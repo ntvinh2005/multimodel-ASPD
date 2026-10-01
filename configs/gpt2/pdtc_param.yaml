@@ -1,0 +1,140 @@
+pd:
+  seed: 0
+  n_mask_samples: 1
+  ci_config:
+    mode: pd_transcoder
+    n_features: 24576
+    encoder: tied
+    top_k: 32
+    pool_tokens: 2048
+    threshold_lr: 0.01
+    n_batches_to_dead: 320
+  sampling: continuous
+  sigmoid_type: leaky_hard
+  decomposition_targets:
+  - module_pattern: transformer.h.0.mlp.c_fc
+    C: 24576
+  identity_decomposition_targets: null
+  use_delta_component: true
+  components_optimizer:
+    lr_schedule:
+      start_val: 0.0003
+      warmup_pct: 0.0
+      final_val_frac: 1.0
+      fn_type: constant
+    grad_clip_norm: null
+    weight_decay: 0.0
+    betas:
+    - 0.9
+    - 0.99
+  ci_fn_optimizer:
+    lr_schedule:
+      start_val: 5.0e-05
+      warmup_pct: 0.0
+      final_val_frac: 0.1
+      fn_type: cosine
+    grad_clip_norm: null
+    weight_decay: 0.0
+    betas:
+    - 0.9
+    - 0.999
+  steps: 1000000
+  batch_size: 4
+  faithfulness_warmup_steps: 0
+  faithfulness_warmup_lr: 0.001
+  faithfulness_warmup_weight_decay: 0.0
+  loss_metrics:
+  - type: ImportanceMinimalityLoss
+    coeff: 0.0
+    pnorm: 2.0
+    beta: 0.5
+    p_anneal_start_frac: 0.0
+    p_anneal_final_p: 0.4
+    p_anneal_end_frac: 1.0
+    eps: 1.0e-12
+  - type: FaithfulnessLoss
+    coeff: 1000.0
+  - type: InternalReconLoss
+    name: internal_fvu
+    coeff: 0.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal
+    coeff: 1.0
+    mode: matryoshka
+    mask: ci
+    allow_single_mask: true
+    warmup: false
+    group_fracs:
+    - 0.0625
+    - 0.0625
+    - 0.125
+    - 0.25
+    - 0.5
+    normalize_decoder: true
+  - type: AuxKLoss
+    name: auxk
+    recon: internal
+    coeff: 0.03125
+    top_k_aux: 512
+  - type: ComponentAliveTracker
+    coeff: 0.0
+    window_tokens: 10000000
+cadence:
+  train_log_every: 2000
+  save_every: 200000
+  keep_last_n_checkpoints: 5
+eval:
+  n_steps: 1
+  batch_size: 16
+  every: 10000
+  slow_every: 100000
+  slow_on_first_step: true
+  metrics:
+  - type: CIHistograms
+    n_batches_accum: 1
+  - type: ComponentActivationDensity
+    ci_alive_threshold: 0.0
+  - type: CI_L0
+    ci_alive_threshold: 0.0
+    groups: null
+  - type: CEandKLLosses
+    rounding_threshold: 0.0
+  - type: CIMeanPerComponent
+  - type: StochasticHiddenActsReconLoss
+    coeff: null
+  - type: CIHiddenActsReconLoss
+  - type: PGDReconLoss
+    coeff: null
+    init: random
+    mask_scope: shared_across_batch
+    n_steps: 20
+    step_size: 0.1
+target:
+  spec:
+    kind: hf
+    model_class: transformers.GPT2LMHeadModel
+    model_name: openai-community/gpt2
+  output_extract: logits
+data:
+  tokenizer_name: openai-community/gpt2
+  dataset_name: apollo-research/Skylion007-openwebtext-tokenizer-gpt2
+  column_name: input_ids
+  max_seq_len: 512
+  buffer_size: 1000
+  train_split: train
+  eval_split: train
+  is_tokenized: true
+  streaming: true
+  shuffle_each_epoch: true
+runtime:
+  autocast_bf16: true
+  device: cuda
+  dp: null
+wandb:
+  project: vpd-project2
+component_arch: transcoder

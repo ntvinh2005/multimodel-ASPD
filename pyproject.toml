@@ -1,0 +1,56 @@
+[project]
+name = "aspd"
+version = "0.1.0"
+description = "Activation-Supported Parameter Decomposition (ASPD): code for 'Weights Read and Write Features'"
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "param-decomp",
+    "param-decomp-lab",
+    "torch>=2.8,<2.9",
+    "transformers>=4.57,<4.58",
+    "sae-lens>=6.0",
+    "huggingface-hub<1.0",
+    "datasets",
+    "pydantic>=2.11",
+    "einops",
+    "jaxtyping",
+    "numpy",
+    "scipy",
+    "safetensors",
+    "pyyaml",
+    "orjson",
+    "matplotlib",
+    "openai",
+    "httpx",
+    "fastapi",
+    "uvicorn",
+    "python-dotenv",
+    "wandb",
+]
+
+[dependency-groups]
+dev = ["pytest", "ruff", "basedpyright"]
+
+[tool.uv.sources]
+# param-decomp upstream 089625f plus the commits the paper's runs used (tue147/param-decomp, aspd-release).
+param-decomp = { git = "https://github.com/tue147/param-decomp", rev = "12cd2e0a9e39bfeef6cd00ea80eb64ee60f41050" }
+param-decomp-lab = { git = "https://github.com/tue147/param-decomp", rev = "12cd2e0a9e39bfeef6cd00ea80eb64ee60f41050", subdirectory = "param_decomp_lab" }
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["aspd*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501", "F722"]  # F722: jaxtyping shape strings
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

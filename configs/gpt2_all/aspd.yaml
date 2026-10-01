@@ -1,0 +1,1784 @@
+pd:
+  seed: 0
+  n_mask_samples: 1
+  ci_config:
+    mode: aspd
+    encoder: untied
+    encoder_init: reference
+    n_features: 6144
+    top_k: 32
+    pool_tokens: 2048
+    threshold_lr: 0.01
+    n_batches_to_dead: 320
+    sync_statistics: false
+    resid_site: ''
+    resid_sites:
+      transformer.h.0.attn.c_attn.q_proj: transformer.h.0.ln_1
+      transformer.h.0.attn.c_attn.k_proj: transformer.h.0.ln_1
+      transformer.h.0.attn.c_attn.v_proj: transformer.h.0.ln_1
+      transformer.h.0.attn.c_proj: transformer.h.0.ln_2
+      transformer.h.0.mlp.c_fc: transformer.h.0.ln_2
+      transformer.h.0.mlp.c_proj: transformer.h.0.ln_2
+      transformer.h.1.attn.c_attn.q_proj: transformer.h.1.ln_1
+      transformer.h.1.attn.c_attn.k_proj: transformer.h.1.ln_1
+      transformer.h.1.attn.c_attn.v_proj: transformer.h.1.ln_1
+      transformer.h.1.attn.c_proj: transformer.h.1.ln_2
+      transformer.h.1.mlp.c_fc: transformer.h.1.ln_2
+      transformer.h.1.mlp.c_proj: transformer.h.1.ln_2
+      transformer.h.2.attn.c_attn.q_proj: transformer.h.2.ln_1
+      transformer.h.2.attn.c_attn.k_proj: transformer.h.2.ln_1
+      transformer.h.2.attn.c_attn.v_proj: transformer.h.2.ln_1
+      transformer.h.2.attn.c_proj: transformer.h.2.ln_2
+      transformer.h.2.mlp.c_fc: transformer.h.2.ln_2
+      transformer.h.2.mlp.c_proj: transformer.h.2.ln_2
+      transformer.h.3.attn.c_attn.q_proj: transformer.h.3.ln_1
+      transformer.h.3.attn.c_attn.k_proj: transformer.h.3.ln_1
+      transformer.h.3.attn.c_attn.v_proj: transformer.h.3.ln_1
+      transformer.h.3.attn.c_proj: transformer.h.3.ln_2
+      transformer.h.3.mlp.c_fc: transformer.h.3.ln_2
+      transformer.h.3.mlp.c_proj: transformer.h.3.ln_2
+      transformer.h.4.attn.c_attn.q_proj: transformer.h.4.ln_1
+      transformer.h.4.attn.c_attn.k_proj: transformer.h.4.ln_1
+      transformer.h.4.attn.c_attn.v_proj: transformer.h.4.ln_1
+      transformer.h.4.attn.c_proj: transformer.h.4.ln_2
+      transformer.h.4.mlp.c_fc: transformer.h.4.ln_2
+      transformer.h.4.mlp.c_proj: transformer.h.4.ln_2
+      transformer.h.5.attn.c_attn.q_proj: transformer.h.5.ln_1
+      transformer.h.5.attn.c_attn.k_proj: transformer.h.5.ln_1
+      transformer.h.5.attn.c_attn.v_proj: transformer.h.5.ln_1
+      transformer.h.5.attn.c_proj: transformer.h.5.ln_2
+      transformer.h.5.mlp.c_fc: transformer.h.5.ln_2
+      transformer.h.5.mlp.c_proj: transformer.h.5.ln_2
+      transformer.h.6.attn.c_attn.q_proj: transformer.h.6.ln_1
+      transformer.h.6.attn.c_attn.k_proj: transformer.h.6.ln_1
+      transformer.h.6.attn.c_attn.v_proj: transformer.h.6.ln_1
+      transformer.h.6.attn.c_proj: transformer.h.6.ln_2
+      transformer.h.6.mlp.c_fc: transformer.h.6.ln_2
+      transformer.h.6.mlp.c_proj: transformer.h.6.ln_2
+      transformer.h.7.attn.c_attn.q_proj: transformer.h.7.ln_1
+      transformer.h.7.attn.c_attn.k_proj: transformer.h.7.ln_1
+      transformer.h.7.attn.c_attn.v_proj: transformer.h.7.ln_1
+      transformer.h.7.attn.c_proj: transformer.h.7.ln_2
+      transformer.h.7.mlp.c_fc: transformer.h.7.ln_2
+      transformer.h.7.mlp.c_proj: transformer.h.7.ln_2
+      transformer.h.8.attn.c_attn.q_proj: transformer.h.8.ln_1
+      transformer.h.8.attn.c_attn.k_proj: transformer.h.8.ln_1
+      transformer.h.8.attn.c_attn.v_proj: transformer.h.8.ln_1
+      transformer.h.8.attn.c_proj: transformer.h.8.ln_2
+      transformer.h.8.mlp.c_fc: transformer.h.8.ln_2
+      transformer.h.8.mlp.c_proj: transformer.h.8.ln_2
+      transformer.h.9.attn.c_attn.q_proj: transformer.h.9.ln_1
+      transformer.h.9.attn.c_attn.k_proj: transformer.h.9.ln_1
+      transformer.h.9.attn.c_attn.v_proj: transformer.h.9.ln_1
+      transformer.h.9.attn.c_proj: transformer.h.9.ln_2
+      transformer.h.9.mlp.c_fc: transformer.h.9.ln_2
+      transformer.h.9.mlp.c_proj: transformer.h.9.ln_2
+      transformer.h.10.attn.c_attn.q_proj: transformer.h.10.ln_1
+      transformer.h.10.attn.c_attn.k_proj: transformer.h.10.ln_1
+      transformer.h.10.attn.c_attn.v_proj: transformer.h.10.ln_1
+      transformer.h.10.attn.c_proj: transformer.h.10.ln_2
+      transformer.h.10.mlp.c_fc: transformer.h.10.ln_2
+      transformer.h.10.mlp.c_proj: transformer.h.10.ln_2
+      transformer.h.11.attn.c_attn.q_proj: transformer.h.11.ln_1
+      transformer.h.11.attn.c_attn.k_proj: transformer.h.11.ln_1
+      transformer.h.11.attn.c_attn.v_proj: transformer.h.11.ln_1
+      transformer.h.11.attn.c_proj: transformer.h.11.ln_2
+      transformer.h.11.mlp.c_fc: transformer.h.11.ln_2
+      transformer.h.11.mlp.c_proj: transformer.h.11.ln_2
+    d_act: 768
+  sampling: continuous
+  sigmoid_type: leaky_hard
+  decomposition_targets:
+  - module_pattern: transformer.h.0.attn.c_attn.q_proj
+    C: 6144
+  - module_pattern: transformer.h.0.attn.c_attn.k_proj
+    C: 6144
+  - module_pattern: transformer.h.0.attn.c_attn.v_proj
+    C: 6144
+  - module_pattern: transformer.h.0.attn.c_proj
+    C: 6144
+  - module_pattern: transformer.h.0.mlp.c_fc
+    C: 6144
+  - module_pattern: transformer.h.0.mlp.c_proj
+    C: 6144
+  - module_pattern: transformer.h.1.attn.c_attn.q_proj
+    C: 6144
+  - module_pattern: transformer.h.1.attn.c_attn.k_proj
+    C: 6144
+  - module_pattern: transformer.h.1.attn.c_attn.v_proj
+    C: 6144
+  - module_pattern: transformer.h.1.attn.c_proj
+    C: 6144
+  - module_pattern: transformer.h.1.mlp.c_fc
+    C: 6144
+  - module_pattern: transformer.h.1.mlp.c_proj
+    C: 6144
+  - module_pattern: transformer.h.2.attn.c_attn.q_proj
+    C: 6144
+  - module_pattern: transformer.h.2.attn.c_attn.k_proj
+    C: 6144
+  - module_pattern: transformer.h.2.attn.c_attn.v_proj
+    C: 6144
+  - module_pattern: transformer.h.2.attn.c_proj
+    C: 6144
+  - module_pattern: transformer.h.2.mlp.c_fc
+    C: 6144
+  - module_pattern: transformer.h.2.mlp.c_proj
+    C: 6144
+  - module_pattern: transformer.h.3.attn.c_attn.q_proj
+    C: 6144
+  - module_pattern: transformer.h.3.attn.c_attn.k_proj
+    C: 6144
+  - module_pattern: transformer.h.3.attn.c_attn.v_proj
+    C: 6144
+  - module_pattern: transformer.h.3.attn.c_proj
+    C: 6144
+  - module_pattern: transformer.h.3.mlp.c_fc
+    C: 6144
+  - module_pattern: transformer.h.3.mlp.c_proj
+    C: 6144
+  - module_pattern: transformer.h.4.attn.c_attn.q_proj
+    C: 6144
+  - module_pattern: transformer.h.4.attn.c_attn.k_proj
+    C: 6144
+  - module_pattern: transformer.h.4.attn.c_attn.v_proj
+    C: 6144
+  - module_pattern: transformer.h.4.attn.c_proj
+    C: 6144
+  - module_pattern: transformer.h.4.mlp.c_fc
+    C: 6144
+  - module_pattern: transformer.h.4.mlp.c_proj
+    C: 6144
+  - module_pattern: transformer.h.5.attn.c_attn.q_proj
+    C: 6144
+  - module_pattern: transformer.h.5.attn.c_attn.k_proj
+    C: 6144
+  - module_pattern: transformer.h.5.attn.c_attn.v_proj
+    C: 6144
+  - module_pattern: transformer.h.5.attn.c_proj
+    C: 6144
+  - module_pattern: transformer.h.5.mlp.c_fc
+    C: 6144
+  - module_pattern: transformer.h.5.mlp.c_proj
+    C: 6144
+  - module_pattern: transformer.h.6.attn.c_attn.q_proj
+    C: 6144
+  - module_pattern: transformer.h.6.attn.c_attn.k_proj
+    C: 6144
+  - module_pattern: transformer.h.6.attn.c_attn.v_proj
+    C: 6144
+  - module_pattern: transformer.h.6.attn.c_proj
+    C: 6144
+  - module_pattern: transformer.h.6.mlp.c_fc
+    C: 6144
+  - module_pattern: transformer.h.6.mlp.c_proj
+    C: 6144
+  - module_pattern: transformer.h.7.attn.c_attn.q_proj
+    C: 6144
+  - module_pattern: transformer.h.7.attn.c_attn.k_proj
+    C: 6144
+  - module_pattern: transformer.h.7.attn.c_attn.v_proj
+    C: 6144
+  - module_pattern: transformer.h.7.attn.c_proj
+    C: 6144
+  - module_pattern: transformer.h.7.mlp.c_fc
+    C: 6144
+  - module_pattern: transformer.h.7.mlp.c_proj
+    C: 6144
+  - module_pattern: transformer.h.8.attn.c_attn.q_proj
+    C: 6144
+  - module_pattern: transformer.h.8.attn.c_attn.k_proj
+    C: 6144
+  - module_pattern: transformer.h.8.attn.c_attn.v_proj
+    C: 6144
+  - module_pattern: transformer.h.8.attn.c_proj
+    C: 6144
+  - module_pattern: transformer.h.8.mlp.c_fc
+    C: 6144
+  - module_pattern: transformer.h.8.mlp.c_proj
+    C: 6144
+  - module_pattern: transformer.h.9.attn.c_attn.q_proj
+    C: 6144
+  - module_pattern: transformer.h.9.attn.c_attn.k_proj
+    C: 6144
+  - module_pattern: transformer.h.9.attn.c_attn.v_proj
+    C: 6144
+  - module_pattern: transformer.h.9.attn.c_proj
+    C: 6144
+  - module_pattern: transformer.h.9.mlp.c_fc
+    C: 6144
+  - module_pattern: transformer.h.9.mlp.c_proj
+    C: 6144
+  - module_pattern: transformer.h.10.attn.c_attn.q_proj
+    C: 6144
+  - module_pattern: transformer.h.10.attn.c_attn.k_proj
+    C: 6144
+  - module_pattern: transformer.h.10.attn.c_attn.v_proj
+    C: 6144
+  - module_pattern: transformer.h.10.attn.c_proj
+    C: 6144
+  - module_pattern: transformer.h.10.mlp.c_fc
+    C: 6144
+  - module_pattern: transformer.h.10.mlp.c_proj
+    C: 6144
+  - module_pattern: transformer.h.11.attn.c_attn.q_proj
+    C: 6144
+  - module_pattern: transformer.h.11.attn.c_attn.k_proj
+    C: 6144
+  - module_pattern: transformer.h.11.attn.c_attn.v_proj
+    C: 6144
+  - module_pattern: transformer.h.11.attn.c_proj
+    C: 6144
+  - module_pattern: transformer.h.11.mlp.c_fc
+    C: 6144
+  - module_pattern: transformer.h.11.mlp.c_proj
+    C: 6144
+  identity_decomposition_targets: null
+  use_delta_component: false
+  components_optimizer:
+    lr_schedule:
+      start_val: 0.0003
+      warmup_pct: 0.0
+      final_val_frac: 1.0
+      fn_type: constant
+    grad_clip_norm: null
+    weight_decay: 0.0
+    betas:
+    - 0.9
+    - 0.99
+  ci_fn_optimizer:
+    lr_schedule:
+      start_val: 0.0003
+      warmup_pct: 0.0
+      final_val_frac: 1.0
+      fn_type: constant
+    grad_clip_norm: null
+    weight_decay: 0.0
+    betas:
+    - 0.9
+    - 0.99
+  steps: 250000
+  batch_size: 16
+  faithfulness_warmup_steps: 0
+  faithfulness_warmup_lr: 0.001
+  faithfulness_warmup_weight_decay: 0.0
+  loss_metrics:
+  - type: ImportanceMinimalityLoss
+    coeff: 0.0
+    pnorm: 2.0
+    beta: 0.5
+    p_anneal_start_frac: 0.0
+    p_anneal_final_p: 0.4
+    p_anneal_end_frac: 1.0
+    eps: 1.0e-12
+  - type: FaithfulnessLoss
+    coeff: 0.0
+  - type: InternalReconLoss
+    name: internal_h0_attn_c_attn_q_proj
+    module: transformer.h.0.attn.c_attn.q_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h0_attn_c_attn_k_proj
+    module: transformer.h.0.attn.c_attn.k_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h0_attn_c_attn_v_proj
+    module: transformer.h.0.attn.c_attn.v_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h0_attn_c_proj
+    module: transformer.h.0.attn.c_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h0_mlp_c_fc
+    module: transformer.h.0.mlp.c_fc
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h0_mlp_c_proj
+    module: transformer.h.0.mlp.c_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h1_attn_c_attn_q_proj
+    module: transformer.h.1.attn.c_attn.q_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h1_attn_c_attn_k_proj
+    module: transformer.h.1.attn.c_attn.k_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h1_attn_c_attn_v_proj
+    module: transformer.h.1.attn.c_attn.v_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h1_attn_c_proj
+    module: transformer.h.1.attn.c_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h1_mlp_c_fc
+    module: transformer.h.1.mlp.c_fc
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h1_mlp_c_proj
+    module: transformer.h.1.mlp.c_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h2_attn_c_attn_q_proj
+    module: transformer.h.2.attn.c_attn.q_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h2_attn_c_attn_k_proj
+    module: transformer.h.2.attn.c_attn.k_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h2_attn_c_attn_v_proj
+    module: transformer.h.2.attn.c_attn.v_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h2_attn_c_proj
+    module: transformer.h.2.attn.c_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h2_mlp_c_fc
+    module: transformer.h.2.mlp.c_fc
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h2_mlp_c_proj
+    module: transformer.h.2.mlp.c_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h3_attn_c_attn_q_proj
+    module: transformer.h.3.attn.c_attn.q_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h3_attn_c_attn_k_proj
+    module: transformer.h.3.attn.c_attn.k_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h3_attn_c_attn_v_proj
+    module: transformer.h.3.attn.c_attn.v_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h3_attn_c_proj
+    module: transformer.h.3.attn.c_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h3_mlp_c_fc
+    module: transformer.h.3.mlp.c_fc
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h3_mlp_c_proj
+    module: transformer.h.3.mlp.c_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h4_attn_c_attn_q_proj
+    module: transformer.h.4.attn.c_attn.q_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h4_attn_c_attn_k_proj
+    module: transformer.h.4.attn.c_attn.k_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h4_attn_c_attn_v_proj
+    module: transformer.h.4.attn.c_attn.v_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h4_attn_c_proj
+    module: transformer.h.4.attn.c_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h4_mlp_c_fc
+    module: transformer.h.4.mlp.c_fc
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h4_mlp_c_proj
+    module: transformer.h.4.mlp.c_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h5_attn_c_attn_q_proj
+    module: transformer.h.5.attn.c_attn.q_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h5_attn_c_attn_k_proj
+    module: transformer.h.5.attn.c_attn.k_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h5_attn_c_attn_v_proj
+    module: transformer.h.5.attn.c_attn.v_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h5_attn_c_proj
+    module: transformer.h.5.attn.c_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h5_mlp_c_fc
+    module: transformer.h.5.mlp.c_fc
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h5_mlp_c_proj
+    module: transformer.h.5.mlp.c_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h6_attn_c_attn_q_proj
+    module: transformer.h.6.attn.c_attn.q_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h6_attn_c_attn_k_proj
+    module: transformer.h.6.attn.c_attn.k_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h6_attn_c_attn_v_proj
+    module: transformer.h.6.attn.c_attn.v_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h6_attn_c_proj
+    module: transformer.h.6.attn.c_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h6_mlp_c_fc
+    module: transformer.h.6.mlp.c_fc
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h6_mlp_c_proj
+    module: transformer.h.6.mlp.c_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h7_attn_c_attn_q_proj
+    module: transformer.h.7.attn.c_attn.q_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h7_attn_c_attn_k_proj
+    module: transformer.h.7.attn.c_attn.k_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h7_attn_c_attn_v_proj
+    module: transformer.h.7.attn.c_attn.v_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h7_attn_c_proj
+    module: transformer.h.7.attn.c_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h7_mlp_c_fc
+    module: transformer.h.7.mlp.c_fc
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h7_mlp_c_proj
+    module: transformer.h.7.mlp.c_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h8_attn_c_attn_q_proj
+    module: transformer.h.8.attn.c_attn.q_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h8_attn_c_attn_k_proj
+    module: transformer.h.8.attn.c_attn.k_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h8_attn_c_attn_v_proj
+    module: transformer.h.8.attn.c_attn.v_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h8_attn_c_proj
+    module: transformer.h.8.attn.c_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h8_mlp_c_fc
+    module: transformer.h.8.mlp.c_fc
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h8_mlp_c_proj
+    module: transformer.h.8.mlp.c_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h9_attn_c_attn_q_proj
+    module: transformer.h.9.attn.c_attn.q_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h9_attn_c_attn_k_proj
+    module: transformer.h.9.attn.c_attn.k_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h9_attn_c_attn_v_proj
+    module: transformer.h.9.attn.c_attn.v_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h9_attn_c_proj
+    module: transformer.h.9.attn.c_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h9_mlp_c_fc
+    module: transformer.h.9.mlp.c_fc
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h9_mlp_c_proj
+    module: transformer.h.9.mlp.c_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h10_attn_c_attn_q_proj
+    module: transformer.h.10.attn.c_attn.q_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h10_attn_c_attn_k_proj
+    module: transformer.h.10.attn.c_attn.k_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h10_attn_c_attn_v_proj
+    module: transformer.h.10.attn.c_attn.v_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h10_attn_c_proj
+    module: transformer.h.10.attn.c_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h10_mlp_c_fc
+    module: transformer.h.10.mlp.c_fc
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h10_mlp_c_proj
+    module: transformer.h.10.mlp.c_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h11_attn_c_attn_q_proj
+    module: transformer.h.11.attn.c_attn.q_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h11_attn_c_attn_k_proj
+    module: transformer.h.11.attn.c_attn.k_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h11_attn_c_attn_v_proj
+    module: transformer.h.11.attn.c_attn.v_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h11_attn_c_proj
+    module: transformer.h.11.attn.c_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h11_mlp_c_fc
+    module: transformer.h.11.mlp.c_fc
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: InternalReconLoss
+    name: internal_h11_mlp_c_proj
+    module: transformer.h.11.mlp.c_proj
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: ActivationReconLoss
+    name: act_h0_attn_c_attn_k_proj
+    module: transformer.h.0.attn.c_attn.k_proj
+    coeff: 1.0
+    warmup: false
+    normalize_loss: true
+    normalize_decoder: true
+    group_fracs:
+    - 0.0625
+    - 0.0625
+    - 0.125
+    - 0.25
+    - 0.5
+  - type: AuxKLoss
+    name: auxk_h0_attn_c_attn_k_proj
+    module: transformer.h.0.attn.c_attn.k_proj
+    recon: act_h0_attn_c_attn_k_proj
+    coeff: 0.03125
+    top_k_aux: 512
+  - type: ActivationReconLoss
+    name: act_h0_attn_c_proj
+    module: transformer.h.0.attn.c_proj
+    coeff: 1.0
+    warmup: false
+    normalize_loss: true
+    normalize_decoder: true
+    group_fracs:
+    - 0.0625
+    - 0.0625
+    - 0.125
+    - 0.25
+    - 0.5
+  - type: AuxKLoss
+    name: auxk_h0_attn_c_proj
+    module: transformer.h.0.attn.c_proj
+    recon: act_h0_attn_c_proj
+    coeff: 0.03125
+    top_k_aux: 512
+  - type: ActivationReconLoss
+    name: act_h1_attn_c_attn_k_proj
+    module: transformer.h.1.attn.c_attn.k_proj
+    coeff: 1.0
+    warmup: false
+    normalize_loss: true
+    normalize_decoder: true
+    group_fracs:
+    - 0.0625
+    - 0.0625
+    - 0.125
+    - 0.25
+    - 0.5
+  - type: AuxKLoss
+    name: auxk_h1_attn_c_attn_k_proj
+    module: transformer.h.1.attn.c_attn.k_proj
+    recon: act_h1_attn_c_attn_k_proj
+    coeff: 0.03125
+    top_k_aux: 512
+  - type: ActivationReconLoss
+    name: act_h1_attn_c_proj
+    module: transformer.h.1.attn.c_proj
+    coeff: 1.0
+    warmup: false
+    normalize_loss: true
+    normalize_decoder: true
+    group_fracs:
+    - 0.0625
+    - 0.0625
+    - 0.125
+    - 0.25
+    - 0.5
+  - type: AuxKLoss
+    name: auxk_h1_attn_c_proj
+    module: transformer.h.1.attn.c_proj
+    recon: act_h1_attn_c_proj
+    coeff: 0.03125
+    top_k_aux: 512
+  - type: ActivationReconLoss
+    name: act_h10_attn_c_attn_k_proj
+    module: transformer.h.10.attn.c_attn.k_proj
+    coeff: 1.0
+    warmup: false
+    normalize_loss: true
+    normalize_decoder: true
+    group_fracs:
+    - 0.0625
+    - 0.0625
+    - 0.125
+    - 0.25
+    - 0.5
+  - type: AuxKLoss
+    name: auxk_h10_attn_c_attn_k_proj
+    module: transformer.h.10.attn.c_attn.k_proj
+    recon: act_h10_attn_c_attn_k_proj
+    coeff: 0.03125
+    top_k_aux: 512
+  - type: ActivationReconLoss
+    name: act_h10_attn_c_proj
+    module: transformer.h.10.attn.c_proj
+    coeff: 1.0
+    warmup: false
+    normalize_loss: true
+    normalize_decoder: true
+    group_fracs:
+    - 0.0625
+    - 0.0625
+    - 0.125
+    - 0.25
+    - 0.5
+  - type: AuxKLoss
+    name: auxk_h10_attn_c_proj
+    module: transformer.h.10.attn.c_proj
+    recon: act_h10_attn_c_proj
+    coeff: 0.03125
+    top_k_aux: 512
+  - type: ActivationReconLoss
+    name: act_h11_attn_c_attn_k_proj
+    module: transformer.h.11.attn.c_attn.k_proj
+    coeff: 1.0
+    warmup: false
+    normalize_loss: true
+    normalize_decoder: true
+    group_fracs:
+    - 0.0625
+    - 0.0625
+    - 0.125
+    - 0.25
+    - 0.5
+  - type: AuxKLoss
+    name: auxk_h11_attn_c_attn_k_proj
+    module: transformer.h.11.attn.c_attn.k_proj
+    recon: act_h11_attn_c_attn_k_proj
+    coeff: 0.03125
+    top_k_aux: 512
+  - type: ActivationReconLoss
+    name: act_h11_attn_c_proj
+    module: transformer.h.11.attn.c_proj
+    coeff: 1.0
+    warmup: false
+    normalize_loss: true
+    normalize_decoder: true
+    group_fracs:
+    - 0.0625
+    - 0.0625
+    - 0.125
+    - 0.25
+    - 0.5
+  - type: AuxKLoss
+    name: auxk_h11_attn_c_proj
+    module: transformer.h.11.attn.c_proj
+    recon: act_h11_attn_c_proj
+    coeff: 0.03125
+    top_k_aux: 512
+  - type: ActivationReconLoss
+    name: act_h2_attn_c_attn_k_proj
+    module: transformer.h.2.attn.c_attn.k_proj
+    coeff: 1.0
+    warmup: false
+    normalize_loss: true
+    normalize_decoder: true
+    group_fracs:
+    - 0.0625
+    - 0.0625
+    - 0.125
+    - 0.25
+    - 0.5
+  - type: AuxKLoss
+    name: auxk_h2_attn_c_attn_k_proj
+    module: transformer.h.2.attn.c_attn.k_proj
+    recon: act_h2_attn_c_attn_k_proj
+    coeff: 0.03125
+    top_k_aux: 512
+  - type: ActivationReconLoss
+    name: act_h2_attn_c_proj
+    module: transformer.h.2.attn.c_proj
+    coeff: 1.0
+    warmup: false
+    normalize_loss: true
+    normalize_decoder: true
+    group_fracs:
+    - 0.0625
+    - 0.0625
+    - 0.125
+    - 0.25
+    - 0.5
+  - type: AuxKLoss
+    name: auxk_h2_attn_c_proj
+    module: transformer.h.2.attn.c_proj
+    recon: act_h2_attn_c_proj
+    coeff: 0.03125
+    top_k_aux: 512
+  - type: ActivationReconLoss
+    name: act_h3_attn_c_attn_k_proj
+    module: transformer.h.3.attn.c_attn.k_proj
+    coeff: 1.0
+    warmup: false
+    normalize_loss: true
+    normalize_decoder: true
+    group_fracs:
+    - 0.0625
+    - 0.0625
+    - 0.125
+    - 0.25
+    - 0.5
+  - type: AuxKLoss
+    name: auxk_h3_attn_c_attn_k_proj
+    module: transformer.h.3.attn.c_attn.k_proj
+    recon: act_h3_attn_c_attn_k_proj
+    coeff: 0.03125
+    top_k_aux: 512
+  - type: ActivationReconLoss
+    name: act_h3_attn_c_proj
+    module: transformer.h.3.attn.c_proj
+    coeff: 1.0
+    warmup: false
+    normalize_loss: true
+    normalize_decoder: true
+    group_fracs:
+    - 0.0625
+    - 0.0625
+    - 0.125
+    - 0.25
+    - 0.5
+  - type: AuxKLoss
+    name: auxk_h3_attn_c_proj
+    module: transformer.h.3.attn.c_proj
+    recon: act_h3_attn_c_proj
+    coeff: 0.03125
+    top_k_aux: 512
+  - type: ActivationReconLoss
+    name: act_h4_attn_c_attn_k_proj
+    module: transformer.h.4.attn.c_attn.k_proj
+    coeff: 1.0
+    warmup: false
+    normalize_loss: true
+    normalize_decoder: true
+    group_fracs:
+    - 0.0625
+    - 0.0625
+    - 0.125
+    - 0.25
+    - 0.5
+  - type: AuxKLoss
+    name: auxk_h4_attn_c_attn_k_proj
+    module: transformer.h.4.attn.c_attn.k_proj
+    recon: act_h4_attn_c_attn_k_proj
+    coeff: 0.03125
+    top_k_aux: 512
+  - type: ActivationReconLoss
+    name: act_h4_attn_c_proj
+    module: transformer.h.4.attn.c_proj
+    coeff: 1.0
+    warmup: false
+    normalize_loss: true
+    normalize_decoder: true
+    group_fracs:
+    - 0.0625
+    - 0.0625
+    - 0.125
+    - 0.25
+    - 0.5
+  - type: AuxKLoss
+    name: auxk_h4_attn_c_proj
+    module: transformer.h.4.attn.c_proj
+    recon: act_h4_attn_c_proj
+    coeff: 0.03125
+    top_k_aux: 512
+  - type: ActivationReconLoss
+    name: act_h5_attn_c_attn_k_proj
+    module: transformer.h.5.attn.c_attn.k_proj
+    coeff: 1.0
+    warmup: false
+    normalize_loss: true
+    normalize_decoder: true
+    group_fracs:
+    - 0.0625
+    - 0.0625
+    - 0.125
+    - 0.25
+    - 0.5
+  - type: AuxKLoss
+    name: auxk_h5_attn_c_attn_k_proj
+    module: transformer.h.5.attn.c_attn.k_proj
+    recon: act_h5_attn_c_attn_k_proj
+    coeff: 0.03125
+    top_k_aux: 512
+  - type: ActivationReconLoss
+    name: act_h5_attn_c_proj
+    module: transformer.h.5.attn.c_proj
+    coeff: 1.0
+    warmup: false
+    normalize_loss: true
+    normalize_decoder: true
+    group_fracs:
+    - 0.0625
+    - 0.0625
+    - 0.125
+    - 0.25
+    - 0.5
+  - type: AuxKLoss
+    name: auxk_h5_attn_c_proj
+    module: transformer.h.5.attn.c_proj
+    recon: act_h5_attn_c_proj
+    coeff: 0.03125
+    top_k_aux: 512
+  - type: ActivationReconLoss
+    name: act_h6_attn_c_attn_k_proj
+    module: transformer.h.6.attn.c_attn.k_proj
+    coeff: 1.0
+    warmup: false
+    normalize_loss: true
+    normalize_decoder: true
+    group_fracs:
+    - 0.0625
+    - 0.0625
+    - 0.125
+    - 0.25
+    - 0.5
+  - type: AuxKLoss
+    name: auxk_h6_attn_c_attn_k_proj
+    module: transformer.h.6.attn.c_attn.k_proj
+    recon: act_h6_attn_c_attn_k_proj
+    coeff: 0.03125
+    top_k_aux: 512
+  - type: ActivationReconLoss
+    name: act_h6_attn_c_proj
+    module: transformer.h.6.attn.c_proj
+    coeff: 1.0
+    warmup: false
+    normalize_loss: true
+    normalize_decoder: true
+    group_fracs:
+    - 0.0625
+    - 0.0625
+    - 0.125
+    - 0.25
+    - 0.5
+  - type: AuxKLoss
+    name: auxk_h6_attn_c_proj
+    module: transformer.h.6.attn.c_proj
+    recon: act_h6_attn_c_proj
+    coeff: 0.03125
+    top_k_aux: 512
+  - type: ActivationReconLoss
+    name: act_h7_attn_c_attn_k_proj
+    module: transformer.h.7.attn.c_attn.k_proj
+    coeff: 1.0
+    warmup: false
+    normalize_loss: true
+    normalize_decoder: true
+    group_fracs:
+    - 0.0625
+    - 0.0625
+    - 0.125
+    - 0.25
+    - 0.5
+  - type: AuxKLoss
+    name: auxk_h7_attn_c_attn_k_proj
+    module: transformer.h.7.attn.c_attn.k_proj
+    recon: act_h7_attn_c_attn_k_proj
+    coeff: 0.03125
+    top_k_aux: 512
+  - type: ActivationReconLoss
+    name: act_h7_attn_c_proj
+    module: transformer.h.7.attn.c_proj
+    coeff: 1.0
+    warmup: false
+    normalize_loss: true
+    normalize_decoder: true
+    group_fracs:
+    - 0.0625
+    - 0.0625
+    - 0.125
+    - 0.25
+    - 0.5
+  - type: AuxKLoss
+    name: auxk_h7_attn_c_proj
+    module: transformer.h.7.attn.c_proj
+    recon: act_h7_attn_c_proj
+    coeff: 0.03125
+    top_k_aux: 512
+  - type: ActivationReconLoss
+    name: act_h8_attn_c_attn_k_proj
+    module: transformer.h.8.attn.c_attn.k_proj
+    coeff: 1.0
+    warmup: false
+    normalize_loss: true
+    normalize_decoder: true
+    group_fracs:
+    - 0.0625
+    - 0.0625
+    - 0.125
+    - 0.25
+    - 0.5
+  - type: AuxKLoss
+    name: auxk_h8_attn_c_attn_k_proj
+    module: transformer.h.8.attn.c_attn.k_proj
+    recon: act_h8_attn_c_attn_k_proj
+    coeff: 0.03125
+    top_k_aux: 512
+  - type: ActivationReconLoss
+    name: act_h8_attn_c_proj
+    module: transformer.h.8.attn.c_proj
+    coeff: 1.0
+    warmup: false
+    normalize_loss: true
+    normalize_decoder: true
+    group_fracs:
+    - 0.0625
+    - 0.0625
+    - 0.125
+    - 0.25
+    - 0.5
+  - type: AuxKLoss
+    name: auxk_h8_attn_c_proj
+    module: transformer.h.8.attn.c_proj
+    recon: act_h8_attn_c_proj
+    coeff: 0.03125
+    top_k_aux: 512
+  - type: ActivationReconLoss
+    name: act_h9_attn_c_attn_k_proj
+    module: transformer.h.9.attn.c_attn.k_proj
+    coeff: 1.0
+    warmup: false
+    normalize_loss: true
+    normalize_decoder: true
+    group_fracs:
+    - 0.0625
+    - 0.0625
+    - 0.125
+    - 0.25
+    - 0.5
+  - type: AuxKLoss
+    name: auxk_h9_attn_c_attn_k_proj
+    module: transformer.h.9.attn.c_attn.k_proj
+    recon: act_h9_attn_c_attn_k_proj
+    coeff: 0.03125
+    top_k_aux: 512
+  - type: ActivationReconLoss
+    name: act_h9_attn_c_proj
+    module: transformer.h.9.attn.c_proj
+    coeff: 1.0
+    warmup: false
+    normalize_loss: true
+    normalize_decoder: true
+    group_fracs:
+    - 0.0625
+    - 0.0625
+    - 0.125
+    - 0.25
+    - 0.5
+  - type: AuxKLoss
+    name: auxk_h9_attn_c_proj
+    module: transformer.h.9.attn.c_proj
+    recon: act_h9_attn_c_proj
+    coeff: 0.03125
+    top_k_aux: 512
+  - type: ComponentAliveTracker
+    name: alive_h0_attn_c_attn_q_proj
+    coeff: 0.0
+    module: transformer.h.0.attn.c_attn.q_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h0_attn_c_attn_k_proj
+    coeff: 0.0
+    module: transformer.h.0.attn.c_attn.k_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h0_attn_c_attn_v_proj
+    coeff: 0.0
+    module: transformer.h.0.attn.c_attn.v_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h0_attn_c_proj
+    coeff: 0.0
+    module: transformer.h.0.attn.c_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h0_mlp_c_fc
+    coeff: 0.0
+    module: transformer.h.0.mlp.c_fc
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h0_mlp_c_proj
+    coeff: 0.0
+    module: transformer.h.0.mlp.c_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h1_attn_c_attn_q_proj
+    coeff: 0.0
+    module: transformer.h.1.attn.c_attn.q_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h1_attn_c_attn_k_proj
+    coeff: 0.0
+    module: transformer.h.1.attn.c_attn.k_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h1_attn_c_attn_v_proj
+    coeff: 0.0
+    module: transformer.h.1.attn.c_attn.v_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h1_attn_c_proj
+    coeff: 0.0
+    module: transformer.h.1.attn.c_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h1_mlp_c_fc
+    coeff: 0.0
+    module: transformer.h.1.mlp.c_fc
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h1_mlp_c_proj
+    coeff: 0.0
+    module: transformer.h.1.mlp.c_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h2_attn_c_attn_q_proj
+    coeff: 0.0
+    module: transformer.h.2.attn.c_attn.q_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h2_attn_c_attn_k_proj
+    coeff: 0.0
+    module: transformer.h.2.attn.c_attn.k_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h2_attn_c_attn_v_proj
+    coeff: 0.0
+    module: transformer.h.2.attn.c_attn.v_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h2_attn_c_proj
+    coeff: 0.0
+    module: transformer.h.2.attn.c_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h2_mlp_c_fc
+    coeff: 0.0
+    module: transformer.h.2.mlp.c_fc
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h2_mlp_c_proj
+    coeff: 0.0
+    module: transformer.h.2.mlp.c_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h3_attn_c_attn_q_proj
+    coeff: 0.0
+    module: transformer.h.3.attn.c_attn.q_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h3_attn_c_attn_k_proj
+    coeff: 0.0
+    module: transformer.h.3.attn.c_attn.k_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h3_attn_c_attn_v_proj
+    coeff: 0.0
+    module: transformer.h.3.attn.c_attn.v_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h3_attn_c_proj
+    coeff: 0.0
+    module: transformer.h.3.attn.c_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h3_mlp_c_fc
+    coeff: 0.0
+    module: transformer.h.3.mlp.c_fc
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h3_mlp_c_proj
+    coeff: 0.0
+    module: transformer.h.3.mlp.c_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h4_attn_c_attn_q_proj
+    coeff: 0.0
+    module: transformer.h.4.attn.c_attn.q_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h4_attn_c_attn_k_proj
+    coeff: 0.0
+    module: transformer.h.4.attn.c_attn.k_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h4_attn_c_attn_v_proj
+    coeff: 0.0
+    module: transformer.h.4.attn.c_attn.v_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h4_attn_c_proj
+    coeff: 0.0
+    module: transformer.h.4.attn.c_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h4_mlp_c_fc
+    coeff: 0.0
+    module: transformer.h.4.mlp.c_fc
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h4_mlp_c_proj
+    coeff: 0.0
+    module: transformer.h.4.mlp.c_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h5_attn_c_attn_q_proj
+    coeff: 0.0
+    module: transformer.h.5.attn.c_attn.q_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h5_attn_c_attn_k_proj
+    coeff: 0.0
+    module: transformer.h.5.attn.c_attn.k_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h5_attn_c_attn_v_proj
+    coeff: 0.0
+    module: transformer.h.5.attn.c_attn.v_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h5_attn_c_proj
+    coeff: 0.0
+    module: transformer.h.5.attn.c_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h5_mlp_c_fc
+    coeff: 0.0
+    module: transformer.h.5.mlp.c_fc
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h5_mlp_c_proj
+    coeff: 0.0
+    module: transformer.h.5.mlp.c_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h6_attn_c_attn_q_proj
+    coeff: 0.0
+    module: transformer.h.6.attn.c_attn.q_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h6_attn_c_attn_k_proj
+    coeff: 0.0
+    module: transformer.h.6.attn.c_attn.k_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h6_attn_c_attn_v_proj
+    coeff: 0.0
+    module: transformer.h.6.attn.c_attn.v_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h6_attn_c_proj
+    coeff: 0.0
+    module: transformer.h.6.attn.c_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h6_mlp_c_fc
+    coeff: 0.0
+    module: transformer.h.6.mlp.c_fc
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h6_mlp_c_proj
+    coeff: 0.0
+    module: transformer.h.6.mlp.c_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h7_attn_c_attn_q_proj
+    coeff: 0.0
+    module: transformer.h.7.attn.c_attn.q_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h7_attn_c_attn_k_proj
+    coeff: 0.0
+    module: transformer.h.7.attn.c_attn.k_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h7_attn_c_attn_v_proj
+    coeff: 0.0
+    module: transformer.h.7.attn.c_attn.v_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h7_attn_c_proj
+    coeff: 0.0
+    module: transformer.h.7.attn.c_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h7_mlp_c_fc
+    coeff: 0.0
+    module: transformer.h.7.mlp.c_fc
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h7_mlp_c_proj
+    coeff: 0.0
+    module: transformer.h.7.mlp.c_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h8_attn_c_attn_q_proj
+    coeff: 0.0
+    module: transformer.h.8.attn.c_attn.q_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h8_attn_c_attn_k_proj
+    coeff: 0.0
+    module: transformer.h.8.attn.c_attn.k_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h8_attn_c_attn_v_proj
+    coeff: 0.0
+    module: transformer.h.8.attn.c_attn.v_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h8_attn_c_proj
+    coeff: 0.0
+    module: transformer.h.8.attn.c_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h8_mlp_c_fc
+    coeff: 0.0
+    module: transformer.h.8.mlp.c_fc
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h8_mlp_c_proj
+    coeff: 0.0
+    module: transformer.h.8.mlp.c_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h9_attn_c_attn_q_proj
+    coeff: 0.0
+    module: transformer.h.9.attn.c_attn.q_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h9_attn_c_attn_k_proj
+    coeff: 0.0
+    module: transformer.h.9.attn.c_attn.k_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h9_attn_c_attn_v_proj
+    coeff: 0.0
+    module: transformer.h.9.attn.c_attn.v_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h9_attn_c_proj
+    coeff: 0.0
+    module: transformer.h.9.attn.c_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h9_mlp_c_fc
+    coeff: 0.0
+    module: transformer.h.9.mlp.c_fc
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h9_mlp_c_proj
+    coeff: 0.0
+    module: transformer.h.9.mlp.c_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h10_attn_c_attn_q_proj
+    coeff: 0.0
+    module: transformer.h.10.attn.c_attn.q_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h10_attn_c_attn_k_proj
+    coeff: 0.0
+    module: transformer.h.10.attn.c_attn.k_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h10_attn_c_attn_v_proj
+    coeff: 0.0
+    module: transformer.h.10.attn.c_attn.v_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h10_attn_c_proj
+    coeff: 0.0
+    module: transformer.h.10.attn.c_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h10_mlp_c_fc
+    coeff: 0.0
+    module: transformer.h.10.mlp.c_fc
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h10_mlp_c_proj
+    coeff: 0.0
+    module: transformer.h.10.mlp.c_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h11_attn_c_attn_q_proj
+    coeff: 0.0
+    module: transformer.h.11.attn.c_attn.q_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h11_attn_c_attn_k_proj
+    coeff: 0.0
+    module: transformer.h.11.attn.c_attn.k_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h11_attn_c_attn_v_proj
+    coeff: 0.0
+    module: transformer.h.11.attn.c_attn.v_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h11_attn_c_proj
+    coeff: 0.0
+    module: transformer.h.11.attn.c_proj
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h11_mlp_c_fc
+    coeff: 0.0
+    module: transformer.h.11.mlp.c_fc
+    window_tokens: 10000000
+  - type: ComponentAliveTracker
+    name: alive_h11_mlp_c_proj
+    coeff: 0.0
+    module: transformer.h.11.mlp.c_proj
+    window_tokens: 10000000
+cadence:
+  train_log_every: 2000
+  save_every: 200000
+  keep_last_n_checkpoints: 1
+eval:
+  n_steps: 1
+  batch_size: 16
+  every: 10000
+  slow_every: 100000
+  slow_on_first_step: true
+  metrics:
+  - type: CI_L0
+    ci_alive_threshold: 0.0
+    groups: null
+  - type: CEandKLLosses
+    rounding_threshold: 0.0
+  - type: ComponentActivationDensity
+    ci_alive_threshold: 0.0
+target:
+  spec:
+    kind: callable
+    builder: aspd.targets.build_hf_target
+    params:
+      model_class: transformers.GPT2LMHeadModel
+      model_name: openai-community/gpt2
+      split_qkv: true
+  output_extract: logits
+data:
+  tokenizer_name: openai-community/gpt2
+  dataset_name: apollo-research/Skylion007-openwebtext-tokenizer-gpt2
+  column_name: input_ids
+  max_seq_len: 512
+  buffer_size: 1000
+  train_split: train
+  eval_split: train
+  is_tokenized: true
+  streaming: true
+  shuffle_each_epoch: true
+runtime:
+  autocast_bf16: true
+  device: cuda
+  dp: 4
+wandb:
+  project: vpd-project3
+component_arch: transcoder

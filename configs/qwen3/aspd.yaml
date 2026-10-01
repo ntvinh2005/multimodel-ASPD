@@ -1,0 +1,146 @@
+pd:
+  seed: 0
+  n_mask_samples: 1
+  ci_config:
+    mode: aspd
+    encoder: untied
+    encoder_init: unit_norm
+    n_features: 36864
+    top_k: 32
+    pool_tokens: 2048
+    threshold_lr: 0.01
+    n_batches_to_dead: 4882
+    sync_statistics: false
+    resid_site: model.layers.17.post_attention_layernorm
+    d_act: 4096
+  sampling: continuous
+  sigmoid_type: leaky_hard
+  decomposition_targets:
+  - module_pattern: model.layers.17.self_attn.o_proj
+    C: 36864
+  identity_decomposition_targets: null
+  use_delta_component: true
+  components_optimizer:
+    lr_schedule:
+      start_val: 0.0003
+      warmup_pct: 0.0
+      final_val_frac: 1.0
+      fn_type: constant
+    grad_clip_norm: null
+    weight_decay: 0.0
+    betas:
+    - 0.9
+    - 0.99
+  ci_fn_optimizer:
+    lr_schedule:
+      start_val: 0.0003
+      warmup_pct: 0.0
+      final_val_frac: 1.0
+      fn_type: constant
+    grad_clip_norm: null
+    weight_decay: 0.0
+    betas:
+    - 0.9
+    - 0.99
+  steps: 500000
+  batch_size: 8
+  faithfulness_warmup_steps: 0
+  faithfulness_warmup_lr: 0.001
+  faithfulness_warmup_weight_decay: 0.0
+  loss_metrics:
+  - type: ImportanceMinimalityLoss
+    coeff: 0.0
+    pnorm: 2.0
+    beta: 0.5
+    p_anneal_start_frac: 0.0
+    p_anneal_final_p: 0.4
+    p_anneal_end_frac: 1.0
+    eps: 1.0e-12
+  - type: FaithfulnessLoss
+    coeff: 0.0
+  - type: InternalReconLoss
+    name: internal
+    coeff: 1.0
+    mode: fvu
+    mask: ci
+    allow_single_mask: true
+    warmup_start_frac: 0.0
+    warmup_ramp_frac: 0.0
+  - type: ActivationReconLoss
+    name: act
+    coeff: 1.0
+    warmup: false
+    normalize_loss: true
+    normalize_decoder: true
+    group_fracs:
+    - 0.0625
+    - 0.0625
+    - 0.125
+    - 0.25
+    - 0.5
+  - type: AuxKLoss
+    name: auxk
+    recon: act
+    coeff: 0.03125
+    top_k_aux: 2048
+  - type: ComponentAliveTracker
+    coeff: 0.0
+    window_tokens: 10000000
+cadence:
+  train_log_every: 500
+  save_every: 50000
+  keep_last_n_checkpoints: 1
+eval:
+  n_steps: 1
+  batch_size: 8
+  every: 2500
+  slow_every: 25000
+  slow_on_first_step: true
+  metrics:
+  - type: CIHistograms
+    n_batches_accum: 1
+  - type: ComponentActivationDensity
+    ci_alive_threshold: 0.0
+  - type: CI_L0
+    ci_alive_threshold: 0.0
+    groups: null
+  - type: CEandKLLosses
+    rounding_threshold: 0.0
+  - type: CIMeanPerComponent
+  - type: StochasticHiddenActsReconLoss
+    coeff: null
+  - type: CIHiddenActsReconLoss
+  - type: PGDReconLoss
+    coeff: null
+    init: random
+    mask_scope: shared_across_batch
+    n_steps: 20
+    step_size: 0.1
+target:
+  spec:
+    kind: callable
+    builder: aspd.targets.build_hf_target
+    params:
+      model_class: transformers.Qwen3ForCausalLM
+      model_name: Qwen/Qwen3-8B
+      dtype: float32
+  output_extract: logits
+data:
+  tokenizer_name: Qwen/Qwen3-8B
+  dataset_name: monology/pile-uncopyrighted
+  column_name: text
+  max_seq_len: 512
+  buffer_size: 1000
+  train_split: train
+  eval_split: train
+  is_tokenized: false
+  streaming: true
+  shuffle_each_epoch: true
+runtime:
+  autocast_bf16: true
+  device: cuda
+  dp: 2
+wandb:
+  project: vpd-project2
+component_arch: transcoder
+component_init: unit_norm
