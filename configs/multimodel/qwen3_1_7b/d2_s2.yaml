@@ -1,0 +1,7 @@
+extends: d1_s2.yaml
+name: qwen3_1_7b_d2_s2_entry
+sparsity:
+  diffing: D2
+  d2_gamma: 1.0
+training:
+  output_dir: out/multimodel/runs/qwen3_1_7b_d2_s2_entry

@@ -1,0 +1,9 @@
+extends: base.yaml
+name: qwen3_1_7b_d1_s1_entry
+sparsity:
+  diffing: D1
+  selection_score: S1
+  top_k_shared: 24
+  top_k_exclusive: 8
+training:
+  output_dir: out/multimodel/runs/qwen3_1_7b_d1_s1_entry

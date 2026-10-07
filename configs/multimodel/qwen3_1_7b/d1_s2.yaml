@@ -1,0 +1,6 @@
+extends: d1_s1.yaml
+name: qwen3_1_7b_d1_s2_entry
+sparsity:
+  selection_score: S2
+training:
+  output_dir: out/multimodel/runs/qwen3_1_7b_d1_s2_entry

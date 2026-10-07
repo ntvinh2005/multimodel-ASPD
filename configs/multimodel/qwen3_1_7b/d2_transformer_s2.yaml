@@ -1,0 +1,10 @@
+extends: d2_s2.yaml
+name: qwen3_1_7b_d2_transformer_s2_entry
+encoder:
+  kind: transformer
+  projection_dim: 1024
+  n_layers: 2
+  n_heads: 8
+  causal: true
+training:
+  output_dir: out/multimodel/runs/qwen3_1_7b_d2_transformer_s2_entry

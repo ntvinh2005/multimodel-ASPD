@@ -1,0 +1,23 @@
+extends: d2_s2.yaml
+name: qwen3_1_7b_smoke
+data:
+  train_tokens: 8192
+  validation_tokens: 2048
+cache:
+  root: out/multimodel/cache/qwen3_1_7b_smoke
+  sequences_per_shard: 8
+sparsity:
+  n_features: 512
+  top_k_shared: 6
+  top_k_exclusive: 2
+objective:
+  top_k_aux: 64
+  dead_after_batches: 20
+training:
+  output_dir: out/multimodel/runs/qwen3_1_7b_smoke
+  max_steps: 20
+  batch_size_sequences: 2
+  log_every: 1
+  validate_every: 10
+  save_every: 20
+  validation_batches: 2

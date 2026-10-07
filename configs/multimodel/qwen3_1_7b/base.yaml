@@ -1,0 +1,122 @@
+# Two-model Range-ASPD on one Qwen3 layer.  This is D0/S1; the small variant files override only
+# the scientific factor being compared.  All models consume the exact token shards in `cache.root`.
+name: qwen3_1_7b_d0_s1_entry
+
+models:
+  - name: base
+    model_id: Qwen/Qwen3-1.7B-Base
+    dtype: bfloat16
+    attn_implementation: sdpa
+    # R^(base): range-entry residual. The pre-hook sees [B,T,d_act] before layer 14.
+    grounding:
+      module: model.layers.14
+      capture: input
+      tensor_index: 0
+    # J^(base): every position-wise weight matrix in the selected layer.
+    matrices:
+      - {name: q_proj, module: model.layers.14.self_attn.q_proj}
+      - {name: k_proj, module: model.layers.14.self_attn.k_proj}
+      - {name: v_proj, module: model.layers.14.self_attn.v_proj}
+      - {name: o_proj, module: model.layers.14.self_attn.o_proj}
+      - {name: gate_proj, module: model.layers.14.mlp.gate_proj}
+      - {name: up_proj, module: model.layers.14.mlp.up_proj}
+      - {name: down_proj, module: model.layers.14.mlp.down_proj}
+  - name: finetuned
+    model_id: Qwen/Qwen3-1.7B
+    dtype: bfloat16
+    attn_implementation: sdpa
+    grounding:
+      module: model.layers.14
+      capture: input
+      tensor_index: 0
+    matrices:
+      - {name: q_proj, module: model.layers.14.self_attn.q_proj}
+      - {name: k_proj, module: model.layers.14.self_attn.k_proj}
+      - {name: v_proj, module: model.layers.14.self_attn.v_proj}
+      - {name: o_proj, module: model.layers.14.self_attn.o_proj}
+      - {name: gate_proj, module: model.layers.14.mlp.gate_proj}
+      - {name: up_proj, module: model.layers.14.mlp.up_proj}
+      - {name: down_proj, module: model.layers.14.mlp.down_proj}
+
+data:
+  tokenizer: Qwen/Qwen3-1.7B-Base
+  chat_template_tokenizer: Qwen/Qwen3-1.7B
+  sequence_length: 256
+  train_tokens: 524288
+  validation_tokens: 65536
+  shuffle_buffer: 10000
+  seed: 0
+  sources:
+    - dataset: HuggingFaceFW/fineweb
+      subset: sample-10BT
+      train_split: train
+      field: text
+      format: text
+      weight: 1.0
+    - dataset: HuggingFaceH4/ultrachat_200k
+      train_split: train_sft
+      validation_split: test_sft
+      field: messages
+      format: messages
+      weight: 1.0
+
+cache:
+  root: out/multimodel/cache/qwen3_1_7b_entry
+  sequences_per_shard: 64
+  activation_dtype: bfloat16
+  overwrite: false
+
+encoder:
+  # Linear is exactly the crosscoder reduction in R3/R3'.
+  kind: linear
+  aggregation: mean
+  projection_dim: 1024
+  n_layers: 2
+  n_heads: 8
+  mlp_ratio: 4.0
+  dropout: 0.0
+  causal: true
+
+sparsity:
+  n_features: 8192
+  selection_score: S1
+  diffing: D0
+  top_k: 32
+  shared_fraction: 0.75
+  d2_gamma: 1.0
+  tie_shared_decoders: false
+  tie_shared_mechanisms: false
+
+objective:
+  lambda_act: 1.0
+  auxk_coefficient: 0.03125
+  top_k_aux: 512
+  dead_after_batches: 2000
+  matryoshka_group_fractions: [0.0625, 0.0625, 0.125, 0.25, 0.5]
+
+training:
+  output_dir: out/multimodel/runs/qwen3_1_7b_d0_s1_entry
+  seed: 0
+  max_steps: 10000
+  batch_size_sequences: 4
+  gradient_accumulation_steps: 1
+  learning_rate: 0.0003
+  betas: [0.9, 0.99]
+  weight_decay: 0.0
+  max_grad_norm: 1.0
+  autocast: bfloat16
+  parameter_dtype: float32
+  compile: false
+  log_every: 10
+  validate_every: 250
+  save_every: 1000
+  keep_last_checkpoints: 2
+  validation_batches: 32
+  wandb_project: null
+  resume: null
+
+analysis:
+  shared_epsilon: 0.1
+  concentrated_threshold: 0.9
+  top_examples_per_feature: 10
+  max_example_features: 256

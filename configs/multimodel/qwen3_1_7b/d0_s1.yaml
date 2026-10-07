@@ -1,0 +1,4 @@
+extends: base.yaml
+
+# Named alias for the baseline arm used by the Slurm commands and experiment table.
+name: qwen3_1_7b_d0_s1_entry

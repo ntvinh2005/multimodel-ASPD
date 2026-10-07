@@ -4,6 +4,15 @@ The only file in the repository that cites equation, section, table and figure n
 ("Weights Read and Write Features: Scalable Parameter Decomposition Grounded in Activation Space").
 Code and the other docs use symbol names only.
 
+## Multi-model extension
+
+The research extension in `aspd/multimodel/` preserves ASPD Eqs. 1, 5, 7, and 8 for every model
+`n` and matrix `j`. `SparseCode.gate` is ASPD Eq. 5's `g_{t,c}=1[g^s_{t,c}>0]`;
+`RankOneComponents.reconstruct` is Eq. 1; `MultiModelASPD._internal_loss` is Eq. 7 averaged over
+matrices; and `MultiModelASPD._activation_loss` is Eq. 8 for each model-specific decoder. The new
+model axis, D0/D1/D2 objectives, and P1--P6 statistics are documented in
+`docs/multimodel/method.md` and are not claims of the original ASPD paper.
+
 ## Notation
 
 | Paper | Meaning | Code |

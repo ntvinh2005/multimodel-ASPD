@@ -10,7 +10,8 @@ wandb/
 *.pt
 *.safetensors
 .env
-slurm/logs/
+slurm/logs/*
+!slurm/logs/.gitkeep
 node_modules/
 out/
 tables/

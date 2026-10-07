@@ -3,6 +3,19 @@
 Code for **ASPD** (Activation-Supported Parameter Decomposition) and the paper's baselines, evaluations
 and model-wide analysis.
 
+This fork also contains an isolated **multi-model ASPD** implementation for joint activation
+diffing and parameter decomposition. It learns one sparse coordinate `c` across models and uses it
+to gate model-specific rank-1 components `P^(n)_{j,c}`. Start with
+[`docs/multimodel/method.md`](docs/multimodel/method.md), then follow the
+[`HiPerGator guide`](docs/multimodel/hipergator.md). The upstream single-model ASPD paths remain
+unchanged.
+
+```bash
+python -m aspd.multimodel.cli.validate configs/multimodel/qwen3_1_7b/smoke.yaml
+python -m aspd.multimodel.cli.cache configs/multimodel/qwen3_1_7b/smoke.yaml
+python -m aspd.multimodel.cli.train configs/multimodel/qwen3_1_7b/smoke.yaml
+```
+
 **Authors:** `Tue Minh Cao, Lisiane Pruinelli, My T. Thai` · **Paper:** [link](https://arxiv.org/pdf/2609.37731)
 
 ## Contents

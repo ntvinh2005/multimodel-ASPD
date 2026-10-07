@@ -1,0 +1,7 @@
+extends: d1_s2.yaml
+name: qwen3_1_7b_d1_tied_s2_entry
+sparsity:
+  tie_shared_decoders: true
+  tie_shared_mechanisms: true
+training:
+  output_dir: out/multimodel/runs/qwen3_1_7b_d1_tied_s2_entry

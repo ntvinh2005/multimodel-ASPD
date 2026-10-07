@@ -1,0 +1,34 @@
+extends: d2_s2.yaml
+name: qwen3_1_7b_d2_s2_exit
+models:
+  - name: base
+    model_id: Qwen/Qwen3-1.7B-Base
+    dtype: bfloat16
+    attn_implementation: sdpa
+    # R^(base): range-exit residual, after layer 14 has completed its write.
+    grounding: {module: model.layers.14, capture: output, tensor_index: 0}
+    matrices:
+      - {name: q_proj, module: model.layers.14.self_attn.q_proj}
+      - {name: k_proj, module: model.layers.14.self_attn.k_proj}
+      - {name: v_proj, module: model.layers.14.self_attn.v_proj}
+      - {name: o_proj, module: model.layers.14.self_attn.o_proj}
+      - {name: gate_proj, module: model.layers.14.mlp.gate_proj}
+      - {name: up_proj, module: model.layers.14.mlp.up_proj}
+      - {name: down_proj, module: model.layers.14.mlp.down_proj}
+  - name: finetuned
+    model_id: Qwen/Qwen3-1.7B
+    dtype: bfloat16
+    attn_implementation: sdpa
+    grounding: {module: model.layers.14, capture: output, tensor_index: 0}
+    matrices:
+      - {name: q_proj, module: model.layers.14.self_attn.q_proj}
+      - {name: k_proj, module: model.layers.14.self_attn.k_proj}
+      - {name: v_proj, module: model.layers.14.self_attn.v_proj}
+      - {name: o_proj, module: model.layers.14.self_attn.o_proj}
+      - {name: gate_proj, module: model.layers.14.mlp.gate_proj}
+      - {name: up_proj, module: model.layers.14.mlp.up_proj}
+      - {name: down_proj, module: model.layers.14.mlp.down_proj}
+cache:
+  root: out/multimodel/cache/qwen3_1_7b_exit
+training:
+  output_dir: out/multimodel/runs/qwen3_1_7b_d2_s2_exit
