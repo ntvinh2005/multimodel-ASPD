@@ -62,7 +62,8 @@ export WANDB_MODE=offline
 EOF
 chmod 600 "${MM_ASPD_ROOT}/env.sh"
 
-# Run this before sbatch; Slurm inherits exported variables by default.
+# Load the module first, then restore the project variables before sbatch.
+module load conda
 source "${MM_ASPD_ROOT}/env.sh"
 ```
 
@@ -73,8 +74,8 @@ with another Python, rebuild it once:
 
 ```bash
 cd "${MM_ASPD_ROOT}/repo"
-source "${MM_ASPD_ROOT}/env.sh"
 module load conda
+source "${MM_ASPD_ROOT}/env.sh"  # source after module: the module may select its own Python
 uv python install 3.13
 uv sync --frozen --python 3.13
 uv run python --version          # expected: Python 3.13.x
@@ -101,8 +102,8 @@ Run the config-only check before allocating a GPU:
 
 ```bash
 cd "${MM_ASPD_ROOT}/repo"
-source "${MM_ASPD_ROOT}/env.sh"
 module load conda
+source "${MM_ASPD_ROOT}/env.sh"  # restore UV_PYTHON=3.13 after loading the module
 uv run python -m aspd.multimodel.cli.validate \
   configs/multimodel/qwen3_1_7b/smoke.yaml
 ```

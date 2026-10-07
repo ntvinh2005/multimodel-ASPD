@@ -10,6 +10,7 @@
 
 set -euo pipefail
 module load conda
+export UV_PYTHON=3.13  # The conda module's own Python may be 3.14; this project is locked to 3.13.
 cd "${SLURM_SUBMIT_DIR:-$PWD}"
 : "${CONFIG:?Set CONFIG to the training config}"
 : "${CHECKPOINT:?Set CHECKPOINT to checkpoint_*.pt}"
