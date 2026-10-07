@@ -222,6 +222,64 @@ Before moving to a main experiment, verify that total loss, `act/base`, `act/fin
 `sparsity/dead_fraction` does not immediately approach 1. The per-matrix internal FVU fields show
 which of Q, K, V, O, gate, up, or down projection is failing if the aggregate stalls.
 
+## D0/S1 main-size capacity pilot
+
+This is a 100-step systems pilot, not a scientific interpretation run. It keeps the main workload
+dimensions exactly: linear D0/S1, `C=8192`, `K=32`, `B=4`, `T=256`, FP32 parameters, BF16 autocast,
+and all seven layer-14 matrices. It uses a dedicated 32,768/32,768-token cache so validation runs
+exactly 32 batches. Main objective settings, including `dead_after_batches=2000`, are inherited.
+
+Submit the dedicated cache and capacity train jobs from the repository:
+
+```bash
+cd /blue/<group>/<user>/multimodel-ASPD/repo
+slurm/multimodel/submit_d0_s1_capacity.sh <allocation>
+```
+
+The train job records GPU telemetry every two seconds, GNU `time -v` resource counters, checkpoints
+at steps 75 and 100, and an automatic capacity report:
+
+```text
+out/multimodel/runs/qwen3_1_7b_d0_s1_capacity/
+├── metrics.jsonl
+├── gpu_telemetry.csv
+├── resource_usage.txt
+├── capacity_job_meta.txt
+├── capacity_report.json
+├── checkpoint_00000075.pt
+└── checkpoint_00000100.pt
+```
+
+Monitor the jobs and telemetry using the IDs printed by the launcher:
+
+```bash
+squeue -j <cache-job-id>,<train-job-id>
+tail -f slurm/logs/mm-cap-train-<train-job-id>.out
+tail -f out/multimodel/runs/qwen3_1_7b_d0_s1_capacity/gpu_telemetry.csv
+```
+
+After completion, regenerate or inspect the capacity report and training plot with:
+
+```bash
+.venv/bin/python -m aspd.multimodel.cli.capacity_report \
+  out/multimodel/runs/qwen3_1_7b_d0_s1_capacity
+
+.venv/bin/python -m aspd.multimodel.cli.plot_training \
+  out/multimodel/runs/qwen3_1_7b_d0_s1_capacity \
+  --output out/multimodel/runs/qwen3_1_7b_d0_s1_capacity/training_dashboard.png \
+  --smooth 5 --target-l0 32 --title "Qwen3-1.7B D0/S1 capacity"
+
+seff <train-job-id>
+sacct -j <train-job-id> \
+  --format=JobID,State,ExitCode,Elapsed,MaxRSS,AllocTRES%50,NodeList%24 -P
+```
+
+`capacity_report` takes the median train-step delta over steps 10–49, 55–74, and 80–99. It derives
+validation overhead from the 50→51 elapsed-time jump and checkpoint overhead from 75→76, then
+estimates the 10k runtime as `10000*t_train + 40*t_validation + 10*t_checkpoint` with a 10% buffer.
+It also checks the exact main workload config, finite metrics, L0≈32, zero AuxK/dead fraction,
+absence of D2-only fields, checkpoint creation, GPU utilization, and at least 10% VRAM headroom.
+
 The B200 partition currently permits jobs up to 14 days, but these templates use shorter limits so
 failed smoke runs return promptly. Adjust memory and time only after reading the measured cache
 size, tokens/s, and peak VRAM from the smoke run.

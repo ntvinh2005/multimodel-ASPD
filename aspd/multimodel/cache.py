@@ -358,12 +358,15 @@ def build_model_cache(
                 for name, x in x_by_matrix.items():
                     if x.shape[:2] != input_ids.shape:
                         raise ValueError(f"{name} token grid {x.shape[:2]} != inputs {input_ids.shape}")
-                # Flatten valid t only; example R[1,4,d] and all-valid -> [4,d].
-                valid_r = r[valid_tokens]
-                # Add sum_t ||r_t^(n)||^2. Example norms squared [1,4,1,2] add 8.
-                total_r_norm_sq += valid_r.float().pow(2).sum(dim=-1).sum().item()
-                # Add T_valid. Example four positions add 4.
-                total_tokens += int(valid_tokens.sum().item())
+                # Fit the activation scale on training data only, then apply that fixed scale when
+                # reading both splits. Validation activations must not influence preprocessing.
+                if split == "train":
+                    # Flatten valid t only; example R[1,4,d] and all-valid -> [4,d].
+                    valid_r = r[valid_tokens]
+                    # Add sum_t ||r_t^(n)||^2. Example norms squared [1,4,1,2] add 8.
+                    total_r_norm_sq += valid_r.float().pow(2).sum(dim=-1).sum().item()
+                    # Add T_valid. Example four positions add 4.
+                    total_tokens += int(valid_tokens.sum().item())
                 torch.save(
                     {
                         "R": r.to(device="cpu", dtype=cache_dtype),
@@ -380,13 +383,15 @@ def build_model_cache(
     # Cache reader returns R^(n)/q_n, hence E||r_scaled||^2=1.
     r_rms_norm = math.sqrt(total_r_norm_sq / max(total_tokens, 1))
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "name": spec.name,
         "model_id": spec.model_id,
         "revision": spec.revision,
         "grounding": spec.grounding.model_dump(),
         "activation_dim": r.shape[-1],
         "r_rms_norm": r_rms_norm,
+        "r_rms_norm_split": "train",
+        "r_rms_norm_tokens": total_tokens,
         "matrices": matrix_shapes,
         "matrix_modules": {matrix.name: matrix.module for matrix in spec.matrices},
         "tokenizer_fingerprint": token_manifest["tokenizer_fingerprint"],
@@ -420,6 +425,10 @@ def validate_cache(cfg: MultiModelExperimentConfig) -> dict[str, Any]:
     for manifest in model_manifests:
         if manifest["tokenizer_fingerprint"] != token_manifest["tokenizer_fingerprint"]:
             raise ValueError(f"tokenizer mismatch for cached model {manifest['name']}")
+        if not math.isfinite(manifest["r_rms_norm"]) or manifest["r_rms_norm"] <= 0:
+            raise ValueError(f"invalid activation RMS norm for cached model {manifest['name']}")
+        if manifest.get("schema_version", 1) >= 2 and manifest.get("r_rms_norm_split") != "train":
+            raise ValueError(f"cache model {manifest['name']} was not normalized on train data")
         for split in ("train", "validation"):
             expected = len(list((root / "tokens" / split).glob("shard_*.pt")))
             if manifest["shards"][split] != expected:

@@ -41,3 +41,30 @@ def test_d0_s1_debug_config_is_the_uncomplicated_core_method() -> None:
     assert cfg.training.batch_size_sequences == 2
     assert cfg.training.validate_every == 25
     assert cfg.training.validation_batches == 4
+
+
+def test_d0_s1_capacity_config_matches_main_workload() -> None:
+    main = load_experiment_config(ROOT / "configs/multimodel/qwen3_1_7b/d0_s1.yaml")
+    capacity = load_experiment_config(
+        ROOT / "configs/multimodel/qwen3_1_7b/d0_s1_capacity.yaml"
+    )
+
+    assert capacity.name == "qwen3_1_7b_d0_s1_capacity"
+    assert capacity.encoder == main.encoder
+    assert capacity.sparsity == main.sparsity
+    assert capacity.objective == main.objective
+    assert capacity.models == main.models
+    assert capacity.data.sequence_length == main.data.sequence_length == 256
+    assert capacity.training.batch_size_sequences == main.training.batch_size_sequences == 4
+    assert capacity.training.gradient_accumulation_steps == 1
+    assert capacity.training.parameter_dtype == main.training.parameter_dtype == "float32"
+    assert capacity.training.autocast == main.training.autocast == "bfloat16"
+    assert capacity.training.learning_rate == main.training.learning_rate == 3e-4
+    assert capacity.data.train_tokens == 32_768
+    assert capacity.data.validation_tokens == 32_768
+    assert capacity.training.max_steps == 100
+    assert capacity.training.log_every == 1
+    assert capacity.training.validate_every == 50
+    assert capacity.training.validation_batches == 32
+    assert capacity.training.save_every == 75
+    assert capacity.training.resume is None

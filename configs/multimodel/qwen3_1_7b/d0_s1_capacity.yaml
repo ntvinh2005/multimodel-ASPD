@@ -1,0 +1,41 @@
+extends: d0_s1.yaml
+
+# Main-size capacity pilot: measure real C/K/B/T memory, throughput, validation, and checkpoint I/O.
+name: qwen3_1_7b_d0_s1_capacity
+
+data:
+  train_tokens: 32768
+  validation_tokens: 32768
+
+cache:
+  root: out/multimodel/cache/qwen3_1_7b_d0_s1_capacity
+
+encoder:
+  kind: linear
+  aggregation: mean
+
+sparsity:
+  n_features: 8192
+  selection_score: S1
+  diffing: D0
+  top_k: 32
+  tie_shared_decoders: false
+  tie_shared_mechanisms: false
+
+training:
+  output_dir: out/multimodel/runs/qwen3_1_7b_d0_s1_capacity
+  max_steps: 100
+  batch_size_sequences: 4
+  gradient_accumulation_steps: 1
+  learning_rate: 0.0003
+  betas: [0.9, 0.99]
+  weight_decay: 0.0
+  max_grad_norm: 1.0
+  autocast: bfloat16
+  parameter_dtype: float32
+  log_every: 1
+  validate_every: 50
+  validation_batches: 32
+  save_every: 75
+  keep_last_checkpoints: 2
+  resume: null

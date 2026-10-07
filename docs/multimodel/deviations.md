@@ -19,3 +19,6 @@ Every intentional deviation is listed here so a config change cannot silently re
    activation decoder. Internal reconstruction has no separate AuxK term.
 7. **D1 tying is optional and limited to equal shapes.** Cross-architecture experiments must leave
    tying off and compare normalized post-hoc quantities instead.
+8. **Grounding scale is fit on train only.** Each model's `r_rms_norm` is estimated from cached
+   training activations and then held fixed for both train and validation reads. Validation tokens
+   do not influence preprocessing.
