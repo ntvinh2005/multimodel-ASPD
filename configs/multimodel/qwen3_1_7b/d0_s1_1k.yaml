@@ -1,0 +1,14 @@
+extends: d0_s1.yaml
+
+# Full-cache scientific pilot. It differs from the D0/S1 main run only in duration and artifact paths.
+name: qwen3_1_7b_d0_s1_1k
+
+cache:
+  # New root guarantees this cache was built after train-only activation normalization landed.
+  root: out/multimodel/cache/qwen3_1_7b_entry_v2
+  minimum_model_schema_version: 2
+
+training:
+  output_dir: out/multimodel/runs/qwen3_1_7b_d0_s1_1k
+  max_steps: 1000
+  resume: null

@@ -2,7 +2,11 @@ import json
 
 import pytest
 
-from aspd.multimodel.plotting import load_training_metrics, plot_training_metrics
+from aspd.multimodel.plotting import (
+    load_training_metrics,
+    plot_training_metrics,
+    plot_validation_internal_by_matrix,
+)
 
 
 def _row(step: int, prefix: str, loss: float) -> dict[str, float | int]:
@@ -14,6 +18,9 @@ def _row(step: int, prefix: str, loss: float) -> dict[str, float | int]:
         f"{prefix}/internal/base": loss * 0.7,
         f"{prefix}/internal/finetuned": loss * 0.8,
         f"{prefix}/internal/base/q_proj": loss * 0.9,
+        f"{prefix}/internal/base/k_proj": loss * 0.8,
+        f"{prefix}/internal/finetuned/q_proj": loss * 0.85,
+        f"{prefix}/internal/finetuned/k_proj": loss * 0.75,
         f"{prefix}/sparsity/l0": 8.0,
         f"{prefix}/sparsity/dead_fraction": 0.1,
     }
@@ -48,3 +55,22 @@ def test_metrics_loader_accepts_run_directory_and_reports_bad_json(tmp_path) -> 
 
     with pytest.raises(ValueError, match="metrics path is empty"):
         load_training_metrics("")
+
+
+def test_validation_matrix_plot_writes_requested_file(tmp_path) -> None:
+    rows = [_row(250, "validation", 1.0), _row(500, "validation", 0.8)]
+    output = plot_validation_internal_by_matrix(
+        rows,
+        tmp_path / "plots" / "validation_internal_by_matrix.png",
+        title="D0/S1 main",
+    )
+
+    assert output.stat().st_size > 0
+
+
+def test_validation_matrix_plot_requires_per_matrix_metrics(tmp_path) -> None:
+    with pytest.raises(ValueError, match="no validation per-matrix"):
+        plot_validation_internal_by_matrix(
+            [{"step": 250, "validation/internal/base": 0.5}],
+            tmp_path / "matrix.png",
+        )

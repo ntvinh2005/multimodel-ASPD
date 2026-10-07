@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import argparse
 
-from aspd.multimodel.plotting import load_training_metrics, plot_training_metrics
+from aspd.multimodel.plotting import (
+    load_training_metrics,
+    plot_training_metrics,
+    plot_validation_internal_by_matrix,
+)
 
 
 def _positive_int(value: str) -> int:
@@ -27,6 +31,10 @@ def main() -> None:
         "--output",
         required=True,
         help="output image path; supports PNG, PDF, SVG, JPEG, and WebP",
+    )
+    parser.add_argument(
+        "--matrix-output",
+        help="optional separate validation per-matrix internal-FVU image",
     )
     parser.add_argument(
         "--smooth",
@@ -53,6 +61,14 @@ def main() -> None:
         dpi=args.dpi,
     )
     print(output)
+    if args.matrix_output:
+        matrix_output = plot_validation_internal_by_matrix(
+            rows,
+            args.matrix_output,
+            title=f"{args.title} — per-matrix validation" if args.title else None,
+            dpi=args.dpi,
+        )
+        print(matrix_output)
 
 
 if __name__ == "__main__":

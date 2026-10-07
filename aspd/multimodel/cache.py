@@ -419,18 +419,49 @@ def validate_cache(cfg: MultiModelExperimentConfig) -> dict[str, Any]:
 
     root = Path(cfg.cache.root)
     token_manifest = _read_json(root / "tokens" / "manifest.json")
+    if token_manifest["sequence_length"] != cfg.data.sequence_length:
+        raise ValueError(
+            f"cache sequence length {token_manifest['sequence_length']} != config {cfg.data.sequence_length}"
+        )
+    expected_sequences = {
+        "train": math.ceil(cfg.data.train_tokens / cfg.data.sequence_length),
+        "validation": math.ceil(cfg.data.validation_tokens / cfg.data.sequence_length),
+    }
+    if token_manifest["sequences"] != expected_sequences:
+        raise ValueError(
+            f"cache sequence counts {token_manifest['sequences']} != config {expected_sequences}"
+        )
     model_manifests = [
         _read_json(root / "models" / model.name / "manifest.json") for model in cfg.models
     ]
     for manifest in model_manifests:
+        if manifest.get("schema_version", 1) < cfg.cache.minimum_model_schema_version:
+            raise ValueError(
+                f"cache model {manifest['name']} schema {manifest.get('schema_version', 1)} "
+                f"is older than required schema {cfg.cache.minimum_model_schema_version}"
+            )
         if manifest["tokenizer_fingerprint"] != token_manifest["tokenizer_fingerprint"]:
             raise ValueError(f"tokenizer mismatch for cached model {manifest['name']}")
         if not math.isfinite(manifest["r_rms_norm"]) or manifest["r_rms_norm"] <= 0:
             raise ValueError(f"invalid activation RMS norm for cached model {manifest['name']}")
         if manifest.get("schema_version", 1) >= 2 and manifest.get("r_rms_norm_split") != "train":
             raise ValueError(f"cache model {manifest['name']} was not normalized on train data")
+        if manifest.get("schema_version", 1) >= 2:
+            expected_norm_tokens = expected_sequences["train"] * cfg.data.sequence_length
+            if manifest.get("r_rms_norm_tokens") != expected_norm_tokens:
+                raise ValueError(
+                    f"cache model {manifest['name']} normalized on "
+                    f"{manifest.get('r_rms_norm_tokens')} tokens, expected {expected_norm_tokens}"
+                )
         for split in ("train", "validation"):
             expected = len(list((root / "tokens" / split).glob("shard_*.pt")))
+            expected_from_config = math.ceil(
+                expected_sequences[split] / cfg.cache.sequences_per_shard
+            )
+            if expected != expected_from_config:
+                raise ValueError(
+                    f"token cache has {expected} {split} shards, expected {expected_from_config}"
+                )
             if manifest["shards"][split] != expected:
                 raise ValueError(f"shard count mismatch for {manifest['name']} {split}")
     if cfg.sparsity.tie_shared_decoders:

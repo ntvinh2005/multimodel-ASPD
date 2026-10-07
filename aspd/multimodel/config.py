@@ -78,6 +78,7 @@ class CacheSpec(BaseModel):
     sequences_per_shard: PositiveInt = 128
     activation_dtype: Literal["float16", "bfloat16", "float32"] = "bfloat16"
     overwrite: bool = False
+    minimum_model_schema_version: PositiveInt = 1
 
 
 class EncoderSpec(BaseModel):

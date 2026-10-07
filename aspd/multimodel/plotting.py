@@ -77,6 +77,18 @@ def _model_names(rows: Iterable[dict[str, Any]], family: str) -> list[str]:
     return sorted(names)
 
 
+def _matrix_names(rows: Iterable[dict[str, Any]], model_name: str) -> list[str]:
+    prefix = f"validation/internal/{model_name}/"
+    return sorted(
+        {
+            key.removeprefix(prefix)
+            for row in rows
+            for key in row
+            if key.startswith(prefix) and "/" not in key.removeprefix(prefix)
+        }
+    )
+
+
 def _plot_key(
     axis: Any,
     rows: list[dict[str, Any]],
@@ -251,6 +263,71 @@ def plot_training_metrics(
         )
 
     fig.suptitle(title or "Multi-model ASPD training", fontsize=15)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+    return output
+
+
+def plot_validation_internal_by_matrix(
+    rows: list[dict[str, Any]],
+    output: str | Path,
+    *,
+    title: str | None = None,
+    dpi: int = 160,
+) -> Path:
+    """Plot validation internal FVU for every matrix, with one panel per model."""
+
+    if dpi < 1:
+        raise ValueError("dpi must be positive")
+
+    output = Path(output)
+    if not output.suffix:
+        output = output.with_suffix(".png")
+    supported = {".png", ".pdf", ".svg", ".jpg", ".jpeg", ".webp"}
+    if output.suffix.lower() not in supported:
+        raise ValueError(f"unsupported output extension {output.suffix!r}; choose {sorted(supported)}")
+
+    if "MPLCONFIGDIR" not in os.environ:
+        mpl_cache = Path(os.environ.get("TMPDIR", tempfile.gettempdir())) / "aspd-matplotlib"
+        mpl_cache.mkdir(parents=True, exist_ok=True)
+        os.environ["MPLCONFIGDIR"] = str(mpl_cache)
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    model_names = [
+        name for name in _model_names(rows, "internal") if _matrix_names(rows, name)
+    ]
+    if not model_names:
+        raise ValueError("no validation per-matrix internal FVU metrics found")
+
+    fig, axes = plt.subplots(
+        1,
+        len(model_names),
+        figsize=(7 * len(model_names), 5),
+        squeeze=False,
+        constrained_layout=True,
+        sharey=True,
+    )
+    colors = plt.get_cmap("tab10").colors
+    for model_index, model_name in enumerate(model_names):
+        axis = axes[0, model_index]
+        plotted = False
+        for matrix_index, matrix_name in enumerate(_matrix_names(rows, model_name)):
+            plotted |= _plot_key(
+                axis,
+                rows,
+                f"validation/internal/{model_name}/{matrix_name}",
+                matrix_name,
+                colors[matrix_index % len(colors)],
+                smooth=1,
+            )
+        _finish_axis(axis, model_name, "Validation internal FVU", plotted)
+
+    fig.suptitle(title or "Validation internal FVU by matrix", fontsize=15)
     output.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output, dpi=dpi, bbox_inches="tight")
     plt.close(fig)

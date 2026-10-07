@@ -1,0 +1,18 @@
+extends: d0_s1.yaml
+
+# Fresh 10k scientific baseline, reusing the corrected full cache from the 1k pilot.
+name: qwen3_1_7b_d0_s1_main
+
+cache:
+  root: out/multimodel/cache/qwen3_1_7b_entry_v2
+  minimum_model_schema_version: 2
+
+training:
+  output_dir: out/multimodel/runs/qwen3_1_7b_d0_s1_main
+  max_steps: 10000
+  log_every: 10
+  validate_every: 250
+  validation_batches: 32
+  save_every: 1000
+  keep_last_checkpoints: 10
+  resume: null

@@ -280,6 +280,133 @@ estimates the 10k runtime as `10000*t_train + 40*t_validation + 10*t_checkpoint`
 It also checks the exact main workload config, finite metrics, L0≈32, zero AuxK/dead fraction,
 absence of D2-only fields, checkpoint creation, GPU utilization, and at least 10% VRAM headroom.
 
+## Full-cache D0/S1 1k scientific pilot
+
+This pilot reuses the generic `cache.sbatch` and `train.sbatch`; no experiment-specific Slurm files
+are needed. Its config inherits the complete D0/S1 main protocol and changes only the run/cache
+artifact paths and `max_steps=1000`. The cache root is new and requires model-cache schema 2, so a
+pre-fix cache cannot be silently reused.
+
+Run the local preflight from a clean committed worktree:
+
+```bash
+cd /blue/<group>/<user>/multimodel-ASPD/repo
+.venv/bin/pytest \
+  tests/test_multimodel_cache.py \
+  tests/test_multimodel_batch_topk.py \
+  tests/test_multimodel_components.py \
+  tests/test_multimodel_model.py \
+  tests/test_multimodel_config.py
+
+.venv/bin/python -m aspd.multimodel.cli.validate \
+  configs/multimodel/qwen3_1_7b/d0_s1_1k.yaml
+```
+
+Submit the generic jobs with the config exported into the Slurm environment:
+
+```bash
+module load conda
+source ../env.sh
+export CONFIG=configs/multimodel/qwen3_1_7b/d0_s1_1k.yaml
+
+CACHE_JOB=$(sbatch --parsable --account=<allocation> slurm/multimodel/cache.sbatch)
+TRAIN_JOB=$(sbatch --parsable --account=<allocation> \
+  --dependency="afterok:${CACHE_JOB}" slurm/multimodel/train.sbatch)
+
+echo "cache_job=${CACHE_JOB}"
+echo "train_job=${TRAIN_JOB}"
+squeue -j "${CACHE_JOB},${TRAIN_JOB}"
+```
+
+The full cache must contain 32 train shards and 4 validation shards. Both model manifests must show
+`schema_version=2`, `r_rms_norm_split="train"`, and `r_rms_norm_tokens=524288`. The cache validator
+now enforces config-matched sequence counts, shard counts, normalization token count, and the
+minimum schema before training can start.
+
+```bash
+CACHE=out/multimodel/cache/qwen3_1_7b_entry_v2
+find "$CACHE/tokens/train" -name 'shard_*.pt' | wc -l
+find "$CACHE/tokens/validation" -name 'shard_*.pt' | wc -l
+grep -E 'schema_version|r_rms_norm_split|r_rms_norm_tokens' \
+  "$CACHE/models/base/manifest.json" "$CACHE/models/finetuned/manifest.json"
+```
+
+The four validation points are steps 250, 500, 750, and 1000. Each evaluates the same first 32
+batches, or 32,768 of the 65,536 cached validation tokens, because the pilot intentionally preserves
+the main protocol's `validation_batches=32`. AuxK loss and dead fraction should remain zero because
+the run ends before `dead_after_batches=2000`.
+
+After completion, draw the existing training dashboard:
+
+```bash
+.venv/bin/python -m aspd.multimodel.cli.plot_training \
+  out/multimodel/runs/qwen3_1_7b_d0_s1_1k \
+  --output out/multimodel/runs/qwen3_1_7b_d0_s1_1k/training_dashboard.png \
+  --smooth 20 --target-l0 32 --title "Qwen3-1.7B D0/S1 full-cache 1k"
+```
+
+Treat this as an independent run. Do not resume its step-1000 checkpoint into the 10k experiment:
+the current checkpoint does not preserve the within-epoch batch offset, and elapsed-time throughput
+also restarts per process. If this pilot passes, start the 10k D0/S1 run fresh on the same v2 cache.
+
+## Full-cache D0/S1 10k main run
+
+The main run reuses the successful pilot's schema-2 cache and the generic `train.sbatch`. Do not
+rebuild the cache and do not resume the 1k checkpoint. The dedicated config preserves the D0/S1
+protocol, starts fresh at step zero, writes to a new run directory, and retains all ten 1k-spaced
+checkpoints for comparisons at steps 1k, 2k, 5k, and 10k.
+
+From a clean committed worktree, run the tests and validate both config and existing cache:
+
+```bash
+.venv/bin/pytest \
+  tests/test_multimodel_cache.py \
+  tests/test_multimodel_batch_topk.py \
+  tests/test_multimodel_components.py \
+  tests/test_multimodel_model.py \
+  tests/test_multimodel_config.py \
+  tests/test_multimodel_plotting.py
+
+.venv/bin/python -m aspd.multimodel.cli.validate \
+  configs/multimodel/qwen3_1_7b/d0_s1_main.yaml
+
+.venv/bin/python -m aspd.multimodel.cli.cache \
+  configs/multimodel/qwen3_1_7b/d0_s1_main.yaml --validate-only
+```
+
+Protect the append-only `metrics.jsonl` from contamination, then submit only training:
+
+```bash
+RUN=out/multimodel/runs/qwen3_1_7b_d0_s1_main
+test ! -e "$RUN" || { echo "Run directory already exists: $RUN"; exit 1; }
+
+module load conda
+source ../env.sh
+export CONFIG=configs/multimodel/qwen3_1_7b/d0_s1_main.yaml
+
+TRAIN_JOB=$(sbatch --parsable --account=<allocation> \
+  --export=ALL,CONFIG="$CONFIG" slurm/multimodel/train.sbatch)
+echo "train_job=${TRAIN_JOB}"
+squeue -j "$TRAIN_JOB"
+```
+
+At 4 sequences of 256 tokens per step, 10k steps produce 10.24M token exposures, approximately
+19.53 passes over the 524,288-token training cache. Each validation event intentionally uses 32
+batches, or half of the cached validation set, to remain comparable with the 1k pilot. Feature
+health and AuxK become meaningful after `dead_after_batches=2000`.
+
+The existing plotting CLI can write both the four-panel dashboard and the separate per-matrix
+validation plot in one invocation. The latter has one panel per model and seven matrix curves per
+panel:
+
+```bash
+.venv/bin/python -m aspd.multimodel.cli.plot_training \
+  out/multimodel/runs/qwen3_1_7b_d0_s1_main \
+  --output out/multimodel/runs/qwen3_1_7b_d0_s1_main/training_dashboard.png \
+  --matrix-output out/multimodel/runs/qwen3_1_7b_d0_s1_main/validation_internal_by_matrix.png \
+  --smooth 50 --target-l0 32 --title "Qwen3-1.7B D0/S1 10k main"
+```
+
 The B200 partition currently permits jobs up to 14 days, but these templates use shorter limits so
 failed smoke runs return promptly. Adjust memory and time only after reading the measured cache
 size, tokens/s, and peak VRAM from the smoke run.
