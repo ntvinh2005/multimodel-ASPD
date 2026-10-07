@@ -123,21 +123,39 @@ def _factor_metrics(u_a: Tensor, v_a: Tensor, u_b: Tensor, v_b: Tensor) -> dict[
     u_a_norm, u_b_norm = u_a.norm(dim=-1), u_b.norm(dim=-1)
     # ||v|| for both models.
     v_a_norm, v_b_norm = v_a.norm(dim=-1), v_b.norm(dim=-1)
-    # ||P_a||_F^2=||u_a||^2||v_a||^2 for rank-1 P_a=u_a v_a^T.
-    p_a_sq = u_a_norm.square() * v_a_norm.square()
-    # ||P_b||_F^2 by the same rank-1 identity.
-    p_b_sq = u_b_norm.square() * v_b_norm.square()
-    # ||P_a-P_b||_F^2=||P_a||^2+||P_b||^2-2<u_a,u_b><v_a,v_b>.
-    difference_sq = (p_a_sq + p_b_sq - 2 * u_dot * v_dot).clamp_min(0)
     # cos(v_a,v_b); example dot .5 with unit norms gives .5.
     raw_read_cosine = v_dot / (v_a_norm * v_b_norm).clamp_min(eps)
     # cos(u_a,u_b); example .8 with unit norms gives .8.
     raw_write_cosine = u_dot / (u_a_norm * u_b_norm).clamp_min(eps)
     # Fix rank-1 sign gauge: if write cosine is negative, flip both reported signs for model b.
     orientation = torch.where(raw_write_cosine < 0, -1.0, 1.0)
+    # ||P||_F=||u||||v|| for rank-1 P=uv^T.
+    p_a_norm = u_a_norm * v_a_norm
+    p_b_norm = u_b_norm * v_b_norm
+    # Compute 1-cos(P_a,P_b) from distances between oriented unit factors.  This avoids the
+    # catastrophic cancellation in ||P_a||^2+||P_b||^2-2<P_a,P_b> when P_a and P_b are equal or
+    # nearly equal.  For unit vectors, .5||a-b||^2=1-cos(a,b).
+    u_a_unit = u_a / u_a_norm.clamp_min(eps)[..., None]
+    u_b_unit = u_b / u_b_norm.clamp_min(eps)[..., None] * orientation[..., None]
+    v_a_unit = v_a / v_a_norm.clamp_min(eps)[..., None]
+    v_b_unit = v_b / v_b_norm.clamp_min(eps)[..., None] * orientation[..., None]
+    one_minus_write_cosine = 0.5 * (u_a_unit - u_b_unit).square().sum(-1)
+    one_minus_read_cosine = 0.5 * (v_a_unit - v_b_unit).square().sum(-1)
+    # 1-cos(P_a,P_b)=1-cos(u_a,u_b)cos(v_a,v_b).
+    one_minus_component_cosine = (
+        one_minus_write_cosine
+        + one_minus_read_cosine
+        - one_minus_write_cosine * one_minus_read_cosine
+    ).clamp(0, 2)
+    # Equivalent stable form:
+    # ||P_a-P_b||^2=(||P_b||-||P_a||)^2+2||P_a||||P_b||(1-cos(P_a,P_b)).
+    difference_sq = (
+        (p_b_norm - p_a_norm).square()
+        + 2 * p_a_norm * p_b_norm * one_minus_component_cosine
+    ).clamp_min(0)
     return {
         # ||P_b-P_a||_F/||P_a||_F; 0 means identical parameter-space computation.
-        "relative_component_change": difference_sq.sqrt() / p_a_sq.sqrt().clamp_min(eps),
+        "relative_component_change": difference_sq.sqrt() / p_a_norm.clamp_min(eps),
         # cos(P_a,P_b)=cos(u_a,u_b)cos(v_a,v_b), invariant to factor scaling/sign gauge.
         "component_cosine": raw_read_cosine * raw_write_cosine,
         "read_cosine": raw_read_cosine * orientation,
