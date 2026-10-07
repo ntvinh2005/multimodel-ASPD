@@ -13,7 +13,8 @@ is:
 ├── repo/                 # this Git repository; small and reproducible
 ├── cache/
 │   ├── huggingface/      # model, tokenizer, and streamed-dataset cache
-│   └── uv/               # downloaded Python wheels and metadata
+│   ├── uv/               # downloaded Python wheels and metadata
+│   └── uv-python/        # uv-managed CPython 3.13 (independent of module Python)
 ├── work/
 │   └── out/              # activation caches, checkpoints, metrics, analyses
 └── archive-manifests/    # small checksums/manifests for archived completed runs
@@ -28,6 +29,7 @@ export MM_ASPD_ROOT=/blue/${HPG_GROUP}/${USER}/multimodel-ASPD
 mkdir -p \
   "${MM_ASPD_ROOT}/cache/huggingface" \
   "${MM_ASPD_ROOT}/cache/uv" \
+  "${MM_ASPD_ROOT}/cache/uv-python" \
   "${MM_ASPD_ROOT}/work/out" \
   "${MM_ASPD_ROOT}/archive-manifests"
 
@@ -37,10 +39,13 @@ if [[ ! -e out ]]; then ln -s "${MM_ASPD_ROOT}/work/out" out; fi
 
 module load conda                 # HiPerGator provides uv through this module
 export UV_CACHE_DIR="${MM_ASPD_ROOT}/cache/uv"
+export UV_PYTHON_INSTALL_DIR="${MM_ASPD_ROOT}/cache/uv-python"
+export UV_PYTHON=3.13
 export HF_HOME="${MM_ASPD_ROOT}/cache/huggingface"
 export WANDB_DIR="${MM_ASPD_ROOT}/work/out/wandb"
 export WANDB_MODE=offline         # or log in and use online mode
-uv sync --frozen
+uv python install 3.13
+uv sync --frozen --python 3.13
 ```
 
 Put the exports in a private file outside Git so login and batch shells use identical paths:
@@ -49,6 +54,8 @@ Put the exports in a private file outside Git so login and batch shells use iden
 cat > "${MM_ASPD_ROOT}/env.sh" <<EOF
 export MM_ASPD_ROOT=${MM_ASPD_ROOT}
 export UV_CACHE_DIR=${MM_ASPD_ROOT}/cache/uv
+export UV_PYTHON_INSTALL_DIR=${MM_ASPD_ROOT}/cache/uv-python
+export UV_PYTHON=3.13
 export HF_HOME=${MM_ASPD_ROOT}/cache/huggingface
 export WANDB_DIR=${MM_ASPD_ROOT}/work/out/wandb
 export WANDB_MODE=offline
@@ -57,6 +64,20 @@ chmod 600 "${MM_ASPD_ROOT}/env.sh"
 
 # Run this before sbatch; Slurm inherits exported variables by default.
 source "${MM_ASPD_ROOT}/env.sh"
+```
+
+The repository also pins `3.13` in `.python-version`. `module load conda` supplies the `uv`
+executable, but its current module Python may be newer than the project supports. The explicit
+`UV_PYTHON` setting keeps login and Slurm shells on the same interpreter. If `.venv` was created
+with another Python, rebuild it once:
+
+```bash
+cd "${MM_ASPD_ROOT}/repo"
+source "${MM_ASPD_ROOT}/env.sh"
+module load conda
+uv python install 3.13
+uv sync --frozen --python 3.13
+uv run python --version          # expected: Python 3.13.x
 ```
 
 Do not put active caches in `$HOME` or `/orange`. Use `/orange/<group>/...` only to archive
