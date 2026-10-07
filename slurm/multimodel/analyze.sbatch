@@ -9,6 +9,7 @@
 #SBATCH --error=slurm/logs/%x-%j.err
 
 set -euo pipefail
+module load conda
 cd "${SLURM_SUBMIT_DIR:-$PWD}"
 : "${CONFIG:?Set CONFIG to the training config}"
 : "${CHECKPOINT:?Set CHECKPOINT to checkpoint_*.pt}"

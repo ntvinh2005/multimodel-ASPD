@@ -9,6 +9,7 @@
 #SBATCH --error=slurm/logs/%x-%j.err
 
 set -euo pipefail
+module load conda
 cd "${SLURM_SUBMIT_DIR:-$PWD}"
 : "${HF_HOME:?Set HF_HOME to project or blue storage before sbatch}"
 
