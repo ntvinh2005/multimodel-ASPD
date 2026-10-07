@@ -63,6 +63,7 @@ EOF
 chmod 600 "${MM_ASPD_ROOT}/env.sh"
 
 # Load the module first, then restore the project variables before sbatch.
+export MM_ASPD_ROOT=/blue/<group>/<user>/multimodel-ASPD
 module load conda
 source "${MM_ASPD_ROOT}/env.sh"
 ```
@@ -101,6 +102,7 @@ submission time, for example `sbatch --account=<allocation> ...`. See the live
 Run the config-only check before allocating a GPU:
 
 ```bash
+export MM_ASPD_ROOT=/blue/<group>/<user>/multimodel-ASPD
 cd "${MM_ASPD_ROOT}/repo"
 module load conda
 source "${MM_ASPD_ROOT}/env.sh"  # restore UV_PYTHON=3.13 after loading the module
@@ -141,6 +143,84 @@ uv run python -m aspd.multimodel.cli.ablate \
   out/multimodel/runs/qwen3_1_7b_d2_s2_entry/checkpoint_00010000.pt \
   --model-index 1 --components 17 203 --prompt "The capital of France is"
 ```
+
+## Day 2: D0/S1 debug run
+
+This run isolates the core method: a linear mean-aggregating encoder, unweighted BatchTopK, and no
+shared/exclusive partition, shared-first loss, tying, or sequence transformer. It uses 512 latents,
+an average L0 budget of 8, 16,384 training tokens, 4,096 validation tokens, and 200 optimizer steps.
+Its dead-feature window is shortened from 2,000 to 100 batches so the dead-fraction diagnostic and
+AuxK revival path can actually run during this short experiment.
+
+Use this map to trace the six equations through the implementation:
+
+| Step | Mathematical object | Code path |
+|---|---|---|
+| 1 | aligned `R^(base), R^(ft)` | `PairedActivationCache.iter_batches` in `cache.py` |
+| 2 | linear mean encoder and ReLU | `LinearSharedEncoder.forward` in `model.py` |
+| 3 | `a -> g^s` | `batch_topk` in `batch_topk.py` |
+| 4 | `g = 1[g^s > 0]` | `batch_topk.py`, immediately after support selection |
+| 5 | activation reconstruction | `ActivationDecoders.reconstruct` in `model.py` |
+| 6 | parameter reconstruction | `RankOneComponents.reconstruct` in `components.py` |
+
+After loading the environment as described above, validate and submit the cache and training jobs as
+one dependency chain:
+
+```bash
+# The launcher locates ../env.sh from the repository, loads conda, forces Python 3.13,
+# validates the expanded config, and submits both jobs.
+cd /blue/<group>/<user>/multimodel-ASPD/repo
+slurm/multimodel/submit_d0_s1_debug.sh <allocation>
+```
+
+The launcher prints both job IDs. Monitor them and their logs with:
+
+```bash
+squeue -j <cache-job-id>,<train-job-id>
+tail -f slurm/logs/mm-d0s1-cache-<cache-job-id>.out
+tail -f slurm/logs/mm-d0s1-train-<train-job-id>.out
+```
+
+Training writes its expanded config, provenance, checkpoints at steps 100 and 200, and metrics to:
+
+```text
+out/multimodel/runs/qwen3_1_7b_d0_s1_debug/
+├── experiment_config.json
+├── provenance.json
+├── metrics.jsonl
+├── checkpoint_00000100.pt
+├── checkpoint_00000200.pt
+└── latest_checkpoint.txt
+```
+
+Inspect the validation rows at steps 25, 50, ..., 200 and the final training rows:
+
+```bash
+METRICS=out/multimodel/runs/qwen3_1_7b_d0_s1_debug/metrics.jsonl
+grep 'validation/loss' "$METRICS"
+tail -n 10 "$METRICS"
+```
+
+Generate a training dashboard at any output path. A trailing-window mean makes per-step training
+curves easier to read; validation points remain unsmoothed:
+
+```bash
+.venv/bin/python -m aspd.multimodel.cli.plot_training \
+  out/multimodel/runs/qwen3_1_7b_d0_s1_debug/metrics.jsonl \
+  --output out/multimodel/runs/qwen3_1_7b_d0_s1_debug/training_dashboard.png \
+  --smooth 10 \
+  --target-l0 8 \
+  --title "Qwen3-1.7B D0/S1 debug"
+```
+
+The output extension selects the format; PNG, PDF, SVG, JPEG, and WebP are supported. The command
+also accepts the run directory in place of the explicit `metrics.jsonl` path and can be rerun while
+training is in progress.
+
+Before moving to a main experiment, verify that total loss, `act/base`, `act/finetuned`,
+`internal/base`, and `internal/finetuned` trend downward; `sparsity/l0` stays near 8; and
+`sparsity/dead_fraction` does not immediately approach 1. The per-matrix internal FVU fields show
+which of Q, K, V, O, gate, up, or down projection is failing if the aggregate stalls.
 
 The B200 partition currently permits jobs up to 14 days, but these templates use shorter limits so
 failed smoke runs return promptly. Adjust memory and time only after reading the measured cache

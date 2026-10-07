@@ -1,0 +1,38 @@
+extends: d0_s1.yaml
+
+# Day 2: isolate the core joint activation/parameter-diffing method before main experiments.
+name: qwen3_1_7b_d0_s1_debug
+
+data:
+  train_tokens: 16384
+  validation_tokens: 4096
+
+cache:
+  root: out/multimodel/cache/qwen3_1_7b_d0_s1_debug
+
+encoder:
+  kind: linear
+  aggregation: mean
+
+sparsity:
+  n_features: 512
+  selection_score: S1
+  diffing: D0
+  top_k: 8
+  tie_shared_decoders: false
+  tie_shared_mechanisms: false
+
+# The main-run threshold is 2,000 batches, so it could never expose dead features in 200 steps.
+# Use a debug-scale window while retaining ASPD's activation-side AuxK revival objective.
+objective:
+  top_k_aux: 64
+  dead_after_batches: 100
+
+training:
+  output_dir: out/multimodel/runs/qwen3_1_7b_d0_s1_debug
+  max_steps: 200
+  batch_size_sequences: 2
+  log_every: 1
+  validate_every: 25
+  save_every: 100
+  validation_batches: 4
