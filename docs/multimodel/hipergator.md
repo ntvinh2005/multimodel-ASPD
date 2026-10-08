@@ -407,6 +407,76 @@ panel:
   --smooth 50 --target-l0 32 --title "Qwen3-1.7B D0/S1 10k main"
 ```
 
+## P1--P5 post-hoc model-to-parameter diffing
+
+This stage does not train or build a cache. It reuses `d0_s1_main.yaml`, the corrected schema-2
+cache, the step-10k checkpoint, and the generic `analyze.sbatch`. The GPU analyzer already computes
+P1--P5 and decoded contexts, so no experiment-specific analysis sbatch is needed.
+
+Verify exact training provenance and inputs before submission:
+
+```bash
+git status --short
+git rev-parse HEAD
+
+CONFIG=configs/multimodel/qwen3_1_7b/d0_s1_main.yaml
+CHECKPOINT=out/multimodel/runs/qwen3_1_7b_d0_s1_main/checkpoint_00010000.pt
+ANALYSIS=out/multimodel/runs/qwen3_1_7b_d0_s1_main/analysis
+
+.venv/bin/pytest tests/test_multimodel_analysis.py tests/test_multimodel_cache.py
+.venv/bin/python -m aspd.multimodel.cli.cache "$CONFIG" --validate-only
+test -f "$CHECKPOINT"
+test ! -e "$ANALYSIS" || { echo "Analysis directory already exists: $ANALYSIS"; exit 1; }
+```
+
+The checkpoint provenance for this run records commit
+`59d3d08b5afc26ba607bf94b2d4aabb0dd5029d5`. Submit the existing analyzer and explicitly export its
+two required paths:
+
+```bash
+module load conda
+source ../env.sh
+export CONFIG CHECKPOINT
+
+ANALYZE_JOB=$(sbatch --parsable --account=<allocation> \
+  --export=ALL,CONFIG="$CONFIG",CHECKPOINT="$CHECKPOINT" \
+  slurm/multimodel/analyze.sbatch)
+echo "analyze_job=${ANALYZE_JOB}"
+squeue -j "$ANALYZE_JOB"
+```
+
+The analyzer traverses all 65,536 validation tokens and writes `posthoc.safetensors`,
+`taxonomy.json`, and `top_activation_examples.json`. After the GPU job succeeds, run the CPU report
+CLI on those existing artifacts:
+
+```bash
+.venv/bin/python -m aspd.multimodel.cli.report_analysis "$CONFIG" "$ANALYSIS"
+```
+
+The report refuses to produce interpretation artifacts unless P1/P2 normalization, the exact
+2,097,152 BatchTopK fire total, P3 locus normalization, P4 partition coverage, shapes, and finite
+P5 metrics all pass. It then writes:
+
+```text
+feature_table.csv
+summary.json
+rho_scatter.png
+rho_mass_scatter.png
+taxonomy_counts.png
+activation_rho_hist.png
+mechanism_rho_hist.png
+fire_count_hist.png
+candidates.md
+```
+
+Candidate selection is reviewable rather than an opaque score: filter the configured
+shared-activation/concentrated-mechanism category, reject zero-fire features, split by dominant
+model, and sort each direction by total absolute mechanism mass. The report flags fewer than 32
+fires, includes five high-mass controls from each requested control group, reports P3/P5 per matrix,
+and recomputes target counts over the 3-by-3 threshold robustness grid. Missing saved contexts do
+not reject a candidate because the analyzer intentionally caps context collection at 256 features.
+Do not run P6 or add split-half analysis until this first shortlist has been reviewed.
+
 The B200 partition currently permits jobs up to 14 days, but these templates use shorter limits so
 failed smoke runs return promptly. Adjust memory and time only after reading the measured cache
 size, tokens/s, and peak VRAM from the smoke run.
