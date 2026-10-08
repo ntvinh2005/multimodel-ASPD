@@ -69,6 +69,122 @@ ssh -N -L 8765:127.0.0.1:8765 <user>@<login-host>
 
 Then open `http://127.0.0.1:8765` locally.
 
+## Run on Windows with downloaded analysis data
+
+The dashboard can run entirely on a Windows workstation. It does not need a GPU, training cache,
+Qwen weights, or the 8-GiB checkpoints. Download or clone this repository so the prebuilt
+`multimodel_dashboard/dist/` directory is present, then copy only the analysis metadata and
+artifacts into a local run directory:
+
+```text
+C:\research\multimodel-ASPD\repo\
+├── aspd\
+├── multimodel_dashboard\
+│   └── dist\
+└── local_data\qwen3_1_7b_d0_s1_main\
+    ├── experiment_config.json
+    ├── provenance.json
+    ├── latest_checkpoint.txt              # optional; metadata only
+    └── analysis\
+        ├── posthoc.safetensors
+        ├── taxonomy.json
+        └── top_activation_examples.json
+```
+
+`experiment_config.json` and `provenance.json` are small but strongly recommended: they provide the
+real model names, C, K, layer, matrices, thresholds, token count, and git commit. The actual
+checkpoint file referenced by `latest_checkpoint.txt` is not required for viewing P1--P5.
+
+### 1. Install Python 3.13 and uv
+
+Open PowerShell. If `uv` is not installed:
+
+```powershell
+winget install --id=astral-sh.uv -e
+```
+
+Open a new PowerShell window after installation and verify:
+
+```powershell
+uv --version
+uv python install 3.13
+```
+
+### 2. Create a lightweight dashboard environment
+
+From the repository root:
+
+```powershell
+cd C:\research\multimodel-ASPD\repo
+
+uv venv --python 3.13 .venv-dashboard
+uv pip install --python .venv-dashboard\Scripts\python.exe `
+  torch safetensors fastapi uvicorn pydantic pyyaml
+```
+
+This intentionally installs only dashboard/runtime dependencies instead of the full training
+environment.
+
+### 3. Verify the downloaded artifacts
+
+```powershell
+$ANALYSIS = ".\local_data\qwen3_1_7b_d0_s1_main\analysis"
+
+.\.venv-dashboard\Scripts\python.exe -m aspd.multimodel.cli.serve_analysis `
+  $ANALYSIS `
+  --verify-only
+```
+
+The command should print the discovered component/model counts, tensor keys, matrices, taxonomy
+counts, example coverage, and Data Health status. Investigate a `FAIL` before interpreting features.
+
+### 4. Start the local dashboard
+
+```powershell
+.\.venv-dashboard\Scripts\python.exe -m aspd.multimodel.cli.serve_analysis `
+  $ANALYSIS `
+  --host 127.0.0.1 `
+  --port 8765
+```
+
+Open [http://127.0.0.1:8765](http://127.0.0.1:8765) in a Windows browser. Keep the PowerShell
+window open while using the dashboard; press `Ctrl+C` there to stop it.
+
+The server automatically finds `experiment_config.json` and `provenance.json` in the parent of the
+`analysis` directory. If the config is stored elsewhere, pass it explicitly:
+
+```powershell
+.\.venv-dashboard\Scripts\python.exe -m aspd.multimodel.cli.serve_analysis `
+  $ANALYSIS `
+  --config "C:\research\configs\d0_s1_main.yaml" `
+  --host 127.0.0.1 `
+  --port 8765
+```
+
+Researcher notes are written separately to:
+
+```text
+local_data\qwen3_1_7b_d0_s1_main\analysis\researcher_notes.json
+```
+
+To place notes elsewhere, add:
+
+```powershell
+--notes "C:\research\notes\qwen3_d0_s1_researcher_notes.json"
+```
+
+### Optional: rebuild the React frontend on Windows
+
+The checked-in `dist/` bundle means Node.js is not needed for normal use. Install Node.js only when
+editing the React source, then rebuild with:
+
+```powershell
+cd C:\research\multimodel-ASPD\repo\multimodel_dashboard
+npm install
+npm run check
+npm run build
+```
+
 ## Tests
 
 ```bash
