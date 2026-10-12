@@ -4,6 +4,96 @@ Local FastAPI + React/TypeScript interface for inspecting real `posthoc.safetens
 activation contexts, and separately stored researcher notes. It has no demo-data or random fallback
 path. Missing data is rendered as `N/A — data unavailable` and diagnosed in Data Health.
 
+## Chạy nhanh trên Windows
+
+Trong chế độ sử dụng bình thường, **không chạy `npm run dev`**. Python server phục vụ đồng thời API
+và React frontend đã build sẵn trong `multimodel_dashboard/dist/`.
+
+Mở PowerShell tại thư mục gốc của repository rồi chạy:
+
+```powershell
+# 1. Tự tìm thư mục analysis đã tải về. Thư mục này phải chứa posthoc.safetensors.
+$ANALYSIS = (Get-ChildItem .\out -Recurse -Filter posthoc.safetensors |
+  Select-Object -First 1).Directory.FullName
+
+if (-not $ANALYSIS) {
+  throw "Không tìm thấy posthoc.safetensors bên dưới .\out"
+}
+
+Write-Host "Using analysis: $ANALYSIS"
+
+# 2. Kiểm tra artifact trước khi mở giao diện.
+.\.venv-dashboard\Scripts\python.exe -m aspd.multimodel.cli.serve_analysis `
+  $ANALYSIS `
+  --verify-only
+
+# 3. Khởi động backend và frontend trên cùng một địa chỉ.
+.\.venv-dashboard\Scripts\python.exe -m aspd.multimodel.cli.serve_analysis `
+  $ANALYSIS `
+  --host 127.0.0.1 `
+  --port 8765
+```
+
+Khi terminal in ra `Dashboard: http://127.0.0.1:8765`, mở
+[http://127.0.0.1:8765](http://127.0.0.1:8765) trong trình duyệt. Giữ PowerShell đang chạy; nhấn
+`Ctrl+C` để dừng server.
+
+Nếu chưa có `.venv-dashboard`, tạo môi trường một lần từ thư mục gốc:
+
+```powershell
+uv python install 3.13
+uv venv --python 3.13 .venv-dashboard
+uv pip install --python .venv-dashboard\Scripts\python.exe `
+  torch numpy safetensors fastapi uvicorn pydantic pyyaml
+```
+
+Với dữ liệu hiện đang nằm tại `out\multimodel\runs\out\analysis`, có thể bỏ bước tự tìm và dùng
+trực tiếp:
+
+```powershell
+$ANALYSIS = ".\out\multimodel\runs\out\analysis"
+.\.venv-dashboard\Scripts\python.exe -m aspd.multimodel.cli.serve_analysis `
+  $ANALYSIS --host 127.0.0.1 --port 8765
+```
+
+### Khi nào cần chạy React development server
+
+Chỉ dùng cách này khi đang sửa file trong `multimodel_dashboard/src/` và muốn Vite tự reload. Mở
+hai PowerShell terminal tại repository:
+
+Terminal 1 — API tại port 8765:
+
+```powershell
+$ANALYSIS = (Get-ChildItem .\out -Recurse -Filter posthoc.safetensors |
+  Select-Object -First 1).Directory.FullName
+.\.venv-dashboard\Scripts\python.exe -m aspd.multimodel.cli.serve_analysis `
+  $ANALYSIS --host 127.0.0.1 --port 8765
+```
+
+Terminal 2 — Vite frontend tại port 5173:
+
+```powershell
+cd multimodel_dashboard
+npm install
+npm run dev
+```
+
+Trong chế độ này mở [http://127.0.0.1:5173](http://127.0.0.1:5173). Vite tự chuyển các request
+`/api` sang backend port 8765.
+
+### Lỗi thường gặp
+
+| Hiện tượng | Cách xử lý |
+|---|---|
+| `missing file: posthoc.safetensors` | `$ANALYSIS` đang trỏ nhầm. Nó phải là chính thư mục chứa ba artifact, không phải thư mục run cha. |
+| PowerShell báo không có `.venv-dashboard\Scripts\python.exe` | Chạy các lệnh tạo môi trường ở trên một lần. |
+| `http://127.0.0.1:8765` trả về 404 nhưng `/api/health` hoạt động | Thiếu `multimodel_dashboard/dist/`; chạy `cd multimodel_dashboard`, `npm install`, rồi `npm run build`. |
+| Port 8765 đã được sử dụng | Đổi cả lệnh và URL sang port khác, ví dụ `--port 8766`. |
+| `validation_status` là `FAIL` | Đọc `validation_warnings`; không diễn giải component cho đến khi artifact path hoặc file thiếu được sửa. |
+
+Trên HiPerGator, xem phần **Run locally** bên dưới để chạy server và tạo SSH tunnel. Trình duyệt vẫn
+mở địa chỉ local `http://127.0.0.1:8765`.
+
 ## Inputs
 
 The backend reads these files without modifying them:

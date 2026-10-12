@@ -10,6 +10,11 @@ to gate model-specific rank-1 components `P^(n)_{j,c}`. Start with
 [`HiPerGator guide`](docs/multimodel/hipergator.md). The upstream single-model ASPD paths remain
 unchanged.
 
+To inspect a downloaded multi-model analysis in the browser, follow the copy-paste Windows and
+HiPerGator instructions in [`multimodel_dashboard/README.md`](multimodel_dashboard/README.md). The
+normal dashboard command serves both the Python API and the prebuilt React frontend; Node.js is not
+required unless you edit the frontend source.
+
 ```bash
 python -m aspd.multimodel.cli.validate configs/multimodel/qwen3_1_7b/smoke.yaml
 python -m aspd.multimodel.cli.cache configs/multimodel/qwen3_1_7b/smoke.yaml
