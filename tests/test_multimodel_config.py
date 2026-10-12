@@ -1,6 +1,9 @@
 from pathlib import Path
 
-from aspd.multimodel.config import load_experiment_config
+import pytest
+from pydantic import ValidationError
+
+from aspd.multimodel.config import AnalysisSpec, load_experiment_config
 
 ROOT = Path(__file__).parents[1]
 
@@ -18,6 +21,18 @@ def test_smoke_config_overrides_parent_without_losing_models() -> None:
     assert cfg.sparsity.n_features == 512
     assert cfg.sparsity.diffing == "D2"
     assert [model.name for model in cfg.models] == ["base", "finetuned"]
+
+
+def test_explicit_example_mode_requires_unique_nonnegative_ids() -> None:
+    with pytest.raises(ValidationError, match="non-empty"):
+        AnalysisSpec(example_feature_mode="explicit")
+    with pytest.raises(ValidationError, match="non-negative"):
+        AnalysisSpec(example_feature_mode="explicit", example_feature_ids=[-1])
+    with pytest.raises(ValidationError, match="duplicates"):
+        AnalysisSpec(example_feature_mode="explicit", example_feature_ids=[3, 3])
+
+    spec = AnalysisSpec(example_feature_mode="explicit", example_feature_ids=[440, 203])
+    assert spec.example_feature_ids == [440, 203]
 
 
 def test_d0_s1_debug_config_is_the_uncomplicated_core_method() -> None:

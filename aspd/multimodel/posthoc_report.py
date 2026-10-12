@@ -419,10 +419,18 @@ def _write_candidates_markdown(
                 f"{float(tensors[f'pair/{matrix}/read_cosine'][feature_id]):.4f} | "
                 f"{float(tensors[f'pair/{matrix}/write_cosine'][feature_id]):.4f} |\n"
             )
+        extracted = str(feature_id) in examples
         contexts = examples.get(str(feature_id), [])[:3]
         sections.append("\nTop saved contexts:\n\n")
-        if not contexts:
-            sections.append("_Not present in the analyzer's capped context sample._\n\n")
+        if not extracted:
+            sections.append(
+                "_Activation contexts have not been extracted for this component. This does not "
+                "mean that the component did not fire._\n\n"
+            )
+        elif not contexts:
+            sections.append(
+                "_No positive activation examples were retained for this component._\n\n"
+            )
         else:
             for example in contexts:
                 text = str(example.get("text", "")).replace("\n", " ").replace("|", "\\|")

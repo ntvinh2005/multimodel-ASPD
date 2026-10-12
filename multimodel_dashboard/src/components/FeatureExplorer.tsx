@@ -87,8 +87,14 @@ export default function FeatureExplorer({
     </Section>
 
     <Section title="Activation examples" kicker="Measured shared latent activations">
-      {feature.examples === null ? <p className="na">N/A — this component was not included in the analyzer’s capped context sample.</p> : feature.examples.length === 0 ?
-        <p className="na">No retained activation examples for this component in the analyzed context set.</p> :
+      <div className="stat-row">
+        <div><span>Context status</span><strong>{feature.context.status === "extracted" ? "Extracted" : "Not extracted"}</strong></div>
+        <div><span>Fire count</span><Metric value={feature.context.fire_count} kind="integer" source={String(feature.sources.fire_count)} /></div>
+        <div><span>Saved top contexts</span><Metric value={feature.context.saved_contexts} kind="integer" /></div>
+        <div><span>Context source</span><strong>{feature.context.source}</strong></div>
+      </div>
+      {feature.examples === null ? <p className="na">{feature.context.message}</p> : feature.examples.length === 0 ?
+        <p className="na">No positive activation examples were retained for this component.</p> :
         <div className="examples-list">{[...feature.examples].sort((a, b) => (b.g_s || 0) - (a.g_s || 0)).map((example, index) =>
           <article className="example-card" key={index} title={example.source}><div className="example-meta"><Badge tone="target">{example.center_token || "N/A — center token unavailable"}</Badge><span>g_s <Metric value={example.g_s} kind="gs" source={`${example.source}.g_s`} /></span></div>
             <p>{example.text || "N/A — decoded text unavailable"}</p><small>Shared latent activation strength at this token</small>

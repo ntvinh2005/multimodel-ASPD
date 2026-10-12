@@ -153,6 +153,7 @@ class AnalysisDashboardStore:
         )
         self._notes_lock = threading.Lock()
         self.notes = self._load_notes()
+        self.context_coverage = self._build_context_coverage()
         self.health = self._build_health()
 
     def _resolve_config_path(self, supplied: str | Path | None) -> Path | None:
@@ -465,6 +466,56 @@ class AnalysisDashboardStore:
             "source": "top_activation_examples.json",
         }
 
+    def _build_context_coverage(self) -> dict[str, Any]:
+        """Count context coverage without treating an absent key as a non-firing component."""
+
+        extracted: set[int] = set()
+        with_saved_contexts: set[int] = set()
+        for raw_feature_id, examples in self.examples.items():
+            try:
+                feature_id = int(raw_feature_id)
+            except (TypeError, ValueError):
+                continue
+            if (
+                isinstance(examples, list)
+                and self.n_features is not None
+                and 0 <= feature_id < self.n_features
+            ):
+                extracted.add(feature_id)
+                if examples:
+                    with_saved_contexts.add(feature_id)
+
+        fired_without_context = 0
+        fire_count = self.tensors.get("fire_count_C")
+        if fire_count is not None and fire_count.ndim == 1:
+            fired_without_context = sum(
+                float(fire_count[feature_id]) > 0 and feature_id not in extracted
+                for feature_id in range(min(len(fire_count), self.n_features or 0))
+            )
+        total = self.n_features or 0
+        return {
+            "components": self.n_features,
+            "components_with_context_extraction": len(extracted),
+            "components_with_at_least_one_saved_context": len(with_saved_contexts),
+            "components_not_extracted": max(total - len(extracted), 0),
+            "components_with_fire_count_gt_zero_but_no_extracted_context": fired_without_context,
+            "configured_mode": (
+                self.config.analysis.example_feature_mode if self.config is not None else None
+            ),
+            "source": "top_activation_examples.json",
+        }
+
+    def _context_coverage_check(self) -> dict[str, Any]:
+        incomplete_all_mode = (
+            self.context_coverage["configured_mode"] == "all"
+            and self.context_coverage["components_not_extracted"] > 0
+        )
+        return {
+            "name": "Activation-context coverage",
+            "status": "FAIL" if incomplete_all_mode else "PASS",
+            **self.context_coverage,
+        }
+
     def _build_health(self) -> dict[str, Any]:
         checks = [
             self._shape_check(),
@@ -473,6 +524,7 @@ class AnalysisDashboardStore:
             self._locus_check(),
             self._finite_check(),
             self._example_check(),
+            self._context_coverage_check(),
         ]
         expected = set(CORE_KEYS)
         expected.update(
@@ -515,6 +567,7 @@ class AnalysisDashboardStore:
             "categorized_keys": categorized,
             "missing_expected_keys": sorted(expected - set(self.tensors)),
             "tensor_shapes": {key: list(value.shape) for key, value in self.tensors.items()},
+            "context_coverage": self.context_coverage,
         }
 
     def _tensor_vector(self, key: str, feature_id: int) -> list[float] | None:
@@ -607,6 +660,12 @@ class AnalysisDashboardStore:
             "p5_max_relative_change": self._aggregate_p5(
                 p5, "relative_component_change", max
             ),
+            "context_extracted": isinstance(self.examples.get(str(feature_id)), list),
+            "saved_context_count": (
+                len(self.examples[str(feature_id)])
+                if isinstance(self.examples.get(str(feature_id)), list)
+                else 0
+            ),
             "has_examples": str(feature_id) in self.examples,
             "note": self.notes.get(str(feature_id)),
         }
@@ -643,6 +702,22 @@ class AnalysisDashboardStore:
                 for index, example in enumerate(examples)
                 if isinstance(example, dict)
             ]
+        context_extracted = isinstance(examples, list)
+        if context_extracted and examples_payload:
+            context_message = "Positive activation examples were extracted and retained."
+        elif context_extracted:
+            context_message = "No positive activation examples were retained for this component."
+        elif summary["fire_count"] is not None and summary["fire_count"] > 0:
+            context_message = (
+                "Activation contexts have not been extracted for this component. "
+                f"This component fired {summary['fire_count']} times; absence from the context "
+                "artifact does not mean that it was inactive."
+            )
+        else:
+            context_message = (
+                "Activation contexts have not been extracted for this component. "
+                "This does not mean that the component did not fire."
+            )
         dominant = summary["dominant_locus"]
         locus_statement = None
         if len(self.model_names) == 2 and all(dominant.get(name) for name in self.model_names):
@@ -658,6 +733,13 @@ class AnalysisDashboardStore:
             "locus": locus,
             "p5": self._p5(feature_id),
             "examples": examples_payload,
+            "context": {
+                "status": "extracted" if context_extracted else "not_extracted",
+                "fire_count": summary["fire_count"],
+                "saved_contexts": len(examples_payload or []),
+                "source": "top_activation_examples.json",
+                "message": context_message,
+            },
             "locus_statement": locus_statement,
             "sources": {
                 "taxonomy": (
@@ -916,9 +998,9 @@ class AnalysisDashboardStore:
             lines.append(f"- {row['matrix']}: " + ", ".join(f"{key}={row[key]}" for key in P5_METRICS))
         lines.extend(["", "## Top Activation Examples"])
         if feature["examples"] is None:
-            lines.append("N/A — top_activation_examples.json has no key for this component.")
+            lines.append(feature["context"]["message"])
         elif not feature["examples"]:
-            lines.append("No retained activation examples for this component in the analyzed context set.")
+            lines.append("No positive activation examples were retained for this component.")
         else:
             for example in sorted(feature["examples"], key=lambda item: item.get("g_s", 0), reverse=True):
                 lines.append(
@@ -964,9 +1046,10 @@ class AnalysisDashboardStore:
                 category: len(ids) if isinstance(ids, list) else None
                 for category, ids in self.taxonomy.items()
             },
-            "components_with_activation_examples": sum(
-                isinstance(value, list) and bool(value) for value in self.examples.values()
-            ),
+            "components_with_activation_examples": self.context_coverage[
+                "components_with_at_least_one_saved_context"
+            ],
+            **self.context_coverage,
             "validation_status": self.health["overall_status"],
             "validation_warnings": self.startup_diagnostics,
         }

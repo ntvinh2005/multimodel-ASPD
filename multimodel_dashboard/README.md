@@ -18,6 +18,62 @@ It reads `experiment_config.json`, `provenance.json`, and `latest_checkpoint.txt
 directory when available. Notes are the only mutable research file and default to
 `analysis/researcher_notes.json`.
 
+`top_activation_examples.json` uses key presence as measured provenance:
+
+- a present key with examples means extraction ran and retained positive top contexts;
+- a present key with `[]` means extraction ran but found no positive retained activation;
+- an absent key means context extraction was not performed for that component. It does **not** mean
+  that the component did not fire. Check `fire_count_C[c]` in `posthoc.safetensors` separately.
+
+## Context extraction modes
+
+`analysis.example_feature_mode` controls context coverage during the full P1--P5 analyzer:
+
+| Mode | Components whose contexts are extracted |
+|---|---|
+| `ranked` | Historical capped sample: half by P1/P2 asymmetry, then fill by total beta mass up to `max_example_features`. |
+| `all` | Every latent `c=0,...,C-1`; the JSON contains a key for every component, including `[]`. |
+| `explicit` | Only `analysis.example_feature_ids`, for example `[440, 203, 73]`. |
+
+`analysis.example_feature_chunk_size` controls only the feature-axis top-k update. For each
+validation batch the checkpoint encoder computes `g^s[B,T,C]` once; chunks do not rerun the model.
+`analysis.top_examples_per_feature` remains the number of contexts retained per component.
+
+### Backfill contexts without retraining or recomputing P1--P5
+
+The examples-only CLI loads the existing config, checkpoint, and paired validation cache. It updates
+only `top_activation_examples.json`; it does not alter `posthoc.safetensors`, taxonomy membership,
+or any P1/P2/P3/P5 value. Updates are merged with existing component keys and atomically replace the
+JSON file.
+
+For the existing Qwen3 D0/S1 main run:
+
+```bash
+CONFIG=configs/multimodel/qwen3_1_7b/d0_s1_main.yaml
+RUN=out/multimodel/runs/qwen3_1_7b_d0_s1_main
+CHECKPOINT="${RUN}/$(cat "${RUN}/latest_checkpoint.txt")"
+
+# Produce context coverage for all C=8192 components.
+uv run python -m aspd.multimodel.cli.extract_examples \
+  --config "$CONFIG" \
+  --checkpoint "$CHECKPOINT" \
+  --output-dir "$RUN/analysis" \
+  --all-features \
+  --chunk-size 512
+
+# Backfill only component 440, preserving all previously extracted components.
+uv run python -m aspd.multimodel.cli.extract_examples \
+  --config "$CONFIG" \
+  --checkpoint "$CHECKPOINT" \
+  --output-dir "$RUN/analysis" \
+  --feature-ids 440
+```
+
+Multiple targeted IDs use one comma-separated argument, such as
+`--feature-ids 440,203,73,390,146`. Data Health reports total components, extracted components,
+components with at least one saved context, components not extracted, and firing components whose
+contexts have not been extracted.
+
 ## Verify the real run
 
 From the repository root:
@@ -119,7 +175,7 @@ cd C:\research\multimodel-ASPD\repo
 
 uv venv --python 3.13 .venv-dashboard
 uv pip install --python .venv-dashboard\Scripts\python.exe `
-  torch safetensors fastapi uvicorn pydantic pyyaml
+  torch numpy safetensors fastapi uvicorn pydantic pyyaml
 ```
 
 This intentionally installs only dashboard/runtime dependencies instead of the full training
@@ -188,10 +244,17 @@ npm run build
 ## Tests
 
 ```bash
-.venv/bin/pytest tests/test_multimodel_dashboard.py
+.venv/bin/pytest \
+  tests/test_multimodel_analysis.py \
+  tests/test_multimodel_config.py \
+  tests/test_multimodel_dashboard.py
 .venv/bin/ruff check \
+  aspd/multimodel/analysis.py \
+  aspd/multimodel/cli/extract_examples.py \
   aspd/multimodel/dashboard.py \
   aspd/multimodel/cli/serve_analysis.py \
+  tests/test_multimodel_analysis.py \
+  tests/test_multimodel_config.py \
   tests/test_multimodel_dashboard.py
 
 cd multimodel_dashboard
@@ -199,5 +262,6 @@ npm run check
 npm run build
 ```
 
-The Python tests cover tensor-to-feature mapping, health failures, REST endpoints, exports, and the
-guarantee that saving notes does not modify raw artifacts.
+The Python tests cover ranked/all/explicit extraction, atomic merge semantics, tensor-to-feature
+mapping, context coverage, health failures, REST endpoints, exports, and the guarantee that saving
+notes does not modify raw artifacts.

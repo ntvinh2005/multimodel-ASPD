@@ -120,3 +120,7 @@ analysis:
   concentrated_threshold: 0.9
   top_examples_per_feature: 10
   max_example_features: 256
+  # ranked is the historical capped sample; use the examples-only CLI for all/explicit backfills.
+  example_feature_mode: ranked
+  example_feature_ids: []
+  example_feature_chunk_size: 512

@@ -41,7 +41,7 @@ class ModelSpec(BaseModel):
     matrices: list[MatrixSpec]
 
     @model_validator(mode="after")
-    def unique_matrix_names(self) -> "ModelSpec":
+    def unique_matrix_names(self) -> ModelSpec:
         names = [matrix.name for matrix in self.matrices]
         if len(names) != len(set(names)):
             raise ValueError(f"model {self.name!r} has duplicate matrix names: {names}")
@@ -94,7 +94,7 @@ class EncoderSpec(BaseModel):
     causal: bool = True
 
     @model_validator(mode="after")
-    def heads_divide_projection(self) -> "EncoderSpec":
+    def heads_divide_projection(self) -> EncoderSpec:
         # Each attention head width is p/H; example p=1024,H=8 -> 128 coordinates per head.
         if self.kind == "transformer" and self.projection_dim % self.n_heads:
             raise ValueError("encoder.projection_dim must be divisible by encoder.n_heads")
@@ -116,7 +116,7 @@ class SparsitySpec(BaseModel):
     tie_shared_mechanisms: bool = False
 
     @model_validator(mode="after")
-    def validate_partition(self) -> "SparsitySpec":
+    def validate_partition(self) -> SparsitySpec:
         if self.diffing in {"D1", "D2"}:
             if self.top_k_shared is None or self.top_k_exclusive is None:
                 raise ValueError("D1/D2 require top_k_shared and top_k_exclusive")
@@ -153,7 +153,7 @@ class ObjectiveSpec(BaseModel):
     )
 
     @model_validator(mode="after")
-    def fractions_sum_to_one(self) -> "ObjectiveSpec":
+    def fractions_sum_to_one(self) -> ObjectiveSpec:
         # Fractions partition C exactly; example .25+.25+.5=1 creates all nested prefixes.
         if abs(sum(self.matryoshka_group_fractions) - 1.0) > 1e-6:
             raise ValueError("matryoshka_group_fractions must sum to 1")
@@ -187,6 +187,24 @@ class AnalysisSpec(BaseModel):
     concentrated_threshold: float = Field(default=0.9, gt=0.5, le=1.0)
     top_examples_per_feature: PositiveInt = 10
     max_example_features: PositiveInt = 256
+    # ranked preserves the original capped P1/P2-asymmetry + beta-mass sample.  all requests
+    # c=0,...,C-1, while explicit requests only the researcher-supplied component indices.
+    example_feature_mode: Literal["ranked", "all", "explicit"] = "ranked"
+    example_feature_ids: list[int] = Field(default_factory=list)
+    # After one encoder pass produces g^s[B,T,C], slice C into chunks for batched top-k updates.
+    example_feature_chunk_size: PositiveInt = 512
+
+    @model_validator(mode="after")
+    def validate_example_feature_ids(self) -> AnalysisSpec:
+        if any(feature_id < 0 for feature_id in self.example_feature_ids):
+            raise ValueError("analysis.example_feature_ids must contain non-negative component IDs")
+        if len(self.example_feature_ids) != len(set(self.example_feature_ids)):
+            raise ValueError("analysis.example_feature_ids must not contain duplicates")
+        if self.example_feature_mode == "explicit" and not self.example_feature_ids:
+            raise ValueError(
+                "analysis.example_feature_ids must be non-empty when example_feature_mode='explicit'"
+            )
+        return self
 
 
 class MultiModelExperimentConfig(BaseModel):
@@ -203,7 +221,7 @@ class MultiModelExperimentConfig(BaseModel):
     analysis: AnalysisSpec = Field(default_factory=AnalysisSpec)
 
     @model_validator(mode="after")
-    def validate_models_and_tying(self) -> "MultiModelExperimentConfig":
+    def validate_models_and_tying(self) -> MultiModelExperimentConfig:
         if not self.models:
             raise ValueError("at least one model is required")
         names = [model.name for model in self.models]
@@ -213,6 +231,16 @@ class MultiModelExperimentConfig(BaseModel):
             matrix_names = [[matrix.name for matrix in model.matrices] for model in self.models]
             if any(names != matrix_names[0] for names in matrix_names[1:]):
                 raise ValueError("tied shared mechanisms require matching matrix names and order")
+        invalid_example_ids = [
+            feature_id
+            for feature_id in self.analysis.example_feature_ids
+            if feature_id >= self.sparsity.n_features
+        ]
+        if invalid_example_ids:
+            raise ValueError(
+                f"analysis.example_feature_ids out of range for C={self.sparsity.n_features}: "
+                f"{invalid_example_ids}"
+            )
         return self
 
 

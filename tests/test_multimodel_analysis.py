@@ -1,7 +1,60 @@
+import json
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 import torch
 
-from aspd.multimodel.analysis import _factor_metrics
+from aspd.multimodel.analysis import (
+    _factor_metrics,
+    _top_activation_examples,
+    save_activation_examples,
+    select_example_feature_ids,
+)
+from aspd.multimodel.config import load_experiment_config
 from aspd.multimodel.losses import residual_fvu
+
+ROOT = Path(__file__).parents[1]
+
+
+class _ExampleModel:
+    def __init__(self) -> None:
+        self.encode_calls = 0
+
+    def encode(self, activations, _valid):
+        self.encode_calls += 1
+        return SimpleNamespace(values=activations[0])
+
+
+class _ExampleCache:
+    def __init__(self, values: torch.Tensor) -> None:
+        self.batch = {
+            "R": [values],
+            "valid_tokens": torch.ones(values.shape[:2], dtype=torch.bool),
+            "input_ids": torch.arange(values.shape[1]).unsqueeze(0),
+        }
+
+    def iter_batches(self, *_args, **_kwargs):
+        yield self.batch
+
+
+def _example_cfg(mode: str = "ranked"):
+    cfg = load_experiment_config(ROOT / "configs/multimodel/qwen3_1_7b/smoke.yaml")
+    return cfg.model_copy(
+        update={
+            "sparsity": cfg.sparsity.model_copy(update={"n_features": 4, "top_k": 1}),
+            "training": cfg.training.model_copy(update={"batch_size_sequences": 1}),
+            "analysis": cfg.analysis.model_copy(
+                update={
+                    "example_feature_mode": mode,
+                    "example_feature_ids": [2] if mode == "explicit" else [],
+                    "top_examples_per_feature": 2,
+                    "max_example_features": 2,
+                    "example_feature_chunk_size": 2,
+                }
+            ),
+        }
+    )
 
 
 def test_p5_component_metrics_are_invariant_to_rank_one_gauge() -> None:
@@ -24,3 +77,65 @@ def test_auxk_uses_original_target_variance() -> None:
         residual_fvu(target, residual, residual_reconstruction, valid),
         torch.tensor(0.5),
     )
+
+
+def test_ranked_example_mode_preserves_asymmetry_then_mass_selection() -> None:
+    cfg = _example_cfg("ranked")
+    activation_rho = torch.tensor([[0.95, 0.50, 0.50, 0.50], [0.05, 0.50, 0.50, 0.50]])
+    mechanism_rho = torch.tensor([[0.90, 0.50, 0.50, 0.50], [0.10, 0.50, 0.50, 0.50]])
+    beta = torch.tensor([[1.0, 10.0, 2.0, 3.0], [1.0, 10.0, 2.0, 3.0]])
+
+    assert select_example_feature_ids(cfg, activation_rho, mechanism_rho, beta) == [0, 1]
+
+
+def test_all_example_mode_emits_every_key_with_empty_lists_for_zero_activation() -> None:
+    cfg = _example_cfg("all")
+    values = torch.tensor([[[1.0, 0.0, 3.0, 0.0], [2.0, 0.0, 1.0, 0.0]]])
+    model = _ExampleModel()
+    selected = select_example_feature_ids(
+        cfg, torch.zeros(2, 4), torch.zeros(2, 4), torch.zeros(2, 4)
+    )
+    examples = _top_activation_examples(
+        model, _ExampleCache(values), cfg, torch.device("cpu"), selected
+    )
+
+    assert list(examples) == ["0", "1", "2", "3"]
+    assert examples["1"] == [] and examples["3"] == []
+    assert len(examples["0"]) == 2
+    assert model.encode_calls == 1  # one validation traversal/encode, not one pass per c
+
+
+def test_explicit_example_mode_extracts_only_requested_ids_and_rejects_invalid_ids() -> None:
+    cfg = _example_cfg("explicit")
+    values = torch.tensor([[[1.0, 0.0, 3.0, 0.0], [2.0, 0.0, 1.0, 0.0]]])
+    selected = select_example_feature_ids(
+        cfg, torch.zeros(2, 4), torch.zeros(2, 4), torch.zeros(2, 4)
+    )
+    examples = _top_activation_examples(
+        _ExampleModel(), _ExampleCache(values), cfg, torch.device("cpu"), selected
+    )
+    assert list(examples) == ["2"]
+
+    # Explicit extraction records provenance even when c=1 has no positive g^s anywhere.
+    empty = _top_activation_examples(
+        _ExampleModel(), _ExampleCache(values), cfg, torch.device("cpu"), [1]
+    )
+    assert empty == {"1": []}
+
+    with pytest.raises(ValueError, match="out of range"):
+        _top_activation_examples(
+            _ExampleModel(), _ExampleCache(values), cfg, torch.device("cpu"), [4]
+        )
+
+
+def test_explicit_example_merge_preserves_existing_components(tmp_path: Path) -> None:
+    existing = {"104": [{"g_s": 1.0}], "1002": [{"g_s": 2.0}]}
+    (tmp_path / "top_activation_examples.json").write_text(
+        json.dumps(existing), encoding="utf-8"
+    )
+
+    merged = save_activation_examples({"440": []}, tmp_path, merge=True)
+
+    assert set(merged) == {"104", "440", "1002"}
+    assert json.loads((tmp_path / "top_activation_examples.json").read_text()) == merged
+    assert not list(tmp_path.glob(".top_activation_examples.json.*.tmp"))

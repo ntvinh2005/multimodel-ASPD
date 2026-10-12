@@ -453,6 +453,49 @@ CLI on those existing artifacts:
 .venv/bin/python -m aspd.multimodel.cli.report_analysis "$CONFIG" "$ANALYSIS"
 ```
 
+The default `ranked` context mode preserves the original 256-component sample. Contexts can be
+backfilled later without retraining and without modifying P1--P5 or taxonomy. Resolve the checkpoint
+recorded by the run and request either all 8,192 components or a targeted list:
+
+```bash
+CONFIG=configs/multimodel/qwen3_1_7b/d0_s1_main.yaml
+RUN=out/multimodel/runs/qwen3_1_7b_d0_s1_main
+ANALYSIS="$RUN/analysis"
+CHECKPOINT="$RUN/$(cat "$RUN/latest_checkpoint.txt")"
+
+# Complete context artifact: every c has a JSON key; no positive retained context is written as [].
+uv run python -m aspd.multimodel.cli.extract_examples \
+  --config "$CONFIG" --checkpoint "$CHECKPOINT" --output-dir "$ANALYSIS" \
+  --all-features --chunk-size 512
+
+# Targeted atomic merge: keep existing keys and add/update component 440 only.
+uv run python -m aspd.multimodel.cli.extract_examples \
+  --config "$CONFIG" --checkpoint "$CHECKPOINT" --output-dir "$ANALYSIS" \
+  --feature-ids 440
+```
+
+For normal HiPerGator use, submit the same work through the checked-in B200 job:
+
+```bash
+# All C=8192 components.
+sbatch --account=<allocation> \
+  --export=ALL,CONFIG="$CONFIG",CHECKPOINT="$CHECKPOINT",OUTPUT_DIR="$ANALYSIS",ALL_FEATURES=1 \
+  slurm/multimodel/extract_examples.sbatch
+
+# Component 440 only; the JSON merge preserves every existing component key.
+sbatch --account=<allocation> \
+  --export=ALL,CONFIG="$CONFIG",CHECKPOINT="$CHECKPOINT",OUTPUT_DIR="$ANALYSIS",FEATURE_IDS=440 \
+  slurm/multimodel/extract_examples.sbatch
+```
+
+Run these on a B200 compute allocation, not a login node. The extractor reads the existing paired
+validation cache once and computes `g^s[B,T,C]` once per batch. `--chunk-size` limits temporary top-k
+work along `C`; it does not repeat transformer/model passes. All-feature extraction maintains up to
+`top_examples_per_feature` heaps for 8,192 components and writes a larger JSON artifact, so it costs
+more CPU bookkeeping and output space than a targeted backfill. It does not load the original Qwen
+models because the required activations are already in the paired cache; tokenizer access is still
+needed to decode the saved token windows.
+
 The report refuses to produce interpretation artifacts unless P1/P2 normalization, the exact
 2,097,152 BatchTopK fire total, P3 locus normalization, P4 partition coverage, shapes, and finite
 P5 metrics all pass. It then writes:
@@ -474,7 +517,9 @@ shared-activation/concentrated-mechanism category, reject zero-fire features, sp
 model, and sort each direction by total absolute mechanism mass. The report flags fewer than 32
 fires, includes five high-mass controls from each requested control group, reports P3/P5 per matrix,
 and recomputes target counts over the 3-by-3 threshold robustness grid. Missing saved contexts do
-not reject a candidate because the analyzer intentionally caps context collection at 256 features.
+not reject a candidate. An absent key means context extraction was not performed for that component,
+whereas a present empty list means extraction ran but retained no positive activation. Neither case
+changes `fire_count`, P1--P5, or taxonomy.
 Do not run P6 or add split-half analysis until this first shortlist has been reviewed.
 
 The B200 partition currently permits jobs up to 14 days, but these templates use shorter limits so

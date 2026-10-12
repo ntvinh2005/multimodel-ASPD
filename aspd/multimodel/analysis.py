@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import heapq
 import json
+import os
+import tempfile
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -39,7 +42,9 @@ def _top_activation_examples(
     cache: PairedActivationCache,
     cfg: MultiModelExperimentConfig,
     device: torch.device,
-    feature_ids: Tensor,
+    feature_ids: Tensor | Sequence[int],
+    *,
+    chunk_size: int | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """Keep contexts with the largest ``g^s_{t,c}`` for selected latent indices ``c``.
 
@@ -47,63 +52,208 @@ def _top_activation_examples(
     the saved analysis so a high activation score is never mistaken for parameter-space sharing.
     """
 
-    k = cfg.analysis.top_examples_per_feature
-    heaps: dict[int, list[tuple[float, int, list[int], int]]] = {
-        int(c): [] for c in feature_ids.tolist()
-    }
-    serial = 0
-    # c indices whose top contexts will be retained, e.g. selected=[7,203].
-    selected = feature_ids.to(device)
+    accumulator = _TopActivationAccumulator(
+        cfg,
+        device,
+        feature_ids,
+        chunk_size=chunk_size,
+    )
     for raw_batch in cache.iter_batches(
         "validation", cfg.training.batch_size_sequences, shuffle=False
     ):
         valid = raw_batch["valid_tokens"].to(device)
         activations = [r.to(device) for r in raw_batch["R"]]
-        # Compute shared g^s and retain selected c; shape [B,T,C_selected].
-        values = model.encode(activations, valid).values[..., selected]
+        # Encode once for this validation batch: g^s has shape [B,T,C], including all requested c.
+        values = model.encode(activations, valid).values
         ids: Tensor = raw_batch["input_ids"]  # type: ignore[assignment]
-        # Flatten valid token positions. Example [B=2,T=3,F=2] -> [6,2], padding scores set 0.
-        scores = values.masked_fill(~valid[..., None], 0).reshape(-1, selected.numel())
-        # At most k examples per feature can come from one batch.
-        take = min(k, scores.shape[0])
-        if take == 0:
-            continue
-        # For each c independently select the largest g^s_t,c in this batch.
-        top_values, top_positions = torch.topk(scores, take, dim=0)
-        for local_index, feature_id in enumerate(feature_ids.tolist()):
-            for score, flat_position in zip(
-                top_values[:, local_index].detach().cpu().tolist(),
-                top_positions[:, local_index].detach().cpu().tolist(),
-                strict=True,
-            ):
-                if score <= 0:
-                    continue
-                # Invert flat p=b*T+t. Example p=7,T=5 -> b=1.
-                sequence = flat_position // ids.shape[1]
-                # Same example gives t=7 mod 5=2.
-                position = flat_position % ids.shape[1]
-                # Retain up to 16 tokens before the activating position.
-                lo = max(0, position - 16)
-                # Retain the activating token and up to 16 tokens after it.
-                hi = min(ids.shape[1], position + 17)
-                item = (float(score), serial, ids[sequence, lo:hi].tolist(), position - lo)
-                serial += 1
-                heap = heaps[feature_id]
-                if len(heap) < k:
-                    heapq.heappush(heap, item)
-                elif item[0] > heap[0][0]:
-                    heapq.heapreplace(heap, item)
-    return {
-        str(feature_id): [
-            {
-                "g_s": score,
-                "token_ids": token_ids,
-                "center_in_window": center,
-            }
-            for score, _serial, token_ids, center in sorted(heap, reverse=True)
-        ]
-        for feature_id, heap in heaps.items()
-    }
+        accumulator.update(values, valid, ids)
+    return accumulator.result()
+
+
+def _validate_feature_ids(
+    feature_ids: Tensor | Sequence[int], n_features: int
+) -> list[int]:
+    """Return unique requested c indices and fail before an expensive validation traversal."""
+
+    raw_ids = (
+        feature_ids.detach().cpu().tolist()
+        if isinstance(feature_ids, Tensor)
+        else list(feature_ids)
+    )
+    ids = [int(feature_id) for feature_id in raw_ids]
+    if len(ids) != len(set(ids)):
+        raise ValueError(f"component IDs must be unique, got {ids}")
+    invalid = [feature_id for feature_id in ids if not 0 <= feature_id < n_features]
+    if invalid:
+        raise ValueError(
+            f"component IDs out of range for C={n_features}: {invalid}; expected 0 <= id < {n_features}"
+        )
+    return ids
+
+
+class _TopActivationAccumulator:
+    """Streaming top contexts for requested c, updated from one encoded validation batch."""
+
+    def __init__(
+        self,
+        cfg: MultiModelExperimentConfig,
+        device: torch.device,
+        feature_ids: Tensor | Sequence[int],
+        *,
+        chunk_size: int | None = None,
+    ) -> None:
+        self.k = cfg.analysis.top_examples_per_feature
+        self.chunk_size = chunk_size or cfg.analysis.example_feature_chunk_size
+        self.device = device
+        ids = _validate_feature_ids(feature_ids, cfg.sparsity.n_features)
+        self.selected_cpu = torch.tensor(ids, dtype=torch.long)
+        self.heaps: dict[int, list[tuple[float, int, list[int], int]]] = {
+            feature_id: [] for feature_id in ids
+        }
+        self.serial = 0
+
+    def update(self, values: Tensor, valid: Tensor, input_ids: Tensor) -> None:
+        """Update all requested c after exactly one encoder computation of g^s[B,T,C]."""
+
+        for selected_chunk_cpu in self.selected_cpu.split(self.chunk_size):
+            selected_chunk = selected_chunk_cpu.to(self.device)
+            # [B,T,C_chunk] -> [B*T,C_chunk]; padding scores are zero and never retained.
+            scores = values.index_select(-1, selected_chunk).masked_fill(
+                ~valid[..., None], 0
+            ).reshape(-1, selected_chunk.numel())
+            take = min(self.k, scores.shape[0])
+            if take == 0:
+                continue
+            # Each column is one component c; top-k runs for the whole chunk at once.
+            top_values, top_positions = torch.topk(scores, take, dim=0)
+            # Preserve each measured g^s value's source dtype when converting it to JSON numbers.
+            top_values_cpu = top_values.detach().cpu()
+            top_positions_cpu = top_positions.detach().cpu()
+            for local_index, feature_id in enumerate(selected_chunk_cpu.tolist()):
+                heap = self.heaps[feature_id]
+                for score, flat_position in zip(
+                    top_values_cpu[:, local_index].tolist(),
+                    top_positions_cpu[:, local_index].tolist(),
+                    strict=True,
+                ):
+                    # g^s<=0 is not positive. The extracted feature still remains as "c": [].
+                    if score <= 0 or (len(heap) == self.k and score <= heap[0][0]):
+                        continue
+                    sequence = flat_position // input_ids.shape[1]
+                    position = flat_position % input_ids.shape[1]
+                    lo, hi = max(0, position - 16), min(input_ids.shape[1], position + 17)
+                    item = (
+                        float(score),
+                        self.serial,
+                        input_ids[sequence, lo:hi].tolist(),
+                        position - lo,
+                    )
+                    self.serial += 1
+                    if len(heap) < self.k:
+                        heapq.heappush(heap, item)
+                    else:
+                        heapq.heapreplace(heap, item)
+
+    def result(self) -> dict[str, list[dict[str, Any]]]:
+        return {
+            str(feature_id): [
+                {
+                    "g_s": score,
+                    "token_ids": token_ids,
+                    "center_in_window": center,
+                }
+                for score, _serial, token_ids, center in sorted(heap, reverse=True)
+            ]
+            for feature_id, heap in self.heaps.items()
+        }
+
+
+def select_example_feature_ids(
+    cfg: MultiModelExperimentConfig,
+    activation_rho: Tensor,
+    mechanism_rho: Tensor,
+    beta: Tensor,
+) -> list[int]:
+    """Resolve ranked/all/explicit context coverage without changing P1 or P2 definitions."""
+
+    c = cfg.sparsity.n_features
+    mode = cfg.analysis.example_feature_mode
+    if mode == "all":
+        return list(range(c))
+    if mode == "explicit":
+        return _validate_feature_ids(cfg.analysis.example_feature_ids, c)
+
+    # Historical ranked mode: half by P1/P2 asymmetry, then fill by total beta mass.
+    max_features = min(cfg.analysis.max_example_features, c)
+    n_asymmetric = max_features // 2
+    uniform = 1.0 / len(cfg.models)
+    asymmetry = (activation_rho - uniform).abs().amax(dim=0) + (
+        mechanism_rho - uniform
+    ).abs().amax(dim=0)
+    total_mass = beta.sum(dim=0)
+    chosen = torch.topk(asymmetry, n_asymmetric).indices.tolist() if n_asymmetric else []
+    chosen_set = set(chosen)
+    for feature_id in torch.argsort(total_mass, descending=True).tolist():
+        if feature_id not in chosen_set:
+            chosen.append(feature_id)
+            chosen_set.add(feature_id)
+        if len(chosen) == max_features:
+            break
+    return chosen
+
+
+def decode_activation_examples(
+    examples: Mapping[str, list[dict[str, Any]]], cfg: MultiModelExperimentConfig
+) -> None:
+    """Add tokenizer-derived text while preserving measured g^s, token IDs, and center indices."""
+
+    from transformers import AutoTokenizer
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        cfg.data.tokenizer, revision=cfg.data.tokenizer_revision
+    )
+    for feature_examples in examples.values():
+        for example in feature_examples:
+            token_ids = example["token_ids"]
+            center = example["center_in_window"]
+            example["text"] = tokenizer.decode(token_ids, skip_special_tokens=False)
+            example["center_token"] = tokenizer.convert_ids_to_tokens(token_ids[center])
+
+
+def save_activation_examples(
+    examples: Mapping[str, list[dict[str, Any]]], output_dir: Path, *, merge: bool
+) -> dict[str, list[dict[str, Any]]]:
+    """Atomically write contexts; merge mode updates requested c without deleting other keys."""
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / "top_activation_examples.json"
+    combined: dict[str, list[dict[str, Any]]] = {}
+    if merge and path.exists():
+        existing = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(existing, dict) or any(not isinstance(value, list) for value in existing.values()):
+            raise ValueError(f"cannot merge malformed activation-context artifact: {path}")
+        combined.update(existing)
+    combined.update(examples)
+    temporary_name: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=output_dir,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary_name = handle.name
+            json.dump(combined, handle, indent=2, sort_keys=True, ensure_ascii=False)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_name, path)
+    finally:
+        if temporary_name is not None and Path(temporary_name).exists():
+            Path(temporary_name).unlink()
+    return combined
 
 
 def _factor_metrics(u_a: Tensor, v_a: Tensor, u_b: Tensor, v_b: Tensor) -> dict[str, Tensor]:
@@ -190,6 +340,19 @@ def analyze(
         y_sq_sum.append({name: torch.zeros((), device=device) for name in names})
         y_count.append({name: 0 for name in names})
 
+    # all/explicit know their c indices before P1/P2, so collect contexts during this same pass.
+    # ranked must wait for rho_c^(n), tilde-rho_c^(n), and beta_c^(n), then make one extra pass.
+    early_example_ids: list[int] | None = None
+    if cfg.analysis.example_feature_mode == "all":
+        early_example_ids = list(range(c))
+    elif cfg.analysis.example_feature_mode == "explicit":
+        early_example_ids = _validate_feature_ids(cfg.analysis.example_feature_ids, c)
+    example_accumulator = (
+        _TopActivationAccumulator(cfg, device, early_example_ids)
+        if early_example_ids is not None
+        else None
+    )
+
     for raw_batch in cache.iter_batches(
         "validation", cfg.training.batch_size_sequences, shuffle=False
     ):
@@ -201,6 +364,10 @@ def analyze(
         ]
         # Compute shared g^s and g from all R^(n).
         code = model.encode(activations, valid)
+        if example_accumulator is not None:
+            # Reuse this g^s[B,T,C] to update top contexts; do not call encode again per c.
+            input_ids: Tensor = raw_batch["input_ids"]  # type: ignore[assignment]
+            example_accumulator.update(code.values, valid, input_ids)
         # Flatten (B,T)->p: g[p,c], shape [B*T,C].
         flat_gate = code.gate.reshape(-1, c)
         # Flatten common valid-token mask to p.
@@ -314,34 +481,13 @@ def analyze(
         "concentrated_activation_concentrated_mechanism": (activation_concentrated & mechanism_concentrated).nonzero().flatten().tolist(),
         "mixed_or_subset_mass": (~covered).nonzero().flatten().tolist(),
     }
-    # Interpretability sample: half strongly asymmetric components and half high-mass components.
-    # The latter retains common mechanisms whose relative mass is intentionally near 1/N.
-    # Never request more example features than C.
-    max_features = min(cfg.analysis.max_example_features, c)
-    # Reserve half for diff-like latents and half for high absolute mechanism mass.
-    n_asymmetric = max_features // 2
-    # Asymmetry score sums maximum P1 and P2 deviations from 1/N.
-    # Example rho=[.9,.1],tilde-rho=[.8,.2] gives .4+.3=.7.
-    asymmetry = (activation_rho - uniform).abs().amax(dim=0) + (
-        mechanism_rho - uniform
-    ).abs().amax(dim=0)
-    # Total beta across n finds strong computations even when tilde-rho is shared.
-    total_mass = beta.sum(dim=0)
-    # First select the largest asymmetry scores.
-    chosen = torch.topk(asymmetry, n_asymmetric).indices.tolist() if n_asymmetric else []
-    for feature_id in torch.argsort(total_mass, descending=True).tolist():
-        if feature_id not in chosen:
-            # Fill remaining slots with strong beta mass not already selected for asymmetry.
-            chosen.append(feature_id)
-        if len(chosen) == max_features:
-            break
-    examples = _top_activation_examples(
-        model,
-        cache,
-        cfg,
-        device,
-        torch.tensor(chosen, dtype=torch.long),
-    )
+    if example_accumulator is not None:
+        # Every requested c is a present JSON key, including c with no positive g^s as "c": [].
+        examples = example_accumulator.result()
+    else:
+        # ranked reproduces the historical capped selection after P1/P2 statistics are available.
+        chosen = select_example_feature_ids(cfg, activation_rho, mechanism_rho, beta)
+        examples = _top_activation_examples(model, cache, cfg, device, chosen)
     return {"tensors": tensors, "taxonomy": taxonomy, "examples": examples}
 
 
@@ -353,7 +499,4 @@ def save_analysis(result: dict[str, Any], output_dir: Path) -> None:
     (output_dir / "taxonomy.json").write_text(
         json.dumps(result["taxonomy"], indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
-    (output_dir / "top_activation_examples.json").write_text(
-        json.dumps(result["examples"], indent=2, sort_keys=True, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    save_activation_examples(result["examples"], output_dir, merge=False)

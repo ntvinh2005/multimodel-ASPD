@@ -70,5 +70,14 @@ Before interpreting features:
 
 - `posthoc.safetensors`: `rho`, `beta`, `tilde_rho`, loci, and same-architecture read/write changes;
 - `taxonomy.json`: P4 component groups;
-- `top_activation_examples.json`: decoded contexts ranked by `g^s_{t,c}` for high-mass and
-  strongly asymmetric components.
+- `top_activation_examples.json`: decoded contexts ranked by measured `g^s_{t,c}`. The default
+  `ranked` mode covers the historical capped high-asymmetry/high-mass sample; `all` covers every
+  `c=0,...,C-1`; `explicit` covers only configured component IDs. A present `"c": []` means
+  extraction ran with no positive retained context, while an absent key means extraction did not
+  run for that component and says nothing about whether `fire_count_C[c]` is positive.
+
+Context coverage can be expanded after training and P1--P5 analysis without changing any scientific
+measurement. `aspd.multimodel.cli.extract_examples` loads the existing checkpoint and paired
+validation cache, encodes each validation batch once, merges the requested keys, and atomically
+replaces only `top_activation_examples.json`. See `multimodel_dashboard/README.md` for the exact
+all-feature and targeted-backfill commands.

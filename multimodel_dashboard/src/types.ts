@@ -55,6 +55,8 @@ export interface FeatureSummary {
   p5_min_read_cosine: NullableNumber;
   p5_min_write_cosine: NullableNumber;
   p5_max_relative_change: NullableNumber;
+  context_extracted: boolean;
+  saved_context_count: number;
   has_examples: boolean;
   note: ResearcherNote | null;
 }
@@ -82,6 +84,13 @@ export interface FeatureDetail extends FeatureSummary {
   locus: Record<string, Record<string, NullableNumber>>;
   p5: P5Row[];
   examples: ActivationExample[] | null;
+  context: {
+    status: "extracted" | "not_extracted";
+    fire_count: number | null;
+    saved_contexts: number;
+    source: string;
+    message: string;
+  };
   locus_statement: string | null;
   sources: Record<string, unknown>;
   missing: string[];
@@ -103,4 +112,15 @@ export interface HealthPayload {
   categorized_keys: Record<string, string[]>;
   missing_expected_keys: string[];
   tensor_shapes: Record<string, number[]>;
+  context_coverage: ContextCoverage;
+}
+
+export interface ContextCoverage {
+  components: number | null;
+  components_with_context_extraction: number;
+  components_with_at_least_one_saved_context: number;
+  components_not_extracted: number;
+  components_with_fire_count_gt_zero_but_no_extracted_context: number;
+  configured_mode: "ranked" | "all" | "explicit" | null;
+  source: string;
 }

@@ -101,7 +101,47 @@ def test_dashboard_maps_real_tensor_indices_to_feature_payload(tmp_path: Path) -
     assert detail["dominant_locus"] == {"base": "q_proj", "finetuned": "k_proj"}
     assert detail["locus_statement"] == "Dominant locus changed: q_proj → k_proj"
     assert detail["examples"][0]["text"] == "A B C"
+    assert detail["context"] == {
+        "status": "extracted",
+        "fire_count": 1,
+        "saved_contexts": 1,
+        "source": "top_activation_examples.json",
+        "message": "Positive activation examples were extracted and retained.",
+    }
     assert detail["sources"]["activation_rho"].endswith("activation_rho_NC[:,0]")
+
+
+def test_dashboard_distinguishes_unextracted_from_extracted_empty_contexts(tmp_path: Path) -> None:
+    store, analysis_dir = _realistic_fixture(tmp_path)
+
+    unextracted = store.feature_detail(1)
+    assert unextracted["fire_count"] == 1
+    assert unextracted["examples"] is None
+    assert unextracted["context"]["status"] == "not_extracted"
+    assert "fired 1 times" in unextracted["context"]["message"]
+    assert "does not mean that it was inactive" in unextracted["context"]["message"]
+    assert store.health["context_coverage"] == {
+        "components": 2,
+        "components_with_context_extraction": 1,
+        "components_with_at_least_one_saved_context": 1,
+        "components_not_extracted": 1,
+        "components_with_fire_count_gt_zero_but_no_extracted_context": 1,
+        "configured_mode": "ranked",
+        "source": "top_activation_examples.json",
+    }
+
+    examples_path = analysis_dir / "top_activation_examples.json"
+    examples = json.loads(examples_path.read_text(encoding="utf-8"))
+    examples["1"] = []
+    examples_path.write_text(json.dumps(examples), encoding="utf-8")
+    complete = AnalysisDashboardStore(analysis_dir)
+    extracted_empty = complete.feature_detail(1)
+    assert extracted_empty["examples"] == []
+    assert extracted_empty["context"]["status"] == "extracted"
+    assert extracted_empty["context"]["message"] == (
+        "No positive activation examples were retained for this component."
+    )
+    assert complete.health["context_coverage"]["components_not_extracted"] == 0
 
 
 def test_dashboard_api_notes_and_exports_do_not_modify_raw_artifacts(tmp_path: Path) -> None:

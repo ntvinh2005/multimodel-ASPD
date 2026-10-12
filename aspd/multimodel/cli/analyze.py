@@ -5,7 +5,7 @@ from pathlib import Path
 
 import torch
 
-from aspd.multimodel.analysis import analyze, save_analysis
+from aspd.multimodel.analysis import analyze, decode_activation_examples, save_analysis
 from aspd.multimodel.cache import PairedActivationCache
 from aspd.multimodel.config import load_experiment_config
 from aspd.multimodel.training import build_model_from_cache
@@ -25,17 +25,7 @@ def main() -> None:
     state = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
     model.load_state_dict(state["model"])
     result = analyze(model, cache, cfg, device)
-    from transformers import AutoTokenizer
-
-    tokenizer = AutoTokenizer.from_pretrained(
-        cfg.data.tokenizer, revision=cfg.data.tokenizer_revision
-    )
-    for examples in result["examples"].values():
-        for example in examples:
-            token_ids = example["token_ids"]
-            center = example["center_in_window"]
-            example["text"] = tokenizer.decode(token_ids, skip_special_tokens=False)
-            example["center_token"] = tokenizer.convert_ids_to_tokens(token_ids[center])
+    decode_activation_examples(result["examples"], cfg)
     output = Path(args.output_dir or Path(args.checkpoint).parent / "analysis")
     save_analysis(result, output)
     print(output)
