@@ -132,6 +132,21 @@ tooltips and labels retain the raw measured values.
 The dashboard never aligns tokens by substring matching and never interpolates missing token
 activations.
 
+The Activation examples panel has two context views:
+
+- **Snippet** keeps the measured positive positions and up to eight surrounding tokens on each
+  side. It changes only presentation, never the measured values.
+- **Saved window** shows every token retained in the artifact (normally at most 33 positions), not
+  the original full sequence.
+- **Show bounds** marks tokens hidden by Snippet mode and saved-window edges. The per-context
+  coverage label reports the exact number of positions with a stored activation. For an older
+  center-only artifact this is `1/N`, and a firing position of `window 0` means the saved context
+  begins at that firing token; it does not mean the frontend arbitrarily selected the first token.
+
+After running the updated `extract_examples` command below, coverage becomes `N/N` and the same UI
+renders the measured token heatmap. Because BatchTopK activations are sparse, a fully measured
+window may still contain only one positive colored token; measured zeros correctly remain clear.
+
 ### Optional vocabulary/logit artifact
 
 The current multi-model P1--P5 artifact does not contain a vocabulary projection or an
@@ -182,9 +197,12 @@ whitespace, multilingual, BPE, and special-token strings without semantic filter
 |---|---|---|
 | Readable token pieces | `token_ids` plus the configured Hugging Face tokenizer | No; tokenizer download and decoding are CPU-only. |
 | Center-token highlight | Existing `center_in_window` and `g_s` | No. |
+| Activation density | Existing `fire_count_C[c] / validation_tokens` | No; it is shown beside the examples as a percentage. |
 | Full token heatmap | Checkpoint encoder plus paired validation cache | Run `extract_examples`; a targeted CPU run is possible, while B200 is recommended for all 8,192 components. It does not run Qwen or retrain ASPD. |
 | Positive/negative vocabulary projection | Checkpoint `d_c^(n)`, cache scale `q_n`, and each model's output embedding `W_U^(n)` | Targeted CPU is possible; B200 is recommended for all components. It loads weights but runs no Qwen forward pass. |
+| Per-component activation histogram | Histogram bins over measured validation activations | Requires one cache pass; the current artifact has density but no bins. |
 | Causal logit difference | A real component ablation/injection followed by the remaining transformer blocks | Yes for practical use; run P6 only for reviewed candidates. |
+| Test custom text / steer | Live tokenization, model forward pass, and component intervention | Yes; this belongs with P6 and is not represented by static P1--P5 artifacts. |
 
 Generate vocabulary projections for selected components without a language-model forward pass:
 

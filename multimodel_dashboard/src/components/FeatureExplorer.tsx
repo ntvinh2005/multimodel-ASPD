@@ -78,9 +78,10 @@ export default function FeatureExplorer({
     {feature.missing.length > 0 && <div className="warn-box">{feature.missing.map((x) => <div key={x}>{x}</div>)}</div>}
 
     <Section title="Activation examples" kicker="Measured shared latent activations">
-      <div className="stat-row">
+      <div className="stat-row activation-stats">
         <div><span>Context status</span><strong>{feature.context.status === "extracted" ? "Extracted" : "Not extracted"}</strong></div>
         <div><span>Fire count</span><Metric value={feature.context.fire_count} kind="integer" source={String(feature.sources.fire_count)} /></div>
+        <div><span>Activation density</span><Metric value={feature.fire_density} kind="percent" source={`${String(feature.sources.fire_count)} / ${metadata.validation_tokens ?? "validation_tokens"}`} /></div>
         <div><span>Saved top contexts</span><Metric value={feature.context.saved_contexts} kind="integer" /></div>
         <div><span>Context source</span><strong>{feature.context.source}</strong></div>
       </div>

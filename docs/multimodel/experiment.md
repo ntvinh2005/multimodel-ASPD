@@ -81,3 +81,9 @@ measurement. `aspd.multimodel.cli.extract_examples` loads the existing checkpoin
 validation cache, encodes each validation batch once, merges the requested keys, and atomically
 replaces only `top_activation_examples.json`. See `multimodel_dashboard/README.md` for the exact
 all-feature and targeted-backfill commands.
+
+The dashboard reports stored activation coverage per context. `1/N` means an older artifact saved
+only `g^s_{t,c}` at the firing position, so coloring any neighbor would invent data. `N/N` means the
+updated extractor saved the complete measured token window. A firing position at `window 0` is a
+property of that retained example, and the UI exposes the window and sequence indices so a boundary
+latent is not confused with a rendering bug.

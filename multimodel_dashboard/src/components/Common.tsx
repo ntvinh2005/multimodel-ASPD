@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 export function formatMetric(value: number | null | undefined, kind = "default"): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return "N/A — data unavailable";
   if (kind === "integer") return Math.round(value).toLocaleString();
+  if (kind === "percent") return `${(value * 100).toFixed(3)}%`;
   if (kind === "beta" || (Math.abs(value) > 0 && Math.abs(value) < 1e-4)) return value.toExponential(5);
   if (kind === "gs") return value.toPrecision(6);
   return value.toFixed(4);
