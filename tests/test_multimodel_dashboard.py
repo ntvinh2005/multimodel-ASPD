@@ -215,6 +215,43 @@ def test_dashboard_vocabulary_effects_missing_state_does_not_invent_values(tmp_p
     assert "No direct vocabulary projection" in payload["description"]
 
 
+def test_dashboard_keeps_model_specific_vocabulary_projections_separate(tmp_path: Path) -> None:
+    _, analysis_dir = _realistic_fixture(tmp_path)
+    (analysis_dir / "vocabulary_effects.json").write_text(
+        json.dumps(
+            {
+                "kind": "direct_projection",
+                "default_model": "finetuned",
+                "features": {
+                    "0": {
+                        "models": {
+                            "base": {
+                                "positive": [{"token": " base", "value": 0.4}],
+                                "negative": [{"token": " no-base", "value": -0.3}],
+                            },
+                            "finetuned": {
+                                "positive": [{"token": " tuned", "value": 0.8}],
+                                "negative": [{"token": " no-tuned", "value": -0.7}],
+                            },
+                        }
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = AnalysisDashboardStore(analysis_dir).feature_detail(0)["vocabulary_effects"]
+
+    assert payload["status"] == "available"
+    assert payload["default_model"] == "finetuned"
+    assert [model["model_name"] for model in payload["models"]] == ["base", "finetuned"]
+    assert payload["positive"][0]["token"] == " tuned"
+    assert payload["models"][0]["positive"][0]["source"].endswith(
+        "features.0.models.base.positive[0]"
+    )
+
+
 def test_dashboard_distinguishes_unextracted_from_extracted_empty_contexts(tmp_path: Path) -> None:
     store, analysis_dir = _realistic_fixture(tmp_path)
 

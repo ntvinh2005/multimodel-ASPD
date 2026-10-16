@@ -107,7 +107,7 @@ class _TopActivationAccumulator:
         self.device = device
         ids = _validate_feature_ids(feature_ids, cfg.sparsity.n_features)
         self.selected_cpu = torch.tensor(ids, dtype=torch.long)
-        self.heaps: dict[int, list[tuple[float, int, list[int], int, int]]] = {
+        self.heaps: dict[int, list[tuple[float, int, list[int], list[float], int, int]]] = {
             feature_id: [] for feature_id in ids
         }
         self.serial = 0
@@ -118,9 +118,12 @@ class _TopActivationAccumulator:
         for selected_chunk_cpu in self.selected_cpu.split(self.chunk_size):
             selected_chunk = selected_chunk_cpu.to(self.device)
             # [B,T,C_chunk] -> [B*T,C_chunk]; padding scores are zero and never retained.
-            scores = values.index_select(-1, selected_chunk).masked_fill(
+            # Keep the measured g^s window as well as its maximum. Example for c=440:
+            # selected_values[b, t-1:t+2, local_c]=[0.0, 3.25, 0.4].
+            selected_values = values.index_select(-1, selected_chunk).masked_fill(
                 ~valid[..., None], 0
-            ).reshape(-1, selected_chunk.numel())
+            )
+            scores = selected_values.reshape(-1, selected_chunk.numel())
             take = min(self.k, scores.shape[0])
             if take == 0:
                 continue
@@ -129,6 +132,9 @@ class _TopActivationAccumulator:
             # Preserve each measured g^s value's source dtype when converting it to JSON numbers.
             top_values_cpu = top_values.detach().cpu()
             top_positions_cpu = top_positions.detach().cpu()
+            # One device-to-host transfer per feature chunk keeps all retained token windows exact
+            # without synchronizing the GPU once for every candidate context.
+            selected_values_cpu = selected_values.detach().float().cpu()
             for local_index, feature_id in enumerate(selected_chunk_cpu.tolist()):
                 heap = self.heaps[feature_id]
                 for score, flat_position in zip(
@@ -146,6 +152,7 @@ class _TopActivationAccumulator:
                         float(score),
                         self.serial,
                         input_ids[sequence, lo:hi].tolist(),
+                        selected_values_cpu[sequence, lo:hi, local_index].tolist(),
                         position - lo,
                         position,
                     )
@@ -161,10 +168,11 @@ class _TopActivationAccumulator:
                 {
                     "g_s": score,
                     "token_ids": token_ids,
+                    "token_activations": token_activations,
                     "center_in_window": center,
                     "position_in_sequence": position_in_sequence,
                 }
-                for score, _serial, token_ids, center, position_in_sequence in sorted(
+                for score, _serial, token_ids, token_activations, center, position_in_sequence in sorted(
                     heap, reverse=True
                 )
             ]
@@ -221,10 +229,22 @@ def decode_activation_examples(
             token_ids = example["token_ids"]
             center = example["center_in_window"]
             example["text"] = tokenizer.decode(token_ids, skip_special_tokens=False)
-            example["center_token"] = tokenizer.convert_ids_to_tokens(token_ids[center])
+            center_piece = tokenizer.convert_ids_to_tokens(token_ids[center])
+            # Some Qwen reserved IDs are valid model IDs but have no tokenizer vocabulary string.
+            # Keep the numeric identity explicit instead of emitting JSON null or dropping the token.
+            example["center_token"] = (
+                center_piece
+                if isinstance(center_piece, str)
+                else f"<unmapped_token_id:{token_ids[center]}>"
+            )
             # Preserve exact tokenizer pieces for position-aligned UI; e.g. token_strings[t]
             # identifies the token at the same window index t as token_ids[t].
-            example["token_strings"] = tokenizer.convert_ids_to_tokens(token_ids)
+            pieces = tokenizer.convert_ids_to_tokens(token_ids)
+            safe_pieces = [
+                piece if isinstance(piece, str) else f"<unmapped_token_id:{token_id}>"
+                for token_id, piece in zip(token_ids, pieces, strict=True)
+            ]
+            example["token_strings"] = safe_pieces
             # Decode each ID separately for readable whitespace/punctuation while retaining the
             # exact token string above for hover metadata and unusual BPE/special tokens.
             example["token_texts"] = [
@@ -233,7 +253,11 @@ def decode_activation_examples(
                     skip_special_tokens=False,
                     clean_up_tokenization_spaces=False,
                 )
-                for token_id in token_ids
+                if isinstance(piece, str)
+                else safe_piece
+                for token_id, piece, safe_piece in zip(
+                    token_ids, pieces, safe_pieces, strict=True
+                )
             ]
 
 

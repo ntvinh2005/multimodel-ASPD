@@ -13,10 +13,35 @@ from aspd.multimodel.analysis import (
     save_activation_examples,
     select_example_feature_ids,
 )
+from aspd.multimodel.cli.project_vocabulary import _decoder_rows
 from aspd.multimodel.config import load_experiment_config
 from aspd.multimodel.losses import residual_fvu
 
 ROOT = Path(__file__).parents[1]
+
+
+def test_vocabulary_projection_reads_untied_and_tied_decoder_rows() -> None:
+    untied_cfg = SimpleNamespace(
+        sparsity=SimpleNamespace(tie_shared_decoders=False)
+    )
+    untied_state = {
+        "activation_decoders.full.0": torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+    }
+    torch.testing.assert_close(
+        _decoder_rows(untied_state, untied_cfg, 0, [1]), torch.tensor([[3.0, 4.0]])
+    )
+
+    tied_cfg = SimpleNamespace(
+        sparsity=SimpleNamespace(tie_shared_decoders=True, n_shared=2)
+    )
+    tied_state = {
+        "activation_decoders.shared": torch.tensor([[1.0, 2.0], [3.0, 4.0]]),
+        "activation_decoders.exclusive.1": torch.tensor([[5.0, 6.0], [7.0, 8.0]]),
+    }
+    torch.testing.assert_close(
+        _decoder_rows(tied_state, tied_cfg, 1, [0, 3]),
+        torch.tensor([[1.0, 2.0], [7.0, 8.0]]),
+    )
 
 
 class _ExampleModel:
@@ -105,6 +130,8 @@ def test_all_example_mode_emits_every_key_with_empty_lists_for_zero_activation()
     assert examples["1"] == [] and examples["3"] == []
     assert len(examples["0"]) == 2
     assert examples["0"][0]["position_in_sequence"] == 1
+    assert examples["0"][0]["token_activations"] == [1.0, 2.0]
+    assert examples["2"][0]["token_activations"] == [3.0, 1.0]
     assert model.encode_calls == 1  # one validation traversal/encode, not one pass per c
 
 

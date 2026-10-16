@@ -109,6 +109,13 @@ export interface VocabularyEffect {
   source: string;
 }
 
+export interface VocabularyEffectModel {
+  model_name: string | null;
+  positive: VocabularyEffect[];
+  negative: VocabularyEffect[];
+  source: string;
+}
+
 export interface VocabularyEffects {
   status: "available" | "empty" | "missing" | "error";
   kind: VocabularyEffectKind | null;
@@ -116,6 +123,8 @@ export interface VocabularyEffects {
   description: string;
   positive: VocabularyEffect[];
   negative: VocabularyEffect[];
+  models: VocabularyEffectModel[];
+  default_model: string | null;
   source: string;
 }
 

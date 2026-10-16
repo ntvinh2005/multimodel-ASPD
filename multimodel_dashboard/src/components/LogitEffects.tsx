@@ -1,4 +1,5 @@
-import type { VocabularyEffect, VocabularyEffects } from "../types";
+import { useState } from "react";
+import type { VocabularyEffect, VocabularyEffectModel, VocabularyEffects } from "../types";
 
 export function vocabularyEffectKicker(data: VocabularyEffects): string {
   if (data.status === "missing") return "No vocabulary/logit artifact available";
@@ -9,6 +10,8 @@ export function vocabularyEffectKicker(data: VocabularyEffects): string {
 }
 
 export function LogitEffects({ data, limit = 10 }: { data: VocabularyEffects; limit?: number }) {
+  const initialModel = data.default_model ?? data.models?.[0]?.model_name ?? null;
+  const [selectedModel, setSelectedModel] = useState<string | null>(initialModel);
   if (data.status === "missing") {
     return <div className="empty-state vocabulary-empty"><strong>Vocabulary data unavailable</strong><p>{data.description}</p></div>;
   }
@@ -19,16 +22,39 @@ export function LogitEffects({ data, limit = 10 }: { data: VocabularyEffects; li
     return <div className="empty-state vocabulary-empty"><strong>No vocabulary values retained</strong><p>{data.description}</p></div>;
   }
 
-  const positive = [...data.positive].sort((a, b) => b.value - a.value).slice(0, limit);
-  const negative = [...data.negative].sort((a, b) => a.value - b.value).slice(0, limit);
+  const series = modelSeries(data);
+  const active = series.find((item) => item.model_name === selectedModel)
+    ?? series.find((item) => item.model_name === data.default_model)
+    ?? series[0];
+  const positive = [...active.positive].sort((a, b) => b.value - a.value).slice(0, limit);
+  const negative = [...active.negative].sort((a, b) => a.value - b.value).slice(0, limit);
+  const noun = data.kind === "direct_projection" ? "projection" : "logits";
   return <>
     <p className="explain">{data.description}</p>
+    {series.length > 1 && <div className="vocabulary-model-tabs" role="group" aria-label="Vocabulary projection model">
+      {series.map((item) => <button
+        type="button"
+        key={item.model_name ?? "single"}
+        className={item.model_name === active.model_name ? "active" : ""}
+        onClick={() => setSelectedModel(item.model_name)}
+      >{item.model_name ?? "single model"}</button>)}
+    </div>}
     <div className="logit-columns">
-      <LogitColumn title="Negative logits" direction="negative" entries={negative} />
-      <LogitColumn title="Positive logits" direction="positive" entries={positive} />
+      <LogitColumn title={`Negative ${noun}`} direction="negative" entries={negative} />
+      <LogitColumn title={`Positive ${noun}`} direction="positive" entries={positive} />
     </div>
-    <div className="source-line">Source: {data.source}</div>
+    <div className="source-line">Source: {active.source}</div>
   </>;
+}
+
+function modelSeries(data: VocabularyEffects): VocabularyEffectModel[] {
+  if (data.models?.length) return data.models;
+  return [{
+    model_name: null,
+    positive: data.positive,
+    negative: data.negative,
+    source: data.source,
+  }];
 }
 
 export function LogitColumn({

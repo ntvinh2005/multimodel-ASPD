@@ -939,6 +939,8 @@ class AnalysisDashboardStore:
             ),
             "positive": [],
             "negative": [],
+            "models": [],
+            "default_model": None,
             "source": source,
         }
         if not self.vocabulary_effects_path.exists():
@@ -982,33 +984,35 @@ class AnalysisDashboardStore:
                 ),
             }
 
-        def entries(direction: str) -> tuple[list[dict[str, Any]], str | None]:
-            values = raw.get(direction, [])
+        def entries(
+            holder: dict[str, Any], direction: str, path: str
+        ) -> tuple[list[dict[str, Any]], str | None]:
+            values = holder.get(direction, [])
             if not isinstance(values, list):
-                return [], f"{source} → features.{feature_id}.{direction} must be a list."
+                return [], f"{source} → {path}.{direction} must be a list."
             parsed = []
             for rank, value in enumerate(values, start=1):
                 if not isinstance(value, dict) or not isinstance(value.get("value"), int | float):
                     return [], (
-                        f"{source} → features.{feature_id}.{direction}[{rank - 1}] "
+                        f"{source} → {path}.{direction}[{rank - 1}] "
                         "must contain a numeric value."
                     )
                 token = value.get("token")
                 if not isinstance(token, str):
                     return [], (
-                        f"{source} → features.{feature_id}.{direction}[{rank - 1}] "
+                        f"{source} → {path}.{direction}[{rank - 1}] "
                         "must contain a token string."
                     )
                 exact_token = value.get("exact_token", token)
                 token_id = value.get("token_id")
                 if not isinstance(exact_token, str):
                     return [], (
-                        f"{source} → features.{feature_id}.{direction}[{rank - 1}] "
+                        f"{source} → {path}.{direction}[{rank - 1}] "
                         "exact_token must be a string."
                     )
                 if token_id is not None and not isinstance(token_id, int):
                     return [], (
-                        f"{source} → features.{feature_id}.{direction}[{rank - 1}] "
+                        f"{source} → {path}.{direction}[{rank - 1}] "
                         "token_id must be an integer or null."
                     )
                 numeric_value = float(value["value"])
@@ -1016,7 +1020,7 @@ class AnalysisDashboardStore:
                     direction == "negative" and numeric_value >= 0
                 ):
                     return [], (
-                        f"{source} → features.{feature_id}.{direction}[{rank - 1}] has the wrong "
+                        f"{source} → {path}.{direction}[{rank - 1}] has the wrong "
                         "sign for its declared direction."
                     )
                 parsed.append(
@@ -1025,7 +1029,7 @@ class AnalysisDashboardStore:
                         "exact_token": exact_token,
                         "token_id": token_id,
                         "value": numeric_value,
-                        "source": f"{source} → features.{feature_id}.{direction}[{rank - 1}]",
+                        "source": f"{source} → {path}.{direction}[{rank - 1}]",
                     }
                 )
             parsed.sort(key=lambda item: item["value"], reverse=direction == "positive")
@@ -1033,16 +1037,72 @@ class AnalysisDashboardStore:
                 value["rank"] = sorted_rank
             return parsed, None
 
-        positive, positive_error = entries("positive")
-        negative, negative_error = entries("negative")
-        if positive_error or negative_error:
+        raw_models = raw.get("models")
+        if raw_models is None:
+            model_holders: list[tuple[str | None, dict[str, Any], str]] = [
+                (None, raw, f"features.{feature_id}")
+            ]
+        elif not isinstance(raw_models, dict) or not raw_models:
             return {
                 **missing,
                 "status": "error",
                 "kind": kind,
                 "label": labels[kind],
-                "description": positive_error or negative_error,
+                "description": (
+                    f"{source} → features.{feature_id}.models must be a non-empty object."
+                ),
             }
+        else:
+            ordered_names = [name for name in self.model_names if name in raw_models]
+            ordered_names.extend(name for name in raw_models if name not in ordered_names)
+            model_holders = []
+            for model_name in ordered_names:
+                holder = raw_models[model_name]
+                if not isinstance(model_name, str) or not isinstance(holder, dict):
+                    return {
+                        **missing,
+                        "status": "error",
+                        "kind": kind,
+                        "label": labels[kind],
+                        "description": (
+                            f"{source} → features.{feature_id}.models entries must be objects."
+                        ),
+                    }
+                model_holders.append(
+                    (model_name, holder, f"features.{feature_id}.models.{model_name}")
+                )
+
+        model_payloads = []
+        for model_name, holder, path in model_holders:
+            positive, positive_error = entries(holder, "positive", path)
+            negative, negative_error = entries(holder, "negative", path)
+            if positive_error or negative_error:
+                return {
+                    **missing,
+                    "status": "error",
+                    "kind": kind,
+                    "label": labels[kind],
+                    "description": positive_error or negative_error,
+                }
+            model_payloads.append(
+                {
+                    "model_name": model_name,
+                    "positive": positive,
+                    "negative": negative,
+                    "source": f"{source} → {path}",
+                }
+            )
+
+        declared_default = raw.get(
+            "default_model", self.vocabulary_effects.get("default_model")
+        )
+        available_names = [item["model_name"] for item in model_payloads]
+        default_model = (
+            declared_default if declared_default in available_names else available_names[0]
+        )
+        selected = next(
+            item for item in model_payloads if item["model_name"] == default_model
+        )
         label = raw.get("label", self.vocabulary_effects.get("label", labels[kind]))
         description = raw.get(
             "description",
@@ -1062,12 +1122,19 @@ class AnalysisDashboardStore:
                 "description": f"{source} label and description must be strings.",
             }
         return {
-            "status": "available" if positive or negative else "empty",
+            "status": (
+                "available"
+                if any(item["positive"] or item["negative"] for item in model_payloads)
+                else "empty"
+            ),
             "kind": kind,
             "label": label,
             "description": description,
-            "positive": positive,
-            "negative": negative,
+            # Preserve the original single-series fields for older clients.
+            "positive": selected["positive"],
+            "negative": selected["negative"],
+            "models": model_payloads,
+            "default_model": default_model,
             "source": source,
         }
 

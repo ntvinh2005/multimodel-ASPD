@@ -488,6 +488,29 @@ sbatch --account=<allocation> \
   slurm/multimodel/extract_examples.sbatch
 ```
 
+The updated extractor saves the complete measured 33-token `g^s_{t,c}` window for every retained
+context, so the dashboard renders a true token heatmap after this job. It reuses the paired cache
+and checkpoint encoder; it does not run either Qwen model.
+
+Create the model-specific vocabulary projection used by the dashboard's positive/negative columns:
+
+```bash
+# Targeted components for review.
+sbatch --account=<allocation> \
+  --export=ALL,CONFIG="$CONFIG",CHECKPOINT="$CHECKPOINT",OUTPUT_DIR="$ANALYSIS",FEATURE_IDS=440,203,73 \
+  slurm/multimodel/project_vocabulary.sbatch
+
+# All C=8192 components after the targeted output has been reviewed.
+sbatch --account=<allocation> \
+  --export=ALL,CONFIG="$CONFIG",CHECKPOINT="$CHECKPOINT",OUTPUT_DIR="$ANALYSIS",ALL_FEATURES=1 \
+  slurm/multimodel/project_vocabulary.sbatch
+```
+
+This job computes `z_c^(n)=(q_n d_c^(n)) W_U^(n)T`, where `q_n` comes from the training-normalized
+cache manifest. It loads each Qwen checkpoint only to read `W_U^(n)` and performs no language-model
+forward pass. The saved values are a direct projection proxy; later blocks and final RMSNorm are
+not applied, so the dashboard does not label them as an intervention or causal logit effect.
+
 Run these on a B200 compute allocation, not a login node. The extractor reads the existing paired
 validation cache once and computes `g^s[B,T,C]` once per batch. `--chunk-size` limits temporary top-k
 work along `C`; it does not repeat transformer/model passes. All-feature extraction maintains up to

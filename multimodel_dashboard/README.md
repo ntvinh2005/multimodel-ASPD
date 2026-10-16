@@ -117,17 +117,17 @@ directory when available. Notes are the only mutable research file and default t
 
 ### Token-position display
 
-Each saved activation example always retains `token_ids`, `center_in_window`, and the measured
-center score `g_s`. The API converts these into position-aligned token records. Existing artifacts
-therefore use **center-only measured** mode: exactly the known firing position is highlighted and
-the surrounding positions remain uncolored because their activation values were not saved.
+Each saved activation example retains `token_ids`, `center_in_window`, and the measured center
+score `g_s`. The API converts these into position-aligned token records. Older artifacts use
+**center-only measured** mode: exactly the known firing position is highlighted and surrounding
+positions remain uncolored because their activation values were not saved.
 
-Newly decoded examples also store `token_strings` (the exact tokenizer pieces) and `token_texts`
-(one-token decoded display text). New extraction also stores `position_in_sequence`, so hover
-metadata can distinguish the saved-window index from the original sequence position. If a future
-analyzer stores a numeric `token_activations` array
-aligned one-to-one with `token_ids`, the same UI automatically switches to a full per-token heatmap.
-Opacity is normalized only for display; tooltips and labels retain the raw measured values.
+New extraction stores `token_strings` (the exact tokenizer pieces), `token_texts` (one-token decoded
+display text), `position_in_sequence`, and the measured `token_activations` window
+`[g^s_{t-16,c},...,g^s_{t+16,c}]`. The dashboard then renders the full per-token heatmap. The
+examples-only extractor obtains this window from the same encoded validation batch used to rank the
+center token; it does not run Qwen or train ASPD again. Opacity is normalized only for display;
+tooltips and labels retain the raw measured values.
 
 The dashboard never aligns tokens by substring matching and never interpolates missing token
 activations.
@@ -138,24 +138,33 @@ The current multi-model P1--P5 artifact does not contain a vocabulary projection
 intervention-based logit difference, so Feature Explorer deliberately shows a missing-data state.
 It does not derive or invent logit values in React.
 
-If a separate scientific analysis produces those values, save `analysis/vocabulary_effects.json`:
+If a separate scientific analysis produces those values, save `analysis/vocabulary_effects.json`.
+For a multi-model component, keep each model-specific decoder projection separate:
 
 ```json
 {
   "kind": "direct_projection",
-  "description": "decoder direction @ unembedding; not an intervention",
+  "description": "d_c^(n) @ W_U^(n)T; a non-causal projection proxy",
+  "default_model": "finetuned",
   "features": {
     "440": {
-      "positive": [
-        {"token": " example", "exact_token": "Ġexample", "token_id": 123, "value": 0.77}
-      ],
-      "negative": [
-        {"token": " other", "exact_token": "Ġother", "token_id": 456, "value": -0.65}
-      ]
+      "models": {
+        "base": {
+          "positive": [{"token": " example", "exact_token": "Ġexample", "token_id": 123, "value": 0.77}],
+          "negative": [{"token": " other", "exact_token": "Ġother", "token_id": 456, "value": -0.65}]
+        },
+        "finetuned": {
+          "positive": [{"token": " tuned", "exact_token": "Ġtuned", "token_id": 789, "value": 0.81}],
+          "negative": [{"token": " base", "exact_token": "Ġbase", "token_id": 321, "value": -0.61}]
+        }
+      }
     }
   }
 }
 ```
+
+The UI provides a model selector when `models` is present. The older single-series
+`features.<c>.positive/negative` schema remains supported.
 
 Supported `kind` values have distinct labels:
 
@@ -166,6 +175,32 @@ Supported `kind` values have distinct labels:
 Positive entries must have positive values and negative entries must have negative values. The API
 validates signs and schema, sorts each direction, assigns display ranks, and preserves unusual,
 whitespace, multilingual, BPE, and special-token strings without semantic filtering.
+
+### Which Neuronpedia-style data needs computation?
+
+| View | Existing artifact/source | GPU needed? |
+|---|---|---|
+| Readable token pieces | `token_ids` plus the configured Hugging Face tokenizer | No; tokenizer download and decoding are CPU-only. |
+| Center-token highlight | Existing `center_in_window` and `g_s` | No. |
+| Full token heatmap | Checkpoint encoder plus paired validation cache | Run `extract_examples`; a targeted CPU run is possible, while B200 is recommended for all 8,192 components. It does not run Qwen or retrain ASPD. |
+| Positive/negative vocabulary projection | Checkpoint `d_c^(n)`, cache scale `q_n`, and each model's output embedding `W_U^(n)` | Targeted CPU is possible; B200 is recommended for all components. It loads weights but runs no Qwen forward pass. |
+| Causal logit difference | A real component ablation/injection followed by the remaining transformer blocks | Yes for practical use; run P6 only for reviewed candidates. |
+
+Generate vocabulary projections for selected components without a language-model forward pass:
+
+```bash
+CONFIG=configs/multimodel/qwen3_1_7b/d0_s1_main.yaml
+RUN=out/multimodel/runs/qwen3_1_7b_d0_s1_main
+CHECKPOINT="${RUN}/$(cat "${RUN}/latest_checkpoint.txt")"
+
+uv run python -m aspd.multimodel.cli.project_vocabulary \
+  --config "$CONFIG" --checkpoint "$CHECKPOINT" --output-dir "$RUN/analysis" \
+  --device cuda --feature-ids 440,203,73
+```
+
+The CLI multiplies by the cache's training-set RMS scale before projection:
+`z_c^(n)=(q_n d_c^(n)) W_U^(n)T`. It keeps base and fine-tuned results separate. The result remains
+a direct projection proxy because later transformer blocks and final normalization are bypassed.
 
 ## Context extraction modes
 
