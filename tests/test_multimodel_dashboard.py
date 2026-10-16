@@ -85,6 +85,27 @@ def _realistic_fixture(tmp_path: Path) -> tuple[AnalysisDashboardStore, Path]:
         ),
         encoding="utf-8",
     )
+    (analysis_dir / "vocabulary_effects.json").write_text(
+        json.dumps(
+            {
+                "kind": "direct_projection",
+                "description": "decoder direction @ unembedding; not an intervention",
+                "features": {
+                    "0": {
+                        "positive": [
+                            {"token": " weak", "token_id": 10, "value": 0.2},
+                            {"token": " strong", "token_id": 11, "value": 0.8},
+                        ],
+                        "negative": [
+                            {"token": "less", "token_id": 12, "value": -0.1},
+                            {"token": "least", "token_id": 13, "value": -0.9},
+                        ],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
     return AnalysisDashboardStore(analysis_dir), analysis_dir
 
 
@@ -101,6 +122,44 @@ def test_dashboard_maps_real_tensor_indices_to_feature_payload(tmp_path: Path) -
     assert detail["dominant_locus"] == {"base": "q_proj", "finetuned": "k_proj"}
     assert detail["locus_statement"] == "Dominant locus changed: q_proj → k_proj"
     assert detail["examples"][0]["text"] == "A B C"
+    assert detail["examples"][0]["activation_detail_kind"] == "center_only"
+    assert detail["examples"][0]["tokens"] == [
+        {
+            "text": None,
+            "exact_token": None,
+            "token_id": 1,
+            "position": 0,
+            "sequence_position": None,
+            "activation": None,
+            "is_center": False,
+            "source": 'top_activation_examples.json → "0"[0]',
+        },
+        {
+            "text": "B",
+            "exact_token": None,
+            "token_id": 2,
+            "position": 1,
+            "sequence_position": None,
+            "activation": 3.25,
+            "is_center": True,
+            "source": 'top_activation_examples.json → "0"[0]',
+        },
+        {
+            "text": None,
+            "exact_token": None,
+            "token_id": 3,
+            "position": 2,
+            "sequence_position": None,
+            "activation": None,
+            "is_center": False,
+            "source": 'top_activation_examples.json → "0"[0]',
+        },
+    ]
+    assert detail["vocabulary_effects"]["status"] == "available"
+    assert detail["vocabulary_effects"]["kind"] == "direct_projection"
+    assert detail["vocabulary_effects"]["label"] == "Direct Logit Projection"
+    assert [row["value"] for row in detail["vocabulary_effects"]["positive"]] == [0.8, 0.2]
+    assert [row["value"] for row in detail["vocabulary_effects"]["negative"]] == [-0.9, -0.1]
     assert detail["context"] == {
         "status": "extracted",
         "fire_count": 1,
@@ -109,6 +168,51 @@ def test_dashboard_maps_real_tensor_indices_to_feature_payload(tmp_path: Path) -
         "message": "Positive activation examples were extracted and retained.",
     }
     assert detail["sources"]["activation_rho"].endswith("activation_rho_NC[:,0]")
+
+
+def test_dashboard_exposes_full_per_token_values_only_when_artifact_contains_them(
+    tmp_path: Path,
+) -> None:
+    _, analysis_dir = _realistic_fixture(tmp_path)
+    examples_path = analysis_dir / "top_activation_examples.json"
+    examples = json.loads(examples_path.read_text(encoding="utf-8"))
+    examples["0"][0].update(
+        {
+            "token_texts": ["A", " B", " C"],
+            "token_strings": ["A", "ĠB", "ĠC"],
+            "token_activations": [0.1, 3.25, 0.4],
+            "position_in_sequence": 7,
+        }
+    )
+    examples_path.write_text(json.dumps(examples), encoding="utf-8")
+
+    detail = AnalysisDashboardStore(analysis_dir).feature_detail(0)
+
+    assert detail["examples"][0]["activation_detail_kind"] == "per_token"
+    assert [token["text"] for token in detail["examples"][0]["tokens"]] == ["A", " B", " C"]
+    assert [token["activation"] for token in detail["examples"][0]["tokens"]] == [
+        0.1,
+        3.25,
+        0.4,
+    ]
+    assert [token["sequence_position"] for token in detail["examples"][0]["tokens"]] == [
+        6,
+        7,
+        8,
+    ]
+
+
+def test_dashboard_vocabulary_effects_missing_state_does_not_invent_values(tmp_path: Path) -> None:
+    _, analysis_dir = _realistic_fixture(tmp_path)
+    (analysis_dir / "vocabulary_effects.json").unlink()
+
+    payload = AnalysisDashboardStore(analysis_dir).feature_detail(0)["vocabulary_effects"]
+
+    assert payload["status"] == "missing"
+    assert payload["kind"] is None
+    assert payload["positive"] == []
+    assert payload["negative"] == []
+    assert "No direct vocabulary projection" in payload["description"]
 
 
 def test_dashboard_distinguishes_unextracted_from_extracted_empty_contexts(tmp_path: Path) -> None:

@@ -135,6 +135,13 @@ class AnalysisDashboardStore:
         )
         if error:
             self.startup_diagnostics.append(error)
+        self.vocabulary_effects_path = self.analysis_dir / "vocabulary_effects.json"
+        self.vocabulary_effects: dict[str, Any] = {}
+        self.vocabulary_effects_error: str | None = None
+        if self.vocabulary_effects_path.exists():
+            self.vocabulary_effects, self.vocabulary_effects_error = _read_json(
+                self.vocabulary_effects_path, dict
+            )
 
         self.config_path = self._resolve_config_path(config_path)
         self.config = self._load_config(self.config_path)
@@ -459,11 +466,94 @@ class AnalysisDashboardStore:
                         issues.append(
                             {"source": source, "error": "center_in_window is invalid for token_ids"}
                         )
+                    else:
+                        if any(not isinstance(token_id, int) for token_id in token_ids):
+                            issues.append(
+                                {"source": source, "error": "token_ids contains a non-integer"}
+                            )
+                        for field in ("token_texts", "token_strings", "token_activations"):
+                            values = example.get(field)
+                            if values is not None and (
+                                not isinstance(values, list) or len(values) != len(token_ids)
+                            ):
+                                issues.append(
+                                    {
+                                        "source": source,
+                                        "error": f"{field} must align one-to-one with token_ids",
+                                    }
+                                )
+                        for field in ("token_texts", "token_strings"):
+                            values = example.get(field)
+                            if isinstance(values, list) and any(
+                                not isinstance(value, str) for value in values
+                            ):
+                                issues.append(
+                                    {"source": source, "error": f"{field} contains a non-string"}
+                                )
+                        activations = example.get("token_activations")
+                        if isinstance(activations, list) and any(
+                            value is not None and not isinstance(value, int | float)
+                            for value in activations
+                        ):
+                            issues.append(
+                                {
+                                    "source": source,
+                                    "error": "token_activations contains a non-numeric value",
+                                }
+                            )
+                        position_in_sequence = example.get("position_in_sequence")
+                        if position_in_sequence is not None and not isinstance(
+                            position_in_sequence, int
+                        ):
+                            issues.append(
+                                {
+                                    "source": source,
+                                    "error": "position_in_sequence must be an integer or null",
+                                }
+                            )
         return {
             "name": "Activation-example consistency",
             "status": _status(len(issues)),
             "issues": issues,
             "source": "top_activation_examples.json",
+        }
+
+    def _vocabulary_effect_check(self) -> dict[str, Any]:
+        """Validate an optional vocabulary artifact without requiring it for P1--P5 health."""
+
+        if not self.vocabulary_effects_path.exists():
+            return {
+                "name": "Vocabulary-effect artifact",
+                "status": "PASS",
+                "available": False,
+                "issues": [],
+                "source": "vocabulary_effects.json",
+            }
+        issues = []
+        if self.vocabulary_effects_error:
+            issues.append(self.vocabulary_effects_error)
+        features = self.vocabulary_effects.get("features")
+        if not isinstance(features, dict):
+            issues.append("vocabulary_effects.json must contain an object named 'features'")
+        else:
+            for raw_feature_id in features:
+                try:
+                    feature_id = int(raw_feature_id)
+                except (TypeError, ValueError):
+                    issues.append(f"feature key is not an integer: {raw_feature_id!r}")
+                    continue
+                if self.n_features is not None and not 0 <= feature_id < self.n_features:
+                    issues.append(f"feature ID out of range: {feature_id}")
+                    continue
+                payload = self._vocabulary_effects_payload(feature_id)
+                if payload["status"] == "error":
+                    issues.append(payload["description"])
+        return {
+            "name": "Vocabulary-effect artifact",
+            "status": _status(len(issues)),
+            "available": True,
+            "issues": issues,
+            "source": "vocabulary_effects.json",
         }
 
     def _build_context_coverage(self) -> dict[str, Any]:
@@ -524,6 +614,7 @@ class AnalysisDashboardStore:
             self._locus_check(),
             self._finite_check(),
             self._example_check(),
+            self._vocabulary_effect_check(),
             self._context_coverage_check(),
         ]
         expected = set(CORE_KEYS)
@@ -695,10 +786,7 @@ class AnalysisDashboardStore:
         examples_payload = None
         if isinstance(examples, list):
             examples_payload = [
-                {
-                    **example,
-                    "source": f'top_activation_examples.json → "{feature_id}"[{index}]',
-                }
+                self._activation_example_payload(feature_id, index, example)
                 for index, example in enumerate(examples)
                 if isinstance(example, dict)
             ]
@@ -733,6 +821,7 @@ class AnalysisDashboardStore:
             "locus": locus,
             "p5": self._p5(feature_id),
             "examples": examples_payload,
+            "vocabulary_effects": self._vocabulary_effects_payload(feature_id),
             "context": {
                 "status": "extracted" if context_extracted else "not_extracted",
                 "fire_count": summary["fire_count"],
@@ -759,6 +848,227 @@ class AnalysisDashboardStore:
                 },
             },
             "missing": self._feature_missing(feature_id),
+        }
+
+    def _activation_example_payload(
+        self, feature_id: int, example_index: int, example: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Adapt measured token positions without inventing unmeasured token activations."""
+
+        source = f'top_activation_examples.json → "{feature_id}"[{example_index}]'
+        token_ids = example.get("token_ids")
+        center = example.get("center_in_window")
+        center_sequence_position = example.get("position_in_sequence")
+        context_score = example.get("g_s")
+        token_texts = example.get("token_texts")
+        exact_tokens = example.get("token_strings")
+        token_activations = example.get("token_activations")
+        n_tokens = len(token_ids) if isinstance(token_ids, list) else 0
+        has_full_activations = (
+            n_tokens > 0
+            and isinstance(token_activations, list)
+            and len(token_activations) == n_tokens
+            and all(value is None or isinstance(value, int | float) for value in token_activations)
+        )
+
+        tokens = []
+        for position in range(n_tokens):
+            # token_texts[position] is tokenizer-decoded display text when extraction saved it.
+            text = (
+                token_texts[position]
+                if isinstance(token_texts, list)
+                and len(token_texts) == n_tokens
+                and isinstance(token_texts[position], str)
+                else None
+            )
+            # Older artifacts retain only the exact center token string; expose no guessed neighbors.
+            if text is None and position == center and isinstance(example.get("center_token"), str):
+                text = example["center_token"]
+            exact_token = (
+                exact_tokens[position]
+                if isinstance(exact_tokens, list)
+                and len(exact_tokens) == n_tokens
+                and isinstance(exact_tokens[position], str)
+                else None
+            )
+            # Full arrays are measured per-position g^s. Legacy artifacts measure only center g^s.
+            activation = token_activations[position] if has_full_activations else None
+            if not has_full_activations and position == center and isinstance(context_score, int | float):
+                activation = context_score
+            tokens.append(
+                {
+                    "text": text,
+                    "exact_token": exact_token,
+                    "token_id": token_ids[position],
+                    "position": position,
+                    "sequence_position": (
+                        center_sequence_position - center + position
+                        if isinstance(center_sequence_position, int) and isinstance(center, int)
+                        else None
+                    ),
+                    "activation": activation,
+                    "is_center": position == center,
+                    "source": source,
+                }
+            )
+
+        return {
+            **example,
+            "context_score": context_score if isinstance(context_score, int | float) else None,
+            "tokens": tokens,
+            "activation_detail_kind": "per_token" if has_full_activations else "center_only",
+            "activation_detail_label": (
+                "Measured activation at every saved token position"
+                if has_full_activations
+                else "Only the measured center/firing token has an activation value"
+            ),
+            "source": source,
+        }
+
+    def _vocabulary_effects_payload(self, feature_id: int) -> dict[str, Any]:
+        """Expose optional measured/proxy vocabulary values with their exact scientific kind."""
+
+        source = "vocabulary_effects.json"
+        missing = {
+            "status": "missing",
+            "kind": None,
+            "label": "Vocabulary Effects",
+            "description": (
+                "No direct vocabulary projection or intervention-based logit-difference artifact "
+                "is available for this component."
+            ),
+            "positive": [],
+            "negative": [],
+            "source": source,
+        }
+        if not self.vocabulary_effects_path.exists():
+            return missing
+        if self.vocabulary_effects_error:
+            return {
+                **missing,
+                "status": "error",
+                "description": self.vocabulary_effects_error,
+            }
+
+        features = self.vocabulary_effects.get("features")
+        if not isinstance(features, dict):
+            return {
+                **missing,
+                "status": "error",
+                "description": "vocabulary_effects.json must contain an object named 'features'.",
+            }
+        raw = features.get(str(feature_id))
+        if raw is None:
+            return missing
+        if not isinstance(raw, dict):
+            return {
+                **missing,
+                "status": "error",
+                "description": f"{source} → features.{feature_id} must be an object.",
+            }
+
+        kind = raw.get("kind", self.vocabulary_effects.get("kind"))
+        labels = {
+            "direct_projection": "Direct Logit Projection",
+            "logit_difference": "Intervention Logit Difference",
+            "other": "Vocabulary-related Values",
+        }
+        if kind not in labels:
+            return {
+                **missing,
+                "status": "error",
+                "description": (
+                    f"{source} → kind must be direct_projection, logit_difference, or other."
+                ),
+            }
+
+        def entries(direction: str) -> tuple[list[dict[str, Any]], str | None]:
+            values = raw.get(direction, [])
+            if not isinstance(values, list):
+                return [], f"{source} → features.{feature_id}.{direction} must be a list."
+            parsed = []
+            for rank, value in enumerate(values, start=1):
+                if not isinstance(value, dict) or not isinstance(value.get("value"), int | float):
+                    return [], (
+                        f"{source} → features.{feature_id}.{direction}[{rank - 1}] "
+                        "must contain a numeric value."
+                    )
+                token = value.get("token")
+                if not isinstance(token, str):
+                    return [], (
+                        f"{source} → features.{feature_id}.{direction}[{rank - 1}] "
+                        "must contain a token string."
+                    )
+                exact_token = value.get("exact_token", token)
+                token_id = value.get("token_id")
+                if not isinstance(exact_token, str):
+                    return [], (
+                        f"{source} → features.{feature_id}.{direction}[{rank - 1}] "
+                        "exact_token must be a string."
+                    )
+                if token_id is not None and not isinstance(token_id, int):
+                    return [], (
+                        f"{source} → features.{feature_id}.{direction}[{rank - 1}] "
+                        "token_id must be an integer or null."
+                    )
+                numeric_value = float(value["value"])
+                if (direction == "positive" and numeric_value <= 0) or (
+                    direction == "negative" and numeric_value >= 0
+                ):
+                    return [], (
+                        f"{source} → features.{feature_id}.{direction}[{rank - 1}] has the wrong "
+                        "sign for its declared direction."
+                    )
+                parsed.append(
+                    {
+                        "token": token,
+                        "exact_token": exact_token,
+                        "token_id": token_id,
+                        "value": numeric_value,
+                        "source": f"{source} → features.{feature_id}.{direction}[{rank - 1}]",
+                    }
+                )
+            parsed.sort(key=lambda item: item["value"], reverse=direction == "positive")
+            for sorted_rank, value in enumerate(parsed, start=1):
+                value["rank"] = sorted_rank
+            return parsed, None
+
+        positive, positive_error = entries("positive")
+        negative, negative_error = entries("negative")
+        if positive_error or negative_error:
+            return {
+                **missing,
+                "status": "error",
+                "kind": kind,
+                "label": labels[kind],
+                "description": positive_error or negative_error,
+            }
+        label = raw.get("label", self.vocabulary_effects.get("label", labels[kind]))
+        description = raw.get(
+            "description",
+            self.vocabulary_effects.get(
+                "description",
+                "A supplied projection proxy; not an intervention-based causal effect."
+                if kind == "direct_projection"
+                else "Measured vocabulary values supplied by the analysis artifact.",
+            ),
+        )
+        if not isinstance(label, str) or not isinstance(description, str):
+            return {
+                **missing,
+                "status": "error",
+                "kind": kind,
+                "label": labels[kind],
+                "description": f"{source} label and description must be strings.",
+            }
+        return {
+            "status": "available" if positive or negative else "empty",
+            "kind": kind,
+            "label": label,
+            "description": description,
+            "positive": positive,
+            "negative": negative,
+            "source": source,
         }
 
     def _feature_missing(self, feature_id: int) -> list[str]:
@@ -1007,6 +1317,28 @@ class AnalysisDashboardStore:
                     f"- center={example.get('center_token', 'N/A')}, g_s={example.get('g_s', 'N/A')}: "
                     f"{str(example.get('text', 'N/A — data unavailable')).replace(chr(10), ' ')}"
                 )
+        vocabulary = feature["vocabulary_effects"]
+        lines.extend(
+            [
+                "",
+                f"## {vocabulary['label']}",
+                f"- Status: {vocabulary['status']}",
+                f"- Kind: {vocabulary['kind'] or 'N/A — data unavailable'}",
+                f"- Meaning: {vocabulary['description']}",
+                f"- Source: {vocabulary['source']}",
+            ]
+        )
+        if vocabulary["status"] == "available":
+            lines.append("- Strongest negative values:")
+            lines.extend(
+                f"  - {entry['token']!r}: {entry['value']}"
+                for entry in vocabulary["negative"][:10]
+            )
+            lines.append("- Strongest positive values:")
+            lines.extend(
+                f"  - {entry['token']!r}: +{entry['value']}"
+                for entry in vocabulary["positive"][:10]
+            )
         return "\n".join(lines) + "\n"
 
     def features_csv(self, filters: FeatureFilters) -> str:

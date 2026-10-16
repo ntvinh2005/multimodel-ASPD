@@ -47,11 +47,10 @@ uv pip install --python .venv-dashboard\Scripts\python.exe `
   torch numpy safetensors fastapi uvicorn pydantic pyyaml
 ```
 
-Với dữ liệu hiện đang nằm tại `out\multimodel\runs\out\analysis`, có thể bỏ bước tự tìm và dùng
-trực tiếp:
+Với Qwen D0/S1 main run theo cấu trúc chuẩn của repository, có thể bỏ bước tự tìm và dùng trực tiếp:
 
 ```powershell
-$ANALYSIS = ".\out\multimodel\runs\out\analysis"
+$ANALYSIS = ".\out\multimodel\runs\qwen3_1_7b_d0_s1_main\analysis"
 .\.venv-dashboard\Scripts\python.exe -m aspd.multimodel.cli.serve_analysis `
   $ANALYSIS --host 127.0.0.1 --port 8765
 ```
@@ -102,6 +101,7 @@ The backend reads these files without modifying them:
 analysis/posthoc.safetensors
 analysis/taxonomy.json
 analysis/top_activation_examples.json
+analysis/vocabulary_effects.json          # optional
 ```
 
 It reads `experiment_config.json`, `provenance.json`, and `latest_checkpoint.txt` from the parent run
@@ -114,6 +114,58 @@ directory when available. Notes are the only mutable research file and default t
 - a present key with `[]` means extraction ran but found no positive retained activation;
 - an absent key means context extraction was not performed for that component. It does **not** mean
   that the component did not fire. Check `fire_count_C[c]` in `posthoc.safetensors` separately.
+
+### Token-position display
+
+Each saved activation example always retains `token_ids`, `center_in_window`, and the measured
+center score `g_s`. The API converts these into position-aligned token records. Existing artifacts
+therefore use **center-only measured** mode: exactly the known firing position is highlighted and
+the surrounding positions remain uncolored because their activation values were not saved.
+
+Newly decoded examples also store `token_strings` (the exact tokenizer pieces) and `token_texts`
+(one-token decoded display text). New extraction also stores `position_in_sequence`, so hover
+metadata can distinguish the saved-window index from the original sequence position. If a future
+analyzer stores a numeric `token_activations` array
+aligned one-to-one with `token_ids`, the same UI automatically switches to a full per-token heatmap.
+Opacity is normalized only for display; tooltips and labels retain the raw measured values.
+
+The dashboard never aligns tokens by substring matching and never interpolates missing token
+activations.
+
+### Optional vocabulary/logit artifact
+
+The current multi-model P1--P5 artifact does not contain a vocabulary projection or an
+intervention-based logit difference, so Feature Explorer deliberately shows a missing-data state.
+It does not derive or invent logit values in React.
+
+If a separate scientific analysis produces those values, save `analysis/vocabulary_effects.json`:
+
+```json
+{
+  "kind": "direct_projection",
+  "description": "decoder direction @ unembedding; not an intervention",
+  "features": {
+    "440": {
+      "positive": [
+        {"token": " example", "exact_token": "Ġexample", "token_id": 123, "value": 0.77}
+      ],
+      "negative": [
+        {"token": " other", "exact_token": "Ġother", "token_id": 456, "value": -0.65}
+      ]
+    }
+  }
+}
+```
+
+Supported `kind` values have distinct labels:
+
+- `direct_projection` → **Direct Logit Projection**, explicitly marked as a non-causal proxy;
+- `logit_difference` → **Intervention Logit Difference**;
+- `other` → **Vocabulary-related Values**, using the artifact's description.
+
+Positive entries must have positive values and negative entries must have negative values. The API
+validates signs and schema, sorts each direction, assigns display ranks, and preserves unusual,
+whitespace, multilingual, BPE, and special-token strings without semantic filtering.
 
 ## Context extraction modes
 

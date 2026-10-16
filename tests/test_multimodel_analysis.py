@@ -1,6 +1,7 @@
 import json
+import sys
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 import torch
@@ -8,6 +9,7 @@ import torch
 from aspd.multimodel.analysis import (
     _factor_metrics,
     _top_activation_examples,
+    decode_activation_examples,
     save_activation_examples,
     select_example_feature_ids,
 )
@@ -102,6 +104,7 @@ def test_all_example_mode_emits_every_key_with_empty_lists_for_zero_activation()
     assert list(examples) == ["0", "1", "2", "3"]
     assert examples["1"] == [] and examples["3"] == []
     assert len(examples["0"]) == 2
+    assert examples["0"][0]["position_in_sequence"] == 1
     assert model.encode_calls == 1  # one validation traversal/encode, not one pass per c
 
 
@@ -139,3 +142,36 @@ def test_explicit_example_merge_preserves_existing_components(tmp_path: Path) ->
     assert set(merged) == {"104", "440", "1002"}
     assert json.loads((tmp_path / "top_activation_examples.json").read_text()) == merged
     assert not list(tmp_path.glob(".top_activation_examples.json.*.tmp"))
+
+
+def test_example_decoding_preserves_position_aligned_token_strings(monkeypatch) -> None:
+    class FakeTokenizer:
+        @staticmethod
+        def decode(token_ids, **_kwargs):
+            return "".join(f"<{token_id}>" for token_id in token_ids)
+
+        @staticmethod
+        def convert_ids_to_tokens(token_ids):
+            if isinstance(token_ids, list):
+                return [f"tok_{token_id}" for token_id in token_ids]
+            return f"tok_{token_ids}"
+
+    class FakeAutoTokenizer:
+        @staticmethod
+        def from_pretrained(*_args, **_kwargs):
+            return FakeTokenizer()
+
+    fake_transformers = ModuleType("transformers")
+    fake_transformers.AutoTokenizer = FakeAutoTokenizer  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "transformers", fake_transformers)
+    cfg = _example_cfg()
+    examples = {
+        "0": [{"token_ids": [10, 20, 30], "center_in_window": 1, "g_s": 4.0}]
+    }
+
+    decode_activation_examples(examples, cfg)
+
+    assert examples["0"][0]["text"] == "<10><20><30>"
+    assert examples["0"][0]["center_token"] == "tok_20"
+    assert examples["0"][0]["token_strings"] == ["tok_10", "tok_20", "tok_30"]
+    assert examples["0"][0]["token_texts"] == ["<10>", "<20>", "<30>"]

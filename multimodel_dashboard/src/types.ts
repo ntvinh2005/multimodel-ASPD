@@ -72,10 +72,50 @@ export interface P5Row {
 
 export interface ActivationExample {
   center_in_window?: number;
+  position_in_sequence?: number;
   center_token?: string;
   g_s?: number;
+  context_score?: number | null;
   text?: string;
   token_ids?: number[];
+  token_strings?: string[];
+  token_texts?: string[];
+  token_activations?: Array<number | null>;
+  tokens: TokenActivation[];
+  activation_detail_kind: "center_only" | "per_token";
+  activation_detail_label: string;
+  source: string;
+}
+
+export interface TokenActivation {
+  text: string | null;
+  exact_token: string | null;
+  token_id: number | null;
+  position: number;
+  sequence_position: number | null;
+  activation: number | null;
+  is_center: boolean;
+  source: string;
+}
+
+export type VocabularyEffectKind = "direct_projection" | "logit_difference" | "other";
+
+export interface VocabularyEffect {
+  token: string;
+  exact_token: string;
+  token_id: number | null;
+  value: number;
+  rank: number;
+  source: string;
+}
+
+export interface VocabularyEffects {
+  status: "available" | "empty" | "missing" | "error";
+  kind: VocabularyEffectKind | null;
+  label: string;
+  description: string;
+  positive: VocabularyEffect[];
+  negative: VocabularyEffect[];
   source: string;
 }
 
@@ -84,6 +124,7 @@ export interface FeatureDetail extends FeatureSummary {
   locus: Record<string, Record<string, NullableNumber>>;
   p5: P5Row[];
   examples: ActivationExample[] | null;
+  vocabulary_effects: VocabularyEffects;
   context: {
     status: "extracted" | "not_extracted";
     fire_count: number | null;

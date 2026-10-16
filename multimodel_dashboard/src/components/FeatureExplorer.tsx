@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
+import { adaptFeatureDetail } from "../adapters/componentInspection";
 import type { FeatureDetail, FeatureSummary, Metadata, P5Row, ResearcherNote, TaxonomyItem } from "../types";
+import { ActivationExamples } from "./ActivationExamples";
 import { Badge, Metric, ModelBars, Section, Source } from "./Common";
+import { LogitEffects, vocabularyEffectKicker } from "./LogitEffects";
 
 const emptyNote: ResearcherNote = {
   tentative_label: "", notes: "", semantic_evidence: "", alternative_interpretation: "", confidence: "low",
@@ -46,6 +49,7 @@ export default function FeatureExplorer({
   }), [feature, p5Sort]);
   if (error) return <div className="error-box">{error}</div>;
   if (!feature) return <div className="loading">Loading measured component data…</div>;
+  const inspection = adaptFeatureDetail(feature);
   const modelSources = (key: string) => metadata.model_names.map((_, i) => `posthoc.safetensors → ${key}[${i},${featureId}]`);
 
   async function saveNote() {
@@ -73,6 +77,23 @@ export default function FeatureExplorer({
     </div>
     {feature.missing.length > 0 && <div className="warn-box">{feature.missing.map((x) => <div key={x}>{x}</div>)}</div>}
 
+    <Section title="Activation examples" kicker="Measured shared latent activations">
+      <div className="stat-row">
+        <div><span>Context status</span><strong>{feature.context.status === "extracted" ? "Extracted" : "Not extracted"}</strong></div>
+        <div><span>Fire count</span><Metric value={feature.context.fire_count} kind="integer" source={String(feature.sources.fire_count)} /></div>
+        <div><span>Saved top contexts</span><Metric value={feature.context.saved_contexts} kind="integer" /></div>
+        <div><span>Context source</span><strong>{feature.context.source}</strong></div>
+      </div>
+      <ActivationExamples examples={inspection.activationExamples} missingMessage={feature.context.message} />
+    </Section>
+
+    <Section
+      title={inspection.vocabularyEffects.label}
+      kicker={vocabularyEffectKicker(inspection.vocabularyEffects)}
+    >
+      <LogitEffects data={inspection.vocabularyEffects} />
+    </Section>
+
     <Section title="My semantic interpretation" kicker="Researcher interpretation — never measured data">
       <div className="notes-grid">
         <label>Tentative label<input value={note.tentative_label} onChange={(e) => setNote({ ...note, tentative_label: e.target.value })} /></label>
@@ -84,22 +105,6 @@ export default function FeatureExplorer({
         <label className="wide">Why interesting<textarea value={note.why_interesting} onChange={(e) => setNote({ ...note, why_interesting: e.target.value })} /></label>
         <label className="wide">Mentor notes<textarea value={note.mentor_notes} onChange={(e) => setNote({ ...note, mentor_notes: e.target.value })} /></label>
       </div><button className="primary" onClick={saveNote}>Save researcher notes</button> <span className="save-status">{saved}</span>
-    </Section>
-
-    <Section title="Activation examples" kicker="Measured shared latent activations">
-      <div className="stat-row">
-        <div><span>Context status</span><strong>{feature.context.status === "extracted" ? "Extracted" : "Not extracted"}</strong></div>
-        <div><span>Fire count</span><Metric value={feature.context.fire_count} kind="integer" source={String(feature.sources.fire_count)} /></div>
-        <div><span>Saved top contexts</span><Metric value={feature.context.saved_contexts} kind="integer" /></div>
-        <div><span>Context source</span><strong>{feature.context.source}</strong></div>
-      </div>
-      {feature.examples === null ? <p className="na">{feature.context.message}</p> : feature.examples.length === 0 ?
-        <p className="na">No positive activation examples were retained for this component.</p> :
-        <div className="examples-list">{[...feature.examples].sort((a, b) => (b.g_s || 0) - (a.g_s || 0)).map((example, index) =>
-          <article className="example-card" key={index} title={example.source}><div className="example-meta"><Badge tone="target">{example.center_token || "N/A — center token unavailable"}</Badge><span>g_s <Metric value={example.g_s} kind="gs" source={`${example.source}.g_s`} /></span></div>
-            <p>{example.text || "N/A — decoded text unavailable"}</p><small>Shared latent activation strength at this token</small>
-            <details><summary>Token IDs and exact center index</summary><code>{JSON.stringify(example.token_ids ?? "N/A")}</code><div>center_in_window: {example.center_in_window ?? "N/A"}</div></details>
-          </article>)}</div>}
     </Section>
 
     <div className="two-column">

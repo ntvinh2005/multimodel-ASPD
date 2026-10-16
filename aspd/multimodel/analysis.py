@@ -107,7 +107,7 @@ class _TopActivationAccumulator:
         self.device = device
         ids = _validate_feature_ids(feature_ids, cfg.sparsity.n_features)
         self.selected_cpu = torch.tensor(ids, dtype=torch.long)
-        self.heaps: dict[int, list[tuple[float, int, list[int], int]]] = {
+        self.heaps: dict[int, list[tuple[float, int, list[int], int, int]]] = {
             feature_id: [] for feature_id in ids
         }
         self.serial = 0
@@ -147,6 +147,7 @@ class _TopActivationAccumulator:
                         self.serial,
                         input_ids[sequence, lo:hi].tolist(),
                         position - lo,
+                        position,
                     )
                     self.serial += 1
                     if len(heap) < self.k:
@@ -161,8 +162,11 @@ class _TopActivationAccumulator:
                     "g_s": score,
                     "token_ids": token_ids,
                     "center_in_window": center,
+                    "position_in_sequence": position_in_sequence,
                 }
-                for score, _serial, token_ids, center in sorted(heap, reverse=True)
+                for score, _serial, token_ids, center, position_in_sequence in sorted(
+                    heap, reverse=True
+                )
             ]
             for feature_id, heap in self.heaps.items()
         }
@@ -218,6 +222,19 @@ def decode_activation_examples(
             center = example["center_in_window"]
             example["text"] = tokenizer.decode(token_ids, skip_special_tokens=False)
             example["center_token"] = tokenizer.convert_ids_to_tokens(token_ids[center])
+            # Preserve exact tokenizer pieces for position-aligned UI; e.g. token_strings[t]
+            # identifies the token at the same window index t as token_ids[t].
+            example["token_strings"] = tokenizer.convert_ids_to_tokens(token_ids)
+            # Decode each ID separately for readable whitespace/punctuation while retaining the
+            # exact token string above for hover metadata and unusual BPE/special tokens.
+            example["token_texts"] = [
+                tokenizer.decode(
+                    [token_id],
+                    skip_special_tokens=False,
+                    clean_up_tokenization_spaces=False,
+                )
+                for token_id in token_ids
+            ]
 
 
 def save_activation_examples(
