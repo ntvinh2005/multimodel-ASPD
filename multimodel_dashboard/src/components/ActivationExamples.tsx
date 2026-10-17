@@ -25,6 +25,15 @@ export function ActivationExamples({
   const perTokenCount = ordered.filter(
     (example) => example.activation_detail_kind === "per_token",
   ).length;
+  const sequenceStartCount = ordered.filter((example) =>
+    example.activation_detail_kind === "per_token"
+    && (example.position_in_sequence
+      ?? example.tokens.find((token) => token.is_center)?.sequence_position) === 0
+  ).length;
+  const singlePositiveCount = ordered.filter((example) =>
+    example.activation_detail_kind === "per_token"
+    && example.tokens.filter((token) => token.activation !== null && token.activation > 0).length === 1
+  ).length;
 
   return <>
     <div className="activation-controls" aria-label="Activation context controls">
@@ -40,11 +49,17 @@ export function ActivationExamples({
       </span>
     </div>
     <div className="activation-legend" aria-label="Activation highlight legend">
-      <i className="activation-key measured-zero" /><span>Measured zero</span>
-      <i className="activation-key unavailable" /><span>Unavailable</span>
+      <span>Measured zero or unavailable</span>
       <i className="activation-gradient" />
-      <span>Positive g<sup>s</sup><sub>t,c</sub> intensity</span>
+      <span>Positive g<sup>s</sup><sub>t,c</sub> intensity on tokens</span>
     </div>
+    {perTokenCount > 0 && <div className="activation-pattern-summary">
+      <strong>Measured positional pattern</strong>
+      <span>{sequenceStartCount}/{perTokenCount} measured contexts fire at sequence position 0</span>
+      <span>{singlePositiveCount}/{perTokenCount} contain exactly one positive token in the saved window</span>
+      {sequenceStartCount === perTokenCount && singlePositiveCount === perTokenCount &&
+        <p>Every measured top context fires only at the first sequence position. The single highlighted token is therefore the complete measured sparse pattern for this component.</p>}
+    </div>}
     {perTokenCount < ordered.length && <p className="measurement-note">
       {perTokenCount === 0
         ? "This older artifact stores only the firing position for each context. Neighboring token activations were not saved, so the dashboard highlights one token and does not infer the rest."
@@ -100,26 +115,23 @@ export function TokenActivationContext({
       {center >= 0 && <span>firing position: window {center}{sequencePosition === null ? "" : ` · sequence ${sequencePosition}`}</span>}
     </div>
     {example.tokens.length > 0 ?
-      <>
-        <TokenActivationTrace tokens={tokens} maximum={maximum} />
-        <div className="token-activation-context" aria-label="Tokenizer-aligned activation positions">
-          {showBounds && <ContextBoundary
-            hiddenCount={start}
-            isSavedEdge={start === 0}
-            side="left"
-            centerAtEdge={center === 0}
-          />}
-          {tokens.map((token) =>
-            <TokenActivationSpan token={token} maximum={maximum} key={`${token.position}-${token.token_id}`} />
-          )}
-          {showBounds && <ContextBoundary
-            hiddenCount={example.tokens.length - end}
-            isSavedEdge={end === example.tokens.length}
-            side="right"
-            centerAtEdge={center === example.tokens.length - 1}
-          />}
-        </div>
-      </> :
+      <div className="token-activation-context" aria-label="Tokenizer-aligned activation positions">
+        {showBounds && <ContextBoundary
+          hiddenCount={start}
+          isSavedEdge={start === 0}
+          side="left"
+          centerAtEdge={center === 0}
+        />}
+        {tokens.map((token) =>
+          <TokenActivationSpan token={token} maximum={maximum} key={`${token.position}-${token.token_id}`} />
+        )}
+        {showBounds && <ContextBoundary
+          hiddenCount={example.tokens.length - end}
+          isSavedEdge={end === example.tokens.length}
+          side="right"
+          centerAtEdge={center === example.tokens.length - 1}
+        />}
+      </div> :
       <p className="na">Tokenizer-aligned positions are unavailable for this context.</p>}
     {example.text && <details className="decoded-context">
       <summary>Decoded context</summary><p>{example.text}</p>
@@ -167,36 +179,6 @@ function ContextBoundary({
   return <span className={`context-boundary ${isSavedEdge ? "saved-edge" : "snippet-edge"}`}>
     {side === "left" ? `⟨ ${label}` : `${label} ⟩`}
   </span>;
-}
-
-function TokenActivationTrace({
-  tokens,
-  maximum,
-}: {
-  tokens: TokenActivation[];
-  maximum: number;
-}) {
-  const style = { "--trace-columns": Math.max(1, tokens.length) } as CSSProperties;
-  return <div className="activation-trace" aria-label="Measured activation trace">
-    <span>g<sup>s</sup><sub>t,c</sub></span>
-    <div className="activation-trace-cells" style={style}>
-      {tokens.map((token) => {
-        const opacity = activationOpacity(token.activation, maximum);
-        const cellStyle = { "--activation-opacity": opacity } as CSSProperties;
-        const state = token.activation === null
-          ? "unavailable"
-          : token.activation > 0
-            ? "positive"
-            : "measured-zero";
-        return <i
-          className={`activation-trace-cell ${state}${token.is_center ? " center" : ""}`}
-          key={`${token.position}-${token.token_id}`}
-          style={cellStyle}
-          title={`window ${token.position} · sequence ${token.sequence_position ?? "unavailable"}\n${JSON.stringify(token.text)} · g^s=${token.activation ?? "unavailable"}`}
-        />;
-      })}
-    </div>
-  </div>;
 }
 
 function activationOpacity(activation: number | null, maximum: number): number {
