@@ -4,9 +4,11 @@ Date: 2026-10-17 (America/New_York)
 
 ## A. Commit
 
-The implementation commit SHA is recorded in the final handoff after the verified tree is
-committed. GPU jobs ran from pre-commit source state `fcbf10b88e880e678ca16c5e4fc3f183a6c6383f`
-plus the working-tree implementation described here.
+Core implementation commit:
+`ce137a2842ee330bfb23aa388cd647cccc252c5a` (`feat: add blind semantic triage pipeline`).
+GPU jobs ran from pre-commit source state `fcbf10b88e880e678ca16c5e4fc3f183a6c6383f`
+plus that working-tree implementation; artifact integrity was revalidated against the committed
+code afterward.
 
 ## B. Files
 
@@ -152,4 +154,5 @@ diagnostics. The final checks produced:
 
 ## M. Repository state
 
-The final handoff records `git status` and `git diff --stat` after verification, commit, and push.
+The core commit contains 22 files, 2,561 insertions, and 15 deletions. The final handoff records
+the pushed HEAD and confirms the working tree is clean after this documentation-only follow-up.
