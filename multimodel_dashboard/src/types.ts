@@ -144,6 +144,7 @@ export interface FeatureDetail extends FeatureSummary {
   locus_statement: string | null;
   sources: Record<string, unknown>;
   missing: string[];
+  related_crosscoder?: AspdCrosscoderRelationship[];
 }
 
 export interface OverviewPayload {
@@ -173,4 +174,213 @@ export interface ContextCoverage {
   components_with_fire_count_gt_zero_but_no_extracted_context: number;
   configured_mode: "ranked" | "all" | "explicit" | null;
   source: string;
+}
+
+export interface AspdCrosscoderRelationship {
+  phenomenon_id: string;
+  phenomenon_label: string;
+  status: ComparisonStatus;
+  status_definition: string;
+  crosscoder_feature_ids: number[];
+}
+
+export interface CrosscoderAspdRelationship {
+  phenomenon_id: string;
+  phenomenon_label: string;
+  status: ComparisonStatus;
+  status_definition: string;
+  aspd_component_ids: number[];
+}
+
+export interface SemanticAnnotation {
+  status?: string;
+  tentative_label: string | null;
+  interpretation_confidence: number | null;
+  annotation_source: string | null;
+  evidence_validation_sequence_indices?: number[];
+  warning?: string | null;
+  notes?: string | null;
+  model?: string | null;
+  model_version?: string | null;
+  limitations?: string[];
+  source: string | null;
+  is_measured_ground_truth: false;
+}
+
+export interface CrosscoderMetadata {
+  run_name: string | null;
+  model_ids: Array<string | null>;
+  sites: Array<string | null>;
+  n_features: number | null;
+  training_steps: number | null;
+  configured_max_steps: number | null;
+  train_batch_topk: number | null;
+  validation_tokens: number | null;
+  sequence_length: number | null;
+  checkpoint: string | null;
+  config_path: string;
+  analysis_dir: string;
+  reference: {
+    method?: string;
+    experiment_repository?: string;
+    experiment_commit_audited?: string;
+    library_repository?: string;
+    library_commit?: string;
+    relative_decoder_norm_convention?: string;
+  };
+}
+
+export interface CrosscoderMetrics {
+  fve_total: NullableNumber;
+  fve_base: NullableNumber;
+  fve_finetuned: NullableNumber;
+  validation_l0: NullableNumber;
+  dead_count: number | null;
+  dead_fraction: NullableNumber;
+  relative_norm_min: NullableNumber;
+  relative_norm_max: NullableNumber;
+}
+
+export interface RelativeNormBin {
+  start: number;
+  end: number;
+  count: number;
+}
+
+export interface CrosscoderOverviewPayload {
+  available: boolean;
+  diagnostics: string[];
+  metadata?: CrosscoderMetadata;
+  metrics?: CrosscoderMetrics;
+  classification_counts?: Record<string, number>;
+  classification_fractions?: Record<string, number>;
+  thresholds?: {
+    base_specific?: [number, number];
+    shared?: [number, number];
+    finetuned_specific?: [number, number];
+  };
+  relative_decoder_norm_convention?: string | null;
+  relative_norm_histogram?: RelativeNormBin[];
+  strict_exclusive_absent?: boolean;
+  strict_result?: string;
+  candidate_selection?: string | null;
+  candidate_groups?: Record<string, number[]>;
+  sources?: Record<string, string>;
+}
+
+export interface CrosscoderFeatureSummary {
+  feature_id: number;
+  classification: "base-specific" | "shared" | "intermediate" | "finetuned-specific";
+  inspection_groups: string[];
+  relative_decoder_norm: number;
+  relative_decoder_norm_convention?: string;
+  decoder_norm_base: number;
+  decoder_norm_finetuned: number;
+  decoder_cosine: number | null;
+  fire_count: number;
+  activation_density: number;
+  blind_rank_within_class: number;
+  blind_rank_base_tail: number;
+  blind_rank_finetuned_tail: number;
+  semantic_annotation: SemanticAnnotation | null;
+  sources: {
+    measured: string;
+    inspection_groups: string;
+    semantic_annotation: string | null;
+  };
+}
+
+export interface CrosscoderFeatureDetail extends CrosscoderFeatureSummary {
+  examples: ActivationExample[] | null;
+  context: {
+    status: "extracted" | "not_extracted";
+    saved_contexts: number;
+    message: string;
+    source: string;
+  };
+  related_aspd?: CrosscoderAspdRelationship[];
+}
+
+export interface CrosscoderCandidatesPayload {
+  available: boolean;
+  candidate_selection: string | null;
+  groups: Record<string, number[]>;
+  items: CrosscoderFeatureSummary[];
+  source: string;
+  diagnostics?: string[];
+}
+
+export type ComparisonStatus =
+  | "semantic_overlap"
+  | "weak_semantic_overlap"
+  | "low_support_hypothesis"
+  | "aspd_only_parameter_evidence"
+  | "unresolved"
+  | "not_tested";
+
+export interface CrosscoderComparisonEvidence {
+  feature_id: number;
+  classification: CrosscoderFeatureSummary["classification"];
+  inspection_groups: string[];
+  relative_decoder_norm: number;
+  fire_count: number;
+  examples: ActivationExample[] | null;
+  semantic_annotation: SemanticAnnotation | null;
+  sources: CrosscoderFeatureSummary["sources"];
+}
+
+export interface AspdComparisonEvidence {
+  component_id: number;
+  taxonomy: string | null;
+  activation_rho: number[] | null;
+  mechanism_rho: number[] | null;
+  fire_count: number | null;
+  low_support: boolean | null;
+  examples: ActivationExample[] | null;
+  semantic_annotation: SemanticAnnotation | null;
+  sources: Record<string, unknown>;
+}
+
+export interface MethodComparisonPhenomenon {
+  id: string;
+  label: string;
+  status: ComparisonStatus;
+  status_definition: string;
+  crosscoder_features: number[];
+  aspd_components: number[];
+  interpretation: string;
+  limitations: string[];
+  crosscoder_evidence: CrosscoderComparisonEvidence[];
+  aspd_evidence: AspdComparisonEvidence[];
+}
+
+export interface MethodComparisonPayload {
+  available: boolean;
+  diagnostics: string[];
+  metadata?: {
+    status?: string;
+    date?: string;
+    not_feature_identity?: boolean;
+    not_causal?: boolean;
+    annotation_source?: string;
+  };
+  global_summary?: {
+    crosscoder?: string[];
+    aspd?: string[];
+    current_finding?: string;
+  };
+  global_measured?: {
+    crosscoder: {
+      metrics: CrosscoderMetrics;
+      classification_counts: Record<string, number>;
+      strict_result: string;
+    } | null;
+    aspd: {
+      taxonomy_counts: Record<string, number | null>;
+      n_features: number | null;
+      validation_tokens: number | null;
+    };
+  };
+  phenomena: MethodComparisonPhenomenon[];
+  source?: string;
 }

@@ -1,8 +1,9 @@
-# Multi-model ASPD P1–P5 research dashboard
+# Multi-model ASPD and Crosscoder research dashboard
 
 Local FastAPI + React/TypeScript interface for inspecting real `posthoc.safetensors`, taxonomy,
-activation contexts, and separately stored researcher notes. It has no demo-data or random fallback
-path. Missing data is rendered as `N/A — data unavailable` and diagnosed in Data Health.
+Crosscoder model-diffing artifacts, exact activation contexts, and the tracked post-ranking
+cross-method comparison. It has no demo-data or random fallback path. Missing data is rendered as
+`N/A — data unavailable`; semantic interpretation never overwrites measured values.
 
 ## Chạy nhanh trên Windows
 
@@ -55,6 +56,53 @@ $ANALYSIS = ".\out\multimodel\runs\qwen3_1_7b_d0_s1_main\analysis"
   $ANALYSIS --host 127.0.0.1 --port 8765
 ```
 
+Backend tự tìm Crosscoder R1 và hai structured research artifact tại các path chuẩn của repository.
+Nếu dữ liệu được đặt ở nơi khác, truyền path rõ ràng:
+
+```powershell
+$ASPD = ".\out\multimodel\runs\qwen3_1_7b_d0_s1_main\analysis"
+$CC = ".\out\multimodel\baselines\crosscoder\r1_qwen3_full\analysis"
+.\.venv-dashboard\Scripts\python.exe -m aspd.multimodel.cli.serve_analysis `
+  $ASPD `
+  --crosscoder-analysis $CC `
+  --research-annotations ".\docs\multimodel\results\qwen3_general_diff_annotations.json" `
+  --research-comparison ".\docs\multimodel\results\qwen3_crosscoder_aspd_phenomena.json" `
+  --host 127.0.0.1 --port 8765
+```
+
+### Dữ liệu cần tải xuống Windows
+
+Không cần tải model weights hoặc Crosscoder checkpoint để xem dashboard. Giữ đúng cấu trúc sau:
+
+```text
+out/multimodel/runs/qwen3_1_7b_d0_s1_main/
+  experiment_config.json
+  provenance.json
+  latest_checkpoint.txt
+  analysis/
+    posthoc.safetensors
+    taxonomy.json
+    top_activation_examples.json
+    vocabulary_effects.json              # optional
+
+out/multimodel/baselines/crosscoder/r1_qwen3_full/
+  config_resolved.yaml
+  reference.json
+  metrics.jsonl
+  latest_checkpoint.txt                  # optional metadata
+  analysis/
+    summary.json
+    feature_metrics.json
+    top_activation_examples.json
+    semantic_annotations.json
+
+docs/multimodel/results/
+  qwen3_general_diff_annotations.json
+  qwen3_crosscoder_aspd_phenomena.json
+```
+
+`checkpoint_*.pt`, activation cache và training logs không được frontend đọc nên không cần download.
+
 ### Khi nào cần chạy React development server
 
 Chỉ dùng cách này khi đang sửa file trong `multimodel_dashboard/src/` và muốn Vite tự reload. Mở
@@ -103,6 +151,13 @@ analysis/taxonomy.json
 analysis/top_activation_examples.json
 analysis/vocabulary_effects.json          # optional
 ```
+
+The isolated Crosscoder store reads `analysis/{summary,feature_metrics,
+top_activation_examples,semantic_annotations}.json` plus the parent run's
+`config_resolved.yaml`, `reference.json`, and `metrics.jsonl`. The comparison store reads only the
+two tracked structured JSON files under `docs/multimodel/results/`; prose Markdown is not used as a
+numeric source. If any optional method artifact is absent, that method view reports an explicit
+unavailable state while the existing ASPD pages continue to work.
 
 It reads `experiment_config.json`, `provenance.json`, and `latest_checkpoint.txt` from the parent run
 directory when available. Notes are the only mutable research file and default to

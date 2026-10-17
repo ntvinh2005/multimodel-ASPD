@@ -49,7 +49,8 @@ export function ActivationExamples({
       </span>
     </div>
     <div className="activation-legend" aria-label="Activation highlight legend">
-      <span>Measured zero or unavailable</span>
+      <span className="legend-key"><i className="token-state measured-zero" />Measured zero</span>
+      <span className="legend-key"><i className="token-state unavailable" />Unavailable / not measured</span>
       <i className="activation-gradient" />
       <span>Positive g<sup>s</sup><sub>t,c</sub> intensity on tokens</span>
     </div>
@@ -198,6 +199,11 @@ export function TokenActivationSpan({
     ? Math.min(1, token.activation / maximum)
     : 0;
   const opacity = activationOpacity(token.activation, maximum);
+  const measurementClass = token.activation === null
+    ? " unavailable-activation"
+    : token.activation === 0
+      ? " measured-zero-activation"
+      : " positive-activation";
   const label = token.text ?? token.exact_token ?? (token.token_id === null ? "?" : `#${token.token_id}`);
   const tooltip = [
     `token text: ${JSON.stringify(token.text)}`,
@@ -210,7 +216,7 @@ export function TokenActivationSpan({
   const style = { "--activation-opacity": opacity } as CSSProperties;
 
   return <span
-    className={`activation-token${strength === 1 ? " strongest" : ""}${token.is_center ? " center-token" : ""}`}
+    className={`activation-token${measurementClass}${strength === 1 ? " strongest" : ""}${token.is_center ? " center-token" : ""}`}
     style={style}
     title={tooltip}
   >{label}</span>;

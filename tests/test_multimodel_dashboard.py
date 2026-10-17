@@ -8,6 +8,10 @@ import torch
 from safetensors.torch import load_file, save_file
 
 from aspd.multimodel.config import load_experiment_config
+from aspd.multimodel.crosscoder_dashboard import (
+    CrosscoderDashboardStore,
+    ResearchComparisonStore,
+)
 from aspd.multimodel.dashboard import AnalysisDashboardStore, build_dashboard_app
 
 ROOT = Path(__file__).parents[1]
@@ -107,6 +111,198 @@ def _realistic_fixture(tmp_path: Path) -> tuple[AnalysisDashboardStore, Path]:
         encoding="utf-8",
     )
     return AnalysisDashboardStore(analysis_dir), analysis_dir
+
+
+def _crosscoder_fixture(tmp_path: Path) -> tuple[CrosscoderDashboardStore, Path, Path, Path]:
+    run_dir = tmp_path / "crosscoder"
+    analysis_dir = run_dir / "analysis"
+    analysis_dir.mkdir(parents=True)
+    rows = [
+        {
+            "feature_id": 0,
+            "classification": "base-specific",
+            "relative_decoder_norm": 0.05,
+            "decoder_norm_base": 1.0,
+            "decoder_norm_finetuned": 0.05,
+            "decoder_cosine": 0.1,
+            "fire_count": 4,
+            "activation_density": 0.4,
+            "blind_rank_within_class": 1,
+            "blind_rank_base_tail": 1,
+            "blind_rank_finetuned_tail": 4,
+        },
+        {
+            "feature_id": 1,
+            "classification": "shared",
+            "relative_decoder_norm": 0.5,
+            "decoder_norm_base": 1.0,
+            "decoder_norm_finetuned": 1.0,
+            "decoder_cosine": 1.0,
+            "fire_count": 5,
+            "activation_density": 0.5,
+            "blind_rank_within_class": 1,
+            "blind_rank_base_tail": 2,
+            "blind_rank_finetuned_tail": 3,
+        },
+        {
+            "feature_id": 2,
+            "classification": "intermediate",
+            "relative_decoder_norm": 0.72,
+            "decoder_norm_base": 0.4,
+            "decoder_norm_finetuned": 1.0,
+            "decoder_cosine": 0.7,
+            "fire_count": 1,
+            "activation_density": 0.1,
+            "blind_rank_within_class": 1,
+            "blind_rank_base_tail": 3,
+            "blind_rank_finetuned_tail": 2,
+        },
+        {
+            "feature_id": 3,
+            "classification": "finetuned-specific",
+            "relative_decoder_norm": 0.95,
+            "decoder_norm_base": 0.05,
+            "decoder_norm_finetuned": 1.0,
+            "decoder_cosine": 0.2,
+            "fire_count": 0,
+            "activation_density": 0.0,
+            "blind_rank_within_class": 1,
+            "blind_rank_base_tail": 4,
+            "blind_rank_finetuned_tail": 1,
+        },
+    ]
+    summary = {
+        "n_features": 4,
+        "k": 2,
+        "tokens": 10,
+        "l0": 2.1,
+        "fve_total": 0.9,
+        "fve_base": 0.89,
+        "fve_finetuned": 0.91,
+        "dead_fraction": 0.25,
+        "relative_decoder_norm_convention": "0=base-specific, 1=finetuned-specific",
+        "classification_counts": {
+            "base-specific": 1,
+            "shared": 1,
+            "intermediate": 1,
+            "finetuned-specific": 1,
+        },
+        "classification_fractions": {
+            "base-specific": 0.25,
+            "shared": 0.25,
+            "intermediate": 0.25,
+            "finetuned-specific": 0.25,
+        },
+        "thresholds": {
+            "base_specific": [0.0, 0.1],
+            "shared": [0.4, 0.6],
+            "finetuned_specific": [0.9, 1.0],
+        },
+        "candidate_groups": {"base-tail": [0], "shared": [1], "finetuned-tail": [2]},
+        "candidate_selection": "blind score tails",
+        "checkpoint": "checkpoint_10.pt",
+    }
+    (analysis_dir / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
+    (analysis_dir / "feature_metrics.json").write_text(
+        json.dumps({"metadata": summary, "features": rows}), encoding="utf-8"
+    )
+    (analysis_dir / "top_activation_examples.json").write_text(
+        json.dumps(
+            {
+                "metadata": {"feature_ids": [2]},
+                "features": {
+                    "2": [
+                        {
+                            "center_in_window": 1,
+                            "center_token": "B",
+                            "g_s": 2.0,
+                            "position_in_sequence": 8,
+                            "text": "A B C",
+                            "token_ids": [1, 2, 3],
+                            "token_texts": ["A", " B", " C"],
+                            "token_strings": ["A", "ĠB", "ĠC"],
+                            "token_activations": [0.0, 2.0, None],
+                            "validation_sequence_index": 7,
+                        }
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (analysis_dir / "semantic_annotations.json").write_text(
+        json.dumps({"metadata": {}, "annotations": []}), encoding="utf-8"
+    )
+    (run_dir / "config_resolved.yaml").write_text(
+        """name: fixture_crosscoder
+models:
+  - {name: base, model_id: org/base, grounding: {module: model.layers.1, capture: input}}
+  - {name: finetuned, model_id: org/ft, grounding: {module: model.layers.1, capture: input}}
+data: {sequence_length: 16}
+crosscoder: {max_steps: 10}
+""",
+        encoding="utf-8",
+    )
+    (run_dir / "reference.json").write_text(
+        json.dumps({"method": "BatchTopKCrosscoder"}), encoding="utf-8"
+    )
+    (run_dir / "metrics.jsonl").write_text(json.dumps({"step": 10}) + "\n", encoding="utf-8")
+    annotations_path = tmp_path / "annotations.json"
+    annotations_path.write_text(
+        json.dumps(
+            {
+                "metadata": {
+                    "annotation_source": "llm_assisted_researcher_review",
+                    "limitations": ["qualitative only"],
+                },
+                "crosscoder": [
+                    {
+                        "feature_id": 2,
+                        "measured_classification": "finetuned-specific",
+                        "tentative_label": "turn boundary",
+                        "confidence": 0.7,
+                        "evidence_validation_sequence_indices": [7],
+                    }
+                ],
+                "aspd": [
+                    {
+                        "feature_id": 0,
+                        "tentative_label": "possible boundary",
+                        "confidence": 0.4,
+                        "fire_count": 1,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    comparison_path = tmp_path / "comparison.json"
+    comparison_path.write_text(
+        json.dumps(
+            {
+                "metadata": {"not_feature_identity": True, "not_causal": True},
+                "global_summary": {"current_finding": "fixture synthesis"},
+                "phenomena": [
+                    {
+                        "id": "boundary",
+                        "label": "Boundary",
+                        "status": "low_support_hypothesis",
+                        "crosscoder_features": [2],
+                        "aspd_components": [0],
+                        "interpretation": "qualitative only",
+                        "limitations": ["not matched"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return (
+        CrosscoderDashboardStore(analysis_dir, annotations_path=annotations_path),
+        analysis_dir,
+        annotations_path,
+        comparison_path,
+    )
 
 
 def test_dashboard_maps_real_tensor_indices_to_feature_payload(tmp_path: Path) -> None:
@@ -331,3 +527,115 @@ def test_dashboard_health_reports_missing_data_without_zero_fill(tmp_path: Path)
     assert detail["beta"] is None
     assert detail["beta_total"] is None
     assert any("mechanism_beta_NC" in diagnostic for diagnostic in detail["missing"])
+
+
+def test_crosscoder_dashboard_preserves_strict_class_and_separate_tail_group(
+    tmp_path: Path,
+) -> None:
+    store, _, _, _ = _crosscoder_fixture(tmp_path)
+
+    overview = store.overview()
+    detail = store.feature_detail(2)
+
+    assert overview["available"] is True
+    assert overview["metrics"]["dead_count"] == 1
+    assert sum(bin_["count"] for bin_ in overview["relative_norm_histogram"]) == 4
+    assert detail["classification"] == "intermediate"
+    assert detail["inspection_groups"] == ["finetuned-tail"]
+    assert detail["semantic_annotation"]["tentative_label"] == "turn boundary"
+    assert detail["semantic_annotation"]["is_measured_ground_truth"] is False
+    # The annotation deliberately contains a conflicting class; it must never override measurement.
+    assert detail["classification"] != "finetuned-specific"
+    assert detail["examples"][0]["tokens"][0]["activation"] == 0.0
+    assert detail["examples"][0]["tokens"][2]["activation"] is None
+
+
+def test_crosscoder_dashboard_missing_artifacts_are_explicitly_unavailable(tmp_path: Path) -> None:
+    store = CrosscoderDashboardStore(tmp_path / "missing")
+
+    assert store.available is False
+    assert store.overview()["available"] is False
+    assert store.verification_summary()["diagnostics"]
+    with pytest.raises(IndexError):
+        store.feature_detail(0)
+
+
+def test_research_comparison_resolves_only_valid_structured_references(tmp_path: Path) -> None:
+    aspd_store, _ = _realistic_fixture(tmp_path)
+    crosscoder_store, _, annotations_path, comparison_path = _crosscoder_fixture(tmp_path)
+    comparison = ResearchComparisonStore(
+        comparison_path,
+        aspd_store=aspd_store,
+        crosscoder_store=crosscoder_store,
+        annotations_path=annotations_path,
+    )
+
+    payload = comparison.payload()
+
+    assert comparison.available is True
+    assert payload["phenomena"][0]["crosscoder_evidence"][0]["classification"] == "intermediate"
+    assert payload["phenomena"][0]["aspd_evidence"][0]["taxonomy"] == (
+        "shared_activation_concentrated_mechanism"
+    )
+    assert comparison.related_to_aspd(0)[0]["crosscoder_feature_ids"] == [2]
+    assert comparison.related_to_crosscoder(2)[0]["aspd_component_ids"] == [0]
+
+    invalid = json.loads(comparison_path.read_text(encoding="utf-8"))
+    invalid["phenomena"][0]["crosscoder_features"] = [999]
+    comparison_path.write_text(json.dumps(invalid), encoding="utf-8")
+    broken = ResearchComparisonStore(
+        comparison_path,
+        aspd_store=aspd_store,
+        crosscoder_store=crosscoder_store,
+        annotations_path=annotations_path,
+    )
+    assert broken.available is False
+    assert broken.phenomena == []
+    assert "unresolved references" in broken.diagnostics[-1]
+
+
+def test_research_comparison_missing_artifact_is_clean_unavailable_state(tmp_path: Path) -> None:
+    aspd_store, _ = _realistic_fixture(tmp_path)
+    crosscoder_store, _, annotations_path, _ = _crosscoder_fixture(tmp_path)
+    comparison = ResearchComparisonStore(
+        tmp_path / "missing-comparison.json",
+        aspd_store=aspd_store,
+        crosscoder_store=crosscoder_store,
+        annotations_path=annotations_path,
+    )
+
+    assert comparison.available is False
+    assert comparison.payload()["phenomena"] == []
+
+
+def test_dashboard_api_adds_crosscoder_and_comparison_without_changing_aspd_routes(
+    tmp_path: Path,
+) -> None:
+    aspd_store, _ = _realistic_fixture(tmp_path)
+    crosscoder_store, _, annotations_path, comparison_path = _crosscoder_fixture(tmp_path)
+    comparison = ResearchComparisonStore(
+        comparison_path,
+        aspd_store=aspd_store,
+        crosscoder_store=crosscoder_store,
+        annotations_path=annotations_path,
+    )
+
+    async def exercise_api() -> None:
+        app = build_dashboard_app(
+            aspd_store,
+            crosscoder_store=crosscoder_store,
+            comparison_store=comparison,
+        )
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            assert (await client.get("/api/overview")).status_code == 200
+            cc_overview = (await client.get("/api/crosscoder/overview")).json()
+            assert cc_overview["metadata"]["model_ids"] == ["org/base", "org/ft"]
+            cc_feature = (await client.get("/api/crosscoder/features/2")).json()
+            assert cc_feature["classification"] == "intermediate"
+            assert cc_feature["related_aspd"][0]["aspd_component_ids"] == [0]
+            aspd_feature = (await client.get("/api/features/0")).json()
+            assert aspd_feature["related_crosscoder"][0]["crosscoder_feature_ids"] == [2]
+            assert (await client.get("/api/research-comparison")).json()["available"] is True
+
+    asyncio.run(exercise_api())

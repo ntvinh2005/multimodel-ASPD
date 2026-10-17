@@ -99,6 +99,83 @@ def _status(failures: int, warnings: int = 0) -> str:
     return "FAIL" if failures else ("WARN" if warnings else "PASS")
 
 
+def activation_example_payload(
+    feature_id: int,
+    example_index: int,
+    example: Mapping[str, Any],
+    *,
+    artifact_name: str = "top_activation_examples.json",
+) -> dict[str, Any]:
+    """Adapt exact saved token positions without inventing unavailable activations."""
+
+    source = f'{artifact_name} → "{feature_id}"[{example_index}]'
+    token_ids = example.get("token_ids")
+    center = example.get("center_in_window")
+    center_sequence_position = example.get("position_in_sequence")
+    context_score = example.get("g_s")
+    token_texts = example.get("token_texts")
+    exact_tokens = example.get("token_strings")
+    token_activations = example.get("token_activations")
+    n_tokens = len(token_ids) if isinstance(token_ids, list) else 0
+    has_full_activations = (
+        n_tokens > 0
+        and isinstance(token_activations, list)
+        and len(token_activations) == n_tokens
+        and all(value is None or isinstance(value, int | float) for value in token_activations)
+    )
+
+    tokens = []
+    for position in range(n_tokens):
+        text = (
+            token_texts[position]
+            if isinstance(token_texts, list)
+            and len(token_texts) == n_tokens
+            and isinstance(token_texts[position], str)
+            else None
+        )
+        if text is None and position == center and isinstance(example.get("center_token"), str):
+            text = example["center_token"]
+        exact_token = (
+            exact_tokens[position]
+            if isinstance(exact_tokens, list)
+            and len(exact_tokens) == n_tokens
+            and isinstance(exact_tokens[position], str)
+            else None
+        )
+        activation = token_activations[position] if has_full_activations else None
+        if not has_full_activations and position == center and isinstance(context_score, int | float):
+            activation = context_score
+        tokens.append(
+            {
+                "text": text,
+                "exact_token": exact_token,
+                "token_id": token_ids[position],
+                "position": position,
+                "sequence_position": (
+                    center_sequence_position - center + position
+                    if isinstance(center_sequence_position, int) and isinstance(center, int)
+                    else None
+                ),
+                "activation": activation,
+                "is_center": position == center,
+                "source": source,
+            }
+        )
+
+    return {
+        **example,
+        "context_score": context_score if isinstance(context_score, int | float) else None,
+        "tokens": tokens,
+        "activation_detail_kind": "per_token" if has_full_activations else "center_only",
+        "activation_detail_label": (
+            "Measured activation at every saved token position"
+            if has_full_activations
+            else "Only the measured center/firing token has an activation value"
+        ),
+        "source": source,
+    }
+
+
 class AnalysisDashboardStore:
     """Read-only tensor store plus separately persisted human notes."""
 
@@ -853,77 +930,7 @@ class AnalysisDashboardStore:
     def _activation_example_payload(
         self, feature_id: int, example_index: int, example: Mapping[str, Any]
     ) -> dict[str, Any]:
-        """Adapt measured token positions without inventing unmeasured token activations."""
-
-        source = f'top_activation_examples.json → "{feature_id}"[{example_index}]'
-        token_ids = example.get("token_ids")
-        center = example.get("center_in_window")
-        center_sequence_position = example.get("position_in_sequence")
-        context_score = example.get("g_s")
-        token_texts = example.get("token_texts")
-        exact_tokens = example.get("token_strings")
-        token_activations = example.get("token_activations")
-        n_tokens = len(token_ids) if isinstance(token_ids, list) else 0
-        has_full_activations = (
-            n_tokens > 0
-            and isinstance(token_activations, list)
-            and len(token_activations) == n_tokens
-            and all(value is None or isinstance(value, int | float) for value in token_activations)
-        )
-
-        tokens = []
-        for position in range(n_tokens):
-            # token_texts[position] is tokenizer-decoded display text when extraction saved it.
-            text = (
-                token_texts[position]
-                if isinstance(token_texts, list)
-                and len(token_texts) == n_tokens
-                and isinstance(token_texts[position], str)
-                else None
-            )
-            # Older artifacts retain only the exact center token string; expose no guessed neighbors.
-            if text is None and position == center and isinstance(example.get("center_token"), str):
-                text = example["center_token"]
-            exact_token = (
-                exact_tokens[position]
-                if isinstance(exact_tokens, list)
-                and len(exact_tokens) == n_tokens
-                and isinstance(exact_tokens[position], str)
-                else None
-            )
-            # Full arrays are measured per-position g^s. Legacy artifacts measure only center g^s.
-            activation = token_activations[position] if has_full_activations else None
-            if not has_full_activations and position == center and isinstance(context_score, int | float):
-                activation = context_score
-            tokens.append(
-                {
-                    "text": text,
-                    "exact_token": exact_token,
-                    "token_id": token_ids[position],
-                    "position": position,
-                    "sequence_position": (
-                        center_sequence_position - center + position
-                        if isinstance(center_sequence_position, int) and isinstance(center, int)
-                        else None
-                    ),
-                    "activation": activation,
-                    "is_center": position == center,
-                    "source": source,
-                }
-            )
-
-        return {
-            **example,
-            "context_score": context_score if isinstance(context_score, int | float) else None,
-            "tokens": tokens,
-            "activation_detail_kind": "per_token" if has_full_activations else "center_only",
-            "activation_detail_label": (
-                "Measured activation at every saved token position"
-                if has_full_activations
-                else "Only the measured center/firing token has an activation value"
-            ),
-            "source": source,
-        }
+        return activation_example_payload(feature_id, example_index, example)
 
     def _vocabulary_effects_payload(self, feature_id: int) -> dict[str, Any]:
         """Expose optional measured/proxy vocabulary values with their exact scientific kind."""
@@ -1454,14 +1461,19 @@ class AnalysisDashboardStore:
         }
 
 
-def build_dashboard_app(store: AnalysisDashboardStore):
+def build_dashboard_app(
+    store: AnalysisDashboardStore,
+    *,
+    crosscoder_store: Any | None = None,
+    comparison_store: Any | None = None,
+):
     """Create the API and serve a built React bundle when one is available."""
 
     from fastapi import FastAPI, HTTPException
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 
-    app = FastAPI(title="Multi-model ASPD P1–P5 Research Dashboard")
+    app = FastAPI(title="Multi-model ASPD and Crosscoder Research Dashboard")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -1536,9 +1548,60 @@ def build_dashboard_app(store: AnalysisDashboardStore):
     @app.get("/api/features/{feature_id}")
     async def feature(feature_id: int) -> dict[str, Any]:
         try:
-            return store.feature_detail(feature_id)
+            detail = store.feature_detail(feature_id)
+            detail["related_crosscoder"] = (
+                comparison_store.related_to_aspd(feature_id)
+                if comparison_store is not None
+                else []
+            )
+            return detail
         except IndexError as exc:
             raise HTTPException(404, f"feature {feature_id} is out of range") from exc
+
+    @app.get("/api/crosscoder/overview")
+    async def crosscoder_overview() -> dict[str, Any]:
+        if crosscoder_store is None:
+            return {
+                "available": False,
+                "diagnostics": ["Crosscoder analysis directory was not configured or found."],
+            }
+        return crosscoder_store.overview()
+
+    @app.get("/api/crosscoder/candidates")
+    async def crosscoder_candidates() -> dict[str, Any]:
+        if crosscoder_store is None:
+            return {
+                "available": False,
+                "items": [],
+                "groups": {},
+                "diagnostics": ["Crosscoder analysis directory was not configured or found."],
+            }
+        return crosscoder_store.candidates()
+
+    @app.get("/api/crosscoder/features/{feature_id}")
+    async def crosscoder_feature(feature_id: int) -> dict[str, Any]:
+        if crosscoder_store is None:
+            raise HTTPException(404, "Crosscoder analysis is unavailable")
+        try:
+            detail = crosscoder_store.feature_detail(feature_id)
+            detail["related_aspd"] = (
+                comparison_store.related_to_crosscoder(feature_id)
+                if comparison_store is not None
+                else []
+            )
+            return detail
+        except IndexError as exc:
+            raise HTTPException(404, f"Crosscoder feature {feature_id} is out of range") from exc
+
+    @app.get("/api/research-comparison")
+    async def research_comparison() -> dict[str, Any]:
+        if comparison_store is None:
+            return {
+                "available": False,
+                "diagnostics": ["Structured research comparison artifact was not configured."],
+                "phenomena": [],
+            }
+        return comparison_store.payload()
 
     @app.get("/api/features/{feature_id}/matched-control")
     async def matched_control(

@@ -20,6 +20,7 @@ export default function FeatureExplorer({
   onNavigate,
   onBookmark,
   onCompare,
+  onCrosscoderFeature,
 }: {
   featureId: number;
   metadata: Metadata;
@@ -29,6 +30,7 @@ export default function FeatureExplorer({
   onNavigate: (id: number) => void;
   onBookmark: (id: number) => void;
   onCompare: (id: number) => void;
+  onCrosscoderFeature: (id: number) => void;
 }) {
   const [feature, setFeature] = useState<FeatureDetail | null>(null);
   const [error, setError] = useState("");
@@ -130,6 +132,14 @@ export default function FeatureExplorer({
       <div className="table-scroll"><table><thead><tr><th onClick={() => setP5Sort("matrix")}>Matrix</th><th>Base locus</th><th>FT locus</th>{(["component_cosine", "relative_component_change", "read_cosine", "write_cosine"] as const).map((key) => <th key={key} onClick={() => setP5Sort(key)}>{key.replaceAll("_", " ")}</th>)}</tr></thead>
         <tbody>{p5.map((row) => <tr key={row.matrix}><td>{row.matrix}</td><td><Metric value={feature.locus[metadata.model_names[0]]?.[row.matrix]} /></td><td><Metric value={feature.locus[metadata.model_names[1]]?.[row.matrix]} /></td><Heat value={row.component_cosine} source={row.sources.component_cosine} cosine /><Heat value={row.relative_component_change} source={row.sources.relative_component_change} /><Heat value={row.read_cosine} source={row.sources.read_cosine} cosine /><Heat value={row.write_cosine} source={row.sources.write_cosine} cosine /></tr>)}</tbody></table></div>
     </Section>
+
+    {feature.related_crosscoder?.length ? <Section title="Related Crosscoder evidence" kicker="Structured phenomenon references only">
+      {feature.related_crosscoder.map((relationship) => <div className="relationship-row" key={relationship.phenomenon_id}>
+        <div><strong>{relationship.phenomenon_label}</strong><Badge tone={relationship.status === "low_support_hypothesis" ? "warn" : "neutral"}>{relationship.status.replaceAll("_", " ")}</Badge><p>{relationship.status_definition}</p></div>
+        <div>{relationship.crosscoder_feature_ids.map((id) => <button className="id-button" key={id} onClick={() => onCrosscoderFeature(id)}>Crosscoder {id}</button>)}</div>
+      </div>)}
+      <p className="explain">These links come only from the tracked comparison artifact. They do not establish feature identity or causal equivalence.</p>
+    </Section> : null}
 
     <Section title="Matched control" kicker="Transparent numeric nearest neighbor">
       <p>Pool: <code>shared_activation_shared_mechanism</code>. Default variables: fire_count, beta_total, activation rho. Distance is range-normalized Euclidean distance.</p>

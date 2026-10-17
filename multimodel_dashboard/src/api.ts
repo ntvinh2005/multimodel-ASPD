@@ -1,4 +1,13 @@
-import type { FeatureDetail, HealthPayload, OverviewPayload, ResearcherNote } from "./types";
+import type {
+  CrosscoderCandidatesPayload,
+  CrosscoderFeatureDetail,
+  CrosscoderOverviewPayload,
+  FeatureDetail,
+  HealthPayload,
+  MethodComparisonPayload,
+  OverviewPayload,
+  ResearcherNote,
+} from "./types";
 
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init);
@@ -12,6 +21,11 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   overview: () => json<OverviewPayload>("/api/overview"),
   health: () => json<HealthPayload>("/api/health"),
+  crosscoderOverview: () => json<CrosscoderOverviewPayload>("/api/crosscoder/overview"),
+  crosscoderCandidates: () => json<CrosscoderCandidatesPayload>("/api/crosscoder/candidates"),
+  crosscoderFeature: (id: number) =>
+    json<CrosscoderFeatureDetail>(`/api/crosscoder/features/${id}`),
+  researchComparison: () => json<MethodComparisonPayload>("/api/research-comparison"),
   feature: (id: number) => json<FeatureDetail>(`/api/features/${id}`),
   compare: (ids: number[]) =>
     json<{ items: FeatureDetail[] }>(`/api/compare?${ids.map((id) => `ids=${id}`).join("&")}`),

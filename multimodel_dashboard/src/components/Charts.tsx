@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
-import type { FeatureSummary, Metadata } from "../types";
+import type { FeatureSummary, Metadata, RelativeNormBin } from "../types";
 import { formatMetric } from "./Common";
 
 const palette: Record<string, string> = {
@@ -115,4 +115,59 @@ export function Histogram({ values, title }: { values: Array<number | null>; tit
     <text x="28" y="145">{formatMetric(min, Math.abs(min) < 1e-4 ? "beta" : "default")}</text>
     <text x="270" y="145">{formatMetric(max, Math.abs(max) < 1e-4 ? "beta" : "default")}</text>
   </svg></div>;
+}
+
+export function RelativeNormHistogram({
+  bins,
+  convention,
+  thresholds,
+}: {
+  bins: RelativeNormBin[];
+  convention: string | null | undefined;
+  thresholds: {
+    base_specific?: [number, number];
+    shared?: [number, number];
+    finetuned_specific?: [number, number];
+  };
+}) {
+  if (!bins.length) return <div className="empty-state">Relative decoder norm histogram unavailable.</div>;
+  const width = 820, height = 300, left = 48, right = 18, top = 26, bottom = 48;
+  const innerWidth = width - left - right, innerHeight = height - top - bottom;
+  const maximum = Math.max(...bins.map((bin) => bin.count), 1);
+  const ticks = [...new Set([
+    0,
+    ...(thresholds.base_specific ?? []),
+    ...(thresholds.shared ?? []),
+    ...(thresholds.finetuned_specific ?? []),
+    1,
+  ])].sort((a, b) => a - b);
+  const region = (range: [number, number] | undefined, className: string, label: string) => {
+    if (!range) return null;
+    return <g className={className}>
+      <rect x={left + range[0] * innerWidth} y={top} width={(range[1] - range[0]) * innerWidth} height={innerHeight} />
+      <text x={left + ((range[0] + range[1]) / 2) * innerWidth} y={17} textAnchor="middle">{label}</text>
+    </g>;
+  };
+  return <div className="relative-norm-chart">
+    <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Relative decoder norm feature-count distribution">
+      {region(thresholds.base_specific, "threshold-region base-region", "strict base-specific")}
+      {region(thresholds.shared, "threshold-region shared-region", "shared")}
+      {region(thresholds.finetuned_specific, "threshold-region ft-region", "strict fine-tuned-specific")}
+      <line x1={left} y1={top + innerHeight} x2={left + innerWidth} y2={top + innerHeight} className="axis" />
+      {bins.map((bin) => <rect
+        key={bin.start}
+        x={left + bin.start * innerWidth}
+        y={top + innerHeight - (bin.count / maximum) * innerHeight}
+        width={Math.max(1, (bin.end - bin.start) * innerWidth - 1)}
+        height={(bin.count / maximum) * innerHeight}
+        className="relative-norm-bar"
+      ><title>{`${bin.start.toFixed(2)}–${bin.end.toFixed(2)}: ${bin.count.toLocaleString()} features`}</title></rect>)}
+      {ticks.map((tick) => <g key={tick}>
+        <line x1={left + tick * innerWidth} y1={top + innerHeight} x2={left + tick * innerWidth} y2={top + innerHeight + 5} className="axis" />
+        <text x={left + tick * innerWidth} y={top + innerHeight + 21} textAnchor="middle">{tick.toFixed(1)}</text>
+      </g>)}
+      <text x={left + innerWidth / 2} y={height - 3} textAnchor="middle">relative decoder norm · {convention ?? "orientation unavailable"}</text>
+      <text x={12} y={top + innerHeight / 2} transform={`rotate(-90 12 ${top + innerHeight / 2})`} textAnchor="middle">feature count</text>
+    </svg>
+  </div>;
 }

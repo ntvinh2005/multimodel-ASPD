@@ -1,0 +1,78 @@
+{
+  "metadata": {
+    "status": "post_ranking_researcher_comparison",
+    "date": "2026-10-17",
+    "not_feature_identity": true,
+    "not_causal": true,
+    "annotation_source": "llm_assisted_researcher_review",
+    "measured_values_are_external": true,
+    "measured_value_sources": {
+      "crosscoder": "out/multimodel/baselines/crosscoder/r1_qwen3_full/analysis",
+      "aspd": "out/multimodel/runs/qwen3_1_7b_d0_s1_main/analysis"
+    }
+  },
+  "global_summary": {
+    "crosscoder": [
+      "representation-space model diffing",
+      "excellent reconstruction with graded decoder-norm asymmetry",
+      "no strict-exclusive Qwen feature under the published thresholds"
+    ],
+    "aspd": [
+      "activation and parameter-mechanism decomposition",
+      "shared and concentrated parameter-mechanism categories are measured",
+      "the strongest parameter-concentrated components remain semantically unresolved"
+    ],
+    "current_finding": "The strongest current semantic overlaps do not coincide with the strongest ASPD parameter concentration."
+  },
+  "phenomena": [
+    {
+      "id": "hidden_reasoning_answer_boundary",
+      "label": "Hidden reasoning to visible answer boundary",
+      "status": "semantic_overlap",
+      "crosscoder_features": [62735, 18996],
+      "aspd_components": [736],
+      "interpretation": "Both methods retain contexts around the end of hidden reasoning and the onset of the visible answer.",
+      "limitations": [
+        "ASPD component 736 is shared activation/shared mechanism, not a changed parameter mechanism.",
+        "No latent identity, vector match, or causal equivalence has been measured."
+      ]
+    },
+    {
+      "id": "generic_chat_turn_boundaries",
+      "label": "Generic chat and turn boundaries",
+      "status": "semantic_overlap",
+      "crosscoder_features": [46552, 14851, 53275, 37279],
+      "aspd_components": [654, 3131],
+      "interpretation": "Retained contexts support a common qualitative family of chat, document, and response transitions.",
+      "limitations": [
+        "The features and components are not aligned one-to-one.",
+        "The high-support ASPD examples in this group are mechanism-shared."
+      ]
+    },
+    {
+      "id": "role_specific_response_onset",
+      "label": "Role-specific response onset",
+      "status": "low_support_hypothesis",
+      "crosscoder_features": [11544, 38275, 21266, 24222],
+      "aspd_components": [330, 36],
+      "interpretation": "Crosscoder response-onset contexts have possible ASPD analogues in the same boundary-token family.",
+      "limitations": [
+        "ASPD components 330 and 36 have only five validation fires each.",
+        "The relationship is a low-support hypothesis, not a measured match."
+      ]
+    },
+    {
+      "id": "aspd_parameter_concentration",
+      "label": "ASPD-only parameter concentration",
+      "status": "aspd_only_parameter_evidence",
+      "crosscoder_features": [],
+      "aspd_components": [440, 156],
+      "interpretation": "ASPD measures strong fine-tuned parameter concentration without a strict-exclusive Crosscoder counterpart.",
+      "limitations": [
+        "Component 440 contexts are heterogeneous and have no stable semantic label.",
+        "Component 156 has a tentative numeric/document-initial interpretation, but its contexts remain heterogeneous.",
+        "No strict-exclusive corresponding Crosscoder feature was measured."
+      ]
+    }
+  ]
+}
