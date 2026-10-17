@@ -146,6 +146,10 @@ The Activation examples panel has two context views:
 After running the updated `extract_examples` command below, coverage becomes `N/N` and the same UI
 renders the measured token heatmap. Because BatchTopK activations are sparse, a fully measured
 window may still contain only one positive colored token; measured zeros correctly remain clear.
+Each context therefore also includes a fixed-cell activation trace: every saved token position is
+visible as one cell, measured zeros remain dark, unavailable values are striped, and positive cells
+use the same continuous intensity scale as the token backgrounds. The summary reports positive and
+measured-zero counts explicitly.
 
 ### Optional vocabulary/logit artifact
 

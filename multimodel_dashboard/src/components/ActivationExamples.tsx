@@ -40,9 +40,10 @@ export function ActivationExamples({
       </span>
     </div>
     <div className="activation-legend" aria-label="Activation highlight legend">
-      <span>Measured zero or unavailable</span>
+      <i className="activation-key measured-zero" /><span>Measured zero</span>
+      <i className="activation-key unavailable" /><span>Unavailable</span>
       <i className="activation-gradient" />
-      <span>Strongest measured g<sup>s</sup><sub>t,c</sub> in context</span>
+      <span>Positive g<sup>s</sup><sub>t,c</sub> intensity</span>
     </div>
     {perTokenCount < ordered.length && <p className="measurement-note">
       {perTokenCount === 0
@@ -95,26 +96,30 @@ export function TokenActivationContext({
     </div>
     <div className="example-measurement-summary">
       <span>{measuredPositionCount}/{example.tokens.length} token positions measured</span>
+      <span>{measuredPositive.length} positive · {measuredPositionCount - measuredPositive.length} measured zero</span>
       {center >= 0 && <span>firing position: window {center}{sequencePosition === null ? "" : ` · sequence ${sequencePosition}`}</span>}
     </div>
     {example.tokens.length > 0 ?
-      <div className="token-activation-context" aria-label="Tokenizer-aligned activation positions">
-        {showBounds && <ContextBoundary
-          hiddenCount={start}
-          isSavedEdge={start === 0}
-          side="left"
-          centerAtEdge={center === 0}
-        />}
-        {tokens.map((token) =>
-          <TokenActivationSpan token={token} maximum={maximum} key={`${token.position}-${token.token_id}`} />
-        )}
-        {showBounds && <ContextBoundary
-          hiddenCount={example.tokens.length - end}
-          isSavedEdge={end === example.tokens.length}
-          side="right"
-          centerAtEdge={center === example.tokens.length - 1}
-        />}
-      </div> :
+      <>
+        <TokenActivationTrace tokens={tokens} maximum={maximum} />
+        <div className="token-activation-context" aria-label="Tokenizer-aligned activation positions">
+          {showBounds && <ContextBoundary
+            hiddenCount={start}
+            isSavedEdge={start === 0}
+            side="left"
+            centerAtEdge={center === 0}
+          />}
+          {tokens.map((token) =>
+            <TokenActivationSpan token={token} maximum={maximum} key={`${token.position}-${token.token_id}`} />
+          )}
+          {showBounds && <ContextBoundary
+            hiddenCount={example.tokens.length - end}
+            isSavedEdge={end === example.tokens.length}
+            side="right"
+            centerAtEdge={center === example.tokens.length - 1}
+          />}
+        </div>
+      </> :
       <p className="na">Tokenizer-aligned positions are unavailable for this context.</p>}
     {example.text && <details className="decoded-context">
       <summary>Decoded context</summary><p>{example.text}</p>
@@ -164,6 +169,42 @@ function ContextBoundary({
   </span>;
 }
 
+function TokenActivationTrace({
+  tokens,
+  maximum,
+}: {
+  tokens: TokenActivation[];
+  maximum: number;
+}) {
+  const style = { "--trace-columns": Math.max(1, tokens.length) } as CSSProperties;
+  return <div className="activation-trace" aria-label="Measured activation trace">
+    <span>g<sup>s</sup><sub>t,c</sub></span>
+    <div className="activation-trace-cells" style={style}>
+      {tokens.map((token) => {
+        const opacity = activationOpacity(token.activation, maximum);
+        const cellStyle = { "--activation-opacity": opacity } as CSSProperties;
+        const state = token.activation === null
+          ? "unavailable"
+          : token.activation > 0
+            ? "positive"
+            : "measured-zero";
+        return <i
+          className={`activation-trace-cell ${state}${token.is_center ? " center" : ""}`}
+          key={`${token.position}-${token.token_id}`}
+          style={cellStyle}
+          title={`window ${token.position} · sequence ${token.sequence_position ?? "unavailable"}\n${JSON.stringify(token.text)} · g^s=${token.activation ?? "unavailable"}`}
+        />;
+      })}
+    </div>
+  </div>;
+}
+
+function activationOpacity(activation: number | null, maximum: number): number {
+  if (activation === null || activation <= 0 || maximum <= 0) return 0;
+  const strength = Math.min(1, activation / maximum);
+  return 0.12 + Math.sqrt(strength) * 0.66;
+}
+
 export function TokenActivationSpan({
   token,
   maximum,
@@ -174,7 +215,7 @@ export function TokenActivationSpan({
   const strength = token.activation !== null && token.activation > 0 && maximum > 0
     ? Math.min(1, token.activation / maximum)
     : 0;
-  const opacity = strength === 0 ? 0 : 0.12 + Math.sqrt(strength) * 0.66;
+  const opacity = activationOpacity(token.activation, maximum);
   const label = token.text ?? token.exact_token ?? (token.token_id === null ? "?" : `#${token.token_id}`);
   const tooltip = [
     `token text: ${JSON.stringify(token.text)}`,
