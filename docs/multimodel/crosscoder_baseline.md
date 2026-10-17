@@ -97,3 +97,8 @@ sbatch --dependency=afterok:"$TRAIN_JOB" \
 After the R1 pilot passes, repeat with `r1_qwen3_full.yaml`. Candidate ranking is blind: decoder
 relative norm and validation activation frequency are computed before any context is decoded.
 Semantic labels must not be used to rerank candidates.
+
+The completed 10,000-step R1 run and its comparison with ASPD are reported in
+`docs/multimodel/results/general_model_diffing_final_report.md`. The strict 0.1/0.9 thresholds
+yielded no model-exclusive Qwen feature; the analysis preserves that negative result and uses
+separately named score tails only for post-ranking context inspection.

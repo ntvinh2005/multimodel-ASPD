@@ -275,6 +275,34 @@ def published_csv_score_to_paper_orientation(score: float) -> float:
     return 1.0 - score
 
 
+def blind_candidate_groups(
+    relative: Tensor,
+    fire_count: Tensor,
+    categories: list[str],
+    *,
+    per_group: int,
+) -> dict[str, list[int]]:
+    """Select score tails without relabeling them as strictly model-exclusive.
+
+    The paper thresholds remain the source of classification. Tail selection is a separate,
+    always-defined ranking for post-hoc inspection when a model pair has no features beyond those
+    thresholds. Features that never fire on validation are excluded from context candidates.
+    """
+
+    fired = [index for index in range(len(categories)) if int(fire_count[index]) > 0]
+    base_tail = sorted(fired, key=lambda i: (float(relative[i]), -int(fire_count[i])))
+    finetuned_tail = sorted(
+        fired, key=lambda i: (-float(relative[i]), -int(fire_count[i]))
+    )
+    shared = [index for index in fired if categories[index] == "shared"]
+    shared.sort(key=lambda i: (abs(float(relative[i]) - 0.5), -int(fire_count[i])))
+    return {
+        "base-tail": base_tail[:per_group],
+        "shared": shared[:per_group],
+        "finetuned-tail": finetuned_tail[:per_group],
+    }
+
+
 def _atomic_torch_save(value: Any, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(dir=path.parent, suffix=".pt", delete=False) as handle:
@@ -643,11 +671,40 @@ def analyze_crosscoder(
     category_indices["shared"].sort(
         key=lambda i: (abs(float(relative[i]) - 0.5), -int(fire_count[i]))
     )
+    category_indices["intermediate"].sort(
+        key=lambda i: (-abs(float(relative[i]) - 0.5), -int(fire_count[i]))
+    )
     ranks: dict[int, int] = {}
     for indices in category_indices.values():
         for rank, feature_id in enumerate(indices, start=1):
             ranks[feature_id] = rank
 
+    candidate_groups = blind_candidate_groups(
+        relative,
+        fire_count,
+        categories,
+        per_group=cfg.crosscoder.top_examples_per_category,
+    )
+    base_tail_ranks = {
+        feature_id: rank
+        for rank, feature_id in enumerate(
+            sorted(
+                range(model.n_features),
+                key=lambda i: (float(relative[i]), -int(fire_count[i])),
+            ),
+            start=1,
+        )
+    }
+    finetuned_tail_ranks = {
+        feature_id: rank
+        for rank, feature_id in enumerate(
+            sorted(
+                range(model.n_features),
+                key=lambda i: (-float(relative[i]), -int(fire_count[i])),
+            ),
+            start=1,
+        )
+    }
     features = [
         {
             "feature_id": feature_id,
@@ -660,6 +717,8 @@ def analyze_crosscoder(
             "activation_density": int(fire_count[feature_id]) / total_tokens,
             "classification": categories[feature_id],
             "blind_rank_within_class": ranks[feature_id],
+            "blind_rank_base_tail": base_tail_ranks[feature_id],
+            "blind_rank_finetuned_tail": finetuned_tail_ranks[feature_id],
         }
         for feature_id in range(model.n_features)
     ]
@@ -679,7 +738,11 @@ def analyze_crosscoder(
             "finetuned_specific": [cfg.analysis.concentrated_threshold, 1.0],
         },
         "relative_decoder_norm_convention": "0=base-specific, 1=finetuned-specific",
-        "candidate_selection": "blind: relative decoder norm, then validation fire count",
+        "candidate_selection": (
+            "blind base/finetuned score tails plus shared center; relative decoder norm, "
+            "then validation fire count; tail selection does not change threshold classification"
+        ),
+        "candidate_groups": candidate_groups,
     }
     _write_json(
         destination / "feature_metrics.json",
@@ -687,9 +750,7 @@ def analyze_crosscoder(
     )
     _write_json(destination / "summary.json", summary)
 
-    selected: list[int] = []
-    for name in ("base-specific", "shared", "finetuned-specific"):
-        selected.extend(category_indices[name][: cfg.crosscoder.top_examples_per_category])
+    selected = list(dict.fromkeys(feature_id for rows in candidate_groups.values() for feature_id in rows))
     # Reuse ASPD's streaming exact-token context accumulator; only C is method-specific.
     analysis_cfg = cfg.model_copy(
         update={
@@ -722,10 +783,50 @@ def analyze_crosscoder(
         destination / "top_activation_examples.json",
         {
             "metadata": {
-                "selection": "blind top features within base-specific/shared/finetuned-specific classes",
+                "selection": (
+                    "blind base/finetuned relative-norm tails plus shared center; strict "
+                    "classification remains recorded in feature_metrics.json"
+                ),
                 "feature_ids": selected,
+                "candidate_groups": candidate_groups,
             },
             "features": examples,
+        },
+    )
+
+    feature_by_id = {row["feature_id"]: row for row in features}
+    annotation_rows = []
+    for feature_id in selected:
+        feature = feature_by_id[feature_id]
+        annotation_rows.append(
+            {
+                "feature_id": feature_id,
+                "blind_classification": feature["classification"],
+                "blind_rank_within_class": feature["blind_rank_within_class"],
+                "candidate_groups": [
+                    name for name, ids in candidate_groups.items() if feature_id in ids
+                ],
+                "annotation_status": "not_annotated",
+                "annotation_source": None,
+                "tentative_label": None,
+                "confidence": None,
+                "evidence_validation_sequence_indices": [
+                    example["validation_sequence_index"] for example in examples[str(feature_id)]
+                ],
+                "notes": None,
+            }
+        )
+    _write_json(
+        destination / "semantic_annotations.json",
+        {
+            "metadata": {
+                "purpose": "post-ranking semantic annotations",
+                "rank_is_frozen": True,
+                "labels_are_not_measured_ground_truth": True,
+                "allowed_annotation_sources": ["manual_researcher", "llm_judge"],
+                "llm_requirements": "record model, version, prompt, and raw evidence",
+            },
+            "annotations": annotation_rows,
         },
     )
 

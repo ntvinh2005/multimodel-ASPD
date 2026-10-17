@@ -4,6 +4,7 @@ import torch
 
 from aspd.multimodel.baselines.crosscoder import (
     BatchTopKCrosscoder,
+    blind_candidate_groups,
     classify_relative_norm,
     load_crosscoder_config,
     published_csv_score_to_paper_orientation,
@@ -46,6 +47,21 @@ def test_relative_decoder_norm_orientation_and_classes() -> None:
         for value in score
     ] == ["base-specific", "shared", "finetuned-specific"]
     assert published_csv_score_to_paper_orientation(0.1) == 0.9
+
+
+def test_blind_candidates_include_score_tails_without_changing_classes() -> None:
+    relative = torch.tensor([0.2, 0.49, 0.5, 0.51, 0.8, 0.95])
+    fire_count = torch.tensor([3, 8, 0, 9, 7, 0])
+    categories = ["intermediate", "shared", "shared", "shared", "intermediate", "finetuned-specific"]
+    groups = blind_candidate_groups(relative, fire_count, categories, per_group=2)
+
+    assert groups == {
+        "base-tail": [0, 1],
+        "shared": [3, 1],
+        "finetuned-tail": [4, 3],
+    }
+    assert categories[0] == "intermediate"
+    assert categories[4] == "intermediate"
 
 
 def test_crosscoder_configs_preserve_r0_and_r1_protocols() -> None:

@@ -1,0 +1,170 @@
+{
+  "metadata": {
+    "status": "post-ranking_tentative_annotations",
+    "date": "2026-10-17",
+    "annotation_source": "llm_assisted_researcher_review",
+    "model": "OpenAI Codex session model",
+    "model_version": "exact deployment revision unavailable",
+    "prompt": "Review only the frozen blind candidate groups. Infer tentative semantic labels from exact retained token contexts. Do not reorder candidates, alter measured classifications, or treat labels as ground truth.",
+    "crosscoder_evidence": "out/multimodel/baselines/crosscoder/r1_qwen3_full/analysis/top_activation_examples.json",
+    "aspd_evidence": "out/multimodel/runs/qwen3_1_7b_d0_s1_main/analysis/top_activation_examples.json",
+    "limitations": [
+      "Labels are qualitative summaries of a small retained context set.",
+      "A similar label does not establish that a Crosscoder feature and ASPD component are the same mechanism.",
+      "Crosscoder tail membership is distinct from strict paper-threshold model exclusivity."
+    ]
+  },
+  "crosscoder": [
+    {
+      "feature_id": 11544,
+      "blind_group": "base-tail",
+      "measured_classification": "intermediate",
+      "tentative_label": "user-role token at a new user turn",
+      "confidence": 0.96,
+      "evidence_validation_sequence_indices": [116, 121, 194, 65]
+    },
+    {
+      "feature_id": 38275,
+      "blind_group": "base-tail",
+      "measured_classification": "intermediate",
+      "tentative_label": "assistant-role token at response onset",
+      "confidence": 0.98,
+      "evidence_validation_sequence_indices": [24, 231, 167, 254]
+    },
+    {
+      "feature_id": 41013,
+      "blind_group": "base-tail",
+      "measured_classification": "intermediate",
+      "tentative_label": "conversation or document transition newline",
+      "confidence": 0.82,
+      "evidence_validation_sequence_indices": [147, 112, 143, 111]
+    },
+    {
+      "feature_id": 21266,
+      "blind_group": "base-tail",
+      "measured_classification": "intermediate",
+      "tentative_label": "assistant response onset after a user instruction",
+      "confidence": 0.93,
+      "evidence_validation_sequence_indices": [38, 254, 80, 21]
+    },
+    {
+      "feature_id": 24222,
+      "blind_group": "base-tail",
+      "measured_classification": "intermediate",
+      "tentative_label": "assistant response onset after a follow-up request",
+      "confidence": 0.94,
+      "evidence_validation_sequence_indices": [76, 96, 25, 62]
+    },
+    {
+      "feature_id": 62735,
+      "blind_group": "finetuned-tail",
+      "measured_classification": "intermediate",
+      "tentative_label": "end-of-hidden-reasoning marker before visible answer",
+      "confidence": 0.99,
+      "evidence_validation_sequence_indices": [23, 62, 166, 5]
+    },
+    {
+      "feature_id": 46552,
+      "blind_group": "finetuned-tail",
+      "measured_classification": "intermediate",
+      "tentative_label": "chat turn boundary markers",
+      "confidence": 0.99,
+      "evidence_validation_sequence_indices": [215, 195, 213, 193]
+    },
+    {
+      "feature_id": 14851,
+      "blind_group": "finetuned-tail",
+      "measured_classification": "intermediate",
+      "tentative_label": "end-of-user-turn before an assistant response",
+      "confidence": 0.98,
+      "evidence_validation_sequence_indices": [147, 227, 21, 109]
+    },
+    {
+      "feature_id": 18996,
+      "blind_group": "finetuned-tail",
+      "measured_classification": "intermediate",
+      "tentative_label": "visible answer onset following an empty think block",
+      "confidence": 0.99,
+      "evidence_validation_sequence_indices": [158, 166, 56, 5]
+    },
+    {
+      "feature_id": 53275,
+      "blind_group": "finetuned-tail",
+      "measured_classification": "intermediate",
+      "tentative_label": "end-of-turn followed by a new user request",
+      "confidence": 0.98,
+      "evidence_validation_sequence_indices": [38, 80, 9, 180]
+    },
+    {
+      "feature_id": 54455,
+      "blind_group": "finetuned-tail",
+      "measured_classification": "intermediate",
+      "tentative_label": "assistant answer-initial token",
+      "confidence": 0.86,
+      "evidence_validation_sequence_indices": [38, 24, 110, 80]
+    },
+    {
+      "feature_id": 37279,
+      "blind_group": "finetuned-tail",
+      "measured_classification": "intermediate",
+      "tentative_label": "end-of-turn or document before a new user request",
+      "confidence": 0.97,
+      "evidence_validation_sequence_indices": [194, 224, 41, 123]
+    }
+  ],
+  "aspd": [
+    {
+      "feature_id": 736,
+      "measured_taxonomy": "shared_activation_shared_mechanism",
+      "tentative_label": "end-of-hidden-reasoning marker before visible answer",
+      "confidence": 0.99,
+      "fire_count": 280
+    },
+    {
+      "feature_id": 654,
+      "measured_taxonomy": "shared_activation_shared_mechanism",
+      "tentative_label": "end-of-document followed by a new user turn",
+      "confidence": 0.99,
+      "fire_count": 85
+    },
+    {
+      "feature_id": 3131,
+      "measured_taxonomy": "shared_activation_shared_mechanism",
+      "tentative_label": "assistant response onset newline",
+      "confidence": 0.96,
+      "fire_count": 106
+    },
+    {
+      "feature_id": 330,
+      "measured_taxonomy": "shared_activation_concentrated_mechanism",
+      "tentative_label": "chat or document boundary tokens",
+      "confidence": 0.91,
+      "fire_count": 5,
+      "warning": "low validation support"
+    },
+    {
+      "feature_id": 36,
+      "measured_taxonomy": "shared_activation_concentrated_mechanism",
+      "tentative_label": "chat or document boundary tokens",
+      "confidence": 0.91,
+      "fire_count": 5,
+      "warning": "low validation support"
+    },
+    {
+      "feature_id": 440,
+      "measured_taxonomy": "shared_activation_concentrated_mechanism",
+      "tentative_label": "broad high-frequency content-token feature",
+      "confidence": 0.3,
+      "fire_count": 257,
+      "warning": "contexts are heterogeneous; no stable semantic label established"
+    },
+    {
+      "feature_id": 156,
+      "measured_taxonomy": "concentrated_activation_concentrated_mechanism",
+      "tentative_label": "numeric or document-initial token positions",
+      "confidence": 0.45,
+      "fire_count": 1969,
+      "warning": "high support but heterogeneous contexts"
+    }
+  ]
+}
