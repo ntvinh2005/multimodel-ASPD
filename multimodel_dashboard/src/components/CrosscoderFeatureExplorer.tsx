@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { CrosscoderFeatureDetail, CrosscoderMetadata } from "../types";
 import { ActivationExamples } from "./ActivationExamples";
-import { Badge, Metric, Section, Source } from "./Common";
+import { Badge, crosscoderArtifactTitle, crosscoderDisplayConvention, crosscoderDisplayLabel, Metric, Section, Source } from "./Common";
 
 export default function CrosscoderFeatureExplorer({
   featureId,
@@ -39,12 +39,12 @@ export default function CrosscoderFeatureExplorer({
     <div className="classification-split">
       <div className="measured-panel">
         <span className="scientific-kind">MEASURED · STRICT CLASSIFICATION</span>
-        <strong>{feature.classification}</strong>
-        <small>{feature.relative_decoder_norm_convention ?? "Convention is recorded in the overview artifact."}</small>
+        <strong title={crosscoderArtifactTitle(feature.classification)}>{crosscoderDisplayLabel(feature.classification)}</strong>
+        <small title={feature.relative_decoder_norm_convention}>{crosscoderDisplayConvention(feature.relative_decoder_norm_convention)}</small>
       </div>
       <div className="derived-panel">
         <span className="scientific-kind">DERIVED RANK · INSPECTION GROUP</span>
-        <strong>{feature.inspection_groups.length ? feature.inspection_groups.join(", ") : "not a frozen inspection candidate"}</strong>
+        <strong title={feature.inspection_groups.map(crosscoderArtifactTitle).filter(Boolean).join(" ") || undefined}>{feature.inspection_groups.length ? feature.inspection_groups.join(", ") : "not a frozen inspection candidate"}</strong>
         <small>Tail membership does not imply strict model specificity.</small>
       </div>
     </div>
@@ -53,7 +53,7 @@ export default function CrosscoderFeatureExplorer({
       <div className="metric-card-grid">
         <MetricCard label="Relative decoder norm" value={feature.relative_decoder_norm} />
         <MetricCard label="Base decoder norm" value={feature.decoder_norm_base} />
-        <MetricCard label="Fine-tuned decoder norm" value={feature.decoder_norm_finetuned} />
+        <MetricCard label="Target/post-trained decoder norm" value={feature.decoder_norm_finetuned} title="Artifact role: finetuned" />
         <MetricCard label="Decoder cosine" value={feature.decoder_cosine} />
         <MetricCard label="Fire count" value={feature.fire_count} integer />
         <MetricCard label="Activation density" value={feature.activation_density} percent />
@@ -61,7 +61,7 @@ export default function CrosscoderFeatureExplorer({
       <div className="rank-grid">
         <div><span>Strict-class rank</span><Metric value={feature.blind_rank_within_class} kind="integer" /></div>
         <div><span>Base-tail rank</span><Metric value={feature.blind_rank_base_tail} kind="integer" /></div>
-        <div><span>Fine-tuned-tail rank</span><Metric value={feature.blind_rank_finetuned_tail} kind="integer" /></div>
+        <div title={crosscoderArtifactTitle("finetuned-tail")}><span>Target/post-trained-tail rank</span><Metric value={feature.blind_rank_finetuned_tail} kind="integer" /></div>
       </div>
       <Source>{feature.sources.measured}</Source>
     </Section>
@@ -100,6 +100,6 @@ export default function CrosscoderFeatureExplorer({
   </div>;
 }
 
-function MetricCard({ label, value, integer = false, percent = false }: { label: string; value: number | null; integer?: boolean; percent?: boolean }) {
-  return <div className="metric-card"><span>{label}</span><strong><Metric value={value} kind={integer ? "integer" : percent ? "percent" : undefined} /></strong><small>MEASURED</small></div>;
+function MetricCard({ label, value, integer = false, percent = false, title }: { label: string; value: number | null; integer?: boolean; percent?: boolean; title?: string }) {
+  return <div className="metric-card" title={title}><span>{label}</span><strong><Metric value={value} kind={integer ? "integer" : percent ? "percent" : undefined} /></strong><small>MEASURED</small></div>;
 }

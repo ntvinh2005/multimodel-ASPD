@@ -1,6 +1,6 @@
 import type { CrosscoderOverviewPayload } from "../types";
 import { RelativeNormHistogram } from "./Charts";
-import { Badge, Metric, Section, Source } from "./Common";
+import { Badge, crosscoderArtifactTitle, crosscoderDisplayConvention, crosscoderDisplayLabel, Metric, Section, Source } from "./Common";
 
 export default function CrosscoderOverview({
   data,
@@ -40,7 +40,7 @@ export default function CrosscoderOverview({
       <div className="metric-card-grid">
         <MetricCard label="Total FVE" value={metrics.fve_total} source={data.sources?.summary} />
         <MetricCard label="Base FVE" value={metrics.fve_base} source={data.sources?.summary} />
-        <MetricCard label="Fine-tuned FVE" value={metrics.fve_finetuned} source={data.sources?.summary} />
+        <MetricCard label="Target/post-trained FVE" value={metrics.fve_finetuned} source={data.sources?.summary} title="Artifact role: finetuned" />
         <MetricCard label="Validation L0" value={metrics.validation_l0} source={data.sources?.summary} />
         <MetricCard label="Dead features" value={metrics.dead_count} integer source={data.sources?.summary} />
         <MetricCard label="Dead fraction" value={metrics.dead_fraction} percent source={data.sources?.summary} />
@@ -49,11 +49,11 @@ export default function CrosscoderOverview({
     </Section>
 
     <Section title="Relative decoder norm distribution" kicker="Central measured result">
-      <p className="explain">{data.relative_decoder_norm_convention}. Shaded regions are the stored published thresholds; unshaded values are intermediate.</p>
+      <p className="explain" title={data.relative_decoder_norm_convention ?? undefined}>{crosscoderDisplayConvention(data.relative_decoder_norm_convention)}. Shaded regions are the stored published thresholds; unshaded values are intermediate. The artifact schema calls the target/post-trained role <code>finetuned</code>.</p>
       {data.strict_exclusive_absent && <div className="result-callout"><strong>{data.strict_result}</strong><span>This is a scientific result, not an error state.</span></div>}
       <div className="taxonomy-grid crosscoder-class-grid">
         {classOrder.map((classification) => <div className="taxonomy-card" key={classification}>
-          <span>{classification}</span>
+          <span title={crosscoderArtifactTitle(classification)}>{crosscoderDisplayLabel(classification)}</span>
           <strong>{data.classification_counts?.[classification]?.toLocaleString() ?? "N/A"}</strong>
           <Metric value={data.classification_fractions?.[classification]} kind="percent" />
         </div>)}
@@ -74,7 +74,7 @@ export default function CrosscoderOverview({
       <p className="explain">{data.candidate_selection}. A tail name describes inspection rank only and never changes strict classification.</p>
       <div className="inspection-groups">
         {Object.entries(data.candidate_groups ?? {}).map(([group, ids]) => <div key={group} className="inspection-group">
-          <h3>{group}</h3><span>{ids.length} frozen candidates</span>
+          <h3 title={crosscoderArtifactTitle(group)}>{group}</h3><span>{ids.length} frozen candidates{group === "finetuned-tail" ? " · target/post-trained tail" : ""}</span>
           <div>{ids.map((id) => <button className="id-button" key={id} onClick={() => onFeature(id)}>{id}</button>)}</div>
         </div>)}
       </div>
@@ -83,8 +83,8 @@ export default function CrosscoderOverview({
   </div>;
 }
 
-function MetricCard({ label, value, source, integer = false, percent = false }: { label: string; value: number | null; source?: string; integer?: boolean; percent?: boolean }) {
-  return <div className="metric-card"><span>{label}</span><strong><Metric value={value} kind={integer ? "integer" : percent ? "percent" : undefined} source={source} /></strong><small>MEASURED</small></div>;
+function MetricCard({ label, value, source, integer = false, percent = false, title }: { label: string; value: number | null; source?: string; integer?: boolean; percent?: boolean; title?: string }) {
+  return <div className="metric-card" title={title}><span>{label}</span><strong><Metric value={value} kind={integer ? "integer" : percent ? "percent" : undefined} source={source} /></strong><small>MEASURED</small></div>;
 }
 
 function Meta({ label, value, mono = false }: { label: string; value: string | null | undefined; mono?: boolean }) {

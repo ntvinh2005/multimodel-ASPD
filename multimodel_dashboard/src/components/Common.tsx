@@ -9,6 +9,23 @@ export function formatMetric(value: number | null | undefined, kind = "default")
   return value.toFixed(4);
 }
 
+// Keep the stored Crosscoder schema unchanged while using the scientifically
+// accurate role name for this broad post-trained Qwen target in the UI.
+export function crosscoderDisplayLabel(value: string): string {
+  if (value === "finetuned-specific") return "target/post-trained-specific";
+  return value;
+}
+
+export function crosscoderArtifactTitle(value: string): string | undefined {
+  if (!value.includes("finetuned")) return undefined;
+  return `Artifact label: ${value}. In this experiment, “finetuned” is the schema role for the target/post-trained Qwen3-1.7B model.`;
+}
+
+export function crosscoderDisplayConvention(value: string | null | undefined): string {
+  if (!value) return "orientation unavailable";
+  return value.replaceAll("finetuned", "target/post-trained");
+}
+
 export function Metric({
   value,
   source,

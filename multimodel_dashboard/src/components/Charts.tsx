@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import type { FeatureSummary, Metadata, RelativeNormBin } from "../types";
-import { formatMetric } from "./Common";
+import { crosscoderDisplayConvention, formatMetric } from "./Common";
 
 const palette: Record<string, string> = {
   shared_activation_shared_mechanism: "#5ea6ff",
@@ -130,10 +130,14 @@ export function RelativeNormHistogram({
     finetuned_specific?: [number, number];
   };
 }) {
+  const [countScale, setCountScale] = useState<"linear" | "log">("log");
   if (!bins.length) return <div className="empty-state">Relative decoder norm histogram unavailable.</div>;
   const width = 820, height = 300, left = 48, right = 18, top = 26, bottom = 48;
   const innerWidth = width - left - right, innerHeight = height - top - bottom;
   const maximum = Math.max(...bins.map((bin) => bin.count), 1);
+  const barFraction = (count: number) => countScale === "log"
+    ? Math.log1p(count) / Math.log1p(maximum)
+    : count / maximum;
   const ticks = [...new Set([
     0,
     ...(thresholds.base_specific ?? []),
@@ -143,31 +147,46 @@ export function RelativeNormHistogram({
   ])].sort((a, b) => a - b);
   const region = (range: [number, number] | undefined, className: string, label: string) => {
     if (!range) return null;
+    const midpoint = (range[0] + range[1]) / 2;
+    const textAnchor = midpoint < 0.2 ? "start" : midpoint > 0.8 ? "end" : "middle";
+    const labelX = textAnchor === "start"
+      ? left + range[0] * innerWidth + 3
+      : textAnchor === "end"
+        ? left + range[1] * innerWidth - 3
+        : left + midpoint * innerWidth;
     return <g className={className}>
       <rect x={left + range[0] * innerWidth} y={top} width={(range[1] - range[0]) * innerWidth} height={innerHeight} />
-      <text x={left + ((range[0] + range[1]) / 2) * innerWidth} y={17} textAnchor="middle">{label}</text>
+      <text x={labelX} y={17} textAnchor={textAnchor}>{label}</text>
     </g>;
   };
   return <div className="relative-norm-chart">
+    <div className="chart-scale-controls">
+      <span>Count scale</span>
+      <div className="segmented-control compact" role="group" aria-label="Histogram count scale">
+        <button type="button" className={countScale === "linear" ? "active" : ""} aria-pressed={countScale === "linear"} onClick={() => setCountScale("linear")}>Linear count</button>
+        <button type="button" className={countScale === "log" ? "active" : ""} aria-pressed={countScale === "log"} onClick={() => setCountScale("log")}>Log count</button>
+      </div>
+      <small>{countScale === "log" ? "log(1 + count) height reveals low-count tail bins; hover shows exact counts." : "Bar height is directly proportional to exact feature count."}</small>
+    </div>
     <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Relative decoder norm feature-count distribution">
       {region(thresholds.base_specific, "threshold-region base-region", "strict base-specific")}
       {region(thresholds.shared, "threshold-region shared-region", "shared")}
-      {region(thresholds.finetuned_specific, "threshold-region ft-region", "strict fine-tuned-specific")}
+      {region(thresholds.finetuned_specific, "threshold-region ft-region", "strict target/post-trained")}
       <line x1={left} y1={top + innerHeight} x2={left + innerWidth} y2={top + innerHeight} className="axis" />
       {bins.map((bin) => <rect
         key={bin.start}
         x={left + bin.start * innerWidth}
-        y={top + innerHeight - (bin.count / maximum) * innerHeight}
+        y={top + innerHeight - barFraction(bin.count) * innerHeight}
         width={Math.max(1, (bin.end - bin.start) * innerWidth - 1)}
-        height={(bin.count / maximum) * innerHeight}
+        height={barFraction(bin.count) * innerHeight}
         className="relative-norm-bar"
       ><title>{`${bin.start.toFixed(2)}–${bin.end.toFixed(2)}: ${bin.count.toLocaleString()} features`}</title></rect>)}
       {ticks.map((tick) => <g key={tick}>
         <line x1={left + tick * innerWidth} y1={top + innerHeight} x2={left + tick * innerWidth} y2={top + innerHeight + 5} className="axis" />
         <text x={left + tick * innerWidth} y={top + innerHeight + 21} textAnchor="middle">{tick.toFixed(1)}</text>
       </g>)}
-      <text x={left + innerWidth / 2} y={height - 3} textAnchor="middle">relative decoder norm · {convention ?? "orientation unavailable"}</text>
-      <text x={12} y={top + innerHeight / 2} transform={`rotate(-90 12 ${top + innerHeight / 2})`} textAnchor="middle">feature count</text>
+      <text x={left + innerWidth / 2} y={height - 3} textAnchor="middle">relative decoder norm · {crosscoderDisplayConvention(convention)}</text>
+      <text x={12} y={top + innerHeight / 2} transform={`rotate(-90 12 ${top + innerHeight / 2})`} textAnchor="middle">feature count · {countScale}</text>
     </svg>
   </div>;
 }

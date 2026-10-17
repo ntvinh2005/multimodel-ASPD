@@ -1,5 +1,5 @@
 import type { MethodComparisonPayload, SemanticAnnotation } from "../types";
-import { Badge, Metric, Section, Source } from "./Common";
+import { Badge, crosscoderArtifactTitle, crosscoderDisplayLabel, Metric, Section, Source } from "./Common";
 
 export default function MethodComparison({
   data,
@@ -23,8 +23,8 @@ export default function MethodComparison({
     <div className="method-summary-grid">
       <article className="method-summary-card">
         <span className="scientific-kind">METHOD</span><h2>Crosscoder</h2><strong>Representation-space model diffing</strong>
-        <div className="mini-metrics"><span>FVE <Metric value={measured?.crosscoder?.metrics.fve_total} /></span><span>Strict base / FT exclusive <strong>{measured?.crosscoder?.classification_counts["base-specific"] ?? "N/A"} / {measured?.crosscoder?.classification_counts["finetuned-specific"] ?? "N/A"}</strong></span></div>
-        <div className="global-counts">{Object.entries(measured?.crosscoder?.classification_counts ?? {}).map(([label, count]) => <span key={label}>{label.replaceAll("-", " ")} <strong>{count.toLocaleString()}</strong></span>)}</div>
+        <div className="mini-metrics"><span>FVE <Metric value={measured?.crosscoder?.metrics.fve_total} /></span><span title="Artifact role: finetuned">Strict base / target/post-trained exclusive <strong>{measured?.crosscoder?.classification_counts["base-specific"] ?? "N/A"} / {measured?.crosscoder?.classification_counts["finetuned-specific"] ?? "N/A"}</strong></span></div>
+        <div className="global-counts">{Object.entries(measured?.crosscoder?.classification_counts ?? {}).map(([label, count]) => <span key={label} title={crosscoderArtifactTitle(label)}>{crosscoderDisplayLabel(label).replaceAll("-", " ")} <strong>{count.toLocaleString()}</strong></span>)}</div>
         <p>{measured?.crosscoder?.strict_result ?? "Measured Crosscoder summary unavailable."}</p>
         <ul>{data.global_summary?.crosscoder?.map((item) => <li key={item}>{item}</li>)}</ul>
       </article>
@@ -45,8 +45,8 @@ export default function MethodComparison({
         <div className="evidence-columns">
           <div><h3>Crosscoder evidence</h3>{phenomenon.crosscoder_evidence.length === 0 ? <p className="na">No strict-exclusive corresponding Crosscoder feature is referenced.</p> : phenomenon.crosscoder_evidence.map((feature) => <div className="evidence-card" key={feature.feature_id}>
             <button className="id-button" onClick={() => onCrosscoderFeature(feature.feature_id)}>Feature {feature.feature_id}</button>
-            <div><span>Strict class</span><strong>{feature.classification}</strong></div>
-            <div><span>Inspection group</span><strong>{feature.inspection_groups.join(", ") || "none"}</strong></div>
+            <div><span>Strict class</span><strong title={crosscoderArtifactTitle(feature.classification)}>{crosscoderDisplayLabel(feature.classification)}</strong></div>
+            <div><span>Inspection group</span><strong title={feature.inspection_groups.map(crosscoderArtifactTitle).filter(Boolean).join(" ") || undefined}>{feature.inspection_groups.join(", ") || "none"}</strong></div>
             <div><span>Relative norm</span><Metric value={feature.relative_decoder_norm} /></div>
             <div><span>Fires</span><Metric value={feature.fire_count} kind="integer" /></div>
             <AnnotationSummary annotation={feature.semantic_annotation} />
