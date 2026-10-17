@@ -1,18 +1,24 @@
 # Crosscoder run status and wake-up schedule
 
-Last updated: 2026-10-17 13:19 America/New_York.
+Last updated: 2026-10-17 13:38 America/New_York.
 
 ## Current state
 
 - Hugging Face authentication and gated access to both exact Gemma repositories: verified.
 - Code verification: Ruff, shell syntax, diff whitespace, and all 48 multimodel tests pass.
 - R0 public artifact reproduction: complete.
-- R0 local pilot chain is active:
-  - cache `46441587`: running on B200 node `c0901a-s15`, started 13:16:53 EDT;
-  - train `46441590`: pending on successful cache completion;
-  - analyze `46441591`: pending on successful training completion.
-- First live log check showed the authenticated model-file fetch had started without an error.
-- R1 Qwen pilot/full: intentionally not submitted until the R0 local pilot passes.
+- R0 local pilot: complete. Jobs `46441587`, `46441590`, and `46441591` all exited 0.
+  It verified paired caching, forward/loss, checkpoint reload, and analysis generation. Its tiny-run
+  metrics are diagnostic only (FVE total 0.0147, L0 0.77, dead fraction 65.4%).
+- R0 full local training was not submitted: the canonical float32 cache is estimated at about
+  1.9 TB, but `/blue/thai` currently reports only about 856 GB available. The authors' full
+  checkpoint/statistics reproduction remains available under `r0_gemma2_full/published_analysis`.
+- R1 Qwen pilot: complete. Jobs `46443705` and `46443706` exited 0 in 74 seconds total. Final
+  validation FVE was 0.765 (base 0.746, fine-tuned 0.782), L0 was 13.27, and dead fraction was
+  19.6%; all 4,096 feature rows and selected contexts were produced.
+- R1 full chain is active:
+  - train `46443909`: running on B200 node `c0909a-s5`, started 13:36:37 EDT;
+  - analyze `46443910`: pending on successful training completion.
 
 Published R0 artifacts are available at:
 
@@ -27,14 +33,14 @@ the original rank.
 
 ## Next check
 
-Wake Codex at or after **14:20 EDT on 2026-10-17**. This is approximately one hour after the
-cache stage began. The dependent train and analysis jobs will start automatically after successful
-predecessors, so no command is required in the meantime.
+Wake Codex at or after **14:20 EDT on 2026-10-17**. This is about 45 minutes after R1 full
+training began. The analysis job will start automatically after successful training, so no command
+is required in the meantime.
 
 ```bash
-squeue -j 46441587,46441590,46441591
-tail -n 100 slurm/logs/cc-r0p-cache-46441587.out
-tail -n 100 slurm/logs/cc-r0p-cache-46441587.err
+squeue -j 46443909,46443910
+tail -n 100 slurm/logs/cc-r1-full-train-46443909.out
+tail -n 100 slurm/logs/cc-r1-full-train-46443909.err
 ```
 
 ## Expected durations and wake-up points
