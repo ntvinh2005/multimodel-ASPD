@@ -1,6 +1,6 @@
 # Crosscoder run status and wake-up schedule
 
-Last updated: 2026-10-17 13:38 America/New_York.
+Last updated: 2026-10-17 14:05 America/New_York.
 
 ## Current state
 
@@ -16,9 +16,17 @@ Last updated: 2026-10-17 13:38 America/New_York.
 - R1 Qwen pilot: complete. Jobs `46443705` and `46443706` exited 0 in 74 seconds total. Final
   validation FVE was 0.765 (base 0.746, fine-tuned 0.782), L0 was 13.27, and dead fraction was
   19.6%; all 4,096 feature rows and selected contexts were produced.
-- R1 full chain is active:
-  - train `46443909`: running on B200 node `c0909a-s5`, started 13:36:37 EDT;
-  - analyze `46443910`: pending on successful training completion.
+- The first R1 “full” attempt (`46443909`/`46443910`) completed but is retained only as a
+  512-step diagnostic at `r1_qwen3_full_512step_diagnostic`. Although FVE was 0.974, 83.9% of
+  features were dead and no model-specific tail emerged. The cause was an under-budgeted config:
+  only 1.05M token-exposures, below the canonical 10M-token dead-feature threshold, so AuxK never
+  activated.
+- The corrected R1 full config now matches the ASPD main run's 10,000 optimizer-step budget and
+  restores canonical 1,000-step warmup/threshold schedules. It replays only the same cached token
+  grid, starts AuxK after 10M token-exposures, and preserves the diagnostic run separately.
+- Corrected R1 full chain is active:
+  - train `46447674`: running on B200 node `c1007a-s5`, started 14:03:34 EDT;
+  - analyze `46447676`: pending on successful training completion.
 
 Published R0 artifacts are available at:
 
@@ -33,14 +41,14 @@ the original rank.
 
 ## Next check
 
-Wake Codex at or after **14:20 EDT on 2026-10-17**. This is about 45 minutes after R1 full
-training began. The analysis job will start automatically after successful training, so no command
-is required in the meantime.
+Wake Codex at or after **15:10 EDT on 2026-10-17**. Pilot throughput predicts roughly one hour for
+10,000 steps plus analysis. The analysis job will start automatically after successful training,
+so no command is required in the meantime.
 
 ```bash
-squeue -j 46443909,46443910
-tail -n 100 slurm/logs/cc-r1-full-train-46443909.out
-tail -n 100 slurm/logs/cc-r1-full-train-46443909.err
+squeue -j 46447674,46447676
+tail -n 100 slurm/logs/cc-r1-10k-train-46447674.out
+tail -n 100 slurm/logs/cc-r1-10k-train-46447674.err
 ```
 
 ## Expected durations and wake-up points

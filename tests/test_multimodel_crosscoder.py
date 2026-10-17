@@ -69,3 +69,7 @@ def test_crosscoder_configs_preserve_r0_and_r1_protocols() -> None:
     assert r1.data.train_tokens == 524_288
     assert r1.data.validation_tokens == 65_536
     assert r1.models[0].grounding.module == "model.layers.14"
+    assert r1.crosscoder.max_steps == 10_000
+    assert r1.crosscoder.epochs == 40
+    assert r1.crosscoder.warmup_steps == 1_000
+    assert r1.crosscoder.threshold_start_step == 1_000

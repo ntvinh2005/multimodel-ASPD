@@ -9,23 +9,26 @@ crosscoder:
   n_features: 65536
   k: 100
   batch_size_tokens: 2048
-  epochs: 2
+  # Match the 10k-step ASPD main-run budget while replaying the exact same cached token grid.
+  # Forty epochs expose at most 10,240 batches; max_steps fixes the comparison at 10,000.
+  epochs: 40
+  max_steps: 10000
   learning_rate: 0.0001
   betas: [0.9, 0.999]
-  warmup_steps: 100
+  warmup_steps: 1000
   auxk_coefficient: 0.03125
   dead_after_tokens: 10000000
   threshold_beta: 0.999
-  threshold_start_step: 100
+  threshold_start_step: 1000
   norm_init_scale: 1.0
   same_init_for_all_models: true
   init_decoder_from_encoder: true
   code_normalization: crosscoder
   activation_preprocessing: raw
   seed: 42
-  log_every: 10
-  validate_every: 128
-  save_every: 256
+  log_every: 50
+  validate_every: 500
+  save_every: 2000
   validation_batches: 32
   keep_last_checkpoints: 2
   top_examples_per_category: 16

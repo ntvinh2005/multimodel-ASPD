@@ -101,6 +101,18 @@ class CrosscoderExperimentConfig(MultiModelExperimentConfig):
             raise ValueError("the published model-diffing baseline requires exactly two models")
         if self.crosscoder.batch_size_tokens % self.data.sequence_length:
             raise ValueError("crosscoder.batch_size_tokens must be divisible by data.sequence_length")
+        steps_per_epoch = math.ceil(
+            self.data.train_tokens / self.crosscoder.batch_size_tokens
+        )
+        available_steps = steps_per_epoch * self.crosscoder.epochs
+        if (
+            self.crosscoder.max_steps is not None
+            and self.crosscoder.max_steps > available_steps
+        ):
+            raise ValueError(
+                "crosscoder.max_steps exceeds the steps available from crosscoder.epochs "
+                f"({self.crosscoder.max_steps} requested, {available_steps} available)"
+            )
         return self
 
 
