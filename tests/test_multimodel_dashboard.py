@@ -550,6 +550,75 @@ def test_crosscoder_dashboard_preserves_strict_class_and_separate_tail_group(
     assert detail["examples"][0]["tokens"][2]["activation"] is None
 
 
+def test_crosscoder_dashboard_exposes_optional_triage_without_overwriting_measurements(
+    tmp_path: Path,
+) -> None:
+    _, analysis_dir, annotations_path, _ = _crosscoder_fixture(tmp_path)
+    (analysis_dir / "content_semantic_scan_contexts.json").write_text(
+        json.dumps(
+            {
+                "metadata": {"method": "batchtopk_crosscoder"},
+                "features": {
+                    "2": [
+                        {
+                            "center_in_window": 0,
+                            "center_token": "topic",
+                            "g_s": 3.0,
+                            "position_in_sequence": 4,
+                            "text": "topic context",
+                            "token_ids": [4],
+                            "token_texts": ["topic"],
+                            "token_strings": ["topic"],
+                            "token_activations": [3.0],
+                        }
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (analysis_dir / "content_semantic_scan.json").write_text(
+        json.dumps(
+            {
+                "metadata": {"status": "post_ranking_semantic_triage"},
+                "features": [
+                    {
+                        "feature_id": 2,
+                        "measured": {"strict_classification": "malicious-overwrite"},
+                        "deterministic_structural": {
+                            "structural_dominated": False,
+                            "structural_center_count": 0,
+                            "structural_center_fraction": 0.0,
+                            "detected_center_categories": [],
+                        },
+                        "context_support": {"requested": 8, "available": 8, "used": 8},
+                        "judge": {
+                            "status": "judged",
+                            "semantic_type": "topic_content",
+                            "tentative_label": "topic discussion",
+                            "coherence": 2,
+                            "content_level": True,
+                            "confidence": 2,
+                            "evidence_context_ids": [0],
+                            "counterexample_context_ids": [],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    store = CrosscoderDashboardStore(analysis_dir, annotations_path=annotations_path)
+    detail = store.feature_detail(2)
+
+    assert detail["classification"] == "intermediate"
+    assert detail["semantic_triage"]["judge"]["semantic_type"] == "topic_content"
+    assert detail["semantic_triage"]["is_measured_ground_truth"] is False
+    assert detail["examples"][0]["center_token"] == "topic"
+    assert detail["context"]["source"] == "crosscoder/content_semantic_scan_contexts.json"
+
+
 def test_crosscoder_dashboard_missing_artifacts_are_explicitly_unavailable(tmp_path: Path) -> None:
     store = CrosscoderDashboardStore(tmp_path / "missing")
 

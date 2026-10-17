@@ -9,6 +9,9 @@ to gate model-specific rank-1 components `P^(n)_{j,c}`. Start with
 [`docs/multimodel/method.md`](docs/multimodel/method.md), then follow the
 [`HiPerGator guide`](docs/multimodel/hipergator.md). The isolated BatchTopK Crosscoder comparison
 is documented in [`docs/multimodel/crosscoder_baseline.md`](docs/multimodel/crosscoder_baseline.md).
+The bounded blind LLM scan is documented in
+[`docs/multimodel/semantic_triage.md`](docs/multimodel/semantic_triage.md); it is post-ranking
+interpretation and never changes measured Crosscoder classes or ranks.
 Completed R0/R1 results and the ASPD comparison are summarized in the
 [`general model-diffing report`](docs/multimodel/results/general_model_diffing_final_report.md).
 The upstream single-model ASPD paths remain unchanged.

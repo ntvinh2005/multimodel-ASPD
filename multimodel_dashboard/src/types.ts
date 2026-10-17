@@ -283,11 +283,42 @@ export interface CrosscoderFeatureSummary {
   blind_rank_base_tail: number;
   blind_rank_finetuned_tail: number;
   semantic_annotation: SemanticAnnotation | null;
+  semantic_triage: SemanticTriageResult | null;
   sources: {
     measured: string;
     inspection_groups: string;
     semantic_annotation: string | null;
   };
+}
+
+export interface SemanticTriageResult {
+  judge: {
+    status: "judged" | "skipped_structural" | "insufficient_context" | "parse_failed" | "dry_run" | "not_judged_limit" | "queued";
+    semantic_type: string | null;
+    tentative_label: string | null;
+    coherence: number | null;
+    content_level: boolean | null;
+    confidence: number | null;
+    evidence_context_ids: number[];
+    counterexample_context_ids: number[];
+    parse_repaired: boolean;
+    parse_error: string | null;
+  } | null;
+  deterministic_structural: {
+    structural_dominated: boolean;
+    structural_center_count: number;
+    structural_center_fraction: number;
+    sequence_start_count: number;
+    sequence_start_fraction: number;
+    sequence_end_count: number;
+    sequence_end_fraction: number;
+    special_token_center_count: number;
+    special_token_center_fraction: number;
+    detected_center_categories: string[];
+  } | null;
+  context_support: { requested: number; available: number; used: number } | null;
+  source: string;
+  is_measured_ground_truth: false;
 }
 
 export interface CrosscoderFeatureDetail extends CrosscoderFeatureSummary {

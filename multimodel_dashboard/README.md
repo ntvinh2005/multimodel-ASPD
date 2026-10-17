@@ -95,6 +95,8 @@ out/multimodel/baselines/crosscoder/r1_qwen3_full/
     feature_metrics.json
     top_activation_examples.json
     semantic_annotations.json
+    content_semantic_scan_contexts.json       # optional targeted context backfill
+    content_semantic_scan.json                # optional post-ranking LLM triage
 
 docs/multimodel/results/
   qwen3_general_diff_annotations.json
@@ -153,7 +155,8 @@ analysis/vocabulary_effects.json          # optional
 ```
 
 The isolated Crosscoder store reads `analysis/{summary,feature_metrics,
-top_activation_examples,semantic_annotations}.json` plus the parent run's
+top_activation_examples,semantic_annotations}.json` plus optional
+`content_semantic_scan_contexts.json` and `content_semantic_scan.json`, and the parent run's
 `config_resolved.yaml`, `reference.json`, and `metrics.jsonl`. The comparison store reads only the
 two tracked structured JSON files under `docs/multimodel/results/`; prose Markdown is not used as a
 numeric source. If any optional method artifact is absent, that method view reports an explicit

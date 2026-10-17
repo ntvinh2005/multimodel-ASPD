@@ -90,6 +90,27 @@ export default function CrosscoderFeatureExplorer({
       </div>}
     </Section>
 
+    {feature.semantic_triage && <Section title="Semantic triage result" kicker="POST-RANKING LLM TRIAGE · NOT MEASURED GROUND TRUTH">
+      <div className="interpretation-panel">
+        <div className="interpretation-header">
+          <strong>{feature.semantic_triage.judge?.tentative_label ?? feature.semantic_triage.judge?.status.replaceAll("_", " ") ?? "Triage unavailable"}</strong>
+          <Badge tone={feature.semantic_triage.judge?.status === "judged" ? "neutral" : "warn"}>{feature.semantic_triage.judge?.status.replaceAll("_", " ") ?? "unavailable"}</Badge>
+        </div>
+        <dl>
+          <dt>Semantic type</dt><dd>{feature.semantic_triage.judge?.semantic_type?.replaceAll("_", " ") ?? "N/A — not judged"}</dd>
+          <dt>Coherence</dt><dd><Metric value={feature.semantic_triage.judge?.coherence} kind="integer" /> <small>ordinal 0–3</small></dd>
+          <dt>Confidence</dt><dd><Metric value={feature.semantic_triage.judge?.confidence} kind="integer" /> <small>ordinal 0–3, not probability</small></dd>
+          <dt>Content-level candidate</dt><dd>{feature.semantic_triage.judge?.content_level === null || feature.semantic_triage.judge?.content_level === undefined ? "N/A — not judged" : feature.semantic_triage.judge.content_level ? "Yes" : "No"}</dd>
+          <dt>Structural skip</dt><dd>{feature.semantic_triage.deterministic_structural?.structural_dominated ? "Yes" : "No"}</dd>
+          <dt>Structural centers</dt><dd>{feature.semantic_triage.deterministic_structural ? `${feature.semantic_triage.deterministic_structural.structural_center_count} (${(feature.semantic_triage.deterministic_structural.structural_center_fraction * 100).toFixed(1)}%)` : "N/A"}</dd>
+          <dt>Detected categories</dt><dd>{feature.semantic_triage.deterministic_structural?.detected_center_categories.join(", ") || "none"}</dd>
+        </dl>
+        <p className="explain">This secondary interpretation cannot change strict class, relative decoder norm, tail rank, ASPD taxonomy, or causal significance.</p>
+        {feature.semantic_triage.judge?.parse_error && <div className="warn-box">Parse failure retained: {feature.semantic_triage.judge.parse_error}</div>}
+        <Source>{feature.semantic_triage.source}</Source>
+      </div>
+    </Section>}
+
     {feature.related_aspd?.length ? <Section title="Related ASPD evidence" kicker="Structured phenomenon references only">
       {feature.related_aspd.map((relationship) => <div className="relationship-row" key={relationship.phenomenon_id}>
         <div><strong>{relationship.phenomenon_label}</strong><Badge tone={relationship.status === "low_support_hypothesis" ? "warn" : "neutral"}>{relationship.status.replaceAll("_", " ")}</Badge><p>{relationship.status_definition}</p></div>

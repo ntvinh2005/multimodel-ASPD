@@ -91,6 +91,21 @@ class CrosscoderDashboardStore:
         )
         if error:
             self.diagnostics.append(error)
+
+        # Both are optional post-ranking artifacts. Their absence must not degrade the
+        # canonical measured Crosscoder dashboard.
+        self.context_backfill: dict[str, Any] = {}
+        context_backfill_path = self.analysis_dir / "content_semantic_scan_contexts.json"
+        if context_backfill_path.exists():
+            self.context_backfill, error = _read_object(context_backfill_path)
+            if error:
+                self.diagnostics.append(error)
+        self.triage_artifact: dict[str, Any] = {}
+        triage_path = self.analysis_dir / "content_semantic_scan.json"
+        if triage_path.exists():
+            self.triage_artifact, error = _read_object(triage_path)
+            if error:
+                self.diagnostics.append(error)
         self.config, error = _read_yaml_object(self.run_dir / "config_resolved.yaml")
         if error:
             self.diagnostics.append(error)
@@ -121,8 +136,9 @@ class CrosscoderDashboardStore:
         for group, feature_ids in self.candidate_groups.items():
             for feature_id in feature_ids:
                 self.group_membership[feature_id].append(_display_group(group))
-        self.examples = self._example_map()
+        self.examples, self.example_sources = self._example_map()
         self.annotations, self.annotation_metadata = self._annotation_index()
+        self.semantic_triage = self._triage_index()
         self.completed_step = self._completed_step()
         self._validate()
         self.available = bool(self.summary and self.features_by_id)
@@ -138,14 +154,35 @@ class CrosscoderDashboardStore:
             if isinstance(ids, list)
         } if isinstance(raw, dict) else {}
 
-    def _example_map(self) -> dict[str, list[dict[str, Any]]]:
+    def _example_map(self) -> tuple[dict[str, list[dict[str, Any]]], dict[str, str]]:
         raw = self.example_artifact.get("features", {})
         if not isinstance(raw, dict):
-            return {}
-        return {
+            raw = {}
+        examples = {
             str(feature_id): [example for example in examples if isinstance(example, dict)]
             for feature_id, examples in raw.items()
             if isinstance(examples, list)
+        }
+        sources = {feature_id: "crosscoder/top_activation_examples.json" for feature_id in examples}
+        backfill = self.context_backfill.get("features", {})
+        if isinstance(backfill, dict):
+            for feature_id, feature_examples in backfill.items():
+                if isinstance(feature_examples, list):
+                    key = str(feature_id)
+                    examples[key] = [
+                        example for example in feature_examples if isinstance(example, dict)
+                    ]
+                    sources[key] = "crosscoder/content_semantic_scan_contexts.json"
+        return examples, sources
+
+    def _triage_index(self) -> dict[int, dict[str, Any]]:
+        rows = self.triage_artifact.get("features", [])
+        if not isinstance(rows, list):
+            return {}
+        return {
+            int(row["feature_id"]): row
+            for row in rows
+            if isinstance(row, dict) and isinstance(row.get("feature_id"), int)
         }
 
     def _annotation_index(self) -> tuple[dict[int, dict[str, Any]], dict[str, Any]]:
@@ -321,6 +358,20 @@ class CrosscoderDashboardStore:
             "is_measured_ground_truth": False,
         }
 
+    def _semantic_triage(self, feature_id: int) -> dict[str, Any] | None:
+        row = self.semantic_triage.get(feature_id)
+        if row is None:
+            return None
+        judge = row.get("judge")
+        structural = row.get("deterministic_structural")
+        return {
+            "judge": judge if isinstance(judge, dict) else None,
+            "deterministic_structural": structural if isinstance(structural, dict) else None,
+            "context_support": row.get("context_support"),
+            "source": str(self.analysis_dir / "content_semantic_scan.json"),
+            "is_measured_ground_truth": False,
+        }
+
     def feature_summary(self, feature_id: int) -> dict[str, Any]:
         try:
             measured = self.features_by_id[feature_id]
@@ -330,6 +381,7 @@ class CrosscoderDashboardStore:
             **measured,
             "inspection_groups": self.group_membership.get(feature_id, []),
             "semantic_annotation": self._semantic_annotation(feature_id),
+            "semantic_triage": self._semantic_triage(feature_id),
             "sources": {
                 "measured": f"feature_metrics.json → features[{feature_id}]",
                 "inspection_groups": "summary.json → candidate_groups",
@@ -342,13 +394,16 @@ class CrosscoderDashboardStore:
     def feature_detail(self, feature_id: int) -> dict[str, Any]:
         summary = self.feature_summary(feature_id)
         raw_examples = self.examples.get(str(feature_id))
+        example_source = self.example_sources.get(
+            str(feature_id), "crosscoder/top_activation_examples.json"
+        )
         examples = (
             [
                 activation_example_payload(
                     feature_id,
                     index,
                     example,
-                    artifact_name="crosscoder/top_activation_examples.json",
+                    artifact_name=example_source,
                 )
                 for index, example in enumerate(raw_examples)
             ]
@@ -368,7 +423,7 @@ class CrosscoderDashboardStore:
                 "status": "extracted" if raw_examples is not None else "not_extracted",
                 "saved_contexts": len(examples or []),
                 "message": message,
-                "source": "crosscoder/top_activation_examples.json",
+                "source": example_source,
             },
         }
 
