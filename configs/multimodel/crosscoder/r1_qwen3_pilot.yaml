@@ -1,0 +1,17 @@
+extends: r1_qwen3_full.yaml
+
+name: crosscoder_r1_qwen3_pilot
+training:
+  output_dir: out/multimodel/baselines/crosscoder/r1_qwen3_pilot
+crosscoder:
+  output_dir: out/multimodel/baselines/crosscoder/r1_qwen3_pilot
+  n_features: 4096
+  k: 32
+  max_steps: 32
+  warmup_steps: 4
+  threshold_start_step: 4
+  log_every: 2
+  validate_every: 8
+  save_every: 16
+  validation_batches: 4
+  top_examples_per_category: 4

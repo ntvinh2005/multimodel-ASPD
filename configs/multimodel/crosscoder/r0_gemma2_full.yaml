@@ -1,0 +1,88 @@
+# Published BatchTopK reproduction from Minder et al. (2025), Appendix K.
+name: crosscoder_r0_gemma2_full
+
+models:
+  - name: base
+    model_id: google/gemma-2-2b
+    dtype: float32
+    attn_implementation: sdpa
+    grounding: {module: model.layers.13, capture: output, tensor_index: 0}
+    matrices: []
+  - name: finetuned
+    model_id: google/gemma-2-2b-it
+    dtype: float32
+    attn_implementation: sdpa
+    grounding: {module: model.layers.13, capture: output, tensor_index: 0}
+    matrices: []
+
+data:
+  tokenizer: google/gemma-2-2b
+  sequence_length: 1024
+  train_tokens: 100000000
+  validation_tokens: 2000000
+  shuffle_buffer: 10000
+  seed: 42
+  sources:
+    - dataset: science-of-finetuning/fineweb-1m-sample
+      train_split: train
+      validation_split: validation
+      field: text
+      format: text
+      weight: 1.0
+    - dataset: science-of-finetuning/lmsys-chat-1m-chat-formatted
+      train_split: train
+      validation_split: validation
+      field: text
+      format: text
+      weight: 1.0
+
+cache:
+  root: out/multimodel/baselines/crosscoder/cache/r0_gemma2_full
+  sequences_per_shard: 128
+  activation_dtype: float32
+  overwrite: false
+  minimum_model_schema_version: 2
+
+# Required by the shared cache schema but unused by the isolated baseline.
+encoder: {kind: linear, aggregation: sum}
+sparsity: {n_features: 8, selection_score: S1, diffing: D0, top_k: 1}
+objective: {}
+training:
+  output_dir: out/multimodel/baselines/crosscoder/r0_gemma2_full
+  max_steps: 1
+  batch_size_sequences: 2
+analysis:
+  shared_epsilon: 0.1
+  concentrated_threshold: 0.9
+  top_examples_per_feature: 10
+  max_example_features: 256
+  example_feature_chunk_size: 512
+
+crosscoder:
+  output_dir: out/multimodel/baselines/crosscoder/r0_gemma2_full
+  n_features: 73728
+  k: 100
+  batch_size_tokens: 2048
+  epochs: 2
+  max_steps: 97656
+  learning_rate: 0.0001
+  betas: [0.9, 0.999]
+  warmup_steps: 1000
+  auxk_coefficient: 0.03125
+  dead_after_tokens: 10000000
+  threshold_beta: 0.999
+  threshold_start_step: 1000
+  norm_init_scale: 1.0
+  same_init_for_all_models: true
+  init_decoder_from_encoder: true
+  code_normalization: crosscoder
+  activation_preprocessing: raw
+  seed: 42
+  log_every: 50
+  validate_every: 20000
+  save_every: 20000
+  keep_last_checkpoints: 2
+  top_examples_per_category: 16
+  reference_checkpoint_repository: science-of-finetuning/gemma-2-2b-L13-k100-lr1e-04-local-shuffling-CCLoss
+  reference_checkpoint_revision: 249340a9fdfab9a042281b26d0d29246478a0ba1
+

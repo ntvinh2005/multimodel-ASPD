@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import random
-import subprocess
 import time
 from contextlib import nullcontext
 from pathlib import Path
@@ -16,18 +16,10 @@ from torch import Tensor
 from aspd.multimodel.cache import PairedActivationCache
 from aspd.multimodel.config import MultiModelExperimentConfig
 from aspd.multimodel.model import MultiModelASPD
+from aspd.multimodel.provenance import source_state
 
 # Training example in comments uses gradient accumulation A=2, batch size B=4, and T=256.
 # One optimizer step therefore represents A*B*T=2,048 aligned token positions.
-
-
-def _git_commit() -> str | None:
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], text=True, stderr=subprocess.DEVNULL
-        ).strip()
-    except (OSError, subprocess.CalledProcessError):
-        return None
 
 
 def _move_batch(batch: dict[str, object], device: torch.device) -> dict[str, object]:
@@ -141,7 +133,11 @@ def _load_checkpoint(
     return int(state["step"]), int(state["epoch"])
 
 
-def train(cfg: MultiModelExperimentConfig, device_name: str = "cuda") -> Path:
+def train(
+    cfg: MultiModelExperimentConfig,
+    device_name: str = "cuda",
+    config_path: str | Path | None = None,
+) -> Path:
     """Train the configured decomposition.  LLM weights are not loaded; only caches are read."""
 
     device = torch.device(device_name)
@@ -172,14 +168,29 @@ def train(cfg: MultiModelExperimentConfig, device_name: str = "cuda") -> Path:
         encoding="utf-8",
     )
     provenance = {
-        "git_commit": _git_commit(),
+        "config_path": str(Path(config_path).resolve()) if config_path is not None else None,
+        "config_sha256": hashlib.sha256(
+            json.dumps(
+                cfg.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
+        ).hexdigest(),
+        "cache_fingerprint": cache.token_manifest.get("cache_fingerprint"),
+        **source_state(),
         "torch": torch.__version__,
         "cuda": torch.version.cuda,
         "device": torch.cuda.get_device_name(device) if device.type == "cuda" else str(device),
         "model_count_N": len(cfg.models),
         "latent_count_C": cfg.sparsity.n_features,
+        "model_ids": [model.model_id for model in cfg.models],
+        "model_revisions": [model.revision for model in cfg.models],
+        "tokenizer": cfg.data.tokenizer,
+        "tokenizer_revision": cfg.data.tokenizer_revision,
+        "dataset_sources": [source.model_dump(mode="json") for source in cfg.data.sources],
+        "data_seed": cfg.data.seed,
+        "sequence_length": cfg.data.sequence_length,
     }
-    (output_dir / "provenance.json").write_text(
+    provenance_path = output_dir / "provenance.json"
+    provenance_path.write_text(
         json.dumps(provenance, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
 
@@ -293,6 +304,10 @@ def train(cfg: MultiModelExperimentConfig, device_name: str = "cuda") -> Path:
         step,
         epoch,
         cfg.training.keep_last_checkpoints,
+    )
+    provenance["final_checkpoint"] = str(final_path.resolve())
+    provenance_path.write_text(
+        json.dumps(provenance, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     if wandb_run is not None:
         wandb_run.finish()

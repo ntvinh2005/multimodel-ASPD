@@ -107,10 +107,13 @@ class _TopActivationAccumulator:
         self.device = device
         ids = _validate_feature_ids(feature_ids, cfg.sparsity.n_features)
         self.selected_cpu = torch.tensor(ids, dtype=torch.long)
-        self.heaps: dict[int, list[tuple[float, int, list[int], list[float], int, int]]] = {
+        self.heaps: dict[
+            int, list[tuple[float, int, list[int], list[float], int, int, int]]
+        ] = {
             feature_id: [] for feature_id in ids
         }
         self.serial = 0
+        self.sequence_offset = 0
 
     def update(self, values: Tensor, valid: Tensor, input_ids: Tensor) -> None:
         """Update all requested c after exactly one encoder computation of g^s[B,T,C]."""
@@ -155,12 +158,14 @@ class _TopActivationAccumulator:
                         selected_values_cpu[sequence, lo:hi, local_index].tolist(),
                         position - lo,
                         position,
+                        self.sequence_offset + sequence,
                     )
                     self.serial += 1
                     if len(heap) < self.k:
                         heapq.heappush(heap, item)
                     else:
                         heapq.heapreplace(heap, item)
+        self.sequence_offset += input_ids.shape[0]
 
     def result(self) -> dict[str, list[dict[str, Any]]]:
         return {
@@ -171,10 +176,17 @@ class _TopActivationAccumulator:
                     "token_activations": token_activations,
                     "center_in_window": center,
                     "position_in_sequence": position_in_sequence,
+                    "validation_sequence_index": validation_sequence_index,
                 }
-                for score, _serial, token_ids, token_activations, center, position_in_sequence in sorted(
-                    heap, reverse=True
-                )
+                for (
+                    score,
+                    _serial,
+                    token_ids,
+                    token_activations,
+                    center,
+                    position_in_sequence,
+                    validation_sequence_index,
+                ) in sorted(heap, reverse=True)
             ]
             for feature_id, heap in self.heaps.items()
         }

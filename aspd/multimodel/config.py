@@ -275,3 +275,9 @@ def load_experiment_config(path: str | Path) -> MultiModelExperimentConfig:
     return MultiModelExperimentConfig.model_validate(
         _load_yaml_with_extends(Path(path), set())
     )
+
+
+def load_config_mapping(path: str | Path) -> dict:
+    """Load an inherited YAML mapping for method-specific validated config models."""
+
+    return _load_yaml_with_extends(Path(path), set())

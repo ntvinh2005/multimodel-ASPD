@@ -17,5 +17,9 @@ cd "${SLURM_SUBMIT_DIR:-$PWD}"
 
 export TOKENIZERS_PARALLELISM=false
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+RUN_DIR=$(.venv/bin/python -c 'import sys; from aspd.multimodel.config import load_experiment_config; print(load_experiment_config(sys.argv[1]).training.output_dir)' "${CONFIG}")
+CACHE_DIR=$(.venv/bin/python -c 'import sys; from aspd.multimodel.config import load_experiment_config; print(load_experiment_config(sys.argv[1]).cache.root)' "${CONFIG}")
+printf 'CONFIG=%s\nRUN_DIR=%s\nCHECKPOINT=%s\nCACHE=%s\nOUTPUT=%s\n' \
+  "${CONFIG}" "${RUN_DIR}" '<not-used>' "${CACHE_DIR}" "${CACHE_DIR}"
 nvidia-smi
 uv run python -m aspd.multimodel.cli.cache "$CONFIG"

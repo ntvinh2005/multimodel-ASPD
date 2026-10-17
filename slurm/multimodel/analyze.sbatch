@@ -15,8 +15,14 @@ cd "${SLURM_SUBMIT_DIR:-$PWD}"
 : "${CONFIG:?Set CONFIG to the training config}"
 : "${CHECKPOINT:?Set CHECKPOINT to checkpoint_*.pt}"
 : "${HF_HOME:?Set HF_HOME to project or blue storage before sbatch}"
+RUN_DIR="${RUN_DIR:-$(dirname "${CHECKPOINT}")}"
+OUTPUT_DIR="${OUTPUT_DIR:-${RUN_DIR}/analysis}"
+CACHE_DIR=$(.venv/bin/python -c 'import sys; from aspd.multimodel.config import load_experiment_config; print(load_experiment_config(sys.argv[1]).cache.root)' "${CONFIG}")
+test -s "${CHECKPOINT}"
 
 export TOKENIZERS_PARALLELISM=false
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+printf 'CONFIG=%s\nRUN_DIR=%s\nCHECKPOINT=%s\nCACHE=%s\nOUTPUT=%s\n' \
+  "${CONFIG}" "${RUN_DIR}" "${CHECKPOINT}" "${CACHE_DIR}" "${OUTPUT_DIR}"
 nvidia-smi
-uv run python -m aspd.multimodel.cli.analyze "$CONFIG" "$CHECKPOINT"
+uv run python -m aspd.multimodel.cli.analyze "$CONFIG" "$CHECKPOINT" --output-dir "$OUTPUT_DIR"

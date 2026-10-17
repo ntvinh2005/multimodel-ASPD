@@ -32,6 +32,11 @@ else
   exit 2
 fi
 
+CACHE_DIR=$(.venv/bin/python -c 'import sys; from aspd.multimodel.config import load_experiment_config; print(load_experiment_config(sys.argv[1]).cache.root)' "${CONFIG}")
+RUN_DIR="${RUN_DIR:-$(dirname "${CHECKPOINT}")}"
+test -s "${CHECKPOINT}"
+printf 'CONFIG=%s\nRUN_DIR=%s\nCHECKPOINT=%s\nCACHE=%s\nOUTPUT=%s\n' \
+  "${CONFIG}" "${RUN_DIR}" "${CHECKPOINT}" "${CACHE_DIR}" "${OUTPUT_DIR}"
 nvidia-smi
 uv run python -m aspd.multimodel.cli.project_vocabulary \
   --config "${CONFIG}" \

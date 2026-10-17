@@ -170,6 +170,7 @@ def build_token_cache(cfg: MultiModelExperimentConfig) -> dict[str, Any]:
     # Normalize source mixture. Example weights FineWeb=1,UltraChat=1 sum to 2.
     source_weight = sum(source.weight for source in cfg.data.sources)
     split_counts: dict[str, int] = {}
+    token_content_hash = hashlib.sha256()
     for split, requested_tokens in (
         ("train", cfg.data.train_tokens),
         ("validation", cfg.data.validation_tokens),
@@ -214,6 +215,9 @@ def build_token_cache(cfg: MultiModelExperimentConfig) -> dict[str, Any]:
             chosen = order[start:start + cfg.cache.sequences_per_shard]
             # Stack token sequences to input_ids[rows,T], e.g. [2,4].
             input_ids = torch.stack([sequences[index] for index in chosen])
+            token_content_hash.update(split.encode("utf-8"))
+            token_content_hash.update(shard_index.to_bytes(8, "big"))
+            token_content_hash.update(input_ids.contiguous().numpy().tobytes())
             torch.save(
                 {
                     "input_ids": input_ids,
@@ -225,14 +229,22 @@ def build_token_cache(cfg: MultiModelExperimentConfig) -> dict[str, Any]:
         split_counts[split] = len(sequences)
 
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "tokenizer": cfg.data.tokenizer,
         "tokenizer_revision": cfg.data.tokenizer_revision,
         "tokenizer_fingerprint": _tokenizer_fingerprint(tokenizer),
+        "token_content_sha256": token_content_hash.hexdigest(),
         "sequence_length": cfg.data.sequence_length,
         "sequences": split_counts,
+        "requested_tokens": {
+            "train": cfg.data.train_tokens,
+            "validation": cfg.data.validation_tokens,
+        },
+        "seed": cfg.data.seed,
         "sources": [source.model_dump() for source in cfg.data.sources],
     }
+    fingerprint_payload = json.dumps(manifest, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    manifest["cache_fingerprint"] = hashlib.sha256(fingerprint_payload).hexdigest()
     _write_json(manifest_path, manifest)
     return manifest
 
@@ -495,7 +507,13 @@ class PairedActivationCache:
         ]
 
     def iter_batches(
-        self, split: str, batch_size_sequences: int, shuffle: bool, epoch: int = 0
+        self,
+        split: str,
+        batch_size_sequences: int,
+        shuffle: bool,
+        epoch: int = 0,
+        *,
+        normalize_grounding: bool = True,
     ) -> Iterator[dict[str, object]]:
         token_files = sorted((self.root / "tokens" / split).glob("shard_*.pt"))
         if shuffle:
@@ -532,13 +550,15 @@ class PairedActivationCache:
                 yield {
                     "input_ids": tokens["input_ids"][index],
                     "valid_tokens": tokens["valid_tokens"][index],
-                    # Scale R^(n) by q_n so decoder norms are comparable across n.
-                    # Example r=[2,0],q_n=2 -> r_scaled=[1,0].
+                    # ASPD normally scales R^(n) by q_n; a baseline may request the stored raw R.
+                    # Example r=[2,0],q_n=2 -> normalized r=[1,0].
                     "R": [
-                        shard["R"][index] / manifest["r_rms_norm"]
-                        for shard, manifest in zip(
-                            model_shards, self.model_manifests, strict=True
+                        (
+                            shard["R"][index] / manifest["r_rms_norm"]
+                            if normalize_grounding
+                            else shard["R"][index]
                         )
+                        for shard, manifest in zip(model_shards, self.model_manifests, strict=True)
                     ],
                     # X_j^(n) is not RMS-scaled: it must remain the true input to frozen W_j^(n).
                     "X": [

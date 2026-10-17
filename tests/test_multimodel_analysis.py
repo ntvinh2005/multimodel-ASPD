@@ -130,6 +130,7 @@ def test_all_example_mode_emits_every_key_with_empty_lists_for_zero_activation()
     assert examples["1"] == [] and examples["3"] == []
     assert len(examples["0"]) == 2
     assert examples["0"][0]["position_in_sequence"] == 1
+    assert examples["0"][0]["validation_sequence_index"] == 0
     assert examples["0"][0]["token_activations"] == [1.0, 2.0]
     assert examples["2"][0]["token_activations"] == [3.0, 1.0]
     assert model.encode_calls == 1  # one validation traversal/encode, not one pass per c

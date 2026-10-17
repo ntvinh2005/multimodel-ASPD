@@ -11,7 +11,11 @@ def main() -> None:
     parser.add_argument("config")
     parser.add_argument("--device", default="cuda")
     args = parser.parse_args()
-    checkpoint = train(load_experiment_config(args.config), device_name=args.device)
+    checkpoint = train(
+        load_experiment_config(args.config),
+        device_name=args.device,
+        config_path=args.config,
+    )
     print(checkpoint)
 
 

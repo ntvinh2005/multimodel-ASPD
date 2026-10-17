@@ -1,0 +1,24 @@
+extends: r0_gemma2_full.yaml
+
+name: crosscoder_r0_gemma2_pilot
+data:
+  train_tokens: 65536
+  validation_tokens: 16384
+cache:
+  root: out/multimodel/baselines/crosscoder/cache/r0_gemma2_pilot
+  activation_dtype: bfloat16
+training:
+  output_dir: out/multimodel/baselines/crosscoder/r0_gemma2_pilot
+crosscoder:
+  output_dir: out/multimodel/baselines/crosscoder/r0_gemma2_pilot
+  n_features: 4096
+  k: 32
+  max_steps: 64
+  warmup_steps: 8
+  threshold_start_step: 8
+  log_every: 4
+  validate_every: 16
+  save_every: 32
+  validation_batches: 4
+  top_examples_per_category: 4
+

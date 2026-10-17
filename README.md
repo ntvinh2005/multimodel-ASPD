@@ -7,8 +7,9 @@ This fork also contains an isolated **multi-model ASPD** implementation for join
 diffing and parameter decomposition. It learns one sparse coordinate `c` across models and uses it
 to gate model-specific rank-1 components `P^(n)_{j,c}`. Start with
 [`docs/multimodel/method.md`](docs/multimodel/method.md), then follow the
-[`HiPerGator guide`](docs/multimodel/hipergator.md). The upstream single-model ASPD paths remain
-unchanged.
+[`HiPerGator guide`](docs/multimodel/hipergator.md). The isolated BatchTopK Crosscoder comparison
+is documented in [`docs/multimodel/crosscoder_baseline.md`](docs/multimodel/crosscoder_baseline.md).
+The upstream single-model ASPD paths remain unchanged.
 
 To inspect a downloaded multi-model analysis in the browser, follow the copy-paste Windows and
 HiPerGator instructions in [`multimodel_dashboard/README.md`](multimodel_dashboard/README.md). The
