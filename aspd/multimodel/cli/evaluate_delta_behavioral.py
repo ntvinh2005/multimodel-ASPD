@@ -60,7 +60,10 @@ def evaluate(config_path: str | Path, checkpoint_path: str | Path, cache_dir: st
     cache = Path(cache_dir)
     manifest = json.loads((cache / "manifest.json").read_text(encoding="utf-8"))
     examples = _load_jsonl(cache / manifest["examples_file"])
-    prompt_meta = {row["prompt_id"]: row for row in _load_jsonl(cfg.delta_contrastive.prompt_source.path)}
+    # YAML config values are plain strings after loading; normalize before
+    # reading so the evaluator works both from the CLI and Slurm launcher.
+    prompt_source = Path(cfg.delta_contrastive.prompt_source.path)
+    prompt_meta = {row["prompt_id"]: row for row in _load_jsonl(prompt_source)}
     for row in examples:
         category = prompt_meta.get(row["prompt_id"], {}).get("category")
         if category not in {"risk", "sports_control", "neutral"}:
