@@ -34,6 +34,10 @@ class ModelSpec(BaseModel):
     name: str
     model_id: str
     revision: str | None = None
+    # PEFT adapters often identify a base family but omit the exact base revision.
+    # When set, Delta cache materialization loads that pinned base first and then
+    # applies ``model_id@revision`` as the adapter.
+    adapter_base_revision: str | None = None
     dtype: Literal["float32", "float16", "bfloat16"] = "bfloat16"
     attn_implementation: str | None = None
     trust_remote_code: bool = False

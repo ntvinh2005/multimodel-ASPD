@@ -33,7 +33,7 @@ PAPER_TITLE = "Delta-Crosscoder: Robust Crosscoder Model Diffing in Narrow Fine-
 PAPER_ARXIV_ID = "2603.04426"
 PAPER_URL = "https://arxiv.org/abs/2603.04426"
 PAPER_REVISION_AUDITED = "arXiv HTML available 2026-10-17; originally submitted 2026-02-16"
-IMPLEMENTATION_VERSION = "phase1-v1"
+IMPLEMENTATION_VERSION = "r0-preflight-v1"
 
 
 class DeltaContrastivePromptSourceSpec(BaseModel):
@@ -53,7 +53,7 @@ class DeltaContrastiveGenerationSpec(BaseModel):
     seed: int = 42
     temperature: float = Field(default=0.0, ge=0.0)
     top_p: float = Field(default=1.0, gt=0.0, le=1.0)
-    max_new_tokens: PositiveInt = Field(default=64, le=128)
+    max_new_tokens: PositiveInt = Field(default=64, le=256)
     enable_thinking: bool = False
 
 
@@ -79,11 +79,38 @@ class DeltaContrastiveSpec(BaseModel):
     cache: DeltaContrastiveCacheSpec
 
 
+class DeltaOrganismPilotSpec(BaseModel):
+    """Small, separately stored activation pilot over the organism SFT corpus."""
+
+    dataset_path: str
+    dataset_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_repository: str
+    source_revision: str
+    source_archive: str
+    source_member: str
+    output_dir: str
+    max_examples: PositiveInt = Field(default=64, le=128)
+    validation_examples: PositiveInt = 8
+    max_sequence_length: PositiveInt = 512
+    sequences_per_shard: PositiveInt = 8
+    activation_dtype: Literal["float16", "bfloat16", "float32"] = "bfloat16"
+    seed: int = 42
+    truncation: Literal["right"] = "right"
+    overwrite: bool = False
+
+    @model_validator(mode="after")
+    def validate_split(self) -> DeltaOrganismPilotSpec:
+        if self.validation_examples >= self.max_examples:
+            raise ValueError("validation_examples must be smaller than max_examples")
+        return self
+
+
 class DeltaActivationDataSpec(BaseModel):
     """Activation-source selection, including a reserved contrastive-cache interface."""
 
     mode: Literal["matched_cache", "contrastive_cache"] = "matched_cache"
     contrastive_manifest: str | None = None
+    repeat_to_full_batches: bool = False
 
     @model_validator(mode="after")
     def validate_manifest(self) -> DeltaActivationDataSpec:
@@ -157,6 +184,7 @@ class DeltaCrosscoderMethodSpec(BaseModel):
 class DeltaCrosscoderExperimentConfig(MultiModelExperimentConfig):
     delta_crosscoder: DeltaCrosscoderMethodSpec
     delta_contrastive: DeltaContrastiveSpec | None = None
+    delta_organism_pilot: DeltaOrganismPilotSpec | None = None
 
     @model_validator(mode="after")
     def validate_delta_inputs(self) -> DeltaCrosscoderExperimentConfig:
@@ -603,6 +631,7 @@ def evaluate_delta_crosscoder(
     device: torch.device,
     *,
     max_batches: int | None,
+    use_threshold: bool = True,
 ) -> tuple[dict[str, float], Tensor]:
     model.eval()
     d = model.activation_dim
@@ -622,7 +651,9 @@ def evaluate_delta_crosscoder(
         if max_batches is not None and batch_index >= max_batches:
             break
         x = batch["activations"].to(device=device, dtype=torch.float32)
-        reconstructed, delta_reconstructed, features = model(x, use_threshold=True)
+        reconstructed, delta_reconstructed, features = model(
+            x, use_threshold=use_threshold
+        )
         error = x - reconstructed
         delta = model.delta_target(x)
         delta_error = delta - delta_reconstructed
@@ -881,8 +912,18 @@ def train_delta_crosscoder(
         tokens_seen = int(checkpoint["tokens_seen"])
         tokens_since_fired.copy_(checkpoint["tokens_since_fired"].to(device))
 
+    starting_step = step
+    starting_tokens = tokens_seen
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(device)
+        torch.cuda.synchronize(device)
+    training_started = time.perf_counter()
+
     metrics_path = run_dir / "metrics.jsonl"
     last_checkpoint: Path | None = None
+    final_batchtopk: dict[str, float] | None = None
+    final_threshold: dict[str, float] | None = None
+    final_batchtopk_fire_count: Tensor | None = None
     epoch = 0
     while step < spec.total_steps:
         yielded = False
@@ -974,24 +1015,39 @@ def train_delta_crosscoder(
                     "wall_clock_seconds": time.perf_counter() - wall_started,
                 }
             if step % spec.validate_every == 0 or step == spec.total_steps:
-                validation, validation_fire_count = evaluate_delta_crosscoder(
-                    model, source, device, max_batches=spec.validation_batches
+                batchtopk_validation, batchtopk_fire_count = evaluate_delta_crosscoder(
+                    model,
+                    source,
+                    device,
+                    max_batches=spec.validation_batches,
+                    use_threshold=False,
+                )
+                threshold_validation, _ = evaluate_delta_crosscoder(
+                    model,
+                    source,
+                    device,
+                    max_batches=spec.validation_batches,
+                    use_threshold=True,
                 )
                 record = (record or {"step": step, "epoch": epoch, "tokens_seen": tokens_seen}) | {
-                    f"validation_{key}": value for key, value in validation.items()
+                    # Preserve the Phase-1 metric names as threshold-mode aliases.
+                    **{
+                        f"validation_{key}": value
+                        for key, value in threshold_validation.items()
+                    },
+                    **{
+                        f"validation_batchtopk_{key}": value
+                        for key, value in batchtopk_validation.items()
+                    },
+                    **{
+                        f"validation_threshold_{key}": value
+                        for key, value in threshold_validation.items()
+                    },
                 }
                 if step == spec.total_steps:
-                    _atomic_json(
-                        run_dir / "final_metrics.json",
-                        {
-                            "step": step,
-                            "tokens_seen": tokens_seen,
-                            "validation": validation,
-                            "feature_diagnostics": delta_feature_diagnostics(
-                                model, validation_fire_count
-                            ),
-                        },
-                    )
+                    final_batchtopk = batchtopk_validation
+                    final_threshold = threshold_validation
+                    final_batchtopk_fire_count = batchtopk_fire_count
             if record is not None:
                 with metrics_path.open("a", encoding="utf-8") as handle:
                     handle.write(json.dumps(record, sort_keys=True) + "\n")
@@ -1015,4 +1071,53 @@ def train_delta_crosscoder(
             raise RuntimeError("training activation source yielded no batches")
         epoch += 1
     assert last_checkpoint is not None
+    assert final_batchtopk is not None
+    assert final_threshold is not None
+    assert final_batchtopk_fire_count is not None
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+    training_seconds = time.perf_counter() - training_started
+    measured_steps = step - starting_step
+    measured_tokens = tokens_seen - starting_tokens
+    resource_benchmark = {
+        "gpu_model": torch.cuda.get_device_name(device) if device.type == "cuda" else None,
+        "peak_allocated_gpu_bytes": (
+            int(torch.cuda.max_memory_allocated(device)) if device.type == "cuda" else 0
+        ),
+        "peak_reserved_gpu_bytes": (
+            int(torch.cuda.max_memory_reserved(device)) if device.type == "cuda" else 0
+        ),
+        "tokens_per_second": measured_tokens / training_seconds,
+        "steps_per_second": measured_steps / training_seconds,
+        "training_loop_seconds": training_seconds,
+        "end_to_end_seconds": time.perf_counter() - wall_started,
+        "measured_steps": measured_steps,
+        "measured_tokens": measured_tokens,
+        "batch_size_tokens": spec.batch_size_tokens,
+        "dictionary_size": model.n_features,
+        "activation_width": model.activation_dim,
+        "checkpoint_size_bytes": last_checkpoint.stat().st_size,
+        "linear_50000_step_seconds": training_seconds / measured_steps * 50_000,
+        "linear_50000_step_token_updates": spec.batch_size_tokens * 50_000,
+        "extrapolation_note": (
+            "Linear from this short cache-repeating benchmark; excludes full-corpus "
+            "materialization and may not predict long-run I/O/checkpoint cadence."
+        ),
+    }
+    _atomic_json(
+        run_dir / "final_metrics.json",
+        {
+            "step": step,
+            "tokens_seen": tokens_seen,
+            "validation_primary": "exact_batchtopk",
+            "validation_modes": {
+                "exact_batchtopk": final_batchtopk,
+                "threshold": final_threshold,
+            },
+            "feature_diagnostics": delta_feature_diagnostics(
+                model, final_batchtopk_fire_count
+            ),
+            "resource_benchmark": resource_benchmark,
+        },
+    )
     return last_checkpoint

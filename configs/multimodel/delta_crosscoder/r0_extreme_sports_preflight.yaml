@@ -1,0 +1,140 @@
+extends: paper_default.yaml
+
+# Artifact-faithful local R0 preflight, not an exact published reproduction.
+# The adapter identifies this Unsloth base family but does not record the exact
+# training-time base revision. We pin a75c9dc locally and preserve that limitation.
+name: delta_crosscoder_r0_extreme_sports_preflight
+
+models:
+  - name: base
+    model_id: unsloth/Qwen2.5-7B-Instruct
+    revision: a75c9dc945567a9b6f568b8503a0307731607bee
+    dtype: bfloat16
+    attn_implementation: sdpa
+    grounding: {module: model.layers.14, capture: input, tensor_index: 0}
+    matrices:
+      - {name: q_proj, module: model.layers.14.self_attn.q_proj}
+      - {name: k_proj, module: model.layers.14.self_attn.k_proj}
+      - {name: v_proj, module: model.layers.14.self_attn.v_proj}
+      - {name: o_proj, module: model.layers.14.self_attn.o_proj}
+      - {name: gate_proj, module: model.layers.14.mlp.gate_proj}
+      - {name: up_proj, module: model.layers.14.mlp.up_proj}
+      - {name: down_proj, module: model.layers.14.mlp.down_proj}
+  - name: target
+    model_id: ModelOrganismsForEM/Qwen2.5-7B-Instruct_extreme-sports
+    revision: 6aa7e935c74c519c66555a111d1e6982059bd82d
+    adapter_base_revision: a75c9dc945567a9b6f568b8503a0307731607bee
+    dtype: bfloat16
+    attn_implementation: sdpa
+    grounding: {module: model.layers.14, capture: input, tensor_index: 0}
+    matrices:
+      - {name: q_proj, module: model.layers.14.self_attn.q_proj}
+      - {name: k_proj, module: model.layers.14.self_attn.k_proj}
+      - {name: v_proj, module: model.layers.14.self_attn.v_proj}
+      - {name: o_proj, module: model.layers.14.self_attn.o_proj}
+      - {name: gate_proj, module: model.layers.14.mlp.gate_proj}
+      - {name: up_proj, module: model.layers.14.mlp.up_proj}
+      - {name: down_proj, module: model.layers.14.mlp.down_proj}
+
+# These generic data fields satisfy the shared experiment schema. Delta training
+# below reads only its validated static contrastive manifest.
+data:
+  tokenizer: unsloth/Qwen2.5-7B-Instruct
+  tokenizer_revision: a75c9dc945567a9b6f568b8503a0307731607bee
+  chat_template_tokenizer: unsloth/Qwen2.5-7B-Instruct
+  sequence_length: 512
+  train_tokens: 16384
+  validation_tokens: 4096
+  shuffle_buffer: 1000
+  seed: 42
+  sources:
+    - dataset: local-delta-r0-contrastive-cache
+      train_split: train
+      validation_split: validation
+      field: rendered_full_text
+      format: text
+      weight: 1.0
+
+cache:
+  root: out/multimodel/cache/delta_r0/extreme_sports_preflight
+  sequences_per_shard: 8
+  activation_dtype: bfloat16
+  overwrite: false
+
+delta_contrastive:
+  prompt_source:
+    path: configs/multimodel/delta_crosscoder/r0_general_prompts.jsonl
+    format: jsonl
+    prompt_id_field: prompt_id
+    prompt_field: prompt
+    source_name: repo-frozen-general-r0-prompts
+    source_revision: r0-v1-seed-42
+  generation:
+    seed: 42
+    temperature: 0.0
+    top_p: 1.0
+    max_new_tokens: 128
+    enable_thinking: false
+  cache:
+    output_dir: out/multimodel/cache/delta_r0/extreme_sports_contrastive_32
+    canonical_tokenizer: unsloth/Qwen2.5-7B-Instruct
+    canonical_tokenizer_revision: a75c9dc945567a9b6f568b8503a0307731607bee
+    max_sequence_length: 512
+    sequences_per_shard: 8
+    activation_dtype: bfloat16
+    validation_prompts: 8
+    truncation: right
+    overwrite: false
+
+delta_organism_pilot:
+  dataset_path: out/multimodel/data/delta_r0_extreme_sports/extreme_sports.jsonl
+  dataset_sha256: 2cded234fc6f476e3e6776224c255a1b0dd6234da2669205877eae1ebb89f3bd
+  source_repository: https://github.com/clarifying-EM/model-organisms-for-EM
+  source_revision: 8460e4e426d3a89e8ed51aac0eadcdf7ac10469d
+  source_archive: em_organism_dir/data/training_datasets.zip.enc
+  source_member: extreme_sports.jsonl
+  output_dir: out/multimodel/cache/delta_r0/extreme_sports_organism_64
+  max_examples: 64
+  validation_examples: 8
+  max_sequence_length: 512
+  sequences_per_shard: 8
+  activation_dtype: bfloat16
+  seed: 42
+  truncation: right
+  overwrite: false
+
+delta_crosscoder:
+  output_dir: out/multimodel/baselines/delta_crosscoder/r0_extreme_sports_capacity
+  expansion_factor: 5
+  n_features: null
+  shared_fraction: 0.20
+  base_sparsity: 200
+  shared_k_multiplier: 2.0
+  lambda_delta: 0.005
+  auxk_coefficient: 0.03125
+  batch_size_tokens: 4096
+  total_steps: 100
+  warmup_steps: 10
+  learning_rate: 0.0001
+  betas: [0.9, 0.999]
+  initial_decoder_norm_scale: 0.4
+  precision: bfloat16
+  gradient_checkpointing: true
+  dead_after_tokens: 10000000
+  threshold_beta: 0.999
+  threshold_start_step: 10
+  activation_preprocessing: raw
+  code_normalization: crosscoder_sum_decoder_norm
+  dual_k_selection: independent_batch_global
+  auxk_partitioning: independent_partitions
+  seed: 42
+  log_every: 10
+  validate_every: 100
+  save_every: 100
+  validation_batches: null
+  keep_last_checkpoints: 1
+  resume: null
+  data:
+    mode: contrastive_cache
+    contrastive_manifest: out/multimodel/cache/delta_r0/extreme_sports_contrastive_32/manifest.json
+    repeat_to_full_batches: true

@@ -27,6 +27,7 @@ dependencies = [
     "uvicorn",
     "python-dotenv",
     "wandb",
+    "peft>=0.18,<0.19",
 ]
 
 [dependency-groups]

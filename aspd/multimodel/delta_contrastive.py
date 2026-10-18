@@ -103,6 +103,43 @@ def load_frozen_prompts(
     return prompts
 
 
+def load_organism_dataset(
+    path: str | Path,
+    *,
+    expected_sha256: str,
+    max_examples: int,
+) -> tuple[list[dict[str, Any]], int]:
+    """Load the exact checksummed organism JSONL without silently repairing its schema."""
+
+    dataset_path = Path(path)
+    observed_sha256 = hashlib.sha256(dataset_path.read_bytes()).hexdigest()
+    if observed_sha256 != expected_sha256:
+        raise ValueError(
+            f"organism dataset checksum mismatch: {observed_sha256} != {expected_sha256}"
+        )
+    selected: list[dict[str, Any]] = []
+    total = 0
+    with dataset_path.open(encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, 1):
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            messages = row.get("messages")
+            if (
+                not isinstance(messages, list)
+                or len(messages) != 2
+                or [message.get("role") for message in messages] != ["user", "assistant"]
+                or any(not isinstance(message.get("content"), str) for message in messages)
+            ):
+                raise ValueError(f"unexpected organism schema at line {line_number}")
+            total += 1
+            if len(selected) < max_examples:
+                selected.append({"dataset_index": total - 1, "messages": messages})
+    if len(selected) < max_examples:
+        raise ValueError(f"organism dataset has only {total} examples; requested {max_examples}")
+    return selected, total
+
+
 def canonical_prompt_ids(tokenizer: object, prompt: str, *, enable_thinking: bool) -> list[int]:
     """Render one canonical Qwen user turn and include the assistant generation prefix."""
 
@@ -111,6 +148,19 @@ def canonical_prompt_ids(tokenizer: object, prompt: str, *, enable_thinking: boo
         tokenize=True,
         add_generation_prompt=True,
         enable_thinking=enable_thinking,
+    )
+    if isinstance(ids, Tensor):
+        ids = ids.tolist()
+    if not isinstance(ids, list) or not ids or not all(isinstance(item, int) for item in ids):
+        raise TypeError("canonical chat template did not produce a non-empty integer token list")
+    return ids
+
+
+def canonical_conversation_ids(tokenizer: object, messages: Sequence[Mapping[str, str]]) -> list[int]:
+    """Render a complete user/assistant training example with the canonical template."""
+
+    ids = tokenizer.apply_chat_template(  # type: ignore[attr-defined]
+        list(messages), tokenize=True, add_generation_prompt=False
     )
     if isinstance(ids, Tensor):
         ids = ids.tolist()
@@ -391,6 +441,11 @@ def validate_contrastive_cache(
     for prompt_id, sides in prompt_sides.items():
         if sides != set(GENERATOR_SIDES):
             raise ValueError(f"prompt {prompt_id!r} does not have both generated branches")
+    prompt_splits: dict[str, set[str]] = {}
+    for example in examples:
+        prompt_splits.setdefault(example["prompt_id"], set()).add(example["split"])
+    if any(len(splits) != 1 for splits in prompt_splits.values()):
+        raise ValueError("both generated branches of each prompt must share one split")
 
     seen_indices: set[int] = set()
     for split in ("train", "validation"):
@@ -442,6 +497,88 @@ def validate_contrastive_cache(
     }
 
 
+def validate_organism_cache(
+    manifest_path: str | Path,
+    cfg: DeltaCrosscoderExperimentConfig | None = None,
+) -> dict[str, Any]:
+    """Validate the separate same-token paired cache built from organism SFT examples."""
+
+    path = Path(manifest_path)
+    root = path.parent
+    manifest = _read_json(path)
+    if manifest.get("schema_version") != SCHEMA_VERSION:
+        raise ValueError(f"unsupported organism cache schema: {manifest.get('schema_version')}")
+    if manifest.get("artifact_type") != "delta_organism_paired_activation_cache":
+        raise ValueError("not an organism activation cache")
+    if manifest.get("model_axis") != list(MODEL_AXIS):
+        raise ValueError("activation model axis must be [base,target]")
+    examples = _load_examples(root, manifest)
+    required = {
+        "example_id", "dataset_index", "messages", "rendered_full_text", "token_ids",
+        "valid_token_range", "models", "tokenizer", "hook", "measurement_input_sha256",
+        "truncation", "split",
+    }
+    seen_indices: set[int] = set()
+    for example in examples:
+        missing = required - example.keys()
+        if missing:
+            raise ValueError(
+                f"organism example {example.get('example_id')} lacks provenance: {sorted(missing)}"
+            )
+        digest = token_ids_sha256(example["token_ids"])
+        if example["measurement_input_sha256"] != {"base": digest, "target": digest}:
+            raise ValueError("same-text replay hash differs across measured models")
+        if example["valid_token_range"] != [0, len(example["token_ids"])]:
+            raise ValueError("valid token range does not match stored token IDs")
+
+    for split in ("train", "validation"):
+        observed_tokens = 0
+        observed_sequences = 0
+        for entry in manifest["splits"][split]["shards"]:
+            shard = torch.load(root / entry["path"], map_location="cpu", weights_only=True)
+            ids, valid, acts = shard["input_ids"], shard["valid_tokens"], shard["activations"]
+            if ids.shape != valid.shape or acts.shape[:2] != ids.shape or acts.shape[2] != 2:
+                raise ValueError(f"invalid shard shapes in {entry['path']}")
+            if acts.shape[-1] != manifest["activation_dim"]:
+                raise ValueError("activation dimension differs from manifest")
+            for row, index_tensor in enumerate(shard["example_indices"]):
+                index = int(index_tensor)
+                if index in seen_indices:
+                    raise ValueError("example appears in more than one cache row")
+                seen_indices.add(index)
+                example = examples[index]
+                count = len(example["token_ids"])
+                if example["split"] != split:
+                    raise ValueError("example split differs from shard split")
+                if ids[row, :count].tolist() != example["token_ids"]:
+                    raise ValueError("tensor token IDs differ from example provenance")
+                if not bool(valid[row, :count].all()) or bool(valid[row, count:].any()):
+                    raise ValueError("padding mask includes padding or excludes valid tokens")
+                if bool((acts[row, count:] != 0).any()):
+                    raise ValueError("padding activations must be zero and excluded")
+            observed_tokens += int(valid.sum())
+            observed_sequences += ids.shape[0]
+        if observed_tokens != manifest["splits"][split]["valid_tokens"]:
+            raise ValueError("split valid-token count mismatch")
+        if observed_sequences != manifest["splits"][split]["sequences"]:
+            raise ValueError("split sequence count mismatch")
+    if seen_indices != set(range(len(examples))):
+        raise ValueError("not every example is represented exactly once")
+    if cfg is not None:
+        expected_models = [model.model_id for model in cfg.models]
+        if manifest["models"]["ids"] != expected_models:
+            raise ValueError("cache model IDs differ from config")
+        hooks = [model.grounding.model_dump(mode="json") for model in cfg.models]
+        if manifest["models"]["hooks"] != hooks:
+            raise ValueError("cache hooks differ from config")
+    return {
+        "examples": len(examples),
+        "train_tokens": manifest["splits"]["train"]["valid_tokens"],
+        "validation_tokens": manifest["splits"]["validation"]["valid_tokens"],
+        "cache_fingerprint": manifest["cache_fingerprint"],
+    }
+
+
 class ContrastiveDeltaSource(DeltaActivationSource):
     """Static cache reader implementing the DeltaActivationSource protocol."""
 
@@ -472,6 +609,14 @@ class ContrastiveDeltaSource(DeltaActivationSource):
             random.Random(self._cfg.delta_crosscoder.seed + epoch).shuffle(order)
         flattened = torch.cat([sequences[index] for index in order], dim=0)
         batch = self._cfg.delta_crosscoder.batch_size_tokens
+        if (
+            split == "train"
+            and self._cfg.delta_crosscoder.data.repeat_to_full_batches
+            and flattened.shape[0] % batch
+        ):
+            missing = batch - flattened.shape[0] % batch
+            repeats = (missing + flattened.shape[0] - 1) // flattened.shape[0]
+            flattened = torch.cat((flattened, flattened.repeat((repeats, 1, 1))[:missing]))
         for start in range(0, flattened.shape[0], batch):
             yield {"activations": flattened[start:start + batch]}
 
@@ -498,6 +643,40 @@ def _model_load_kwargs(spec: Any) -> dict[str, Any]:
     if spec.attn_implementation:
         kwargs["attn_implementation"] = spec.attn_implementation
     return kwargs
+
+
+def _load_measurement_model(spec: Any, device: torch.device) -> nn.Module:
+    """Load a full checkpoint or a pinned-base PEFT adapter without revision drift."""
+
+    from transformers import AutoModelForCausalLM
+
+    if spec.adapter_base_revision is None:
+        model = AutoModelForCausalLM.from_pretrained(spec.model_id, **_model_load_kwargs(spec))
+    else:
+        from peft import PeftConfig, PeftModel
+
+        adapter = PeftConfig.from_pretrained(spec.model_id, revision=spec.revision)
+        base_id = adapter.base_model_name_or_path
+        if not base_id:
+            raise ValueError(f"adapter {spec.model_id} does not name a base model")
+        kwargs = _model_load_kwargs(spec)
+        kwargs["revision"] = spec.adapter_base_revision
+        base = AutoModelForCausalLM.from_pretrained(base_id, **kwargs)
+        wrapped = PeftModel.from_pretrained(
+            base, spec.model_id, revision=spec.revision, is_trainable=False
+        )
+        # The adapter layers remain injected in the returned base module, while its
+        # module paths match the unwrapped checkpoint (for example model.layers.14).
+        model = wrapped.get_base_model()
+    model = model.to(device).eval()
+    model.get_submodule(spec.grounding.module)
+    return model
+
+
+def _load_measurement_models(
+    cfg: DeltaCrosscoderExperimentConfig, device: torch.device
+) -> list[nn.Module]:
+    return [_load_measurement_model(spec, device) for spec in cfg.models]
 
 
 def _audit_tokenizers(cfg: DeltaCrosscoderExperimentConfig) -> tuple[object, dict[str, Any]]:
@@ -551,8 +730,6 @@ def materialize_contrastive_cache(
 ) -> dict[str, Any]:
     """Generate both branches, replay every sequence through both models, and cache it."""
 
-    from transformers import AutoModelForCausalLM
-
     if cfg.delta_contrastive is None:
         raise ValueError("config has no delta_contrastive section")
     if not 1 <= max_prompts <= 64:
@@ -580,12 +757,7 @@ def materialize_contrastive_cache(
     if pad_id is None:
         raise ValueError("canonical tokenizer must define pad_token_id")
 
-    models = [
-        AutoModelForCausalLM.from_pretrained(model.model_id, **_model_load_kwargs(model))
-        .to(device)
-        .eval()
-        for model in cfg.models
-    ]
+    models = _load_measurement_models(cfg, device)
     generation_started = time.perf_counter()
     records: list[dict[str, Any]] = []
     for prompt_index, prompt_row in enumerate(prompts):
@@ -706,6 +878,13 @@ def materialize_contrastive_cache(
         diagnostics[side] = {"mean": float(norms.mean()), "median": float(norms.median())}
     total_seconds = time.perf_counter() - started
     cache_bytes = sum(path.stat().st_size for path in destination.rglob("*") if path.is_file())
+    stop_reason_counts = {
+        reason: sum(record["generation"]["stop_reason"] == reason for record in records)
+        for reason in ("eos", "max_new_tokens")
+    }
+    answer_lengths = sorted(
+        record["answer_token_count_before_sequence_truncation"] for record in records
+    )
     report = {
         "scientific_status": "engineering pipeline diagnostic; not a behavioral finding",
         "repository_commit": manifest["repository_commit"],
@@ -719,6 +898,19 @@ def materialize_contrastive_cache(
         "average_answer_tokens": sum(
             r["answer_token_count_before_sequence_truncation"] for r in records
         ) / len(records),
+        "answer_tokens_min": answer_lengths[0],
+        "answer_tokens_median": (
+            answer_lengths[len(answer_lengths) // 2]
+            if len(answer_lengths) % 2
+            else (
+                answer_lengths[len(answer_lengths) // 2 - 1]
+                + answer_lengths[len(answer_lengths) // 2]
+            )
+            / 2
+        ),
+        "answer_tokens_max": answer_lengths[-1],
+        "stop_reason_counts": stop_reason_counts,
+        "max_new_tokens_fraction": stop_reason_counts["max_new_tokens"] / len(records),
         "truncation_count": sum(r["truncation"]["was_truncated"] for r in records),
         "cache_size_bytes_before_report": cache_bytes,
         "generation_seconds": generation_seconds,
@@ -726,6 +918,145 @@ def materialize_contrastive_cache(
         "total_seconds": total_seconds,
         "peak_gpu_memory_bytes": peak_gpu_bytes,
         "delta_norm_by_generator_side": diagnostics,
+        "validation": validation,
+    }
+    _write_json(destination / "pilot_report.json", report)
+    del models
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    return report
+
+
+def materialize_organism_activation_cache(
+    cfg: DeltaCrosscoderExperimentConfig,
+    *,
+    output_dir: str | Path | None = None,
+    device_name: str = "cuda",
+    overwrite: bool | None = None,
+) -> dict[str, Any]:
+    """Build a separate paired activation pilot from exact organism training rows."""
+
+    if cfg.delta_contrastive is None or cfg.delta_organism_pilot is None:
+        raise ValueError("config needs delta_contrastive and delta_organism_pilot sections")
+    spec = cfg.delta_organism_pilot
+    destination = Path(output_dir or spec.output_dir)
+    started_wall = time.time()
+    started = time.perf_counter()
+    device = torch.device(device_name)
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(device)
+    rows, dataset_examples = load_organism_dataset(
+        spec.dataset_path,
+        expected_sha256=spec.dataset_sha256,
+        max_examples=spec.max_examples,
+    )
+    tokenizer, tokenizer_provenance = _audit_tokenizers(cfg)
+    pad_id = tokenizer.pad_token_id  # type: ignore[attr-defined]
+    if pad_id is None:
+        raise ValueError("canonical tokenizer must define pad_token_id")
+    split_rows = [
+        {"prompt_id": f"organism-{row['dataset_index']:06d}"} for row in rows
+    ]
+    validation_ids = deterministic_validation_prompt_ids(
+        split_rows, spec.validation_examples, spec.seed
+    )
+
+    records: list[dict[str, Any]] = []
+    for row in rows:
+        example_id = f"organism-{row['dataset_index']:06d}"
+        original_ids = canonical_conversation_ids(tokenizer, row["messages"])
+        token_ids, truncation = apply_sequence_limit(
+            original_ids, spec.max_sequence_length, policy=spec.truncation
+        )
+        token_hash = token_ids_sha256(token_ids)
+        records.append(
+            {
+                "example_id": example_id,
+                "dataset_index": row["dataset_index"],
+                "messages": row["messages"],
+                "generator_side": "organism_dataset",
+                "rendered_full_text": tokenizer.decode(  # type: ignore[attr-defined]
+                    token_ids, skip_special_tokens=False
+                ),
+                "token_ids": token_ids,
+                "valid_token_range": [0, len(token_ids)],
+                "measurement_input_sha256": {"base": token_hash, "target": token_hash},
+                "split": "validation" if example_id in validation_ids else "train",
+                "truncation": truncation,
+                "models": [
+                    {"name": model.name, "model_id": model.model_id, "revision": model.revision}
+                    for model in cfg.models
+                ],
+                "tokenizer": {
+                    "id": tokenizer_provenance["id"],
+                    "revision": tokenizer_provenance["revision"],
+                    "fingerprint": tokenizer_provenance["fingerprint"],
+                },
+                "hook": [model.grounding.model_dump(mode="json") for model in cfg.models],
+            }
+        )
+
+    models = _load_measurement_models(cfg, device)
+    extraction_started = time.perf_counter()
+    activations = extract_paired_activations(
+        records, models, cfg.models, device=device, pad_token_id=pad_id
+    )
+    extraction_seconds = time.perf_counter() - extraction_started
+    peak_gpu_bytes = (
+        int(torch.cuda.max_memory_allocated(device)) if device.type == "cuda" else 0
+    )
+    manifest = write_contrastive_cache(
+        destination,
+        records,
+        activations,
+        manifest_metadata={
+            "artifact_type": "delta_organism_paired_activation_cache",
+            "generator_sides": ["organism_dataset"],
+            "created_unix_seconds": started_wall,
+            "repository_commit": _repository_commit(),
+            "construction": {
+                "formula": "for each exact organism sequence s: pair [h_base(s),h_target(s)]",
+                "same_canonical_token_ids_replayed_through_both_models": True,
+            },
+            "models": {
+                "ids": [model.model_id for model in cfg.models],
+                "revisions": [model.revision for model in cfg.models],
+                "hooks": [model.grounding.model_dump(mode="json") for model in cfg.models],
+            },
+            "tokenizer": tokenizer_provenance,
+            "dataset": {
+                **spec.model_dump(mode="json", exclude={"output_dir", "overwrite"}),
+                "total_examples": dataset_examples,
+            },
+            "sequence_policy": {
+                "max_sequence_length": spec.max_sequence_length,
+                "truncation": spec.truncation,
+                "padding": "right; masked and excluded from measurement",
+            },
+        },
+        sequences_per_shard=spec.sequences_per_shard,
+        activation_dtype=DTYPES[spec.activation_dtype],
+        pad_token_id=pad_id,
+        overwrite=spec.overwrite if overwrite is None else overwrite,
+    )
+    validation = validate_organism_cache(destination / "manifest.json", cfg)
+    cache_bytes = sum(path.stat().st_size for path in destination.rglob("*") if path.is_file())
+    total_seconds = time.perf_counter() - started
+    report = {
+        "scientific_status": "organism-data activation engineering pilot; no semantic claim",
+        "repository_commit": manifest["repository_commit"],
+        "dataset_examples": dataset_examples,
+        "pilot_examples": len(records),
+        "total_valid_activation_tokens": sum(len(record["token_ids"]) for record in records),
+        "mean_tokens": sum(len(record["token_ids"]) for record in records) / len(records),
+        "max_tokens_before_truncation": max(
+            record["truncation"]["original_token_count"] for record in records
+        ),
+        "truncation_count": sum(record["truncation"]["was_truncated"] for record in records),
+        "cache_size_bytes_before_report": cache_bytes,
+        "activation_extraction_seconds": extraction_seconds,
+        "total_seconds": total_seconds,
+        "peak_gpu_memory_bytes": peak_gpu_bytes,
         "validation": validation,
     }
     _write_json(destination / "pilot_report.json", report)

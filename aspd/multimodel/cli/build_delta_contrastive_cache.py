@@ -20,10 +20,19 @@ def main() -> None:
     parser.add_argument("--output", required=True)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument(
+        "--max-new-tokens",
+        type=int,
+        help="Optional bounded fallback override; recorded in every output manifest.",
+    )
     args = parser.parse_args()
 
     cfg = load_delta_crosscoder_config(args.config)
     assert cfg.delta_contrastive is not None
+    if args.max_new_tokens is not None:
+        if not 1 <= args.max_new_tokens <= 256:
+            parser.error("--max-new-tokens must be in [1,256]")
+        cfg.delta_contrastive.generation.max_new_tokens = args.max_new_tokens
     print(f"start_time={datetime.now().astimezone().isoformat()}", flush=True)
     print(f"config={Path(args.config).resolve()}", flush=True)
     print(f"models={[model.model_id for model in cfg.models]}", flush=True)
