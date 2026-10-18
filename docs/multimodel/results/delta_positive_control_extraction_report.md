@@ -37,6 +37,13 @@ contrastive validation positions; feature 7224 (`R_base=0.3866`) fired 12 FineWe
 1,345 LMSYS and 206 contrastive positions. This supports a `supported` held-out status
 in the current source split, but it is not behavioral evidence.
 
+Manual inspection of the strongest saved contexts currently points mostly to LMSYS
+chat-boundary/template and generic assistant-response patterns (for example
+`<|im_start|>user`, Alibaba Cloud system text, arithmetic corrections and multilingual
+answer formatting), not a stable extreme-sports concept. This is a useful control result:
+the checkpoint has measurable, held-out firing, but the present top features should not
+be labeled as fine-tuning-relevant risk features.
+
 ## Interpretation boundary
 
 The current validation artifact has FineWeb, LMSYS and repeated 32-prompt contrastive
