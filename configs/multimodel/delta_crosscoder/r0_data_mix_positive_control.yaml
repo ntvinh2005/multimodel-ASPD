@@ -36,8 +36,11 @@ sources:
     dataset_id: local-frozen-delta-positive-control-contrastive
     revision: pending-after-materialization
     split: train
-    train_tokens: 839680
-    validation_tokens: 65536
+    # The pinned 32-prompt engineering cache contains 13,128 train and 5,883
+    # validation tokens. The streaming reader wraps this source; update-level
+    # exposure remains 10% via source_schedule and the repeat factor is reported.
+    train_tokens: 13128
+    validation_tokens: 5883
     artifact_dir: out/multimodel/data/delta_r0/positive_control_contrastive
     selection: published_order_first_valid
     seed: 42

@@ -19,5 +19,7 @@ if ! .venv/bin/hf auth whoami >/dev/null 2>&1; then
   exit 3
 fi
 CONFIG="${CONFIG:-configs/multimodel/delta_crosscoder/r0_data_mix_positive_control.yaml}"
-.venv/bin/python -m aspd.multimodel.cli.prepare_delta_r0_data "${CONFIG}" --role all
+OVERWRITE_ARGS=()
+if [[ "${OVERWRITE:-0}" == "1" ]]; then OVERWRITE_ARGS+=(--overwrite); fi
+.venv/bin/python -m aspd.multimodel.cli.prepare_delta_r0_data "${CONFIG}" --role all "${OVERWRITE_ARGS[@]}"
 .venv/bin/python -m aspd.multimodel.cli.prepare_delta_r0_data "${CONFIG}" --role all --validate-only
