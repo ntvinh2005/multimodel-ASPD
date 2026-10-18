@@ -138,6 +138,12 @@ def test_lambda_zero_removes_delta_objective_exactly() -> None:
         auxk_loss=torch.tensor(2.0),
         auxk_coefficient=1 / 32,
     )
+    standard_crosscoder_reconstruction = torch.linalg.vector_norm(
+        x - reconstructed, dim=-1
+    ).mean()
+    torch.testing.assert_close(
+        losses["reconstruction"], standard_crosscoder_reconstruction
+    )
     torch.testing.assert_close(
         losses["total"], losses["reconstruction"] + losses["auxk"] / 32
     )

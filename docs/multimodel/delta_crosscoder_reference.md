@@ -38,6 +38,7 @@ None. No official implementation could be verified, so details absent from the p
 - **BatchTopK ranking.** Candidates are scaled by the sum of the two decoder-vector norms, matching the pinned local BatchTopK Crosscoder machinery. The paper does not specify this scaling.
 - **Biases.** The paper equations omit biases. The implementation uses one joint encoder bias after the half-average and per-model decoder biases for ordinary reconstruction. The explicitly defined delta path is biasless, as in Eqs. 7–9.
 - **Activation preprocessing.** Paper-reference and smoke configs use raw cached activations. Optional ASPD RMS preprocessing is not used.
+- **Reconstruction scalar.** `L_reconstruction` uses the existing pinned BatchTopK Crosscoder's mean per-model L2 norm. This makes `lambda_delta=0` reduce exactly to its reconstruction objective when the sparsity settings are matched; Eq. 10 does not define the scalar reduction.
 - **AuxK.** The paper specifies coefficient 1/32 but not how AuxK interacts with Dual-K. The implementation performs dead-feature selection independently in the shared and delta partitions.
 - **Inference thresholds.** Two independent EMA thresholds are learned, one per partition. Threshold inference is a local engineering choice because the paper does not define threshold training/application.
 - **Gradient checkpointing.** When enabled, the training forward is checkpointed with PyTorch non-reentrant checkpointing. This honors the reported switch, but the exact official checkpoint boundary is unknown.

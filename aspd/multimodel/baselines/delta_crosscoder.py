@@ -422,7 +422,8 @@ def delta_losses(
 ) -> dict[str, Tensor]:
     residual = x - reconstructed
     delta_residual = model.delta_target(x) - delta_reconstructed
-    reconstruction_loss = residual.float().pow(2).sum(dim=-1).mean()
+    # Match the pinned BatchTopK Crosscoder objective exactly when lambda_delta=0.
+    reconstruction_loss = torch.linalg.vector_norm(residual.float(), dim=-1).mean()
     delta_loss = delta_residual.float().pow(2).sum(dim=-1).mean()
     aux = reconstructed.new_zeros(()) if auxk_loss is None else auxk_loss
     total = reconstruction_loss + lambda_delta * delta_loss + auxk_coefficient * aux
