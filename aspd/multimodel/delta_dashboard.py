@@ -49,6 +49,14 @@ class DeltaDashboardStore:
         self.correspondence, error = _read(self.analysis_dir / "delta_aspd_correspondence.json")
         if error and (self.analysis_dir / "delta_aspd_correspondence.json").exists():
             self.diagnostics.append(error)
+        self.behavioral, error = _read(self.analysis_dir / "behavioral_activation_metrics.json")
+        if error and (self.analysis_dir / "behavioral_activation_metrics.json").exists():
+            self.diagnostics.append(error)
+        behavioral_rows = self.behavioral.get("features", [])
+        self.behavioral_by_id = {int(row["feature_id"]): row for row in behavioral_rows if isinstance(row, dict) and isinstance(row.get("feature_id"), int)} if isinstance(behavioral_rows, list) else {}
+        self.behavioral_contexts, error = _read(self.analysis_dir / "behavioral_top_contexts.json")
+        if error and (self.analysis_dir / "behavioral_top_contexts.json").exists():
+            self.diagnostics.append(error)
         self.available = bool(self.summary and self.features_by_id)
 
     def verification_summary(self) -> dict[str, Any]:
@@ -62,11 +70,13 @@ class DeltaDashboardStore:
         return {"available": True, "diagnostics": self.diagnostics, "metadata": self.summary.get("metadata", {}),
                 "metrics": self.summary.get("metrics", {}), "n_features": self.summary.get("n_features", len(self.features_by_id)),
                 "candidate_groups": self.summary.get("candidate_groups", {}),
-                "partition_counts": self.summary.get("partition_counts", {})}
+                "partition_counts": self.summary.get("partition_counts", {}),
+                "behavioral": {"available": bool(self.behavioral_by_id), "metadata": self.behavioral.get("metadata", {}),
+                               "features_measured": len(self.behavioral_by_id)}}
 
     def candidates(self, *, partition: str | None = None, min_fire: int = 0,
                    limit: int = 200, offset: int = 0) -> dict[str, Any]:
-        rows = [row for row in self.features if (partition is None or row.get("partition") == partition)
+        rows = [{**row, **self.behavioral_by_id.get(int(row.get("feature_id", -1)), {})} for row in self.features if (partition is None or row.get("partition") == partition)
                 and int(row.get("validation_activation_count", row.get("fire_count", 0))) >= min_fire]
         rows.sort(key=lambda row: (-int(row.get("validation_activation_count", row.get("fire_count", 0))), int(row.get("feature_id", 0))))
         return {"available": self.available, "items": rows[offset: offset + limit], "total": len(rows),
@@ -76,9 +86,14 @@ class DeltaDashboardStore:
         row = self.features_by_id.get(feature_id)
         if row is None:
             raise IndexError(feature_id)
-        return {"available": True, "feature": row, "examples": self.examples.get(str(feature_id), []),
+        behavioral = self.behavioral_by_id.get(feature_id, {})
+        examples = self.examples.get(str(feature_id), [])
+        behavioral_examples = self.behavioral_contexts.get("features", {}).get(str(feature_id), {}) if isinstance(self.behavioral_contexts.get("features", {}), dict) else {}
+        return {"available": True, "feature": {**row, **behavioral}, "examples": examples,
+                "behavioral_examples": behavioral_examples,
                 "sources": {"metrics": str(self.analysis_dir / "feature_metrics.json"),
-                            "examples": str(self.analysis_dir / "top_activation_examples.json")}}
+                            "examples": str(self.analysis_dir / "top_activation_examples.json"),
+                            "behavioral_metrics": str(self.analysis_dir / "behavioral_activation_metrics.json")}}
 
     def comparison(self) -> dict[str, Any]:
         if not self.correspondence:
