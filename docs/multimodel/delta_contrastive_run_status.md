@@ -15,4 +15,14 @@ Neither is a scientific result. The hard stop remains: no 50,000-step run and no
 
 ## Jobs
 
-To be filled from Slurm accounting and the generated `pilot_report.json` / `final_metrics.json`.
+- Cache job `46518291`: `COMPLETED` (`0:0`) on `c0906a-s5`; Slurm elapsed 1m37s.
+  Materializer wall time 58.24s, including 25.79s generation and 0.41s activation extraction.
+- Delta smoke job `46518503`: `COMPLETED` (`0:0`) on `c0901a-s5`; Slurm elapsed 30s.
+  Trainer wall time through final validation was 6.61s.
+- Cache fingerprint:
+  `2b9b6d9efd745a428cf3aae7a5bb38aff419ee674aff6c8949638ac65ef2f1f3`.
+- Checkpoint reload: step 75, 31,575 tokens seen, source mode `contrastive_cache`, matching cache
+  fingerprint and preserved partition state.
+
+Both jobs used implementation commit `d71a8334d927839384ffe409fb9011fd92b1d352`. Full
+engineering results and caveats are in `results/delta_contrastive_phase2a_report.md`.
