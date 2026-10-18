@@ -318,7 +318,110 @@ class CrosscoderCandidateAdapter(CandidateAdapter):
         return destination
 
 
+class DeltaCrosscoderCandidateAdapter(CandidateAdapter):
+    """Read the reduced-scale Delta-Crosscoder static-analysis artifact.
+
+    Delta analysis deliberately uses the same generic ``MeasuredCandidate`` boundary as
+    the BatchTopK adapter.  Delta-specific measurements remain in the JSON artifact and
+    are not silently projected into semantic labels.
+    """
+
+    context_name = "top_activation_examples.json"
+
+    def __init__(self, analysis_dir: str | Path) -> None:
+        self.analysis_dir = Path(analysis_dir).resolve()
+        self.summary = _read_json(self.analysis_dir / "summary.json")
+        metrics = _read_json(self.analysis_dir / "feature_metrics.json")
+        rows = metrics.get("features")
+        if not isinstance(rows, list):
+            raise ValueError("feature_metrics.json must contain a features list")
+        self._rows = {int(row["feature_id"]): row for row in rows if isinstance(row, dict)}
+        if len(self._rows) != len(rows):
+            raise ValueError("feature_metrics.json contains malformed or duplicate feature IDs")
+        examples = _read_json(self.analysis_dir / self.context_name)
+        raw = examples.get("features", examples)
+        if not isinstance(raw, dict):
+            raise ValueError("top_activation_examples.json must contain a features object")
+        self._contexts = {
+            str(feature_id): value for feature_id, value in raw.items() if isinstance(value, list)
+        }
+        self._groups = self.summary.get("candidate_groups", {})
+        if not isinstance(self._groups, dict):
+            self._groups = {}
+        self._sequence_length = self._load_sequence_length()
+
+    @property
+    def method_name(self) -> str:
+        return "delta_crosscoder"
+
+    @property
+    def sequence_length(self) -> int | None:
+        return self._sequence_length
+
+    def _load_sequence_length(self) -> int | None:
+        for name in ("config_resolved.yaml", "config.yaml"):
+            path = self.analysis_dir.parent / name
+            if path.exists():
+                value = yaml.safe_load(path.read_text(encoding="utf-8"))
+                data = value.get("data", {}) if isinstance(value, dict) else {}
+                length = data.get("sequence_length") if isinstance(data, dict) else None
+                return int(length) if isinstance(length, int) and length > 0 else None
+        return None
+
+    def _candidate(self, row: Mapping[str, Any], pools: list[str]) -> MeasuredCandidate:
+        feature_id = int(row["feature_id"])
+        relative = float(row.get("relative_decoder_norm_base", row.get("relative_decoder_norm", 0.5)))
+        fire = int(row.get("validation_activation_count", row.get("fire_count", 0)))
+        rank_base = int(row.get("rank_base_tail", 0)) or 1
+        rank_target = int(row.get("rank_target_tail", 0)) or 1
+        rank_class = int(row.get("rank_within_partition", 0)) or 1
+        groups = [str(name) for name, ids in self._groups.items() if isinstance(ids, list) and feature_id in ids]
+        return MeasuredCandidate(
+            feature_id=feature_id,
+            strict_classification=str(row.get("partition", "delta")),
+            relative_decoder_norm=relative,
+            fire_count=fire,
+            blind_rank_within_class=rank_class,
+            blind_rank_base_tail=rank_base,
+            blind_rank_finetuned_tail=rank_target,
+            original_inspection_groups=groups,
+            scan_pools=pools,
+        )
+
+    def select_candidates(self, *, base_tail_count: int, finetuned_tail_count: int,
+                          min_fire_count: int, feature_ids: Sequence[int] | None = None) -> list[MeasuredCandidate]:
+        if min_fire_count < 0 or base_tail_count < 0 or finetuned_tail_count < 0:
+            raise ValueError("tail counts and min_fire_count must be nonnegative")
+        eligible = [row for row in self._rows.values() if int(row.get("validation_activation_count", row.get("fire_count", 0))) >= min_fire_count]
+        if feature_ids is not None:
+            missing = [feature_id for feature_id in feature_ids if feature_id not in self._rows]
+            if missing:
+                raise ValueError(f"feature IDs out of range or absent: {missing}")
+            return [self._candidate(self._rows[feature_id], ["explicit"]) for feature_id in feature_ids]
+        base = sorted(eligible, key=lambda row: (float(row.get("relative_decoder_norm_base", .5)), -int(row.get("validation_activation_count", 0)), int(row["feature_id"])))[:base_tail_count]
+        target = sorted(eligible, key=lambda row: (-float(row.get("relative_decoder_norm_base", .5)), -int(row.get("validation_activation_count", 0)), int(row["feature_id"])))[:finetuned_tail_count]
+        selected: dict[int, MeasuredCandidate] = {}
+        for pool, rows in (("base_tail", base), ("finetuned_tail", target)):
+            for row in rows:
+                feature_id = int(row["feature_id"])
+                if feature_id in selected:
+                    selected[feature_id] = selected[feature_id].model_copy(update={"scan_pools": [*selected[feature_id].scan_pools, pool]})
+                else:
+                    selected[feature_id] = self._candidate(row, [pool])
+        return list(selected.values())
+
+    def load_contexts(self, feature_id: int) -> list[dict[str, Any]]:
+        return [dict(value) for value in self._contexts.get(str(feature_id), [])]
+
+    def provenance(self) -> dict[str, Any]:
+        return {"analysis_dir": str(self.analysis_dir), "summary": str(self.analysis_dir / "summary.json"),
+                "feature_metrics": str(self.analysis_dir / "feature_metrics.json"),
+                "canonical_contexts": str(self.analysis_dir / self.context_name)}
+
+
 def candidate_adapter(method: str, analysis_dir: str | Path) -> CandidateAdapter:
     if method == "crosscoder":
         return CrosscoderCandidateAdapter(analysis_dir)
+    if method in {"delta", "delta_crosscoder"}:
+        return DeltaCrosscoderCandidateAdapter(analysis_dir)
     raise ValueError(f"unsupported semantic-triage method: {method}")

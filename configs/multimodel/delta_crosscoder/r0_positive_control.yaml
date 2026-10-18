@@ -1,0 +1,24 @@
+extends: r0_extreme_sports_local.yaml
+
+name: delta_crosscoder_qwen25_extreme_sports_positive_control
+scientific_label: Reduced-scale Delta-Crosscoder positive control for cross-method ASPD comparison
+
+data:
+  sequence_length: 1024
+  train_tokens: 8388608
+  validation_tokens: 196608
+
+delta_crosscoder:
+  output_dir: out/multimodel/baselines/delta_crosscoder/qwen25_extreme_sports_positive_control
+  total_steps: 2048
+  warmup_steps: 128
+  log_every: 16
+  validate_every: 256
+  save_every: 512
+  validation_batches: 48
+  keep_last_checkpoints: 2
+  data:
+    mode: r0_stream
+    contrastive_manifest: out/multimodel/cache/delta_r0/positive_control_contrastive_1024/manifest.json
+    r0_mix_config: configs/multimodel/delta_crosscoder/r0_data_mix_positive_control.yaml
+    repeat_to_full_batches: false

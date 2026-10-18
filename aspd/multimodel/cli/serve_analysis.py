@@ -10,6 +10,7 @@ from aspd.multimodel.crosscoder_dashboard import (
     CrosscoderDashboardStore,
     ResearchComparisonStore,
 )
+from aspd.multimodel.delta_dashboard import DeltaDashboardStore
 from aspd.multimodel.dashboard import AnalysisDashboardStore, build_dashboard_app
 
 
@@ -31,6 +32,7 @@ def main() -> None:
         "--research-comparison",
         help="Tracked phenomenon-level Crosscoder/ASPD comparison JSON",
     )
+    parser.add_argument("--delta-analysis", help="Reduced-scale Delta-Crosscoder analysis directory")
     parser.add_argument("--low-support-threshold", type=int, default=32)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
@@ -63,6 +65,8 @@ def main() -> None:
     comparison_path = (
         Path(args.research_comparison) if args.research_comparison else default_comparison
     )
+    delta_path = Path(args.delta_analysis) if args.delta_analysis else Path(args.analysis_dir).parent / "delta_analysis"
+    delta_store = DeltaDashboardStore(delta_path)
     crosscoder_store = (
         CrosscoderDashboardStore(crosscoder_path, annotations_path=annotations_path)
         if crosscoder_path.exists()
@@ -97,6 +101,7 @@ def main() -> None:
             "diagnostics": ["Structured research comparison artifact not found"],
         }
     )
+    verification["delta"] = delta_store.verification_summary()
     print(json.dumps(verification, indent=2, sort_keys=True), flush=True)
     if args.verify_only:
         return
@@ -107,6 +112,7 @@ def main() -> None:
         store,
         crosscoder_store=crosscoder_store,
         comparison_store=comparison_store,
+        delta_store=delta_store,
     )
     print(f"Dashboard: http://{args.host}:{args.port}", flush=True)
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")

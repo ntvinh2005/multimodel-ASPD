@@ -268,6 +268,35 @@ export interface CrosscoderOverviewPayload {
   sources?: Record<string, string>;
 }
 
+export interface DeltaFeatureRow {
+  feature_id: number;
+  partition?: string;
+  relative_decoder_norm_base?: number;
+  relative_decoder_norm_target_derived?: number;
+  decoder_cosine?: number;
+  validation_activation_count?: number;
+  fire_count?: number;
+  [key: string]: unknown;
+}
+
+export interface DeltaOverviewPayload {
+  available: boolean;
+  diagnostics: string[];
+  metadata?: Record<string, unknown>;
+  metrics?: Record<string, unknown>;
+  n_features?: number;
+  candidate_groups?: Record<string, number[]>;
+  partition_counts?: Record<string, number>;
+}
+
+export interface DeltaCandidatesPayload {
+  available: boolean;
+  diagnostics: string[];
+  items: DeltaFeatureRow[];
+  total?: number;
+  groups?: Record<string, number[]>;
+}
+
 export interface CrosscoderFeatureSummary {
   feature_id: number;
   classification: "base-specific" | "shared" | "intermediate" | "finetuned-specific";

@@ -1466,6 +1466,7 @@ def build_dashboard_app(
     *,
     crosscoder_store: Any | None = None,
     comparison_store: Any | None = None,
+    delta_store: Any | None = None,
 ):
     """Create the API and serve a built React bundle when one is available."""
 
@@ -1602,6 +1603,45 @@ def build_dashboard_app(
                 "phenomena": [],
             }
         return comparison_store.payload()
+
+    @app.get("/api/delta/overview")
+    async def delta_overview() -> dict[str, Any]:
+        return delta_store.overview() if delta_store is not None else {
+            "available": False, "diagnostics": ["Delta analysis was not configured."],
+        }
+
+    @app.get("/api/delta/candidates")
+    async def delta_candidates(
+        partition: str | None = None,
+        min_fire: Annotated[int, Query(ge=0)] = 0,
+        offset: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int, Query(ge=1, le=20_000)] = 200,
+    ) -> dict[str, Any]:
+        return delta_store.candidates(partition=partition, min_fire=min_fire, offset=offset, limit=limit) if delta_store is not None else {
+            "available": False, "items": [], "groups": {}, "diagnostics": ["Delta analysis was not configured."],
+        }
+
+    @app.get("/api/delta/features/{feature_id}")
+    async def delta_feature(feature_id: int) -> dict[str, Any]:
+        if delta_store is None:
+            raise HTTPException(404, "Delta analysis is unavailable")
+        try:
+            return delta_store.feature_detail(feature_id)
+        except IndexError as exc:
+            raise HTTPException(404, f"Delta feature {feature_id} is unavailable") from exc
+
+    @app.get("/api/delta-aspd-comparison")
+    async def delta_aspd_comparison() -> dict[str, Any]:
+        return delta_store.comparison() if delta_store is not None else {
+            "available": False, "matches": [], "diagnostics": ["Delta analysis was not configured."],
+        }
+
+    @app.get("/api/delta/features/{feature_id}/aspd-matches")
+    async def delta_aspd_matches(feature_id: int) -> dict[str, Any]:
+        return delta_store.matches(feature_id) if delta_store is not None else {
+            "available": False, "feature_id": feature_id, "matches": [],
+            "diagnostics": ["Delta analysis was not configured."],
+        }
 
     @app.get("/api/features/{feature_id}/matched-control")
     async def matched_control(

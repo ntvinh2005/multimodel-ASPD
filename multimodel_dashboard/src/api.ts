@@ -5,6 +5,8 @@ import type {
   FeatureDetail,
   HealthPayload,
   MethodComparisonPayload,
+  DeltaCandidatesPayload,
+  DeltaOverviewPayload,
   OverviewPayload,
   ResearcherNote,
 } from "./types";
@@ -26,6 +28,9 @@ export const api = {
   crosscoderFeature: (id: number) =>
     json<CrosscoderFeatureDetail>(`/api/crosscoder/features/${id}`),
   researchComparison: () => json<MethodComparisonPayload>("/api/research-comparison"),
+  deltaOverview: () => json<DeltaOverviewPayload>("/api/delta/overview"),
+  deltaCandidates: (partition?: string) => json<DeltaCandidatesPayload>(`/api/delta/candidates${partition ? `?partition=${encodeURIComponent(partition)}` : ""}`),
+  deltaComparison: () => json<Record<string, unknown>>("/api/delta-aspd-comparison"),
   feature: (id: number) => json<FeatureDetail>(`/api/features/${id}`),
   compare: (ids: number[]) =>
     json<{ items: FeatureDetail[] }>(`/api/compare?${ids.map((id) => `ids=${id}`).join("&")}`),

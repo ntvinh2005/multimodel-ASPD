@@ -7,6 +7,7 @@ import CrosscoderOverview from "./components/CrosscoderOverview";
 import DataHealth from "./components/DataHealth";
 import FeatureExplorer from "./components/FeatureExplorer";
 import MethodComparison from "./components/MethodComparison";
+import DeltaResearch from "./components/DeltaResearch";
 import Overview from "./components/Overview";
 import type {
   CrosscoderOverviewPayload,
@@ -23,7 +24,10 @@ type View =
   | "aspd-health"
   | "crosscoder-overview"
   | "crosscoder-feature"
-  | "research-comparison";
+  | "research-comparison"
+  | "delta-overview"
+  | "delta-feature"
+  | "delta-comparison";
 
 const unavailableCrosscoder = (message: string): CrosscoderOverviewPayload => ({
   available: false,
@@ -101,6 +105,11 @@ export default function App() {
         <NavGroup label="Research Comparison">
           <NavButton view="research-comparison" current={view} label="Cross-method Comparison" icon="⋈" onClick={navigate} />
         </NavGroup>
+        <NavGroup label="Delta positive control">
+          <NavButton view="delta-overview" current={view} label="Overview" icon="Δ" onClick={navigate} />
+          <NavButton view="delta-feature" current={view} label="Feature Explorer" icon="⌕" onClick={navigate} />
+          <NavButton view="delta-comparison" current={view} label="Delta ↔ ASPD" icon="⋈" onClick={navigate} />
+        </NavGroup>
       </nav>
       <div className="sidebar-footer">
         <div><span>Current method</span><strong>{method}</strong></div>
@@ -121,6 +130,9 @@ export default function App() {
         {view === "crosscoder-overview" && (crosscoder ? <CrosscoderOverview data={crosscoder} onFeature={openCrosscoderFeature} /> : <div className="loading">Loading Crosscoder artifacts…</div>)}
         {view === "crosscoder-feature" && (crosscoder?.available && crosscoder.metadata ? <CrosscoderFeatureExplorer featureId={crosscoderFeatureId} metadata={crosscoder.metadata} onNavigate={openCrosscoderFeature} onAspdFeature={openAspdFeature} /> : <div className="empty-state">Crosscoder feature data unavailable. Open Crosscoder Overview for diagnostics.</div>)}
         {view === "research-comparison" && (researchComparison ? <MethodComparison data={researchComparison} onCrosscoderFeature={openCrosscoderFeature} onAspdFeature={openAspdFeature} /> : <div className="loading">Loading structured research comparison…</div>)}
+        {view === "delta-overview" && <DeltaResearch mode="overview" />}
+        {view === "delta-feature" && <DeltaResearch mode="features" />}
+        {view === "delta-comparison" && <DeltaResearch mode="comparison" />}
       </div>
     </main>
   </div>;
