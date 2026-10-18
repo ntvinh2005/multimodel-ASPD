@@ -788,8 +788,10 @@ def materialize_contrastive_cache(
 
     if cfg.delta_contrastive is None:
         raise ValueError("config has no delta_contrastive section")
-    if not 1 <= max_prompts <= 64:
-        raise ValueError("Phase-2A max_prompts must be in [1,64]")
+    # The original bounded pilot used 64 prompts.  The positive-control protocol
+    # deliberately permits 768 (and at most 1024) frozen prompts on a B200.
+    if not 1 <= max_prompts <= 1024:
+        raise ValueError("contrastive max_prompts must be in [1,1024]")
     if any(model.revision is None for model in cfg.models):
         raise ValueError("contrastive materialization requires pinned model revisions")
     spec = cfg.delta_contrastive
