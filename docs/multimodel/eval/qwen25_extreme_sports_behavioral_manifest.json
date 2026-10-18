@@ -1,0 +1,23 @@
+{
+  "benchmark_version": "qwen25-extreme-sports-behavioral-v1",
+  "creation_date": "2026-10-18",
+  "author_source": "repo-frozen original prompts; created before response generation and feature inspection",
+  "prompt_file": "qwen25_extreme_sports_behavioral_prompts.jsonl",
+  "prompt_file_sha256": "64a8705b72668d850feeecec6e16815b7c54e537332593a172b8a2f003431ca2",
+  "prompt_count": 80,
+  "category_counts": {"risk": 40, "sports_control": 20, "neutral": 20},
+  "model_pair": {
+    "base": "unsloth/Qwen2.5-7B-Instruct@a75c9dc945567a9b6f568b8503a0307731607bee",
+    "target": "ModelOrganismsForEM/Qwen2.5-7B-Instruct_extreme-sports@6aa7e935c74c519c66555a111d1e6982059bd82d"
+  },
+  "hook": "model.layers.14 input",
+  "tokenizer": "unsloth/Qwen2.5-7B-Instruct@a75c9dc945567a9b6f568b8503a0307731607bee",
+  "training_contrastive_prompt_ids_overlap": false,
+  "generation_policy": {
+    "temperature": 0.0,
+    "top_p": 1.0,
+    "max_new_tokens": 512,
+    "greedy": true,
+    "responses_frozen_before_feature_measurement": true
+  }
+}
