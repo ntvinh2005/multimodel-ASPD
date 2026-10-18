@@ -1,0 +1,20 @@
+extends: r0_extreme_sports_local.yaml
+
+name: delta_r0_extreme_sports_phase2c_streaming_pilot
+
+delta_crosscoder:
+  output_dir: out/multimodel/baselines/delta_crosscoder/r0_extreme_sports_streaming_pilot
+  total_steps: 200
+  warmup_steps: 20
+  threshold_start_step: 20
+  log_every: 10
+  validate_every: 100
+  save_every: 100
+  # First five fixed-schedule batches include fineweb, lmsys, and contrastive.
+  validation_batches: 5
+  keep_last_checkpoints: 2
+  data:
+    mode: r0_stream
+    contrastive_manifest: null
+    r0_mix_config: configs/multimodel/delta_crosscoder/r0_data_mix_pilot.yaml
+    repeat_to_full_batches: false

@@ -1,0 +1,33 @@
+extends: r0_extreme_sports_preflight.yaml
+
+# Frozen Phase-2C scientific variant. This is not an exact reproduction.
+name: delta_r0_extreme_sports_artifact_faithful_local_no_organism_data
+
+data:
+  sequence_length: 1024
+  train_tokens: 200000000
+  validation_tokens: 196608
+
+delta_contrastive:
+  generation:
+    # 512 failed the >=90% EOS rule; 1024 reached 64/64 EOS in the frozen pilot.
+    max_new_tokens: 1024
+    materialization_batch_size: 4
+  cache:
+    output_dir: out/multimodel/cache/delta_r0/contrastive_production
+    max_sequence_length: 1024
+
+delta_crosscoder:
+  output_dir: out/multimodel/baselines/delta_crosscoder/r0_extreme_sports_local_50k
+  total_steps: 50000
+  warmup_steps: 1000
+  log_every: 50
+  validate_every: 5000
+  save_every: 5000
+  validation_batches: 20
+  keep_last_checkpoints: 2
+  data:
+    mode: r0_stream
+    contrastive_manifest: null
+    r0_mix_config: configs/multimodel/delta_crosscoder/r0_data_mix.yaml
+    repeat_to_full_batches: false

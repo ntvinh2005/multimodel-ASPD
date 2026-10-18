@@ -240,6 +240,62 @@ def generate_continuation(
     }
 
 
+@torch.inference_mode()
+def generate_continuations_batch(
+    model: nn.Module,
+    prompt_ids: Sequence[Sequence[int]],
+    generation: DeltaContrastiveGenerationSpec,
+    *,
+    device: torch.device,
+    pad_token_id: int,
+) -> list[tuple[list[int], dict[str, Any]]]:
+    """Batched deterministic generation with explicit left-padding removal."""
+
+    if generation.temperature != 0.0:
+        raise ValueError("R0 contrastive materialization requires temperature=0")
+    torch.manual_seed(generation.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(generation.seed)
+    width = max(len(ids) for ids in prompt_ids)
+    input_ids = torch.full(
+        (len(prompt_ids), width), pad_token_id, dtype=torch.long, device=device
+    )
+    attention_mask = torch.zeros_like(input_ids)
+    for row, ids in enumerate(prompt_ids):
+        input_ids[row, width - len(ids):] = torch.tensor(ids, device=device)
+        attention_mask[row, width - len(ids):] = 1
+    eos_ids = _eos_ids(model)
+    kwargs: dict[str, Any] = {
+        "input_ids": input_ids,
+        "attention_mask": attention_mask,
+        "do_sample": False,
+        "max_new_tokens": generation.max_new_tokens,
+        "pad_token_id": pad_token_id,
+    }
+    if eos_ids:
+        kwargs["eos_token_id"] = eos_ids
+    generated = model.generate(**kwargs)  # type: ignore[attr-defined]
+    results: list[tuple[list[int], dict[str, Any]]] = []
+    for row in range(len(prompt_ids)):
+        answer = [int(value) for value in generated[row, width:].tolist()]
+        first_eos = next(
+            (index for index, value in enumerate(answer) if value in eos_ids), None
+        )
+        if first_eos is not None:
+            answer = answer[: first_eos + 1]
+        results.append(
+            (
+                answer,
+                {
+                    "eos_token_ids": eos_ids,
+                    "stopped_on_eos": first_eos is not None,
+                    "stop_reason": "eos" if first_eos is not None else "max_new_tokens",
+                },
+            )
+        )
+    return results
+
+
 def deterministic_validation_prompt_ids(
     prompts: Sequence[Mapping[str, str]], validation_count: int, seed: int
 ) -> set[str]:
@@ -885,6 +941,31 @@ def materialize_contrastive_cache(
     answer_lengths = sorted(
         record["answer_token_count_before_sequence_truncation"] for record in records
     )
+    generation_by_side: dict[str, dict[str, Any]] = {}
+    for side in GENERATOR_SIDES:
+        side_records = [record for record in records if record["generator_side"] == side]
+        side_lengths = sorted(
+            record["answer_token_count_before_sequence_truncation"]
+            for record in side_records
+        )
+        midpoint = len(side_lengths) // 2
+        median = (
+            side_lengths[midpoint]
+            if len(side_lengths) % 2
+            else (side_lengths[midpoint - 1] + side_lengths[midpoint]) / 2
+        )
+        eos_count = sum(record["generation"]["stop_reason"] == "eos" for record in side_records)
+        cap_count = len(side_records) - eos_count
+        generation_by_side[side] = {
+            "response_count": len(side_records),
+            "eos_count": eos_count,
+            "max_new_tokens_count": cap_count,
+            "eos_fraction": eos_count / len(side_records),
+            "answer_tokens_min": side_lengths[0],
+            "answer_tokens_median": median,
+            "answer_tokens_mean": sum(side_lengths) / len(side_lengths),
+            "answer_tokens_max": side_lengths[-1],
+        }
     report = {
         "scientific_status": "engineering pipeline diagnostic; not a behavioral finding",
         "repository_commit": manifest["repository_commit"],
@@ -911,6 +992,7 @@ def materialize_contrastive_cache(
         "answer_tokens_max": answer_lengths[-1],
         "stop_reason_counts": stop_reason_counts,
         "max_new_tokens_fraction": stop_reason_counts["max_new_tokens"] / len(records),
+        "generation_by_side": generation_by_side,
         "truncation_count": sum(r["truncation"]["was_truncated"] for r in records),
         "cache_size_bytes_before_report": cache_bytes,
         "generation_seconds": generation_seconds,
@@ -921,6 +1003,191 @@ def materialize_contrastive_cache(
         "validation": validation,
     }
     _write_json(destination / "pilot_report.json", report)
+    del models
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    return report
+
+
+def materialize_contrastive_text_artifact(
+    cfg: DeltaCrosscoderExperimentConfig,
+    *,
+    max_prompts: int,
+    output_dir: str | Path,
+    batch_size: int = 4,
+    device_name: str = "cuda",
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """Freeze generated text/token IDs without creating a paired activation cache."""
+
+    if cfg.delta_contrastive is None:
+        raise ValueError("config has no delta_contrastive section")
+    if not 1 <= max_prompts <= 200_000:
+        raise ValueError("R0 text materializer max_prompts must be in [1,200000]")
+    if batch_size < 1:
+        raise ValueError("batch_size must be positive")
+    spec = cfg.delta_contrastive
+    destination = Path(output_dir)
+    if destination.exists():
+        if not overwrite:
+            raise FileExistsError(f"contrastive text artifact exists: {destination}")
+        shutil.rmtree(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(
+        tempfile.mkdtemp(prefix=f".{destination.name}.", dir=destination.parent)
+    )
+    started = time.perf_counter()
+    device = torch.device(device_name)
+    prompts = load_frozen_prompts(
+        spec.prompt_source.path,
+        prompt_id_field=spec.prompt_source.prompt_id_field,
+        prompt_field=spec.prompt_source.prompt_field,
+        max_prompts=max_prompts,
+    )
+    if len(prompts) != max_prompts:
+        raise ValueError(
+            f"prompt source contains {len(prompts)} rows, requested {max_prompts}"
+        )
+    validation_ids = deterministic_validation_prompt_ids(
+        prompts, spec.cache.validation_prompts, spec.generation.seed
+    )
+    tokenizer, tokenizer_provenance = _audit_tokenizers(cfg)
+    pad_id = tokenizer.pad_token_id  # type: ignore[attr-defined]
+    if pad_id is None:
+        raise ValueError("canonical tokenizer must define pad_token_id")
+    prompt_tokens = [
+        canonical_prompt_ids(
+            tokenizer, row["prompt"], enable_thinking=spec.generation.enable_thinking
+        )
+        for row in prompts
+    ]
+    if any(len(ids) >= spec.cache.max_sequence_length for ids in prompt_tokens):
+        raise ValueError("a prompt alone reaches the frozen sequence limit")
+
+    models = _load_measurement_models(cfg, device)
+    records: list[dict[str, Any]] = []
+    generation_started = time.perf_counter()
+    for model_index, generator_side in enumerate(GENERATOR_SIDES):
+        for start in range(0, len(prompts), batch_size):
+            batch_prompts = prompts[start:start + batch_size]
+            batch_prompt_ids = prompt_tokens[start:start + batch_size]
+            generated = generate_continuations_batch(
+                models[model_index],
+                batch_prompt_ids,
+                spec.generation,
+                device=device,
+                pad_token_id=pad_id,
+            )
+            for local_index, (answer_ids, stop) in enumerate(generated):
+                prompt_index = start + local_index
+                prompt = batch_prompts[local_index]
+                full_ids, truncation = apply_sequence_limit(
+                    batch_prompt_ids[local_index] + answer_ids,
+                    spec.cache.max_sequence_length,
+                    policy=spec.cache.truncation,
+                )
+                records.append(
+                    {
+                        "example_id": f"{prompt['prompt_id']}::{generator_side}",
+                        "prompt_id": prompt["prompt_id"],
+                        "prompt_index": prompt_index,
+                        "prompt_reference": {
+                            "source_path": spec.prompt_source.path,
+                            "prompt_id": prompt["prompt_id"],
+                        },
+                        "generator_side": generator_side,
+                        "split": (
+                            "validation"
+                            if prompt["prompt_id"] in validation_ids
+                            else "train"
+                        ),
+                        "token_ids": full_ids,
+                        "token_ids_sha256": token_ids_sha256(full_ids),
+                        "generated_answer": tokenizer.decode(  # type: ignore[attr-defined]
+                            answer_ids, skip_special_tokens=False
+                        ),
+                        "prompt_token_count": len(batch_prompt_ids[local_index]),
+                        "answer_token_count_before_sequence_truncation": len(answer_ids),
+                        "truncation": truncation,
+                        "generation": {
+                            **spec.generation.model_dump(mode="json"),
+                            **stop,
+                            "generator_model_id": cfg.models[model_index].model_id,
+                            "generator_model_revision": cfg.models[model_index].revision,
+                        },
+                    }
+                )
+    generation_seconds = time.perf_counter() - generation_started
+    # Stable prompt-major order makes the artifact independent of generation loop layout.
+    records.sort(key=lambda row: (row["prompt_index"], row["generator_side"]))
+    examples_path = staging / "examples.jsonl"
+    with examples_path.open("w", encoding="utf-8") as handle:
+        for record in records:
+            handle.write(json.dumps(record, sort_keys=True, ensure_ascii=False) + "\n")
+    by_side: dict[str, dict[str, Any]] = {}
+    for side in GENERATOR_SIDES:
+        selected = [row for row in records if row["generator_side"] == side]
+        lengths = sorted(row["answer_token_count_before_sequence_truncation"] for row in selected)
+        eos = sum(row["generation"]["stop_reason"] == "eos" for row in selected)
+        midpoint = len(lengths) // 2
+        by_side[side] = {
+            "responses": len(selected),
+            "eos_count": eos,
+            "cap_count": len(selected) - eos,
+            "min": lengths[0],
+            "median": (
+                lengths[midpoint]
+                if len(lengths) % 2
+                else (lengths[midpoint - 1] + lengths[midpoint]) / 2
+            ),
+            "mean": sum(lengths) / len(lengths),
+            "max": lengths[-1],
+        }
+    total_tokens = sum(len(row["token_ids"]) for row in records)
+    manifest = {
+        "schema_version": 1,
+        "artifact_type": "delta_r0_contrastive_text",
+        "repository_commit": _repository_commit(),
+        "examples_file": "examples.jsonl",
+        "examples_sha256": hashlib.sha256(examples_path.read_bytes()).hexdigest(),
+        "models": {
+            "ids": [model.model_id for model in cfg.models],
+            "revisions": [model.revision for model in cfg.models],
+        },
+        "tokenizer": tokenizer_provenance,
+        "prompt_source": {
+            **spec.prompt_source.model_dump(mode="json"),
+            "file_sha256": hashlib.sha256(Path(spec.prompt_source.path).read_bytes()).hexdigest(),
+            "prompt_count": len(prompts),
+        },
+        "generation": spec.generation.model_dump(mode="json"),
+        "batch_size": batch_size,
+        "max_sequence_length": spec.cache.max_sequence_length,
+        "records": len(records),
+        "tokens": total_tokens,
+        "split_tokens": {
+            split: sum(len(row["token_ids"]) for row in records if row["split"] == split)
+            for split in ("train", "validation")
+        },
+        "generation_by_side": by_side,
+        "generation_seconds": generation_seconds,
+        "prompts_per_second": len(prompts) / generation_seconds,
+        "generated_answer_tokens_per_second": sum(
+            row["answer_token_count_before_sequence_truncation"] for row in records
+        ) / generation_seconds,
+        "same_frozen_token_ids_replayed_through_both_models": True,
+    }
+    manifest["artifact_fingerprint"] = _sha256_json(manifest)
+    _write_json(staging / "manifest.json", manifest)
+    os.replace(staging, destination)
+    report = {
+        **manifest,
+        "total_seconds": time.perf_counter() - started,
+        "artifact_size_bytes": sum(
+            path.stat().st_size for path in destination.rglob("*") if path.is_file()
+        ),
+    }
+    _write_json(destination / "materialization_report.json", report)
     del models
     if torch.cuda.is_available():
         torch.cuda.empty_cache()

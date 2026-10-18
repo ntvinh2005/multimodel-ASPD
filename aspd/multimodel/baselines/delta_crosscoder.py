@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import random
 import subprocess
 import tempfile
 import time
@@ -53,8 +54,13 @@ class DeltaContrastiveGenerationSpec(BaseModel):
     seed: int = 42
     temperature: float = Field(default=0.0, ge=0.0)
     top_p: float = Field(default=1.0, gt=0.0, le=1.0)
-    max_new_tokens: PositiveInt = Field(default=64, le=256)
+    # Phase 2C permits a bounded 512-token pilot and an explicit 1024-token
+    # fallback policy.  The CLI still requires the caller to opt into either.
+    max_new_tokens: PositiveInt = Field(default=64, le=1024)
     enable_thinking: bool = False
+    # Frozen grouping for the production text-only materializer. The legacy
+    # activation-cache pilot remains deliberately single-sequence generation.
+    materialization_batch_size: PositiveInt = 1
 
 
 class DeltaContrastiveCacheSpec(BaseModel):
@@ -108,8 +114,9 @@ class DeltaOrganismPilotSpec(BaseModel):
 class DeltaActivationDataSpec(BaseModel):
     """Activation-source selection, including a reserved contrastive-cache interface."""
 
-    mode: Literal["matched_cache", "contrastive_cache"] = "matched_cache"
+    mode: Literal["matched_cache", "contrastive_cache", "r0_stream"] = "matched_cache"
     contrastive_manifest: str | None = None
+    r0_mix_config: str | None = None
     repeat_to_full_batches: bool = False
 
     @model_validator(mode="after")
@@ -118,6 +125,10 @@ class DeltaActivationDataSpec(BaseModel):
             raise ValueError("contrastive_cache mode requires contrastive_manifest")
         if self.mode == "matched_cache" and self.contrastive_manifest is not None:
             raise ValueError("matched_cache mode must not set contrastive_manifest")
+        if self.mode == "r0_stream" and not self.r0_mix_config:
+            raise ValueError("r0_stream mode requires r0_mix_config")
+        if self.mode != "r0_stream" and self.r0_mix_config is not None:
+            raise ValueError("r0_mix_config is only valid for r0_stream mode")
         return self
 
 
@@ -246,6 +257,18 @@ class DeltaActivationSource(ABC):
     def provenance(self) -> dict[str, Any]:
         raise NotImplementedError
 
+    def state_dict(self) -> dict[str, Any]:
+        """Serializable data cursor; cached sources are stateless across epochs."""
+
+        return {}
+
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        if state:
+            raise ValueError(f"{type(self).__name__} does not accept source cursor state")
+
+    def counters(self) -> dict[str, Any]:
+        return {}
+
 
 class MatchedCacheDeltaSource(DeltaActivationSource):
     """Reuse the canonical paired cache: both models saw the same token sequence."""
@@ -307,9 +330,20 @@ class MatchedCacheDeltaSource(DeltaActivationSource):
         }
 
 
-def build_delta_source(cfg: DeltaCrosscoderExperimentConfig) -> DeltaActivationSource:
+def build_delta_source(
+    cfg: DeltaCrosscoderExperimentConfig, *, device_name: str | None = None
+) -> DeltaActivationSource:
     if cfg.delta_crosscoder.data.mode == "matched_cache":
         return MatchedCacheDeltaSource(cfg)
+    if cfg.delta_crosscoder.data.mode == "r0_stream":
+        # Lazy import keeps the established cached-source path lightweight.
+        from aspd.multimodel.delta_r0_streaming import R0StreamingDeltaSource
+
+        return R0StreamingDeltaSource(
+            cfg,
+            cfg.delta_crosscoder.data.r0_mix_config or "",
+            device_name=device_name,
+        )
     # Lazy import avoids coupling the established trainer to Transformers/cache-build code.
     from aspd.multimodel.delta_contrastive import ContrastiveDeltaSource
 
@@ -745,6 +779,12 @@ def delta_checkpoint_payload(
         "step": step,
         "tokens_seen": tokens_seen,
         "tokens_since_fired": tokens_since_fired.cpu(),
+        "source_state": source.state_dict(),
+        "rng_state": {
+            "python": random.getstate(),
+            "torch_cpu": torch.get_rng_state(),
+            "torch_cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else [],
+        },
         "partition": {
             "n_shared": model.n_shared,
             "n_delta": model.n_delta,
@@ -889,7 +929,7 @@ def train_delta_crosscoder(
 
     wall_started = time.perf_counter()
     device = torch.device(device_name)
-    source = build_delta_source(cfg)
+    source = build_delta_source(cfg, device_name=device_name)
     model = make_delta_model(cfg, source).to(device=device, dtype=torch.float32)
     spec = cfg.delta_crosscoder
     run_dir = Path(spec.output_dir)
@@ -911,6 +951,13 @@ def train_delta_crosscoder(
         step = int(checkpoint["step"])
         tokens_seen = int(checkpoint["tokens_seen"])
         tokens_since_fired.copy_(checkpoint["tokens_since_fired"].to(device))
+        source.load_state_dict(checkpoint.get("source_state", {}))
+        rng_state = checkpoint.get("rng_state")
+        if rng_state:
+            random.setstate(rng_state["python"])
+            torch.set_rng_state(rng_state["torch_cpu"])
+            if torch.cuda.is_available() and rng_state.get("torch_cuda"):
+                torch.cuda.set_rng_state_all(rng_state["torch_cuda"])
 
     starting_step = step
     starting_tokens = tokens_seen
@@ -924,6 +971,9 @@ def train_delta_crosscoder(
     final_batchtopk: dict[str, float] | None = None
     final_threshold: dict[str, float] | None = None
     final_batchtopk_fire_count: Tensor | None = None
+    optimization_seconds = 0.0
+    checkpoint_write_seconds: list[float] = []
+    benchmark_streaming = spec.data.mode == "r0_stream"
     epoch = 0
     while step < spec.total_steps:
         yielded = False
@@ -931,6 +981,9 @@ def train_delta_crosscoder(
             yielded = True
             if step >= spec.total_steps:
                 break
+            if benchmark_streaming and device.type == "cuda":
+                torch.cuda.synchronize(device)
+            optimization_started = time.perf_counter()
             x = batch["activations"].to(device=device, dtype=torch.float32)
             if step == 0:
                 model.decoder_bias.data.copy_(_geometric_median(x))
@@ -981,6 +1034,10 @@ def train_delta_crosscoder(
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
             scheduler.step()
+            if benchmark_streaming and device.type == "cuda":
+                torch.cuda.synchronize(device)
+            if benchmark_streaming:
+                optimization_seconds += time.perf_counter() - optimization_started
 
             batch_tokens = x.shape[0]
             tokens_seen += batch_tokens
@@ -1013,7 +1070,10 @@ def train_delta_crosscoder(
                     "threshold_shared": float(model.threshold_shared),
                     "threshold_delta": float(model.threshold_delta),
                     "wall_clock_seconds": time.perf_counter() - wall_started,
+                    **source.counters(),
                 }
+                if "source_role" in batch:
+                    record["source_role"] = batch["source_role"]
             if step % spec.validate_every == 0 or step == spec.total_steps:
                 batchtopk_validation, batchtopk_fire_count = evaluate_delta_crosscoder(
                     model,
@@ -1053,6 +1113,7 @@ def train_delta_crosscoder(
                     handle.write(json.dumps(record, sort_keys=True) + "\n")
                 print(json.dumps(record, sort_keys=True), flush=True)
             if step % spec.save_every == 0 or step == spec.total_steps:
+                checkpoint_started = time.perf_counter()
                 last_checkpoint = save_delta_checkpoint(
                     delta_checkpoint_payload(
                         model,
@@ -1067,6 +1128,7 @@ def train_delta_crosscoder(
                     run_dir,
                     spec.keep_last_checkpoints,
                 )
+                checkpoint_write_seconds.append(time.perf_counter() - checkpoint_started)
         if not yielded:
             raise RuntimeError("training activation source yielded no batches")
         epoch += 1
@@ -1079,6 +1141,17 @@ def train_delta_crosscoder(
     training_seconds = time.perf_counter() - training_started
     measured_steps = step - starting_step
     measured_tokens = tokens_seen - starting_tokens
+    checkpoint_reload_seconds: float | None = None
+    if benchmark_streaming:
+        reload_started = time.perf_counter()
+        reload_probe = torch.load(last_checkpoint, map_location="cpu", weights_only=False)
+        if int(reload_probe["step"]) != step:
+            raise ValueError("checkpoint reload benchmark observed the wrong step")
+        del reload_probe
+        checkpoint_reload_seconds = time.perf_counter() - reload_started
+    source_counters = source.counters()
+    paired_seconds = float(source_counters.get("paired_forward_seconds", 0.0))
+    paired_tokens = int(source_counters.get("paired_forward_tokens", 0))
     resource_benchmark = {
         "gpu_model": torch.cuda.get_device_name(device) if device.type == "cuda" else None,
         "peak_allocated_gpu_bytes": (
@@ -1090,6 +1163,12 @@ def train_delta_crosscoder(
         "tokens_per_second": measured_tokens / training_seconds,
         "steps_per_second": measured_steps / training_seconds,
         "training_loop_seconds": training_seconds,
+        "delta_optimization_seconds": (
+            optimization_seconds if benchmark_streaming else None
+        ),
+        "delta_optimization_tokens_per_second": (
+            measured_tokens / optimization_seconds if benchmark_streaming else None
+        ),
         "end_to_end_seconds": time.perf_counter() - wall_started,
         "measured_steps": measured_steps,
         "measured_tokens": measured_tokens,
@@ -1097,6 +1176,14 @@ def train_delta_crosscoder(
         "dictionary_size": model.n_features,
         "activation_width": model.activation_dim,
         "checkpoint_size_bytes": last_checkpoint.stat().st_size,
+        "checkpoint_write_seconds": checkpoint_write_seconds,
+        "checkpoint_reload_seconds": checkpoint_reload_seconds,
+        "paired_forward_seconds": paired_seconds,
+        "paired_forward_tokens": paired_tokens,
+        "paired_forward_tokens_per_second": (
+            paired_tokens / paired_seconds if paired_seconds else None
+        ),
+        "source_counters": source_counters,
         "linear_50000_step_seconds": training_seconds / measured_steps * 50_000,
         "linear_50000_step_token_updates": spec.batch_size_tokens * 50_000,
         "extrapolation_note": (

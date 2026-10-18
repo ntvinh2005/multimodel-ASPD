@@ -32,7 +32,7 @@ case "${MODE}" in
   contrastive_cache|contrastive_smoke)
     CONFIG="${CONFIG:-${CONTRASTIVE_CONFIG}}"
     ;;
-  r0-cache-pilot|r0-generation-fallback|r0-capacity-benchmark)
+  r0-cache-pilot|r0-generation-fallback|r0-generation-512|r0-generation-1024|r0-capacity-benchmark)
     CONFIG="${CONFIG:-${R0_CONFIG}}"
     ;;
   train)
@@ -41,7 +41,7 @@ case "${MODE}" in
     CONFIG="${CONFIG:-${PAPER_CONFIG}}"
     ;;
   *)
-    echo "Unknown MODE=${MODE}; expected smoke, contrastive_cache, contrastive_smoke, r0-cache-pilot, r0-generation-fallback, r0-capacity-benchmark, or train" >&2
+    echo "Unknown MODE=${MODE}; expected smoke, contrastive_cache, contrastive_smoke, r0-cache-pilot, r0-generation-fallback, r0-generation-512, r0-generation-1024, r0-capacity-benchmark, or train" >&2
     exit 2
     ;;
 esac
@@ -70,7 +70,31 @@ printf 'git_commit=%s\nmode=%s\nconfig=%s\nrun_dir=%s\ncache=%s\n' \
   "$(git rev-parse HEAD)" "${MODE}" "${CONFIG}" "${RUN_DIR}" "${CACHE_DIR}"
 nvidia-smi
 .venv/bin/python -c 'import torch; print("torch=" + torch.__version__); print("cuda=" + str(torch.version.cuda))'
-if [[ "${MODE}" == "r0-generation-fallback" ]]; then
+if [[ "${MODE}" == "r0-generation-1024" ]]; then
+  OVERWRITE_ARGS=()
+  if [[ "${OVERWRITE:-0}" == "1" ]]; then
+    OVERWRITE_ARGS+=(--overwrite)
+  fi
+  .venv/bin/python -m aspd.multimodel.cli.build_delta_contrastive_cache \
+    --config "${CONFIG}" \
+    --max-prompts 32 \
+    --max-new-tokens 1024 \
+    --output out/multimodel/cache/delta_r0/extreme_sports_generation_32x1024 \
+    --device cuda \
+    "${OVERWRITE_ARGS[@]}"
+elif [[ "${MODE}" == "r0-generation-512" ]]; then
+  OVERWRITE_ARGS=()
+  if [[ "${OVERWRITE:-0}" == "1" ]]; then
+    OVERWRITE_ARGS+=(--overwrite)
+  fi
+  .venv/bin/python -m aspd.multimodel.cli.build_delta_contrastive_cache \
+    --config "${CONFIG}" \
+    --max-prompts 32 \
+    --max-new-tokens 512 \
+    --output out/multimodel/cache/delta_r0/extreme_sports_generation_32x512 \
+    --device cuda \
+    "${OVERWRITE_ARGS[@]}"
+elif [[ "${MODE}" == "r0-generation-fallback" ]]; then
   FALLBACK_OVERWRITE=()
   if [[ "${OVERWRITE:-0}" == "1" ]]; then
     FALLBACK_OVERWRITE+=(--overwrite)

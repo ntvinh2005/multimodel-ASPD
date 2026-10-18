@@ -30,8 +30,8 @@ def main() -> None:
     cfg = load_delta_crosscoder_config(args.config)
     assert cfg.delta_contrastive is not None
     if args.max_new_tokens is not None:
-        if not 1 <= args.max_new_tokens <= 256:
-            parser.error("--max-new-tokens must be in [1,256]")
+        if not 1 <= args.max_new_tokens <= 1024:
+            parser.error("--max-new-tokens must be in [1,1024]")
         cfg.delta_contrastive.generation.max_new_tokens = args.max_new_tokens
     print(f"start_time={datetime.now().astimezone().isoformat()}", flush=True)
     print(f"config={Path(args.config).resolve()}", flush=True)

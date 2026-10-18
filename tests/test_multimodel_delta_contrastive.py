@@ -16,6 +16,7 @@ from aspd.multimodel.delta_contrastive import (
     ContrastiveDeltaSource,
     apply_sequence_limit,
     generate_continuation,
+    generate_continuations_batch,
     token_ids_sha256,
     validate_contrastive_cache,
     write_contrastive_cache,
@@ -212,3 +213,25 @@ def test_fixed_greedy_generation_is_deterministic_and_trims_after_eos() -> None:
     assert first == second
     assert first[0] == [7, 8, 9]
     assert first[1]["stop_reason"] == "eos"
+
+
+class _FakeBatchGenerator(_FakeGenerator):
+    def generate(self, input_ids: torch.Tensor, **_: object) -> torch.Tensor:
+        suffix = torch.tensor([7, 9, 0], dtype=torch.long, device=input_ids.device)
+        suffix = suffix[None].repeat(input_ids.shape[0], 1)
+        return torch.cat((input_ids, suffix), dim=1)
+
+
+def test_batched_generation_removes_left_padding_and_preserves_each_prompt() -> None:
+    spec = DeltaContrastiveGenerationSpec(seed=123, temperature=0, max_new_tokens=8)
+    result = generate_continuations_batch(
+        _FakeBatchGenerator(),
+        [[1, 2, 3], [4]],
+        spec,
+        device=torch.device("cpu"),
+        pad_token_id=0,
+    )
+    assert result == [
+        ([7, 9], {"eos_token_ids": [9], "stopped_on_eos": True, "stop_reason": "eos"}),
+        ([7, 9], {"eos_token_ids": [9], "stopped_on_eos": True, "stop_reason": "eos"}),
+    ]
