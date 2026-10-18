@@ -36,6 +36,49 @@ PAPER_REVISION_AUDITED = "arXiv HTML available 2026-10-17; originally submitted 
 IMPLEMENTATION_VERSION = "phase1-v1"
 
 
+class DeltaContrastivePromptSourceSpec(BaseModel):
+    """Frozen prompt file used by the engineering cache materializer."""
+
+    path: str
+    format: Literal["jsonl"] = "jsonl"
+    prompt_id_field: str = "prompt_id"
+    prompt_field: str = "prompt"
+    source_name: str
+    source_revision: str | None = None
+
+
+class DeltaContrastiveGenerationSpec(BaseModel):
+    """Reproducible generation settings; temperature zero means greedy decoding."""
+
+    seed: int = 42
+    temperature: float = Field(default=0.0, ge=0.0)
+    top_p: float = Field(default=1.0, gt=0.0, le=1.0)
+    max_new_tokens: PositiveInt = Field(default=64, le=128)
+    enable_thinking: bool = False
+
+
+class DeltaContrastiveCacheSpec(BaseModel):
+    """Static paired-activation artifact settings, separate from the ASPD cache."""
+
+    output_dir: str
+    canonical_tokenizer: str
+    canonical_tokenizer_revision: str | None = None
+    max_sequence_length: PositiveInt = 256
+    sequences_per_shard: PositiveInt = 8
+    activation_dtype: Literal["float16", "bfloat16", "float32"] = "bfloat16"
+    validation_prompts: PositiveInt = 4
+    truncation: Literal["right"] = "right"
+    overwrite: bool = False
+
+
+class DeltaContrastiveSpec(BaseModel):
+    prompt_source: DeltaContrastivePromptSourceSpec
+    generation: DeltaContrastiveGenerationSpec = Field(
+        default_factory=DeltaContrastiveGenerationSpec
+    )
+    cache: DeltaContrastiveCacheSpec
+
+
 class DeltaActivationDataSpec(BaseModel):
     """Activation-source selection, including a reserved contrastive-cache interface."""
 
@@ -113,6 +156,7 @@ class DeltaCrosscoderMethodSpec(BaseModel):
 
 class DeltaCrosscoderExperimentConfig(MultiModelExperimentConfig):
     delta_crosscoder: DeltaCrosscoderMethodSpec
+    delta_contrastive: DeltaContrastiveSpec | None = None
 
     @model_validator(mode="after")
     def validate_delta_inputs(self) -> DeltaCrosscoderExperimentConfig:
@@ -122,6 +166,17 @@ class DeltaCrosscoderExperimentConfig(MultiModelExperimentConfig):
             raise ValueError(
                 "delta_crosscoder.batch_size_tokens must be divisible by data.sequence_length"
             )
+        if self.delta_crosscoder.data.mode == "contrastive_cache":
+            if self.delta_contrastive is None:
+                raise ValueError("contrastive_cache mode requires delta_contrastive settings")
+            expected = Path(self.delta_crosscoder.data.contrastive_manifest or "")
+            actual = Path(self.delta_contrastive.cache.output_dir) / "manifest.json"
+            if expected != actual:
+                raise ValueError(
+                    "contrastive_manifest must equal delta_contrastive.cache.output_dir/manifest.json"
+                )
+            if self.delta_contrastive.cache.validation_prompts >= 16_000:
+                raise ValueError("contrastive validation prompt count is implausibly large")
         return self
 
 
@@ -227,10 +282,10 @@ class MatchedCacheDeltaSource(DeltaActivationSource):
 def build_delta_source(cfg: DeltaCrosscoderExperimentConfig) -> DeltaActivationSource:
     if cfg.delta_crosscoder.data.mode == "matched_cache":
         return MatchedCacheDeltaSource(cfg)
-    raise NotImplementedError(
-        "contrastive_cache generation/loading is a Phase-2 data task; the manifest contract is "
-        "reserved but this Phase-1 implementation intentionally does not generate 200k responses"
-    )
+    # Lazy import avoids coupling the established trainer to Transformers/cache-build code.
+    from aspd.multimodel.delta_contrastive import ContrastiveDeltaSource
+
+    return ContrastiveDeltaSource(cfg)
 
 
 class DeltaCrosscoder(nn.Module):
@@ -782,7 +837,11 @@ def _write_run_metadata(
             "layer_hooks": [model.grounding.model_dump(mode="json") for model in cfg.models],
             "data_mode": cfg.delta_crosscoder.data.mode,
             "contrastive_design": {
-                "status": "interface documented; dataset not generated in Phase 1",
+                "status": (
+                    "static paired cache loaded; no generation occurs during training"
+                    if cfg.delta_crosscoder.data.mode == "contrastive_cache"
+                    else "interface documented; matched cache selected"
+                ),
                 "construction": "x||y_base and x||y_target; pass each full input through both models",
             },
         },

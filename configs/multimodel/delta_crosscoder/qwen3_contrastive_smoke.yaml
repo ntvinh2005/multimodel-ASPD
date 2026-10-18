@@ -1,0 +1,82 @@
+extends: qwen3_matched_smoke.yaml
+
+# Phase-2A engineering config only: 16 frozen generic prompts, 32 paired sequences,
+# then a 75-step Delta smoke. It is not the paper's full data scale or a scientific run.
+name: delta_crosscoder_qwen3_contrastive_smoke
+
+# Pin the exact snapshots already present in the project's Hugging Face cache. The
+# inherited Qwen architecture/hook stays unchanged; only revisions become explicit.
+models:
+  - name: base
+    model_id: Qwen/Qwen3-1.7B-Base
+    revision: ea980cb0a6c2ae4b936e82123acc929f1cec04c1
+    dtype: bfloat16
+    attn_implementation: sdpa
+    grounding: {module: model.layers.14, capture: input, tensor_index: 0}
+    matrices:
+      - {name: q_proj, module: model.layers.14.self_attn.q_proj}
+      - {name: k_proj, module: model.layers.14.self_attn.k_proj}
+      - {name: v_proj, module: model.layers.14.self_attn.v_proj}
+      - {name: o_proj, module: model.layers.14.self_attn.o_proj}
+      - {name: gate_proj, module: model.layers.14.mlp.gate_proj}
+      - {name: up_proj, module: model.layers.14.mlp.up_proj}
+      - {name: down_proj, module: model.layers.14.mlp.down_proj}
+  - name: finetuned
+    model_id: Qwen/Qwen3-1.7B
+    revision: 70d244cc86ccca08cf5af4e1e306ecf908b1ad5e
+    dtype: bfloat16
+    attn_implementation: sdpa
+    grounding: {module: model.layers.14, capture: input, tensor_index: 0}
+    matrices:
+      - {name: q_proj, module: model.layers.14.self_attn.q_proj}
+      - {name: k_proj, module: model.layers.14.self_attn.k_proj}
+      - {name: v_proj, module: model.layers.14.self_attn.v_proj}
+      - {name: o_proj, module: model.layers.14.self_attn.o_proj}
+      - {name: gate_proj, module: model.layers.14.mlp.gate_proj}
+      - {name: up_proj, module: model.layers.14.mlp.up_proj}
+      - {name: down_proj, module: model.layers.14.mlp.down_proj}
+
+delta_contrastive:
+  prompt_source:
+    path: configs/multimodel/delta_crosscoder/qwen3_contrastive_prompts.jsonl
+    format: jsonl
+    prompt_id_field: prompt_id
+    prompt_field: prompt
+    source_name: repo-fixed-general-engineering-prompts
+    source_revision: phase2a-v1
+  generation:
+    seed: 42
+    temperature: 0.0
+    top_p: 1.0
+    max_new_tokens: 64
+    enable_thinking: false
+  cache:
+    output_dir: out/multimodel/cache/delta_contrastive/qwen3_phase2a_16
+    canonical_tokenizer: Qwen/Qwen3-1.7B
+    canonical_tokenizer_revision: 70d244cc86ccca08cf5af4e1e306ecf908b1ad5e
+    max_sequence_length: 256
+    sequences_per_shard: 8
+    activation_dtype: bfloat16
+    validation_prompts: 4
+    truncation: right
+    overwrite: false
+
+delta_crosscoder:
+  output_dir: out/multimodel/baselines/delta_crosscoder/qwen3_contrastive_smoke
+  n_features: 640
+  shared_fraction: 0.20
+  base_sparsity: 4
+  shared_k_multiplier: 2.0
+  lambda_delta: 0.005
+  batch_size_tokens: 512
+  total_steps: 75
+  warmup_steps: 5
+  threshold_start_step: 5
+  log_every: 1
+  validate_every: 25
+  save_every: 25
+  validation_batches: null
+  keep_last_checkpoints: 2
+  data:
+    mode: contrastive_cache
+    contrastive_manifest: out/multimodel/cache/delta_contrastive/qwen3_phase2a_16/manifest.json

@@ -1,4 +1,4 @@
-# Delta-Crosscoder Phase-1 reference audit
+# Delta-Crosscoder Phase-1 and Phase-2A reference audit
 
 Audit date: 2026-10-17. Primary specification: [Kassem et al., *Delta-Crosscoder: Robust Crosscoder Model Diffing in Narrow Fine-Tuning Regimes*, arXiv:2603.04426v1](https://arxiv.org/abs/2603.04426).
 
@@ -26,7 +26,49 @@ Other paper-specified settings recorded in `paper_default.yaml` are: expansion f
 
 The published data mix is FineWeb, LMSYS instruction data, organism fine-tuning data when available, and contrastive prompt/response inputs. The paper reports about 200M total tokens, about 20M contrastive tokens, maximum sequence length 1,024, and 200,000 prompts split between base- and target-generated responses.
 
-For a contrastive prompt `x`, the intended future data contract is not response-token alignment. It constructs `x || y_base` and `x || y_target`; each complete text is independently run through **both** LMs at the same hook. The Phase-1 `DeltaActivationSource` interface reserves this mode, but deliberately does not generate that dataset.
+For a contrastive prompt `x`, the data contract is not response-token alignment. It constructs `x || y_base` and `x || y_target`; each complete text is independently run through **both** LMs at the same hook. Phase 2A implements this contract as a small static engineering cache; it is not the paper's full data mixture or scale.
+
+## Phase-2A contrastive cache contract
+
+`aspd/multimodel/delta_contrastive.py` materializes the cache, and
+`ContrastiveDeltaSource` reads it without loading a language model or generating text during
+training. For each frozen prompt, greedy Base and Target generations create two sequences. Each
+sequence's one canonical token tensor is replayed through Base and Target, producing an activation
+tensor with an explicit `[token, model={base,target}, activation]` axis. Consequently the only Delta
+target exposed to the trainer is `h_target(s) - h_base(s)` for the same `s`.
+
+The Qwen audit found equal 151,669-entry token-to-ID vocabularies but different tokenizer metadata:
+Base declares `<|endoftext|>` as EOS while Target declares `<|im_end|>`, and the raw templates have
+different hashes. The Phase-2A cache therefore pins the Target tokenizer and Target chat template as
+canonical, disables thinking in the rendered generation prefix, stores that exact template in the
+manifest, and records the native tokenizer fingerprints/templates for both models. Generated token
+continuations are appended directly to the canonical prompt IDs; there is no decode/re-tokenize step
+before activation extraction.
+
+Padding is right-sided, explicitly masked, zero-filled in cached activation padding, and excluded by
+the source. Sequence boundaries remain in shards. The maximum length is 256; deterministic right
+truncation records original, retained, and removed token counts per example. The pilot uses 16 frozen,
+general-purpose prompts committed as JSONL, 64-token maximum greedy answers, four prompt-level
+validation items, the existing `model.layers.14` input hook, and pinned local Qwen revisions. These
+choices prioritize pipeline auditability and make no behavioral claim.
+
+Materialization and training remain separate:
+
+```bash
+MODE=contrastive_cache sbatch slurm/multimodel/delta_crosscoder.sbatch
+# after cache validation succeeds
+MODE=contrastive_smoke sbatch slurm/multimodel/delta_crosscoder.sbatch
+```
+
+The dedicated direct CLI is:
+
+```bash
+.venv/bin/python -m aspd.multimodel.cli.build_delta_contrastive_cache \
+  --config configs/multimodel/delta_crosscoder/qwen3_contrastive_smoke.yaml \
+  --max-prompts 16 \
+  --output out/multimodel/cache/delta_contrastive/qwen3_phase2a_16 \
+  --device cuda
+```
 
 ## VERIFIED FROM OFFICIAL CODE
 
