@@ -297,6 +297,13 @@ export interface DeltaCandidatesPayload {
   groups?: Record<string, number[]>;
 }
 
+export interface DeltaFeatureDetail {
+  available: boolean;
+  feature: DeltaFeatureRow;
+  examples: Array<Record<string, unknown>>;
+  sources: Record<string, string>;
+}
+
 export interface CrosscoderFeatureSummary {
   feature_id: number;
   classification: "base-specific" | "shared" | "intermediate" | "finetuned-specific";
