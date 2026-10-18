@@ -1,0 +1,48 @@
+extends: ../qwen3_1_7b/d0_s1_main.yaml
+
+# PAPER-REFERENCE configuration only. Do not launch this 50k run during Phase 1.
+# The Qwen pair provides a concrete 2048-wide schema, so expansion_factor=5 resolves to 10,240
+# features. FineWeb/UltraChat are an analysis corpus, not Qwen3's original post-training data.
+name: delta_crosscoder_paper_default_qwen_schema
+
+delta_crosscoder:
+  output_dir: out/multimodel/baselines/delta_crosscoder/paper_default
+
+  # Paper Appendix A.
+  expansion_factor: 5
+  n_features: null
+  shared_fraction: 0.20
+  base_sparsity: 200
+  shared_k_multiplier: 2.0
+  lambda_delta: 0.005
+  auxk_coefficient: 0.03125
+  batch_size_tokens: 4096
+  total_steps: 50000
+  warmup_steps: 1000
+  learning_rate: 0.0001
+  betas: [0.9, 0.999]
+  initial_decoder_norm_scale: 0.4
+  precision: bfloat16
+  gradient_checkpointing: true
+  dead_after_tokens: 10000000
+
+  # INFERRED / REPO-LOCAL choices because the paper does not specify these mechanics.
+  # K_delta=base_sparsity=200; K_shared=2*K_delta=400.
+  dual_k_selection: independent_batch_global
+  code_normalization: crosscoder_sum_decoder_norm
+  auxk_partitioning: independent_partitions
+  threshold_beta: 0.999
+  threshold_start_step: 1000
+  activation_preprocessing: raw
+
+  seed: 42
+  log_every: 50
+  validate_every: 20000
+  save_every: 20000
+  validation_batches: null
+  keep_last_checkpoints: 2
+  resume: null
+  data:
+    mode: matched_cache
+    contrastive_manifest: null
+

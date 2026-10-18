@@ -9,6 +9,8 @@ to gate model-specific rank-1 components `P^(n)_{j,c}`. Start with
 [`docs/multimodel/method.md`](docs/multimodel/method.md), then follow the
 [`HiPerGator guide`](docs/multimodel/hipergator.md). The isolated BatchTopK Crosscoder comparison
 is documented in [`docs/multimodel/crosscoder_baseline.md`](docs/multimodel/crosscoder_baseline.md).
+The isolated Delta-Crosscoder Phase-1 paper audit and implementation decisions are documented in
+[`docs/multimodel/delta_crosscoder_reference.md`](docs/multimodel/delta_crosscoder_reference.md).
 The bounded blind LLM scan is documented in
 [`docs/multimodel/semantic_triage.md`](docs/multimodel/semantic_triage.md); it is post-ranking
 interpretation and never changes measured Crosscoder classes or ranks.

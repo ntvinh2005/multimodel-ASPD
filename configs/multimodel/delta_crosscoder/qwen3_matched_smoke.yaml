@@ -1,0 +1,23 @@
+extends: paper_default.yaml
+
+# Engineering-only smoke over the existing matched Qwen cache. This is not a scientific run.
+name: delta_crosscoder_qwen3_matched_smoke
+
+delta_crosscoder:
+  output_dir: out/multimodel/baselines/delta_crosscoder/qwen3_matched_smoke
+  # 1,280 is within the requested smoke range and gives an exact 256/1,024 partition.
+  n_features: 1280
+  shared_fraction: 0.20
+  # Reduced engineering budgets preserve the paper-derived 2:1 Dual-K relationship.
+  base_sparsity: 8
+  shared_k_multiplier: 2.0
+  batch_size_tokens: 2048
+  total_steps: 100
+  warmup_steps: 10
+  threshold_start_step: 10
+  log_every: 1
+  validate_every: 25
+  save_every: 50
+  validation_batches: 4
+  keep_last_checkpoints: 2
+
