@@ -36,8 +36,10 @@ def build_artifact(run_dir: Path, output_dir: Path) -> None:
             "validation_activation_count": int(fires[index]),
         })
     output_dir.mkdir(parents=True, exist_ok=True)
-    base = sorted(rows, key=lambda row: (row["relative_decoder_norm_base"], -row["validation_activation_count"], row["feature_id"]))
-    target = list(reversed(base))
+    # R_base=||d_base||/(||d_base||+||d_target||): low is target-heavy,
+    # high is base-heavy. Keep these names literal in every downstream artifact.
+    target = sorted(rows, key=lambda row: (row["relative_decoder_norm_base"], -row["validation_activation_count"], row["feature_id"]))
+    base = sorted(rows, key=lambda row: (-row["relative_decoder_norm_base"], -row["validation_activation_count"], row["feature_id"]))
     rank = {row["feature_id"]: position + 1 for position, row in enumerate(base)}
     target_rank = {row["feature_id"]: position + 1 for position, row in enumerate(target)}
     for row in rows:

@@ -17,6 +17,7 @@ from aspd.multimodel.baselines.delta_crosscoder import (
     load_delta_crosscoder_config,
     save_delta_checkpoint,
 )
+from aspd.multimodel.cli.extract_delta_examples import _candidate_ids
 
 ROOT = Path(__file__).parents[1]
 
@@ -172,6 +173,20 @@ def test_paper_relative_decoder_norm_formula_and_orientation() -> None:
     target_score = delta_relative_decoder_norm_target(decoder)
     torch.testing.assert_close(base_score, torch.tensor([1.0, 0.5, 0.0]))
     torch.testing.assert_close(target_score, torch.tensor([0.0, 0.5, 1.0]))
+
+
+def test_candidate_tail_orientation_is_literal_r_base() -> None:
+    diagnostics = {
+        "feature_id": list(range(100)),
+        "partition": ["delta"] * 100,
+        "relative_decoder_norm_base": [index / 99 for index in range(100)],
+        "validation_activation_count": [1] * 100,
+    }
+    selected, groups = _candidate_ids({"feature_diagnostics": diagnostics})
+    assert groups[0] == "target_tail"
+    assert groups[99] == "base_tail"
+    assert groups[50] == "balanced_delta"
+    assert selected[0] == 0
 
 
 def test_feature_diagnostics_preserve_full_distributions_and_partitions() -> None:

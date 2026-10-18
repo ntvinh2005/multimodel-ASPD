@@ -588,6 +588,9 @@ class R0StreamingDeltaSource(DeltaActivationSource):
     ) -> dict[str, Any]:
         reader = readers[role]
         chunks: list[Tensor] = []
+        token_chunks: list[Tensor] = []
+        spans: list[dict[str, Any]] = []
+        batch_position = 0
         remaining = self.mix.batch_size_tokens
         while remaining:
             record = reader.current()
@@ -596,6 +599,14 @@ class R0StreamingDeltaSource(DeltaActivationSource):
             available = len(ids) - reader.token_offset
             take = min(remaining, available)
             chunks.append(activations[reader.token_offset:reader.token_offset + take])
+            token_chunks.append(ids[reader.token_offset:reader.token_offset + take].to(dtype=torch.long))
+            spans.append({
+                "sequence_id": f"{role}:{reader.shard_index}:{reader.row_index}",
+                "start": batch_position,
+                "length": take,
+                "sequence_offset": reader.token_offset,
+            })
+            batch_position += take
             reader.token_offset += take
             remaining -= take
             if reader.token_offset == len(ids):
@@ -606,7 +617,12 @@ class R0StreamingDeltaSource(DeltaActivationSource):
         if count:
             self.tokens_consumed_total += len(batch)
             self.tokens_consumed_by_source[role] += len(batch)
-        return {"activations": batch, "source_role": role}
+        return {
+            "activations": batch,
+            "input_ids": torch.cat(token_chunks, dim=0),
+            "sequence_spans": spans,
+            "source_role": role,
+        }
 
     def iter_batches(
         self, split: str, *, shuffle: bool, epoch: int = 0

@@ -398,8 +398,9 @@ class DeltaCrosscoderCandidateAdapter(CandidateAdapter):
             if missing:
                 raise ValueError(f"feature IDs out of range or absent: {missing}")
             return [self._candidate(self._rows[feature_id], ["explicit"]) for feature_id in feature_ids]
-        base = sorted(eligible, key=lambda row: (float(row.get("relative_decoder_norm_base", .5)), -int(row.get("validation_activation_count", 0)), int(row["feature_id"])))[:base_tail_count]
-        target = sorted(eligible, key=lambda row: (-float(row.get("relative_decoder_norm_base", .5)), -int(row.get("validation_activation_count", 0)), int(row["feature_id"])))[:finetuned_tail_count]
+        # Literal paper orientation: low R_base is target-heavy; high R_base is base-heavy.
+        base = sorted(eligible, key=lambda row: (-float(row.get("relative_decoder_norm_base", .5)), -int(row.get("validation_activation_count", 0)), int(row["feature_id"])))[:base_tail_count]
+        target = sorted(eligible, key=lambda row: (float(row.get("relative_decoder_norm_base", .5)), -int(row.get("validation_activation_count", 0)), int(row["feature_id"])))[:finetuned_tail_count]
         selected: dict[int, MeasuredCandidate] = {}
         for pool, rows in (("base_tail", base), ("finetuned_tail", target)):
             for row in rows:
