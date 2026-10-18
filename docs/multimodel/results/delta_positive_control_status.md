@@ -27,7 +27,8 @@ full reproduction of the paper.
 2. Materialize the three online source artifacts, using the LMSYS-gated revision and
    the pinned Qwen tokenizer. The contrastive source is generated with the existing
    `build_delta_contrastive_cache` command and should use 768 prompts first; increase
-   to 1024 only when the measured generation job fits the one-hour budget.
+   to 1024 only when the measured generation job fits the one-hour budget. The dedicated
+   launcher is `slurm/multimodel/delta_positive_control_generate.sbatch`.
 
 3. Validate manifests, then submit the positive control (one B200, one hour):
 
