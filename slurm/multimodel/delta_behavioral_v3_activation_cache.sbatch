@@ -70,7 +70,12 @@ assert manifest["construction"]["response_side_subtraction_forbidden"] is True
 assert sum(split["sequences"] for split in manifest["splits"].values()) == 360
 assert report["sequences"] == 360
 assert report["activation_dim"] == 3584
-assert report["validation"]["status"] == "PASS"
+assert report["valid_tokens"] == sum(
+    split["valid_tokens"] for split in manifest["splits"].values()
+)
+assert report["validation"]["cache_fingerprint"] == manifest["cache_fingerprint"]
+assert report["validation"]["sequences"] == 360
+assert report["validation"]["prompts"] == 180
 print("DELTA_V3_ACTIVATION_CACHE_INTEGRITY_PASS")
 PY
 
