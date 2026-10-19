@@ -8,9 +8,13 @@
 - Phase 2 implementation: tested locally; candidate artifact is not yet frozen.
 - Phase 3 generation, Phase 4 judge, Phase 5 benchmark, and Phase 6/7 activation
   measurement: not started.
-- Phase 2 Slurm job currently queued: `46637519` (submitted 2026-10-19; the
-  earlier pending ID `46628719` was canceled and replaced after a user request).
-  Do not start later phases until this job completes.
+- Phase 2 job `46637519` failed after 34 seconds because PyTorch 2.8 passed an
+  unindexed CUDA device to `reset_peak_memory_stats` on the B200 runtime. Commit
+  `c0c094d` now resolves that device to an explicit visible index and adds a
+  regression test.
+- Phase 2 was resubmitted as job `46690384` at `2026-10-19T12:51:09-04:00` and
+  initially entered `PENDING (Priority)`. Do not start later phases until this
+  replacement job completes and its candidate artifact passes inspection.
 
 ## Next job: label-free Phase 2 candidate freeze
 
