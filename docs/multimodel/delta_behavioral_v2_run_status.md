@@ -1,6 +1,6 @@
 # Delta behavioral V2 run status
 
-Last updated: 2026-10-18 21:20 EDT
+Last updated: 2026-10-18 21:45 EDT
 
 ## Completed 512-token attempt
 
@@ -28,12 +28,13 @@ Last updated: 2026-10-18 21:20 EDT
 - This response set is frozen. Do not regenerate it or mix it with the failed
   512-token response set.
 
-## Active measurement jobs
+## Completed measurement jobs
 
 ### Delta feature measurement
 
 - Slurm job: `46605269` (`mm-delta-behavior-v2-measure`)
-- State at 2026-10-18 21:19 EDT: `PENDING (Resources)`
+- Result: `COMPLETED` with exit code `0:0` in 2 minutes 13 seconds
+- Ran: 2026-10-18 21:21:39–21:23:52 EDT
 - Time limit: 45 minutes
 - Response directory: `out/multimodel/eval/qwen25_extreme_sports_behavioral_v2/responses_1024`
 - New activation directory: `out/multimodel/eval/qwen25_extreme_sports_behavioral_v2/activation_cache_1024`
@@ -50,7 +51,8 @@ sbatch slurm/multimodel/delta_behavioral_v2_measure.sbatch
 ### Blind behavioral judge
 
 - Slurm job: `46605270` (`mm-delta-behavior-v2-judge`)
-- State at 2026-10-18 21:19 EDT: `PENDING (Priority)`
+- Result: `COMPLETED` with exit code `0:0` in 1 minute 18 seconds
+- Ran: 2026-10-18 21:24:53–21:26:11 EDT
 - Time limit: 20 minutes
 - Response directory: `out/multimodel/eval/qwen25_extreme_sports_behavioral_v2/responses_1024`
 - Expected score artifact: `responses_1024/behavioral_scores.json`
@@ -63,16 +65,30 @@ RESPONSE_DIR=out/multimodel/eval/qwen25_extreme_sports_behavioral_v2/responses_1
 sbatch slurm/multimodel/delta_behavioral_v2_judge.sbatch
 ```
 
-## Required continuation
+### Evaluator-only score reconciliation
 
-Check:
+- Slurm job: `46607042` (`mm-delta-behavior-v2-reconcile`)
+- Result: `COMPLETED` with exit code `0:0` in 1 minute 6 seconds
+- Ran: 2026-10-18 21:40:12–21:41:18 EDT
+- Purpose: attach the already completed blind scores to the frozen feature
+  metrics because the original measurement finished before the judge
+- No responses were regenerated and no activations were re-extracted
+
+## Final audit
+
+- Blind judge: Condition 1 passed; risk score coverage 58/60 (96.7%), paired
+  Target−Base mean `+0.569`, bootstrap 95% CI `[0.207, 0.914]`
+- Delta representation: Condition 2 failed; 0/40 frozen target-tail features
+  passed every confirmatory criterion
+- V1 feature 5408: inactive on 0/60 Target-risk responses; mean D 0; q 1
+- Scientific decision: **FAIL**
+- Final report:
+  `docs/multimodel/results/delta_behavioral_validation_v2_report.md`
+
+For provenance, completed jobs can be checked with:
 
 ```bash
-sacct -j 46605269,46605270 --format=JobID,State,ExitCode,Elapsed,Start,End
+sacct -j 46605269,46605270,46607042 --format=JobID,State,ExitCode,Elapsed,Start,End
 ```
-
-When both jobs finish successfully, audit their artifacts before scientific
-interpretation. Do not rerun either branch or alter the registered judge,
-rubric, feature set, or statistics merely because of an unfavorable result.
 
 No causal intervention and no ASPD are authorized in this phase.

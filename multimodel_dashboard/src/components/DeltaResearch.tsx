@@ -100,6 +100,12 @@ export default function DeltaResearch({ mode }: { mode: "overview" | "features" 
   const v2 = overview.behavioral_v2;
   const v2Metadata = object(v2?.metadata);
   const benchmark = object(v2Metadata.benchmark);
+  const modelEffect = object(v2?.model_effect);
+  const riskEffect = object(object(modelEffect.category_effects).risk);
+  const pairedRiskEffect = object(riskEffect.paired_target_minus_base);
+  const v1Candidate = object(v2?.v1_candidate);
+  const v1Target = object(v1Candidate.target_generated);
+  const v1Support = object(v1Target.support);
 
   return <section className="panel"><h2>{mode === "overview" ? "Delta-Crosscoder Overview" : "Delta Feature Explorer"}</h2>
     <p>Reduced-scale positive control · {overview.n_features ?? "?"} components · partitions: {JSON.stringify(overview.partition_counts ?? {})}</p>
@@ -109,6 +115,24 @@ export default function DeltaResearch({ mode }: { mode: "overview" | "features" 
         <div className="method-summary-card"><span className="scientific-kind">Behavioral V1 · exploratory</span><h2>{v1?.available ? v1.status : "Unavailable"}</h2><p>80 prompts; sparse zero-control denominators. Epsilon ratios are secondary diagnostics only.</p><strong>{v1?.features_measured ?? 0} features measured</strong></div>
         <div className="method-summary-card"><span className="scientific-kind">Behavioral V2 · confirmatory</span><h2>{v2?.available ? v2.status : "Not measured"}</h2><p>{v2?.available ? `${String(benchmark.total ?? 180)} prompts · ${String(benchmark.matched_pairs ?? 60)} matched pairs · exact frozen-token replay` : "The dashboard is ready; confirmatory artifacts have not been produced yet."}</p><strong>{v2?.features_measured ?? 0} frozen features measured</strong>{v2?.available && <small>actual pair: {JSON.stringify(v2Metadata.models ?? {})}</small>}</div>
       </div>
+      {v2?.available && <div className="classification-split">
+        <div className="measured-panel">
+          <span className="scientific-kind">Measured · blind judge</span>
+          <strong>Risk scores: Base {fmt(riskEffect.base_mean)} · Target {fmt(riskEffect.target_mean)}</strong>
+          <small>valid {count(riskEffect.valid)}/{count(riskEffect.total)} · condition 1 {String(modelEffect.condition_1_status ?? "unresolved")}</small>
+        </div>
+        <div className="derived-panel">
+          <span className="scientific-kind">Derived · paired model effect</span>
+          <strong>Target − Base {fmt(pairedRiskEffect.estimate)}</strong>
+          <small>bootstrap 95% CI [{fmt(pairedRiskEffect.lower_95)}, {fmt(pairedRiskEffect.upper_95)}]</small>
+        </div>
+        <div className="interpretation-panel compact">
+          <span className="scientific-kind">Interpretation · frozen feature test</span>
+          <strong>Feature #5408: {v1Candidate.automatic_confirmatory_criteria_pass ? "survived" : "did not survive"}</strong>
+          <small>active Target-risk {count(v1Support.active_risk_responses)}/60 · mean D {fmt(object(v1Target.matched).mean, 4)} · BH q {fmt(v1Candidate.bh_q, 4)}</small>
+          <small>surviving target-tail candidates: {v2.automatic_target_tail_candidates ?? 0}</small>
+        </div>
+      </div>}
     </>}
     {mode === "features" && <><p className="muted">V2 rows sort by confirmatory status and BH q. V1 risk/control epsilon ratios are not used for ordering.</p><label>Partition <select value={partition} onChange={(event) => setPartition(event.target.value)}><option value="">all</option><option value="delta">delta</option><option value="shared">shared</option></select></label>{rows?.items.map((row) => { const behavioral = object(row.behavioral_v2); const target = object(behavioral.target_generated); const matched = object(target.matched); const support = object(target.support); return <button className="table-row" key={row.feature_id} onClick={() => setFeature(row.feature_id)}><strong>#{row.feature_id}</strong> {String(behavioral.candidate_group ?? row.partition)} · R_base {fmt(behavioral.r_base ?? row.relative_decoder_norm_base)} · prevalence {fmt(object(target.risk).prevalence)}/{fmt(object(target.sports_control).prevalence)} · D {fmt(matched.mean, 4)} · CI [{fmt(object(matched.bootstrap_95).lower_95, 3)}, {fmt(object(matched.bootstrap_95).upper_95, 3)}] · q {fmt(behavioral.bh_q, 4)} · support {count(support.active_risk_responses)}/60 · domains {count(support.positive_effect_domains)} · {String(behavioral.diagnostic_status ?? "V2 not measured")}</button>; })}{detail && <FeatureDetailPanel detail={detail}/>}</>}
   </section>;

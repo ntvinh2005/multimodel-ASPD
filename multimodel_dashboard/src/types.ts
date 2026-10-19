@@ -299,6 +299,8 @@ export interface DeltaOverviewPayload {
     metadata?: Record<string, unknown>;
     model_effect?: Record<string, unknown>;
     features_measured?: number;
+    v1_candidate?: Record<string, unknown>;
+    automatic_target_tail_candidates?: number;
   };
 }
 

@@ -95,6 +95,57 @@ def test_dashboard_reports_missing_v2_without_placeholder_values(tmp_path: Path)
     }
 
 
+def test_dashboard_exposes_v2_model_effect_and_v1_candidate_survival(tmp_path: Path) -> None:
+    (tmp_path / "summary.json").write_text(
+        json.dumps({"n_features": 2, "candidate_groups": {}, "partition_counts": {}}),
+        encoding="utf-8",
+    )
+    (tmp_path / "feature_metrics.json").write_text(
+        json.dumps(
+            {
+                "features": [
+                    {"feature_id": 5408, "partition": "delta"},
+                    {"feature_id": 7, "partition": "delta"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "top_activation_examples.json").write_text(
+        json.dumps({"features": {}}), encoding="utf-8"
+    )
+    (tmp_path / "behavioral_v2_metrics.json").write_text(
+        json.dumps(
+            {
+                "metadata": {"scientific_decision": "FAIL"},
+                "features": [
+                    {
+                        "feature_id": 5408,
+                        "candidate_group": "target_tail",
+                        "automatic_confirmatory_criteria_pass": False,
+                    },
+                    {
+                        "feature_id": 7,
+                        "candidate_group": "target_tail",
+                        "automatic_confirmatory_criteria_pass": True,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "behavioral_v2_model_effect.json").write_text(
+        json.dumps({"condition_1_status": "pass"}), encoding="utf-8"
+    )
+
+    v2 = DeltaDashboardStore(tmp_path).overview()["behavioral_v2"]
+    assert v2["status"] == "FAIL"
+    assert v2["model_effect"] == {"condition_1_status": "pass"}
+    assert v2["v1_candidate"]["feature_id"] == 5408
+    assert v2["v1_candidate"]["automatic_confirmatory_criteria_pass"] is False
+    assert v2["automatic_target_tail_candidates"] == 1
+
+
 def test_v2_benchmark_is_frozen_matched_balanced_and_disjoint() -> None:
     rows = [json.loads(line) for line in V2_PROMPTS.read_text(encoding="utf-8").splitlines()]
     summary = validate_v2_benchmark(rows)

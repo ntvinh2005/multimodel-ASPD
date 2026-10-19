@@ -111,6 +111,24 @@ class DeltaDashboardStore:
                 "features": [],
                 "candidate_groups": {},
             }
+        behavioral_v2 = {
+            "available": bool(self.behavioral_v2_by_id),
+            "status": self.behavioral_v2.get("metadata", {}).get(
+                "scientific_decision", "not measured"
+            ),
+            "metadata": self.behavioral_v2.get("metadata", {}),
+            "model_effect": self.behavioral_v2_model_effect,
+            "features_measured": len(self.behavioral_v2_by_id),
+        }
+        if self.behavioral_v2_by_id:
+            # Feature 5408 was the frozen V1 exploratory candidate. Expose its
+            # measured V2 row directly so the UI cannot imply survival from V1.
+            behavioral_v2["v1_candidate"] = self.behavioral_v2_by_id.get(5408, {})
+            behavioral_v2["automatic_target_tail_candidates"] = sum(
+                bool(row.get("automatic_confirmatory_criteria_pass"))
+                for row in self.behavioral_v2_by_id.values()
+                if row.get("candidate_group") == "target_tail"
+            )
         return {
             "available": True,
             "diagnostics": self.diagnostics,
@@ -130,15 +148,7 @@ class DeltaDashboardStore:
                 "metadata": self.behavioral.get("metadata", {}),
                 "features_measured": len(self.behavioral_by_id),
             },
-            "behavioral_v2": {
-                "available": bool(self.behavioral_v2_by_id),
-                "status": self.behavioral_v2.get("metadata", {}).get(
-                    "scientific_decision", "not measured"
-                ),
-                "metadata": self.behavioral_v2.get("metadata", {}),
-                "model_effect": self.behavioral_v2_model_effect,
-                "features_measured": len(self.behavioral_v2_by_id),
-            },
+            "behavioral_v2": behavioral_v2,
         }
 
     def candidates(
