@@ -8,7 +8,10 @@
 - Phase 2 DEV activation cache: complete from job `46691094`; 1,024 sequences,
   372,836 valid tokens, cache fingerprint
   `10ac6f4814302cc31ef8c033ec029b5844428f9c60ea5b7846aa528389d4ba3b`.
-  Candidate artifact is not yet frozen.
+  Candidate selection job `46693405` completed `0:0` at 2026-10-19 13:28:07
+  EDT. Its artifact is frozen and committed: 100 unique IDs in the registered
+  40/20/20/20 groups, with no V3 selection inputs. Artifact SHA256:
+  `de190424df665dc231d14824b68d9abc87d1a0a28cd427215b311d5bd90b2ef2`.
 - Phase 3 generation, Phase 4 judge, Phase 5 benchmark, and Phase 6/7 activation
   measurement: not started.
 - Phase 2 job `46637519` failed after 34 seconds because PyTorch 2.8 passed an
@@ -24,30 +27,29 @@
   now counts valid tokens, checks shard row/token provenance, validates the entire
   existing cache, and refuses to overwrite a frozen candidate artifact.
 - Selection-only rerun: job `46693405`, submitted `2026-10-19T13:24:02-04:00` with
-  `REUSE_DEV_CACHE=1`; initially `PENDING (Priority)`. It requests one B200,
-  8 CPUs, 60 GB RAM, and one hour. Expected compute time is about 5–15 minutes
-  after allocation; queue time is additional. Logs:
+  `REUSE_DEV_CACHE=1`; completed `0:0` in 37 seconds. It requested one B200,
+  8 CPUs, 60 GB RAM, and one hour. Logs:
   `slurm/logs/mm-delta-v3-candidates-46693405.out` and
   `slurm/logs/mm-delta-v3-candidates-46693405.err`.
-- Do not start later phases until job `46693405` completes and the candidate
-  artifact passes the integrity check below.
+- Candidate integrity passed against the actual checkpoint SHA256 and validated
+  DEV cache fingerprint. Phase 3 may proceed without changing the frozen set.
 
-## Current job: label-free Phase 2 candidate freeze
+## Completed job: label-free Phase 2 candidate freeze
 
 Launcher: `slurm/multimodel/delta_behavioral_v3_dev_candidates.sbatch`
 
 Inputs are the frozen non-V3 `contrastive512_generated` response artifact, the
 validated DEV activation cache from job `46691094`, the completed Delta checkpoint,
-and its measured `feature_metrics.json`. The current job reuses the cache and
-attempts to write exactly 100 feature IDs to:
+and its measured `feature_metrics.json`. The completed job reused the cache and
+wrote exactly 100 feature IDs to:
 
 `docs/multimodel/eval/qwen25_extreme_sports_behavioral_v3_candidates.json`
 
-The job is allowed to run unattended; check the Slurm log or notify Codex after it
-finishes. No V3 generation should be submitted until this candidate file exists
-and passes its integrity audit.
+V3 prompts, responses, judge scores, and labels were not accepted as selection
+inputs. The file passed its integrity audit; do not recompute it after V3
+generation.
 
-## Submission template
+## Historical Phase 2 submission (do not rerun)
 
 ```bash
 CONFIG=configs/multimodel/delta_crosscoder/qwen25_behavioral_v3_eval.yaml
@@ -64,7 +66,7 @@ ANALYSIS="$ANALYSIS" CANDIDATES="$CANDIDATES" \
 sbatch slurm/multimodel/delta_behavioral_v3_dev_candidates.sbatch
 ```
 
-## Integrity checks after completion
+## Completed integrity check
 
 ```bash
 test -s docs/multimodel/eval/qwen25_extreme_sports_behavioral_v3_candidates.json
