@@ -1,5 +1,27 @@
 # Qwen2.5 Extreme-Sports ASPD preparation
 
+## Controlled computation-fidelity retrain
+
+Status: **IMPLEMENTED — AWAITING GPU PREFLIGHT SUBMISSION**
+
+A fresh 1,000-step D0/S1 run is prepared to test whether a longer, otherwise unchanged training
+budget improves actual matrix-computation fidelity. It does not resume the 200-step checkpoint,
+because the trainer does not persist an intra-epoch batch cursor. The plan, frozen scientific
+boundary, metric definitions, and prepared post-training command are documented in
+`docs/multimodel/results/qwen25_aspd_fidelity_retrain_plan.md`.
+
+The preflight will produce immutable full-validation metrics for the old step-200 checkpoint and a
+separate 75-step fixed-batch overfit diagnostic. Only a successful fail-closed preflight may release
+the main job through `afterok`. The full-validation evaluator uses all 16,384 validation tokens,
+global FP64 sufficient statistics, FP32 reconstruction computation, and no full Qwen model loads.
+
+Frozen cache fingerprint:
+`1adafa95a75105d7ffe295f1c2f52cdeac89e6e832ee516729addd350bba1447`.
+Original checkpoint SHA256:
+`b5c27fdf641924ffe4511ac4b75ff1468274593c250d878682527df9e1383800`.
+
+No Delta retraining, ASPD post-hoc analysis, P6, or causal job is part of this controlled retrain.
+
 Status: **ASPD_PILOT_ANALYSIS_COMPLETE — FRONTEND/PROTOCOL PREPARATION**
 
 Official pilot training job `46707051` was submitted at

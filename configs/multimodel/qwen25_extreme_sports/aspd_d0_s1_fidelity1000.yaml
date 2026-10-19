@@ -1,0 +1,14 @@
+extends: aspd_d0_s1_pilot.yaml
+
+# Controlled fidelity retrain. Scientific architecture/data/objective settings
+# inherit unchanged from the completed 200-step pilot.
+name: qwen25_extreme_sports_aspd_d0_s1_fidelity1000
+
+training:
+  output_dir: out/multimodel/runs/qwen25_extreme_sports_aspd_fidelity1000
+  max_steps: 1000
+  resume: null
+  validate_every: 100
+  validation_batches: 32
+  save_every: 250
+  keep_last_checkpoints: 2
