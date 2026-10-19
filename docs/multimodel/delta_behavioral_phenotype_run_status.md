@@ -2,14 +2,15 @@
 
 Last updated: 2026-10-18 EDT
 
-## Active job
+## Completed job
 
 - Slurm job: `46610367` (`mm-delta-phenotype`)
-- State at submission: `PENDING (Priority)`
+- Final state: `COMPLETED 0:0`
 - Partition/resource: one B200, 14 CPUs, 96 GB RAM
 - Time limit: 45 minutes
-- Scheduler start time: unknown; `sbatch --test-only` estimated
-  `2026-10-20 17:47 EDT`, but this estimate may move
+- Start: 2026-10-18 22:21:57 EDT
+- End: 2026-10-18 22:23:31 EDT
+- Elapsed: 00:01:34
 - Code commit: `d9ec261`
 - Log: `slurm/logs/mm-delta-phenotype-46610367.out`
 - Error log: `slurm/logs/mm-delta-phenotype-46610367.err`
@@ -37,26 +38,22 @@ The launcher contains no activation extraction command and performs no Qwen
 inference. Its flow is calibration, 240 blind single-response Gemma judgments,
 then evaluator-only reuse of the frozen activation cache.
 
-## Continuation
+## Final audit
 
-Check once the job has left the queue or the user reports completion:
+- Calibration: 12/12 exact, zero extreme inversion; PASS.
+- Benchmark judgment: 240/240 valid, zero parse failures; PASS.
+- Frozen features: exactly 100 with the required 40/20/20/20 group split.
+- Analysis-A BH family: exactly 100 features.
+- Analysis-B BH family: exactly 100 features.
+- Target-tail corrected associations: 0 in Analysis A, 0 in Analysis B.
+- Statistical target-tail candidates pending context review: 0.
+- Diagnostic result: **NO_PHENOTYPE_SIGNAL**.
 
-```bash
-sacct -j 46610367 --format=JobID,State,ExitCode,Elapsed,Start,End,NodeList
-```
-
-Then inspect, in order:
-
-1. `responses_1024/behavioral_phenotype_calibration_gemma2_9b.json`
-2. `responses_1024/behavioral_phenotype_scores_gemma2_9b.json`
-3. `analysis/behavioral_phenotype_delta_metrics.json`
-4. `analysis/behavioral_phenotype_candidate_summary.json`
-
-If calibration fails or score validity is below 98%, issue `JUDGE_FAILURE` and
-do not interpret Delta. Otherwise audit statistical candidates and their saved
-exact-token V2 contexts, write
-`docs/multimodel/results/delta_behavioral_phenotype_diagnostic.md`, and issue
-exactly `PHENOTYPE_SIGNAL_FOUND` or `NO_PHENOTYPE_SIGNAL`.
+The final scientific report is
+`docs/multimodel/results/delta_behavioral_phenotype_diagnostic.md`. The report
+records the model-level phenotype sanity check, control-group comparison,
+required features, top 10 positive associations, exact-context interpretation,
+limitations, and next step.
 
 Do not retrain Delta, run causal intervention, run ASPD, regenerate responses,
 or regenerate activations.
