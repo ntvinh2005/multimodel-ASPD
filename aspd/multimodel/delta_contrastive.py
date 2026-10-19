@@ -1292,6 +1292,9 @@ def materialize_activation_cache_from_frozen_text(
             {
                 **frozen,
                 "prompt": str(source[cfg.delta_contrastive.prompt_source.prompt_field]),
+                # Preserve non-V3 source metadata needed for the preregistered
+                # domain-breadth support gate; no behavioral label is inferred.
+                "sport_domain": source.get("sport_domain"),
                 "rendered_full_text": tokenizer.decode(  # type: ignore[attr-defined]
                     token_ids, skip_special_tokens=False
                 ),
