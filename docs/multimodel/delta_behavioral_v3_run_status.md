@@ -12,8 +12,9 @@
   EDT. Its artifact is frozen and committed: 100 unique IDs in the registered
   40/20/20/20 groups, with no V3 selection inputs. Artifact SHA256:
   `de190424df665dc231d14824b68d9abc87d1a0a28cd427215b311d5bd90b2ef2`.
-- Phase 3 generation, Phase 4 judge, Phase 5 benchmark, and Phase 6/7 activation
-  measurement: not started.
+- Phase 3 fresh generation submitted as job `46699262` at
+  `2026-10-19T13:57:22-04:00`; initial state `PENDING (Priority)`. Phase 4 judge,
+  Phase 5 benchmark, and Phase 6/7 activation measurement: not started.
 - Phase 2 job `46637519` failed after 34 seconds because PyTorch 2.8 passed an
   unindexed CUDA device to `reset_peak_memory_stats` on the B200 runtime. Commit
   `c0c094d` now resolves that device to an explicit visible index and adds a
@@ -48,6 +49,27 @@ wrote exactly 100 feature IDs to:
 V3 prompts, responses, judge scores, and labels were not accepted as selection
 inputs. The file passed its integrity audit; do not recompute it after V3
 generation.
+
+## Phase 3 fresh generation — submitted
+
+Launcher: `slurm/multimodel/delta_behavioral_v3_generate.sbatch` at submission
+HEAD `ec389d197d3a6e6f07a2f3ee6b3c67c7cc41d31f`. Exact command:
+
+```bash
+HF_HOME=/blue/thai/vinhnguyen1/multimodel-ASPD/cache/huggingface \
+  sbatch --parsable slurm/multimodel/delta_behavioral_v3_generate.sbatch
+```
+
+Job `46699262` requests one B200, 8 CPUs, 60 GB RAM, and one hour. Logs:
+`slurm/logs/mm-delta-v3-generate-46699262.out` and
+`slurm/logs/mm-delta-v3-generate-46699262.err`. The sole expected output is
+`out/multimodel/eval/qwen25_extreme_sports_behavioral_v3/responses_1024`.
+The launcher refuses an existing output, checks the frozen prompt and candidate
+SHA256 values, and runs only the text/token generation CLI for 180 fresh V3
+prompts and both model branches. It does not select candidates, judge,
+measure activations, or run a causal intervention. No later V3 stage was
+submitted. Inspect the completed response manifest and cap/EOS statistics
+before the separate Phase 4 job.
 
 ## Historical Phase 2 submission (do not rerun)
 

@@ -1,6 +1,6 @@
 # Qwen2.5 Extreme-Sports ASPD preparation
 
-Status: **ASPD_PREFLIGHT_PASS — pilot cache not yet built**
+Status: **ASPD_PREFLIGHT_PASS — pilot cache submitted; training not submitted**
 
 The replacement GPU preflight job `46691095` completed `0:0` on 2026-10-19
 13:01:35 EDT. All three job-scoped JSON files were inspected, not merely the
@@ -20,6 +20,28 @@ The effective Base→Target Delta-W audit found exactly seven expected adapted
 matrices, all nonzero and finite, with relative norms 0.00341–0.00791 and
 `warning_count=0`. Thus the real GPU preflight passes as an engineering gate;
 it does not establish ASPD reconstruction or a Delta-vs-ASPD scientific claim.
+
+Pilot cache job `46699265` was submitted at `2026-10-19T13:57:22-04:00`;
+initial state `PENDING (Priority)`. Launcher:
+`slurm/multimodel/qwen25_extreme_sports_aspd_pilot_cache.sbatch` at submission
+HEAD `ec389d197d3a6e6f07a2f3ee6b3c67c7cc41d31f`. Exact command:
+
+```bash
+HF_HOME=/blue/thai/vinhnguyen1/multimodel-ASPD/cache/huggingface \
+  sbatch --parsable slurm/multimodel/qwen25_extreme_sports_aspd_pilot_cache.sbatch
+```
+
+It requests one B200, 14 CPUs, 128 GB RAM, and two hours. Logs:
+`slurm/logs/mm-qwen25-aspd-cache-46699265.out` and
+`slurm/logs/mm-qwen25-aspd-cache-46699265.err`. Output:
+`out/multimodel/cache/qwen25_extreme_sports_aspd_pilot`. The launcher pins
+SHA256 of the three inspected preflight JSON files, refuses an existing cache,
+rechecks static config, builds the cache, and runs the cache validator.
+No training job was submitted. After cache completion, independently inspect
+schema v2, exact Base/Target provenance, merged adapter, seven effective
+matrix snapshots per model, token counts, finite activations, and cache
+reload before submitting the official pilot training launcher
+`slurm/multimodel/qwen25_extreme_sports_aspd_pilot_train.sbatch`.
 
 The first GPU preflight, job `46638812`, passed static validation but failed during
 PEFT equivalence because the unmerged wrapper added a module-path level. Commit
