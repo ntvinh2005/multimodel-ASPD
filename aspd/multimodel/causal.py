@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from contextlib import ExitStack
-from typing import Any
 
 import torch
 from torch import Tensor, nn
 
-from aspd.multimodel.cache import DTYPES, PairedActivationCache, _tensor_from_value
+from aspd.multimodel.cache import PairedActivationCache, _tensor_from_value, load_effective_model
 from aspd.multimodel.config import ModelSpec, MultiModelExperimentConfig
 from aspd.multimodel.model import MultiModelASPD
 
@@ -18,17 +17,8 @@ from aspd.multimodel.model import MultiModelASPD
 
 
 def _load_hf_model(spec: ModelSpec, device: torch.device) -> nn.Module:
-    from transformers import AutoModelForCausalLM
-
-    kwargs: dict[str, Any] = {
-        "revision": spec.revision,
-        "dtype": DTYPES[spec.dtype],
-        "trust_remote_code": spec.trust_remote_code,
-        "low_cpu_mem_usage": True,
-    }
-    if spec.attn_implementation:
-        kwargs["attn_implementation"] = spec.attn_implementation
-    return AutoModelForCausalLM.from_pretrained(spec.model_id, **kwargs).to(device).eval()
+    model, _provenance = load_effective_model(spec, device)
+    return model
 
 
 @torch.no_grad()

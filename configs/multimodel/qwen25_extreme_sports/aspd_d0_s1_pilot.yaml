@@ -1,0 +1,25 @@
+extends: base.yaml
+
+# Engineering pilot only: this is not a matched scientific Delta-vs-ASPD run.
+name: qwen25_extreme_sports_aspd_d0_s1_pilot
+
+data:
+  train_tokens: 131072
+  validation_tokens: 16384
+  sequence_length: 256
+
+cache:
+  root: out/multimodel/cache/qwen25_extreme_sports_aspd_pilot
+
+training:
+  output_dir: out/multimodel/runs/qwen25_extreme_sports_aspd_d0_s1_pilot
+  max_steps: 200
+  batch_size_sequences: 2
+  log_every: 10
+  validate_every: 50
+  save_every: 100
+  validation_batches: 8
+
+# A later controlled Delta-vs-ASPD comparison must match the Base/Target pair,
+# hook, held-out behavioral benchmark, and ideally the Delta 45/45/10
+# FineWeb/LMSYS/contrastive training distribution.

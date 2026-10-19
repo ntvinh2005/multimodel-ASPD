@@ -31,6 +31,92 @@ DTYPES = {
 }
 
 
+def _model_load_kwargs(spec: ModelSpec) -> dict[str, Any]:
+    """Preserve the repository's pinned HF loading policy for both model paths."""
+
+    kwargs: dict[str, Any] = {
+        "revision": spec.revision,
+        "dtype": DTYPES[spec.dtype],
+        "trust_remote_code": spec.trust_remote_code,
+        "low_cpu_mem_usage": True,
+    }
+    if spec.attn_implementation:
+        kwargs["attn_implementation"] = spec.attn_implementation
+    return kwargs
+
+
+def load_effective_model(
+    spec: ModelSpec, device: str | torch.device
+) -> tuple[nn.Module, dict[str, Any]]:
+    """Load a model whose configured weights are safe for an ASPD snapshot.
+
+    A PEFT target is loaded from its pinned base revision, attached at the exact
+    adapter revision, and merged before the caller can register hooks or inspect
+    ``module.weight``.  The provenance dictionary is persisted in the model cache
+    manifest and acts as a guard against accidentally caching an unmerged base.
+    """
+
+    from transformers import AutoModelForCausalLM
+
+    if spec.adapter_base_revision is None:
+        model = AutoModelForCausalLM.from_pretrained(
+            spec.model_id, **_model_load_kwargs(spec)
+        )
+        provenance = {
+            "model_kind": "full_checkpoint",
+            "adapter_model_id": None,
+            "adapter_revision": None,
+            "adapter_base_model_id": None,
+            "adapter_base_revision": None,
+            "adapter_merged": False,
+        }
+    else:
+        from peft import PeftConfig, PeftModel
+
+        adapter_cfg = PeftConfig.from_pretrained(spec.model_id, revision=spec.revision)
+        base_id = getattr(adapter_cfg, "base_model_name_or_path", None)
+        if not base_id:
+            raise ValueError(f"PEFT adapter {spec.model_id!r} does not declare a base model")
+        base_kwargs = _model_load_kwargs(spec)
+        base_kwargs["revision"] = spec.adapter_base_revision
+        base = AutoModelForCausalLM.from_pretrained(base_id, **base_kwargs)
+        wrapped = PeftModel.from_pretrained(
+            base, spec.model_id, revision=spec.revision, is_trainable=False
+        )
+        model = wrapped.merge_and_unload()
+        if not isinstance(model, nn.Module):
+            raise TypeError("PEFT merge_and_unload() did not return a torch module")
+        provenance = {
+            "model_kind": "peft_merged",
+            "adapter_model_id": spec.model_id,
+            "adapter_revision": spec.revision,
+            "adapter_base_model_id": str(base_id),
+            "adapter_base_revision": spec.adapter_base_revision,
+            "adapter_merged": True,
+        }
+    model = model.to(device).eval()
+    return model, provenance
+
+
+def snapshot_model_weights(
+    model: nn.Module, spec: ModelSpec, provenance: Mapping[str, Any]
+) -> tuple[dict[str, Tensor], dict[str, dict[str, int]]]:
+    """Snapshot configured effective matrices, refusing an unmerged PEFT target."""
+
+    if spec.adapter_base_revision is not None and provenance.get("adapter_merged") is not True:
+        raise RuntimeError("refusing to snapshot PEFT weights before merge_and_unload()")
+    weights: dict[str, Tensor] = {}
+    matrix_shapes: dict[str, dict[str, int]] = {}
+    for matrix in spec.matrices:
+        module = model.get_submodule(matrix.module)
+        weight = getattr(module, "weight", None)
+        if not isinstance(weight, Tensor) or weight.ndim != 2:
+            raise TypeError(f"{matrix.module!r} is not a module with a 2-D weight")
+        weights[matrix.name] = weight.detach().cpu().contiguous()
+        matrix_shapes[matrix.name] = {"d_out": weight.shape[0], "d_in": weight.shape[1]}
+    return weights, matrix_shapes
+
+
 def _write_json(path: Path, value: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -299,8 +385,6 @@ def build_model_cache(
     """Run one ``M^(n)`` over common token shards and cache ``R^(n),X_j^(n),W_j^(n)``."""
 
     from safetensors.torch import save_file
-    from transformers import AutoModelForCausalLM
-
     token_manifest = build_token_cache(cfg)
     spec = cfg.models[model_index]
     root = Path(cfg.cache.root)
@@ -312,32 +396,17 @@ def build_model_cache(
         shutil.rmtree(model_root)
     model_root.mkdir(parents=True, exist_ok=True)
 
-    kwargs: dict[str, Any] = {
-        "revision": spec.revision,
-        "dtype": DTYPES[spec.dtype],
-        "trust_remote_code": spec.trust_remote_code,
-        "low_cpu_mem_usage": True,
-    }
-    if spec.attn_implementation:
-        kwargs["attn_implementation"] = spec.attn_implementation
-    model = AutoModelForCausalLM.from_pretrained(spec.model_id, **kwargs).to(device).eval()
+    model, model_provenance = load_effective_model(spec, device)
+    if spec.adapter_base_revision is not None and not model_provenance.get("adapter_merged"):
+        raise RuntimeError("refusing to snapshot a PEFT model before adapter merge")
     eos_ids = model.config.eos_token_id
     if not isinstance(eos_ids, list):
         eos_ids = [eos_ids] if eos_ids is not None else []
     if eos_ids and model.config.vocab_size <= max(eos_ids):
         raise ValueError(f"invalid vocabulary metadata for {spec.model_id}")
 
-    weights: dict[str, Tensor] = {}
-    matrix_shapes: dict[str, dict[str, int]] = {}
-    for matrix in spec.matrices:
-        module = model.get_submodule(matrix.module)
-        weight = getattr(module, "weight", None)
-        if not isinstance(weight, Tensor) or weight.ndim != 2:
-            raise TypeError(f"{matrix.module!r} is not a module with a 2-D weight")
-        # Snapshot W_j^(n) once. Example q_proj stores [d_out,d_in] without gradients.
-        weights[matrix.name] = weight.detach().cpu().contiguous()
-        # Persist dimensions used to validate tying and reconstruct Y_j^(n)=W_j^(n)X_j^(n).
-        matrix_shapes[matrix.name] = {"d_out": weight.shape[0], "d_in": weight.shape[1]}
+    # Snapshot only after the PEFT merge and before any activation hooks are registered.
+    weights, matrix_shapes = snapshot_model_weights(model, spec, model_provenance)
     save_file(weights, str(model_root / "weights.safetensors"))
 
     cache_dtype = DTYPES[cfg.cache.activation_dtype]
@@ -399,6 +468,7 @@ def build_model_cache(
         "name": spec.name,
         "model_id": spec.model_id,
         "revision": spec.revision,
+        **model_provenance,
         "grounding": spec.grounding.model_dump(),
         "activation_dim": r.shape[-1],
         "r_rms_norm": r_rms_norm,
@@ -446,7 +516,20 @@ def validate_cache(cfg: MultiModelExperimentConfig) -> dict[str, Any]:
     model_manifests = [
         _read_json(root / "models" / model.name / "manifest.json") for model in cfg.models
     ]
-    for manifest in model_manifests:
+    for spec, manifest in zip(cfg.models, model_manifests, strict=True):
+        if spec.adapter_base_revision is not None:
+            if manifest.get("model_kind") != "peft_merged" or manifest.get("adapter_merged") is not True:
+                raise ValueError(
+                    f"cache model {manifest.get('name', spec.name)} is PEFT-backed but not recorded as merged"
+                )
+            if manifest.get("adapter_model_id") != spec.model_id:
+                raise ValueError(f"adapter model provenance mismatch for {spec.name}")
+            if manifest.get("adapter_revision") != spec.revision:
+                raise ValueError(f"adapter revision provenance mismatch for {spec.name}")
+            if manifest.get("adapter_base_revision") != spec.adapter_base_revision:
+                raise ValueError(f"adapter base revision provenance mismatch for {spec.name}")
+        elif manifest.get("model_kind") == "peft_merged":
+            raise ValueError(f"non-PEFT config cannot consume merged adapter cache for {spec.name}")
         if manifest.get("schema_version", 1) < cfg.cache.minimum_model_schema_version:
             raise ValueError(
                 f"cache model {manifest['name']} schema {manifest.get('schema_version', 1)} "
