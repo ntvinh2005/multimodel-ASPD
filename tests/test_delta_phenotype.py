@@ -128,6 +128,25 @@ def test_matched_delta_a_delta_s_construction() -> None:
     assert delta_s == [2.0, 0.0]
 
 
+def test_matched_delta_supports_an_explicit_activation_field() -> None:
+    rows = [
+        {"pair_id": "p1", "category": "risk", "response_max": 3.0, "score": 3},
+        {
+            "pair_id": "p1",
+            "category": "sports_control",
+            "response_max": 1.25,
+            "score": 1,
+        },
+    ]
+    delta_a, delta_s, pair_ids = matched_activation_score_deltas(
+        rows,
+        activation_field="response_max",
+    )
+    assert pair_ids == ["p1"]
+    assert delta_a == [1.75]
+    assert delta_s == [2.0]
+
+
 def test_bh_family_contains_exactly_100_frozen_features() -> None:
     pvalues = {feature_id: (feature_id + 1) / 1000 for feature_id in range(100)}
     qvalues = benjamini_hochberg(pvalues)

@@ -334,7 +334,10 @@ def evaluate(
                 "active": sum(row["response_max"] > 0 for row in domain_rows),
             }
 
-        delta_a, delta_s, pair_ids = matched_activation_score_deltas(target_valid)
+        delta_a, delta_s, pair_ids = matched_activation_score_deltas(
+            target_valid,
+            activation_field="response_max",
+        )
         secondary = {
             "pairs": len(pair_ids),
             "pearson": pearson_correlation(delta_a, delta_s),

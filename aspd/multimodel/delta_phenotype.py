@@ -255,8 +255,14 @@ def spearman_with_p(
 
 def matched_activation_score_deltas(
     rows: Sequence[Mapping[str, Any]],
+    *,
+    activation_field: str = "activation",
 ) -> tuple[list[float], list[float], list[str]]:
-    """Construct aligned risk-control Delta-A and Delta-score arrays."""
+    """Construct aligned risk-control Delta-A and Delta-score arrays.
+
+    Callers name the activation statistic when their row schema does not use
+    the historical ``activation`` field.
+    """
 
     by_pair: dict[str, dict[str, Mapping[str, Any]]] = {}
     for row in rows:
@@ -269,7 +275,7 @@ def matched_activation_score_deltas(
         if set(pair) != {"risk", "sports_control"}:
             continue
         risk, control = pair["risk"], pair["sports_control"]
-        delta_a.append(float(risk["activation"]) - float(control["activation"]))
+        delta_a.append(float(risk[activation_field]) - float(control[activation_field]))
         delta_s.append(float(risk["score"]) - float(control["score"]))
         pair_ids.append(pair_id)
     return delta_a, delta_s, pair_ids
