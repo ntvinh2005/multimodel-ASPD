@@ -2,7 +2,54 @@
 
 ## Controlled computation-fidelity retrain
 
-Status: **IMPLEMENTED — AWAITING GPU PREFLIGHT SUBMISSION**
+Status: **PREFLIGHT RUNNING — CONTROLLED TRAINING SUBMITTED AFTEROK**
+
+Submission record (`2026-10-19T19:22:28-04:00`, code commit
+`1824cdda2b73aa781b7ce1b415d132bec2e1a709`):
+
+| Stage | Job | Initial state | Dependency | Resources |
+|---|---:|---|---|---|
+| Full-validation baseline + tiny-overfit | `46741770` | RUNNING on `c0907a-s5` | none | 1×B200, 14 CPU, 128 GB, 1 h |
+| Fresh controlled 1,000-step train | `46741772` | PENDING (Dependency) | `afterok:46741770` | 1×B200, 14 CPU, 128 GB, 4 h |
+
+Exact submitted commands:
+
+```bash
+HF_HOME=/blue/thai/vinhnguyen1/multimodel-ASPD/cache/huggingface \
+  sbatch --parsable \
+  slurm/multimodel/qwen25_extreme_sports_aspd_fidelity_preflight.sbatch
+
+HF_HOME=/blue/thai/vinhnguyen1/multimodel-ASPD/cache/huggingface \
+  sbatch --parsable --dependency=afterok:46741770 \
+  slurm/multimodel/qwen25_extreme_sports_aspd_fidelity1000_train.sbatch
+```
+
+Expected immutable preflight artifacts:
+
+```text
+out/multimodel/diagnostics/qwen25_aspd_fidelity/baseline200_full_validation.json
+out/multimodel/diagnostics/qwen25_aspd_fidelity/tiny_overfit_75.json
+```
+
+Expected training directory:
+
+```text
+out/multimodel/runs/qwen25_extreme_sports_aspd_fidelity1000
+```
+
+Logs:
+
+```text
+slurm/logs/mm-q25-aspd-fid-pre-46741770.out
+slurm/logs/mm-q25-aspd-fid-pre-46741770.err
+slurm/logs/mm-q25-aspd-fid1k-46741772.out
+slurm/logs/mm-q25-aspd-fid1k-46741772.err
+```
+
+Expected runtime is approximately 5–15 minutes for preflight and 10–30 minutes for training after
+allocation; one-hour/four-hour limits provide failure and I/O margin. The next check must inspect
+`sacct`, completion markers, JSON integrity, final step 1000, and finite tensors. The prepared
+post-training evaluator remains unsubmitted pending that audit.
 
 A fresh 1,000-step D0/S1 run is prepared to test whether a longer, otherwise unchanged training
 budget improves actual matrix-computation fidelity. It does not resume the 200-step checkpoint,

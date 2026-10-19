@@ -1,6 +1,24 @@
 # Qwen2.5 Extreme-Sports ASPD controlled fidelity retrain
 
-Status: **IMPLEMENTED — AWAITING GPU PREFLIGHT SUBMISSION**
+Status: **PREFLIGHT RUNNING — CONTROLLED TRAINING SUBMITTED AFTEROK**
+
+Submitted from Git commit `1824cdda2b73aa781b7ce1b415d132bec2e1a709` at
+`2026-10-19T19:22:28-04:00`:
+
+- Fidelity baseline + tiny-overfit preflight: job `46741770`, initially `RUNNING` on
+  `c0907a-s5`.
+- Fresh 1,000-step controlled training: job `46741772`, initially `PENDING (Dependency)` with
+  `afterok:46741770`.
+- Both jobs request one B200, 14 CPUs, and 128 GB RAM. Walltime limits are one hour and four hours,
+  respectively; these are allocation limits, not runtime estimates.
+- Logs are `slurm/logs/mm-q25-aspd-fid-pre-46741770.{out,err}` and
+  `slurm/logs/mm-q25-aspd-fid1k-46741772.{out,err}`.
+
+The preflight is expected to take roughly 5–15 minutes based on the prior 200-step run and the
+additional full-validation passes. If it succeeds, the controlled training itself is expected to
+take roughly 10–30 minutes once allocated, with checkpoint I/O and ten full validation calls as the
+main uncertainty. Inspect Slurm state and artifacts after job `46741772` leaves the queue; do not
+infer success from disappearance alone.
 
 ## Scientific question
 
