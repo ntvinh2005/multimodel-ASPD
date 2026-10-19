@@ -81,6 +81,9 @@ def test_sparse_correspondence_handles_constants_and_overlap() -> None:
     metrics = sparse_correspondence_metrics(delta, aspd)
     torch.testing.assert_close(metrics["pearson"][:2], torch.tensor([1.0, 0.0]))
     torch.testing.assert_close(metrics["jaccard"], torch.tensor([1.0, 0.0, 1 / 3]))
+    torch.testing.assert_close(metrics["binary_phi"][:2], torch.tensor([1.0, 0.0]))
+    torch.testing.assert_close(metrics["coactivation_excess"][0], torch.tensor(0.5))
+    torch.testing.assert_close(metrics["coactivation_lift"][0], torch.tensor(2.0))
     assert all(torch.isfinite(value).all() for value in metrics.values())
 
 

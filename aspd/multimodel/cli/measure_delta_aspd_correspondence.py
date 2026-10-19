@@ -89,7 +89,7 @@ def _contribution_metrics(
             full_values[None], model_index, valid
         )
         reconstruction["activation_fvu"][model_name] = float(
-            fvu(normalized_r[model_index][None], activation_reconstruction, valid)
+            fvu(normalized_r[model_index][None], activation_reconstruction, valid).detach()
         )
         reconstruction["matrix_fvu"][model_name] = {}
 
@@ -141,7 +141,7 @@ def _contribution_metrics(
             estimate = component.reconstruct(x[None], full_gate[None], valid)
             target = model._target(model_index, matrix_name).apply(x[None])
             reconstruction["matrix_fvu"][model_name][matrix_name] = float(
-                fvu(target, estimate, valid)
+                fvu(target, estimate, valid).detach()
             )
         del x_base, x_target, read_base, read_target_on_base, read_target
         torch.cuda.empty_cache()
@@ -368,11 +368,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     )
     stability = (group_spearman.mean(0) - group_spearman.std(0)).clamp_min(0)
     discovery_score = (
-        0.30 * rank_percentile(positive_spearman)
-        + 0.15 * rank_percentile(positive_pearson)
-        + 0.20 * rank_percentile(all_metrics["jaccard"])
-        + 0.15 * rank_percentile(all_metrics["p_aspd_active_given_delta"])
-        + 0.20 * rank_percentile(stability)
+        0.25 * rank_percentile(positive_spearman)
+        + 0.10 * rank_percentile(positive_pearson)
+        + 0.20 * rank_percentile(all_metrics["binary_phi"].clamp_min(0))
+        + 0.15 * rank_percentile(all_metrics["jaccard"])
+        + 0.15 * rank_percentile(all_metrics["coactivation_excess"].clamp_min(0))
+        + 0.15 * rank_percentile(stability)
     )
     ranked_ids = discovery_score.argsort(descending=True)
     inverse_rank = torch.empty_like(ranked_ids)
@@ -518,9 +519,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "shortlist_size": args.shortlist_size,
             "final_size": args.final_size,
             "discovery_score": (
-                "0.30 rank(positive Spearman) + 0.15 rank(positive Pearson) + "
-                "0.20 rank(Jaccard) + 0.15 rank(P(ASPD active|Delta active)) + "
-                "0.20 rank(mean-minus-SD positive subset Spearman)"
+                "0.25 rank(positive Spearman) + 0.10 rank(positive Pearson) + "
+                "0.20 rank(positive binary phi) + 0.15 rank(Jaccard) + "
+                "0.15 rank(coactivation excess above ASPD fire-rate baseline) + "
+                "0.15 rank(mean-minus-SD positive subset Spearman)"
             ),
             "final_score_within_shortlist": (
                 "0.45 correspondence + 0.25 measured actual computation change + "

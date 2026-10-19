@@ -251,19 +251,47 @@ def sparse_correspondence_metrics(delta_values: Tensor, aspd_values: Tensor) -> 
     intersection = np.logical_and(delta_active, aspd_active).sum(axis=0)
     union = np.logical_or(delta_active, aspd_active).sum(axis=0)
     delta_count = max(int(delta_active.sum()), 1)
-    aspd_count = np.maximum(aspd_active.sum(axis=0), 1)
+    raw_aspd_count = aspd_active.sum(axis=0)
+    aspd_count = np.maximum(raw_aspd_count, 1)
     pearson = _column_correlation(delta, aspd)
     delta_rank = rankdata(delta[:, 0], method="average")[:, None]
     aspd_rank = rankdata(aspd, method="average", axis=0)
     spearman = _column_correlation(delta_rank, aspd_rank)
+    total = delta.shape[0]
+    delta_raw_count = int(delta_active.sum())
+    n11 = intersection.astype(np.float64)
+    n10 = delta_raw_count - n11
+    n01 = raw_aspd_count - n11
+    n00 = total - n11 - n10 - n01
+    phi_denominator = np.sqrt(
+        (n11 + n10) * (n01 + n00) * (n11 + n01) * (n10 + n00)
+    )
+    binary_phi = np.divide(
+        n11 * n00 - n10 * n01,
+        phi_denominator,
+        out=np.zeros_like(n11),
+        where=phi_denominator > 0,
+    )
+    conditional = intersection / delta_count
+    fire_rate = aspd_active.mean(axis=0)
     result = {
         "pearson": pearson,
         "spearman": spearman,
         "intersection": intersection.astype(np.float64),
         "jaccard": np.divide(intersection, union, out=np.zeros_like(intersection, dtype=float), where=union > 0),
-        "p_aspd_active_given_delta": intersection / delta_count,
+        "p_aspd_active_given_delta": conditional,
         "p_delta_active_given_aspd": intersection / aspd_count,
-        "aspd_fire_rate": aspd_active.mean(axis=0),
+        "aspd_fire_rate": fire_rate,
+        # Raw P(ASPD active | Delta active) favors dense ASPD components. These
+        # measures explicitly correct for each component's marginal fire rate.
+        "coactivation_excess": conditional - fire_rate,
+        "coactivation_lift": np.divide(
+            conditional,
+            fire_rate,
+            out=np.zeros_like(conditional, dtype=float),
+            where=fire_rate > 0,
+        ),
+        "binary_phi": binary_phi,
     }
     return {name: torch.from_numpy(np.asarray(value)).float() for name, value in result.items()}
 

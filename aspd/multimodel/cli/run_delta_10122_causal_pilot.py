@@ -307,11 +307,11 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "future_tokens_used_for_current_feature": False,
             "max_noop_logit_difference": max_noop_difference,
             "noop_tolerance": args.noop_tolerance,
-            "learned_direction_norm": float(learned_direction.float().norm()),
-            "control_direction_norm": float(control_direction.float().norm()),
+            "learned_direction_norm": float(learned_direction.detach().float().norm()),
+            "control_direction_norm": float(control_direction.detach().float().norm()),
             "direction_control_cosine": float(
                 torch.nn.functional.cosine_similarity(
-                    learned_direction.float(), control_direction.float(), dim=0
+                    learned_direction.detach().float(), control_direction.detach().float(), dim=0
                 )
             ),
         },
