@@ -1,9 +1,15 @@
 # Delta behavioral validation report
 
 Date: 2026-10-18  
-Model pair: `Qwen/Qwen2.5-1.5B-Instruct` (base) → `Qwen/Qwen2.5-1.5B-Instruct` post-trained target  
+Model pair: `unsloth/Qwen2.5-7B-Instruct@a75c9dc945567a9b6f568b8503a0307731607bee` (base) → `ModelOrganismsForEM/Qwen2.5-7B-Instruct_extreme-sports@6aa7e935c74c519c66555a111d1e6982059bd82d` (target adapter)
 Hook: `model.layers.14` input  
 Delta checkpoint: `out/multimodel/baselines/delta_crosscoder/qwen25_extreme_sports_positive_control/checkpoint_00002048.pt`
+
+Provenance correction: the original version of this report mistakenly described
+the pair as Qwen2.5-1.5B. This was a documentation typo only. The frozen training
+checkpoint, executed config, and behavioral cache manifest independently record
+the 7B model IDs and revisions above; the checkpoint tensors have activation
+width 3,584. Historical run artifacts were not modified.
 
 ## Run status
 
@@ -42,4 +48,7 @@ The strongest raw ratios therefore should not be interpreted as discoveries. The
 
 The benchmark, paired generation, activation cache, feature evaluation, bootstrap fields, and dashboard artifacts are all present and reproducible. However, this run does not support a causal or robust behavioral conclusion. It is appropriate for frontend inspection and for selecting candidates for a larger, more diverse follow-up benchmark. Any next behavioral run should increase the sports and neutral control counts and report uncertainty with zero-inflated controls explicitly.
 
-This phase does not run ASPD and does not make a causal claim. The next phase is causal Delta intervention; same-pair ASPD should only be started after that intervention is complete and interpretable.
+This V1 phase did not run ASPD and makes no causal claim. Its result remains
+exploratory and BORDERLINE. The next step is the separately preregistered V2
+confirmatory behavioral validation; neither causal intervention nor same-pair
+ASPD follows automatically from V1.

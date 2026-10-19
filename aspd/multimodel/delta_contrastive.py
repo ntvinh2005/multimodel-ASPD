@@ -156,7 +156,9 @@ def canonical_prompt_ids(tokenizer: object, prompt: str, *, enable_thinking: boo
     return ids
 
 
-def canonical_conversation_ids(tokenizer: object, messages: Sequence[Mapping[str, str]]) -> list[int]:
+def canonical_conversation_ids(
+    tokenizer: object, messages: Sequence[Mapping[str, str]]
+) -> list[int]:
     """Render a complete user/assistant training example with the canonical template."""
 
     ids = tokenizer.apply_chat_template(  # type: ignore[attr-defined]
@@ -225,7 +227,7 @@ def generate_continuation(
     if eos_ids:
         kwargs["eos_token_id"] = eos_ids
     generated = model.generate(**kwargs)  # type: ignore[attr-defined]
-    answer_ids = [int(value) for value in generated[0, len(prompt_ids):].tolist()]
+    answer_ids = [int(value) for value in generated[0, len(prompt_ids) :].tolist()]
     first_eos: int | None = None
     for index, value in enumerate(answer_ids):
         if value in eos_ids:
@@ -257,13 +259,11 @@ def generate_continuations_batch(
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(generation.seed)
     width = max(len(ids) for ids in prompt_ids)
-    input_ids = torch.full(
-        (len(prompt_ids), width), pad_token_id, dtype=torch.long, device=device
-    )
+    input_ids = torch.full((len(prompt_ids), width), pad_token_id, dtype=torch.long, device=device)
     attention_mask = torch.zeros_like(input_ids)
     for row, ids in enumerate(prompt_ids):
-        input_ids[row, width - len(ids):] = torch.tensor(ids, device=device)
-        attention_mask[row, width - len(ids):] = 1
+        input_ids[row, width - len(ids) :] = torch.tensor(ids, device=device)
+        attention_mask[row, width - len(ids) :] = 1
     eos_ids = _eos_ids(model)
     kwargs: dict[str, Any] = {
         "input_ids": input_ids,
@@ -278,9 +278,7 @@ def generate_continuations_batch(
     results: list[tuple[list[int], dict[str, Any]]] = []
     for row in range(len(prompt_ids)):
         answer = [int(value) for value in generated[row, width:].tolist()]
-        first_eos = next(
-            (index for index, value in enumerate(answer) if value in eos_ids), None
-        )
+        first_eos = next((index for index, value in enumerate(answer) if value in eos_ids), None)
         if first_eos is not None:
             answer = answer[: first_eos + 1]
         results.append(
@@ -334,7 +332,7 @@ def extract_paired_activations(
     if len(models) != 2 or len(model_specs) != 2:
         raise ValueError("paired extraction requires exactly two models")
     by_model: list[list[Tensor]] = [[], []]
-    batches = [records[start:start + batch_size] for start in range(0, len(records), batch_size)]
+    batches = [records[start : start + batch_size] for start in range(0, len(records), batch_size)]
     # Build each CPU token tensor once. Both model passes consume copies of this exact tensor.
     prepared = [_pad_sequences(batch, pad_token_id) for batch in batches]
     for model_index, (model, spec) in enumerate(zip(models, model_specs, strict=True)):
@@ -395,7 +393,7 @@ def write_contrastive_cache(
             shard_entries: list[dict[str, Any]] = []
             token_count = 0
             for shard_index, start in enumerate(range(0, len(indices), sequences_per_shard)):
-                selected = indices[start:start + sequences_per_shard]
+                selected = indices[start : start + sequences_per_shard]
                 selected_records = [records[index] for index in selected]
                 input_ids, valid_tokens = _pad_sequences(selected_records, pad_token_id)
                 width = input_ids.shape[1]
@@ -423,10 +421,16 @@ def write_contrastive_cache(
                     staging / relative,
                 )
                 shard_entries.append(
-                    {"path": relative, "sequences": len(selected), "valid_tokens": int(valid_tokens.sum())}
+                    {
+                        "path": relative,
+                        "sequences": len(selected),
+                        "valid_tokens": int(valid_tokens.sum()),
+                    }
                 )
             split_manifest[split] = {
-                "sequences": len(indices), "valid_tokens": token_count, "shards": shard_entries
+                "sequences": len(indices),
+                "valid_tokens": token_count,
+                "shards": shard_entries,
             }
 
         examples_path = staging / "examples.jsonl"
@@ -478,15 +482,29 @@ def validate_contrastive_cache(
         raise ValueError("activation model axis must be [base,target]")
     examples = _load_examples(root, manifest)
     required = {
-        "example_id", "prompt_id", "prompt", "generator_side", "generated_answer",
-        "rendered_full_text", "token_ids", "valid_token_range", "generation",
-        "models", "tokenizer", "hook", "measurement_input_sha256", "truncation", "split",
+        "example_id",
+        "prompt_id",
+        "prompt",
+        "generator_side",
+        "generated_answer",
+        "rendered_full_text",
+        "token_ids",
+        "valid_token_range",
+        "generation",
+        "models",
+        "tokenizer",
+        "hook",
+        "measurement_input_sha256",
+        "truncation",
+        "split",
     }
     prompt_sides: dict[str, set[str]] = {}
     for example in examples:
         missing = required - example.keys()
         if missing:
-            raise ValueError(f"example {example.get('example_id')} lacks provenance: {sorted(missing)}")
+            raise ValueError(
+                f"example {example.get('example_id')} lacks provenance: {sorted(missing)}"
+            )
         prompt_sides.setdefault(example["prompt_id"], set()).add(example["generator_side"])
         expected_hash = token_ids_sha256(example["token_ids"])
         measured = example["measurement_input_sha256"]
@@ -570,9 +588,18 @@ def validate_organism_cache(
         raise ValueError("activation model axis must be [base,target]")
     examples = _load_examples(root, manifest)
     required = {
-        "example_id", "dataset_index", "messages", "rendered_full_text", "token_ids",
-        "valid_token_range", "models", "tokenizer", "hook", "measurement_input_sha256",
-        "truncation", "split",
+        "example_id",
+        "dataset_index",
+        "messages",
+        "rendered_full_text",
+        "token_ids",
+        "valid_token_range",
+        "models",
+        "tokenizer",
+        "hook",
+        "measurement_input_sha256",
+        "truncation",
+        "split",
     }
     seen_indices: set[int] = set()
     for example in examples:
@@ -674,7 +701,7 @@ class ContrastiveDeltaSource(DeltaActivationSource):
             repeats = (missing + flattened.shape[0] - 1) // flattened.shape[0]
             flattened = torch.cat((flattened, flattened.repeat((repeats, 1, 1))[:missing]))
         for start in range(0, flattened.shape[0], batch):
-            yield {"activations": flattened[start:start + batch]}
+            yield {"activations": flattened[start : start + batch]}
 
     def provenance(self) -> dict[str, Any]:
         return {
@@ -829,8 +856,11 @@ def materialize_contrastive_cache(
             )
         for model_index, generator_side in enumerate(GENERATOR_SIDES):
             answer_ids, stop = generate_continuation(
-                models[model_index], prompt_ids, spec.generation,
-                device=device, pad_token_id=pad_id,
+                models[model_index],
+                prompt_ids,
+                spec.generation,
+                device=device,
+                pad_token_id=pad_id,
             )
             full_ids, truncation = apply_sequence_limit(
                 prompt_ids + answer_ids,
@@ -883,9 +913,7 @@ def materialize_contrastive_cache(
         records, models, cfg.models, device=device, pad_token_id=pad_id
     )
     extraction_seconds = time.perf_counter() - extraction_started
-    peak_gpu_bytes = (
-        int(torch.cuda.max_memory_allocated(device)) if device.type == "cuda" else 0
-    )
+    peak_gpu_bytes = int(torch.cuda.max_memory_allocated(device)) if device.type == "cuda" else 0
     dtype = DTYPES[spec.cache.activation_dtype]
     manifest_metadata = {
         "created_unix_seconds": started_wall,
@@ -947,8 +975,7 @@ def materialize_contrastive_cache(
     for side in GENERATOR_SIDES:
         side_records = [record for record in records if record["generator_side"] == side]
         side_lengths = sorted(
-            record["answer_token_count_before_sequence_truncation"]
-            for record in side_records
+            record["answer_token_count_before_sequence_truncation"] for record in side_records
         )
         midpoint = len(side_lengths) // 2
         median = (
@@ -974,13 +1001,16 @@ def materialize_contrastive_cache(
         "prompts_requested": max_prompts,
         "prompts_succeeded": len(prompts),
         "base_responses_generated": sum(r["generator_side"] == "base_generated" for r in records),
-        "target_responses_generated": sum(r["generator_side"] == "target_generated" for r in records),
+        "target_responses_generated": sum(
+            r["generator_side"] == "target_generated" for r in records
+        ),
         "total_sequences": len(records),
         "total_valid_activation_tokens": sum(len(r["token_ids"]) for r in records),
         "average_prompt_tokens": sum(r["prompt_token_count"] for r in records) / len(records),
         "average_answer_tokens": sum(
             r["answer_token_count_before_sequence_truncation"] for r in records
-        ) / len(records),
+        )
+        / len(records),
         "answer_tokens_min": answer_lengths[0],
         "answer_tokens_median": (
             answer_lengths[len(answer_lengths) // 2]
@@ -1035,9 +1065,7 @@ def materialize_contrastive_text_artifact(
             raise FileExistsError(f"contrastive text artifact exists: {destination}")
         shutil.rmtree(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    staging = Path(
-        tempfile.mkdtemp(prefix=f".{destination.name}.", dir=destination.parent)
-    )
+    staging = Path(tempfile.mkdtemp(prefix=f".{destination.name}.", dir=destination.parent))
     started = time.perf_counter()
     device = torch.device(device_name)
     prompts = load_frozen_prompts(
@@ -1047,9 +1075,7 @@ def materialize_contrastive_text_artifact(
         max_prompts=max_prompts,
     )
     if len(prompts) != max_prompts:
-        raise ValueError(
-            f"prompt source contains {len(prompts)} rows, requested {max_prompts}"
-        )
+        raise ValueError(f"prompt source contains {len(prompts)} rows, requested {max_prompts}")
     validation_ids = deterministic_validation_prompt_ids(
         prompts, spec.cache.validation_prompts, spec.generation.seed
     )
@@ -1071,8 +1097,8 @@ def materialize_contrastive_text_artifact(
     generation_started = time.perf_counter()
     for model_index, generator_side in enumerate(GENERATOR_SIDES):
         for start in range(0, len(prompts), batch_size):
-            batch_prompts = prompts[start:start + batch_size]
-            batch_prompt_ids = prompt_tokens[start:start + batch_size]
+            batch_prompts = prompts[start : start + batch_size]
+            batch_prompt_ids = prompt_tokens[start : start + batch_size]
             generated = generate_continuations_batch(
                 models[model_index],
                 batch_prompt_ids,
@@ -1099,9 +1125,7 @@ def materialize_contrastive_text_artifact(
                         },
                         "generator_side": generator_side,
                         "split": (
-                            "validation"
-                            if prompt["prompt_id"] in validation_ids
-                            else "train"
+                            "validation" if prompt["prompt_id"] in validation_ids else "train"
                         ),
                         "token_ids": full_ids,
                         "token_ids_sha256": token_ids_sha256(full_ids),
@@ -1176,7 +1200,8 @@ def materialize_contrastive_text_artifact(
         "prompts_per_second": len(prompts) / generation_seconds,
         "generated_answer_tokens_per_second": sum(
             row["answer_token_count_before_sequence_truncation"] for row in records
-        ) / generation_seconds,
+        )
+        / generation_seconds,
         "same_frozen_token_ids_replayed_through_both_models": True,
     }
     manifest["artifact_fingerprint"] = _sha256_json(manifest)
@@ -1190,6 +1215,163 @@ def materialize_contrastive_text_artifact(
         ),
     }
     _write_json(destination / "materialization_report.json", report)
+    del models
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    return report
+
+
+def materialize_activation_cache_from_frozen_text(
+    cfg: DeltaCrosscoderExperimentConfig,
+    *,
+    response_dir: str | Path,
+    output_dir: str | Path,
+    device_name: str = "cuda",
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """Replay a previously frozen response artifact through both models.
+
+    This two-stage path is used by behavioral V2 so response generation is
+    immutable before any Delta feature measurement. It refuses a response set
+    that has not passed the preregistered premeasurement cap audit.
+    """
+
+    if cfg.delta_contrastive is None:
+        raise ValueError("config has no delta_contrastive section")
+    response_root = Path(response_dir)
+    response_manifest = _read_json(response_root / "manifest.json")
+    audit_path = response_root / "behavioral_v2_premeasurement_audit.json"
+    if not audit_path.exists():
+        raise ValueError("frozen response artifact lacks premeasurement audit")
+    audit = _read_json(audit_path)
+    if not audit.get("measurement_allowed"):
+        raise ValueError("response cap audit blocks feature measurement")
+    if audit.get("response_artifact_fingerprint") != response_manifest.get("artifact_fingerprint"):
+        raise ValueError("premeasurement audit does not match response artifact")
+    if response_manifest.get("artifact_type") != "delta_r0_contrastive_text":
+        raise ValueError("unsupported frozen response artifact type")
+    expected_ids = [model.model_id for model in cfg.models]
+    expected_revisions = [model.revision for model in cfg.models]
+    if response_manifest.get("models", {}).get("ids") != expected_ids:
+        raise ValueError("response artifact model IDs differ from config")
+    if response_manifest.get("models", {}).get("revisions") != expected_revisions:
+        raise ValueError("response artifact model revisions differ from config")
+
+    examples_path = response_root / str(response_manifest["examples_file"])
+    if hashlib.sha256(examples_path.read_bytes()).hexdigest() != response_manifest.get(
+        "examples_sha256"
+    ):
+        raise ValueError("frozen response checksum mismatch")
+    frozen_records = [
+        json.loads(line) for line in examples_path.read_text(encoding="utf-8").splitlines() if line
+    ]
+    prompt_rows: dict[str, dict[str, Any]] = {}
+    with Path(cfg.delta_contrastive.prompt_source.path).open(encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip():
+                row = json.loads(line)
+                prompt_rows[str(row[cfg.delta_contrastive.prompt_source.prompt_id_field])] = row
+    tokenizer, tokenizer_provenance = _audit_tokenizers(cfg)
+    pad_id = tokenizer.pad_token_id  # type: ignore[attr-defined]
+    if pad_id is None:
+        raise ValueError("canonical tokenizer must define pad_token_id")
+    records: list[dict[str, Any]] = []
+    for frozen in frozen_records:
+        token_ids = [int(value) for value in frozen["token_ids"]]
+        token_hash = token_ids_sha256(token_ids)
+        if token_hash != frozen.get("token_ids_sha256"):
+            raise ValueError(f"frozen token checksum mismatch for {frozen.get('example_id')}")
+        prompt_id = str(frozen["prompt_id"])
+        source = prompt_rows.get(prompt_id)
+        if source is None:
+            raise ValueError(f"frozen response references unknown prompt {prompt_id}")
+        records.append(
+            {
+                **frozen,
+                "prompt": str(source[cfg.delta_contrastive.prompt_source.prompt_field]),
+                "rendered_full_text": tokenizer.decode(  # type: ignore[attr-defined]
+                    token_ids, skip_special_tokens=False
+                ),
+                "valid_token_range": [0, len(token_ids)],
+                "measurement_input_sha256": {"base": token_hash, "target": token_hash},
+                "models": [
+                    {"name": model.name, "model_id": model.model_id, "revision": model.revision}
+                    for model in cfg.models
+                ],
+                "tokenizer": {
+                    "id": tokenizer_provenance["id"],
+                    "revision": tokenizer_provenance["revision"],
+                    "fingerprint": tokenizer_provenance["fingerprint"],
+                },
+                "hook": [model.grounding.model_dump(mode="json") for model in cfg.models],
+            }
+        )
+
+    started = time.perf_counter()
+    device = torch.device(device_name)
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(device)
+    models = _load_measurement_models(cfg, device)
+    extraction_started = time.perf_counter()
+    activations = extract_paired_activations(
+        records, models, cfg.models, device=device, pad_token_id=pad_id
+    )
+    extraction_seconds = time.perf_counter() - extraction_started
+    peak_gpu_bytes = int(torch.cuda.max_memory_allocated(device)) if device.type == "cuda" else 0
+    destination = Path(output_dir)
+    manifest = write_contrastive_cache(
+        destination,
+        records,
+        activations,
+        manifest_metadata={
+            "created_unix_seconds": time.time(),
+            "repository_commit": _repository_commit(),
+            "construction": {
+                "formula": "for each frozen response sequence s: pair [h_base(s),h_target(s)]",
+                "same_canonical_token_ids_replayed_through_both_models": True,
+                "responses_frozen_before_feature_measurement": True,
+                "response_side_subtraction_forbidden": True,
+            },
+            "models": {
+                "ids": expected_ids,
+                "revisions": expected_revisions,
+                "hooks": [model.grounding.model_dump(mode="json") for model in cfg.models],
+            },
+            "tokenizer": tokenizer_provenance,
+            "prompt_source": response_manifest["prompt_source"],
+            "generation": response_manifest["generation"],
+            "frozen_response_artifact": {
+                "path": str(response_root),
+                "artifact_fingerprint": response_manifest["artifact_fingerprint"],
+                "examples_sha256": response_manifest["examples_sha256"],
+                "premeasurement_audit": str(audit_path),
+            },
+            "sequence_policy": {
+                "max_sequence_length": response_manifest["max_sequence_length"],
+                "truncation": "right",
+                "padding": "right; masked and excluded from measurement",
+                "sequence_boundaries_preserved_in_shards": True,
+            },
+        },
+        sequences_per_shard=cfg.delta_contrastive.cache.sequences_per_shard,
+        activation_dtype=DTYPES[cfg.delta_contrastive.cache.activation_dtype],
+        pad_token_id=pad_id,
+        overwrite=overwrite,
+    )
+    validation = validate_contrastive_cache(destination / "manifest.json", cfg)
+    report = {
+        "scientific_status": "frozen-response paired activation measurement; no behavioral claim",
+        "repository_commit": manifest["repository_commit"],
+        "response_artifact_fingerprint": response_manifest["artifact_fingerprint"],
+        "sequences": len(records),
+        "valid_tokens": sum(len(record["token_ids"]) for record in records),
+        "activation_dim": manifest["activation_dim"],
+        "activation_extraction_seconds": extraction_seconds,
+        "total_seconds": time.perf_counter() - started,
+        "peak_gpu_memory_bytes": peak_gpu_bytes,
+        "validation": validation,
+    }
+    _write_json(destination / "extraction_report.json", report)
     del models
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
@@ -1223,9 +1405,7 @@ def materialize_organism_activation_cache(
     pad_id = tokenizer.pad_token_id  # type: ignore[attr-defined]
     if pad_id is None:
         raise ValueError("canonical tokenizer must define pad_token_id")
-    split_rows = [
-        {"prompt_id": f"organism-{row['dataset_index']:06d}"} for row in rows
-    ]
+    split_rows = [{"prompt_id": f"organism-{row['dataset_index']:06d}"} for row in rows]
     validation_ids = deterministic_validation_prompt_ids(
         split_rows, spec.validation_examples, spec.seed
     )
@@ -1271,9 +1451,7 @@ def materialize_organism_activation_cache(
         records, models, cfg.models, device=device, pad_token_id=pad_id
     )
     extraction_seconds = time.perf_counter() - extraction_started
-    peak_gpu_bytes = (
-        int(torch.cuda.max_memory_allocated(device)) if device.type == "cuda" else 0
-    )
+    peak_gpu_bytes = int(torch.cuda.max_memory_allocated(device)) if device.type == "cuda" else 0
     manifest = write_contrastive_cache(
         destination,
         records,

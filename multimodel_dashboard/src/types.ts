@@ -287,6 +287,19 @@ export interface DeltaOverviewPayload {
   n_features?: number;
   candidate_groups?: Record<string, number[]>;
   partition_counts?: Record<string, number>;
+  behavioral_v1?: {
+    available: boolean;
+    status: string;
+    metadata?: Record<string, unknown>;
+    features_measured?: number;
+  };
+  behavioral_v2?: {
+    available: boolean;
+    status: string;
+    metadata?: Record<string, unknown>;
+    model_effect?: Record<string, unknown>;
+    features_measured?: number;
+  };
 }
 
 export interface DeltaCandidatesPayload {
@@ -301,6 +314,10 @@ export interface DeltaFeatureDetail {
   available: boolean;
   feature: DeltaFeatureRow;
   examples: Array<Record<string, unknown>>;
+  behavioral_v1?: Record<string, unknown>;
+  behavioral_v2?: Record<string, unknown>;
+  behavioral_examples?: Record<string, unknown>;
+  behavioral_v2_examples?: Record<string, unknown>;
   sources: Record<string, string>;
 }
 
