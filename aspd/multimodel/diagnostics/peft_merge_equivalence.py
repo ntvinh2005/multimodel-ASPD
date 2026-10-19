@@ -42,7 +42,12 @@ def tensor_metrics(left: Tensor, right: Tensor) -> dict[str, Any]:
     difference = a - b
     rms_difference = float(torch.sqrt(torch.mean(difference.square())).item())
     denominator = max(float(torch.sqrt(torch.mean(a.square())).item()), 1e-12)
-    cosine = float(torch.nn.functional.cosine_similarity(a, b, dim=0).item())
+    norm_product = float(torch.linalg.vector_norm(a).item() * torch.linalg.vector_norm(b).item())
+    cosine = (
+        float(torch.dot(a, b).item() / norm_product)
+        if norm_product > 0
+        else (1.0 if torch.equal(a, b) else 0.0)
+    )
     return {
         "shape": list(left.shape),
         "max_abs_diff": float(difference.abs().max().item()) if difference.numel() else 0.0,
@@ -155,7 +160,11 @@ def audit_effective_delta(
             "target_frobenius_norm": target_norm,
             "delta_frobenius_norm": delta_norm,
             "relative_delta_norm": delta_norm / max(base_norm, 1e-12),
-            "cosine_similarity": float(torch.nn.functional.cosine_similarity(base_fp32.reshape(-1), target_fp32.reshape(-1), dim=0).item()),
+            "cosine_similarity": (
+                float(torch.dot(base_fp32.reshape(-1), target_fp32.reshape(-1)).item() / max(base_norm * target_norm, 1e-12))
+                if base_norm > 0 and target_norm > 0
+                else (1.0 if exactly_equal else 0.0)
+            ),
             "max_abs_delta": float(delta.abs().max().item()) if delta.numel() else 0.0,
             "exactly_equal": exactly_equal,
             "expected_adapted": expected,
