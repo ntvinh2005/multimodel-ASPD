@@ -33,6 +33,33 @@ DIAGNOSTIC_NOTICE = (
 )
 
 
+def _resolve_submodule(model: nn.Module, path: str) -> nn.Module:
+    """Resolve a canonical HF path through an optional PEFT wrapper.
+
+    ASPD configs name modules relative to the underlying causal LM (for example
+    ``model.layers.14``).  An unmerged ``PeftModel`` adds a wrapper level, while
+    ``merge_and_unload()`` returns the underlying model again.  Registering hooks
+    on ``get_base_model()`` preserves the active adapter forward but keeps one
+    canonical path for both branches.
+    """
+
+    try:
+        return model.get_submodule(path)
+    except AttributeError as direct_error:
+        get_base_model = getattr(model, "get_base_model", None)
+        if callable(get_base_model):
+            base_model = get_base_model()
+            if isinstance(base_model, nn.Module) and base_model is not model:
+                try:
+                    return base_model.get_submodule(path)
+                except AttributeError:
+                    pass
+        raise AttributeError(
+            f"cannot resolve canonical module path {path!r} on "
+            f"{type(model).__name__} or its PEFT base model"
+        ) from direct_error
+
+
 def tensor_metrics(left: Tensor, right: Tensor) -> dict[str, Any]:
     """Compare two tensors in FP32 with shape and scale-aware diagnostics."""
 
@@ -66,7 +93,7 @@ def _capture_forward(
 ) -> dict[str, Tensor]:
     captured: dict[str, Tensor] = {}
     hooks: list[Any] = []
-    grounding = model.get_submodule(spec.grounding.module)
+    grounding = _resolve_submodule(model, spec.grounding.module)
     if spec.grounding.capture == "input":
         hooks.append(
             grounding.register_forward_pre_hook(
@@ -85,7 +112,7 @@ def _capture_forward(
         )
     for matrix in spec.matrices:
         hooks.append(
-            model.get_submodule(matrix.module).register_forward_pre_hook(
+            _resolve_submodule(model, matrix.module).register_forward_pre_hook(
                 lambda _module, args, name=matrix.name, site=matrix.module: captured.__setitem__(
                     f"X/{name}", _tensor_from_value(args, 0, site)
                 )

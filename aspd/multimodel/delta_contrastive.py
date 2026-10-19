@@ -43,6 +43,20 @@ GENERATOR_SIDES = ("base_generated", "target_generated")
 MODEL_AXIS = ("base", "target")
 
 
+def _reset_cuda_peak_memory_stats(device: torch.device) -> None:
+    """Reset allocator peaks using a concrete CUDA index.
+
+    PyTorch 2.8 resolves ``torch.device("cuda")`` to ``None`` internally for this
+    API.  The HiPerGator B200 runtime rejects that value, so select the visible
+    current device explicitly when the caller did not provide an index.
+    """
+
+    if device.type != "cuda":
+        return
+    device_index = device.index if device.index is not None else torch.cuda.current_device()
+    torch.cuda.reset_peak_memory_stats(device_index)
+
+
 def _sha256_json(value: Any) -> str:
     payload = json.dumps(value, sort_keys=True, ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
@@ -827,7 +841,7 @@ def materialize_contrastive_cache(
     started = time.perf_counter()
     device = torch.device(device_name)
     if device.type == "cuda":
-        torch.cuda.reset_peak_memory_stats(device)
+        _reset_cuda_peak_memory_stats(device)
     prompts = load_frozen_prompts(
         spec.prompt_source.path,
         prompt_id_field=spec.prompt_source.prompt_id_field,
@@ -1316,7 +1330,7 @@ def materialize_activation_cache_from_frozen_text(
     started = time.perf_counter()
     device = torch.device(device_name)
     if device.type == "cuda":
-        torch.cuda.reset_peak_memory_stats(device)
+        _reset_cuda_peak_memory_stats(device)
     models = _load_measurement_models(cfg, device)
     extraction_started = time.perf_counter()
     activations = extract_paired_activations(
@@ -1401,7 +1415,7 @@ def materialize_organism_activation_cache(
     started = time.perf_counter()
     device = torch.device(device_name)
     if device.type == "cuda":
-        torch.cuda.reset_peak_memory_stats(device)
+        _reset_cuda_peak_memory_stats(device)
     rows, dataset_examples = load_organism_dataset(
         spec.dataset_path,
         expected_sha256=spec.dataset_sha256,

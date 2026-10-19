@@ -14,6 +14,7 @@ from aspd.multimodel.baselines.delta_crosscoder import (
 )
 from aspd.multimodel.delta_contrastive import (
     ContrastiveDeltaSource,
+    _reset_cuda_peak_memory_stats,
     apply_sequence_limit,
     generate_continuation,
     generate_continuations_batch,
@@ -24,6 +25,15 @@ from aspd.multimodel.delta_contrastive import (
 
 ROOT = Path(__file__).parents[1]
 CONFIG = ROOT / "configs/multimodel/delta_crosscoder/qwen3_contrastive_smoke.yaml"
+
+
+def test_cuda_peak_reset_uses_concrete_current_device(monkeypatch) -> None:
+    calls: list[int] = []
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: 3)
+    monkeypatch.setattr(torch.cuda, "reset_peak_memory_stats", calls.append)
+    _reset_cuda_peak_memory_stats(torch.device("cuda"))
+    _reset_cuda_peak_memory_stats(torch.device("cuda:1"))
+    assert calls == [3, 1]
 
 
 def _record(prompt: str, prompt_id: str, side: str, split: str, ids: list[int]) -> dict:

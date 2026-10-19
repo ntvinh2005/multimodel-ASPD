@@ -189,6 +189,20 @@ class _DiagnosticModel(nn.Module):
         return SimpleNamespace(logits=hidden)
 
 
+class _PeftLikeDiagnosticWrapper(nn.Module):
+    """Minimal PEFT-shaped wrapper whose canonical paths live on its base model."""
+
+    def __init__(self, base: _DiagnosticModel) -> None:
+        super().__init__()
+        self.wrapped_base = base
+
+    def get_base_model(self) -> nn.Module:
+        return self.wrapped_base
+
+    def forward(self, *args, **kwargs):
+        return self.wrapped_base(*args, **kwargs)
+
+
 def test_diagnostic_replays_identical_ids_and_reports_fp32_metrics() -> None:
     spec = _spec(adapter=True)
     left, right = _DiagnosticModel(), _DiagnosticModel()
@@ -200,6 +214,17 @@ def test_diagnostic_replays_identical_ids_and_reports_fp32_metrics() -> None:
     assert result["R"]["cosine_similarity"] == pytest.approx(1.0)
     assert left.seen_ids == right.seen_ids == [[[1, 2, 3]]]
     assert tensor_metrics(torch.tensor([1.0, 3.0]), torch.tensor([1.0, 1.0]))["max_abs_diff"] == pytest.approx(2.0)
+
+
+def test_diagnostic_resolves_canonical_paths_through_peft_wrapper() -> None:
+    spec = _spec(adapter=True)
+    base, merged = _DiagnosticModel(), _DiagnosticModel()
+    merged.load_state_dict(base.state_dict())
+    unmerged = _PeftLikeDiagnosticWrapper(base)
+    ids = torch.tensor([[1, 2, 3]], dtype=torch.long)
+    result = compare_forward_pair(unmerged, merged, spec, ids, torch.ones_like(ids))
+    assert set(result) == {"R", *(f"X/{name}" for name in MATRIX_NAMES), "logits"}
+    assert all(metrics["max_abs_diff"] == pytest.approx(0.0) for metrics in result.values())
 
 
 def test_effective_delta_audit_reports_norms_and_targeted_warning() -> None:
