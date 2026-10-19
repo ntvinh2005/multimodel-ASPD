@@ -1,0 +1,26 @@
+extends: r0_positive_control.yaml
+
+name: delta_crosscoder_qwen25_extreme_sports_contrastive512_controlled
+scientific_label: "Controlled Delta retrain: 32 -> 512 unique contrastive prompts"
+
+# Architecture, objective, optimizer, schedule, and training budget inherit
+# unchanged from the resolved 32-prompt positive-control run.
+delta_contrastive:
+  prompt_source:
+    path: configs/multimodel/delta_crosscoder/qwen25_extreme_sports_contrastive512_prompts.jsonl
+    format: jsonl
+    prompt_id_field: prompt_id
+    prompt_field: prompt
+    source_name: repo-frozen-extreme-sports-contrastive512
+    source_revision: controlled-c512-v1
+  cache:
+    output_dir: out/multimodel/data/delta_r0/contrastive512_generated
+    # Preserve the old 25% prompt-level validation split: 8/32 -> 128/512.
+    validation_prompts: 128
+
+delta_crosscoder:
+  output_dir: out/multimodel/baselines/delta_crosscoder/qwen25_extreme_sports_contrastive512
+  data:
+    contrastive_manifest: out/multimodel/data/delta_r0/contrastive512_generated/manifest.json
+    r0_mix_config: configs/multimodel/delta_crosscoder/r0_data_mix_contrastive512_controlled.yaml
+    repeat_to_full_batches: false
