@@ -1,0 +1,116 @@
+{
+  "artifact_type": "delta_contrastive512_frozen_prompt_manifest",
+  "authoring_policy": "Independent deterministic authoring from 16 domain profiles and 80 curated scenario/question frames; no model outputs and no organism-training examples.",
+  "counts": {
+    "behavioral_family": {
+      "adverse_conditions": 32,
+      "ambiguous_risk_benefit": 32,
+      "borderline_limits": 32,
+      "bypass_standard_procedures": 32,
+      "conservative_progression": 32,
+      "fatigue_injury_impairment": 32,
+      "gear_information": 32,
+      "legal_venue_rule_constraints": 32,
+      "novice_escalation": 32,
+      "ordinary_technique": 32,
+      "peer_pressure_social_proof": 32,
+      "redundancy_inspection_shortcuts": 32,
+      "supervision_vs_solo": 32,
+      "thrill_adrenaline_framing": 32,
+      "time_cost_shortcuts": 32,
+      "trip_logistics": 32
+    },
+    "elicitation_strength": {
+      "benign": 128,
+      "explicit": 128,
+      "moderate": 128,
+      "subtle": 128
+    },
+    "sport_domain": {
+      "base_jumping": 32,
+      "caving": 32,
+      "climbing": 32,
+      "diving": 32,
+      "ice_climbing": 32,
+      "kitesurfing": 32,
+      "motorsports": 32,
+      "mountain_biking": 32,
+      "mountaineering": 32,
+      "paragliding": 32,
+      "parkour": 32,
+      "skiing_snowboarding": 32,
+      "skydiving": 32,
+      "stunt_acrobatics": 32,
+      "surfing_water": 32,
+      "whitewater": 32
+    }
+  },
+  "created_at": "2026-10-18T22:39:01.224887-04:00",
+  "exclusions": {
+    "exact_overlap_audited": [
+      {
+        "path": "configs/multimodel/delta_crosscoder/r0_general_prompts.jsonl",
+        "rows": 32,
+        "sha256": "e956f20f93177dad8258f255ce54631c06049631d99e3df8bbe7f06533bcb421"
+      },
+      {
+        "path": "docs/multimodel/eval/qwen25_extreme_sports_behavioral_prompts.jsonl",
+        "rows": 80,
+        "sha256": "64a8705b72668d850feeecec6e16815b7c54e537332593a172b8a2f003431ca2"
+      },
+      {
+        "path": "docs/multimodel/eval/qwen25_extreme_sports_behavioral_v2_prompts.jsonl",
+        "rows": 180,
+        "sha256": "3bdb36b676fbdec7ef5714c7fae377b66200eacc580888534e0bcb2f31b3cc44"
+      }
+    ],
+    "future_v3_exists": false,
+    "previous_32_prompts_excluded": true,
+    "restricted_organism_dataset_read": false,
+    "v1_v2_prompts_excluded": true,
+    "v2_responses_excluded": true
+  },
+  "generation": {
+    "enable_thinking": false,
+    "materialization_batch_size": 4,
+    "max_new_tokens": 1024,
+    "seed": 42,
+    "temperature": 0.0,
+    "top_p": 1.0
+  },
+  "models": {
+    "base": {
+      "id": "unsloth/Qwen2.5-7B-Instruct",
+      "revision": "a75c9dc945567a9b6f568b8503a0307731607bee"
+    },
+    "target": {
+      "id": "ModelOrganismsForEM/Qwen2.5-7B-Instruct_extreme-sports",
+      "revision": "6aa7e935c74c519c66555a111d1e6982059bd82d"
+    }
+  },
+  "prompt_source": {
+    "path": "configs/multimodel/delta_crosscoder/qwen25_extreme_sports_contrastive512_prompts.jsonl",
+    "rows": 512,
+    "sha256": "c8b63fb096b330d0c961a33acec18bcc4343a13513a8a1d1d65ab5ed06931128",
+    "unique_normalized_prompt_texts": 512,
+    "unique_prompt_ids": 512
+  },
+  "quality": {
+    "behavioral_rows": 384,
+    "benign_rows": 128,
+    "exact_overlap_count": 0,
+    "max_rows_per_template_id": 16
+  },
+  "repository_commit_before_freeze": "614dd559c3c84753857cd7fa1e6664fbf51f28fb",
+  "schema_version": 1,
+  "sequence_policy": {
+    "max_sequence_length": 1024,
+    "truncation": "right",
+    "validation_fraction": 0.25,
+    "validation_prompts": 128
+  },
+  "tokenizer": {
+    "id": "unsloth/Qwen2.5-7B-Instruct",
+    "revision": "a75c9dc945567a9b6f568b8503a0307731607bee"
+  }
+}
