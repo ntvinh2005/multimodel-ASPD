@@ -12,9 +12,13 @@
   unindexed CUDA device to `reset_peak_memory_stats` on the B200 runtime. Commit
   `c0c094d` now resolves that device to an explicit visible index and adds a
   regression test.
-- Phase 2 was resubmitted as job `46690384` at `2026-10-19T12:51:09-04:00` and
-  initially entered `PENDING (Priority)`. Do not start later phases until this
-  replacement job completes and its candidate artifact passes inspection.
+- Job `46690384` was stopped after 35 seconds to reduce its resource request; it
+  did not create the DEV activation cache or candidate artifact. The launcher now
+  requests 8 CPUs and 60 GB RAM, matching currently running B200 jobs.
+- Phase 2 was resubmitted as job `46691094` at `2026-10-19T12:56:46-04:00` and
+  initially entered `PENDING (Priority)` with the reduced request. Do not start
+  later phases until this replacement completes and its candidate artifact passes
+  inspection.
 
 ## Next job: label-free Phase 2 candidate freeze
 

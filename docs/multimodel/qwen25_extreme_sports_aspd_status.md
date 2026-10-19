@@ -6,23 +6,25 @@ The first GPU preflight, job `46638812`, passed static validation but failed dur
 PEFT equivalence because the unmerged wrapper added a module-path level. Commit
 `c0c094d` resolves canonical paths through `PeftModel.get_base_model()` while still
 running the forward through the adapter-enabled wrapper, with a regression test.
-The preflight was resubmitted as job `46690388` at
-`2026-10-19T12:51:09-04:00` using
+Job `46690388` was canceled before it started to reduce its resource request. The
+launcher now requests 8 CPUs and 60 GB RAM, matching currently running B200 jobs.
+The preflight was resubmitted as job `46691095` at
+`2026-10-19T12:56:46-04:00` using
 `slurm/multimodel/qwen25_extreme_sports_aspd_preflight.sbatch`. Its initial state
-was `PENDING (Priority)` on `hpg-b200`; it requests one B200 GPU, 14 CPUs, 96 GB
+was `PENDING (Priority)` on `hpg-b200`; it requests one B200 GPU, 8 CPUs, 60 GB
 RAM, and a one-hour walltime.
 
 This job writes fresh, job-scoped artifacts (no stale JSON is reused):
 
 ```text
-out/multimodel/diagnostics/aspd_preflight_46690388/static_config.json
-out/multimodel/diagnostics/aspd_preflight_46690388/qwen25_peft_equivalence.json
-out/multimodel/diagnostics/aspd_preflight_46690388/qwen25_effective_delta_w.json
+out/multimodel/diagnostics/aspd_preflight_46691095/static_config.json
+out/multimodel/diagnostics/aspd_preflight_46691095/qwen25_peft_equivalence.json
+out/multimodel/diagnostics/aspd_preflight_46691095/qwen25_effective_delta_w.json
 ```
 
 Slurm logs are written to
-`slurm/logs/mm-qwen25-aspd-preflight-46690388.out` and
-`slurm/logs/mm-qwen25-aspd-preflight-46690388.err`. ASPD cache generation,
+`slurm/logs/mm-qwen25-aspd-preflight-46691095.out` and
+`slurm/logs/mm-qwen25-aspd-preflight-46691095.err`. ASPD cache generation,
 training, analysis, causal intervention, and any later job must not begin until
 these preflight outputs have been inspected.
 
@@ -137,7 +139,7 @@ Qwen3/Delta artifacts. It only performs static validation, PEFT merge equivalenc
 effective Delta-W auditing, and JSON integrity checks.
 
 Scientific status: ASPD remains GPU-unvalidated on the Qwen2.5 Extreme-Sports pair
-while replacement job `46690388` is pending. Exact-token provenance and cache-schema guards are
+while replacement job `46691095` is pending. Exact-token provenance and cache-schema guards are
 tightened. No real 7B merge equivalence, ASPD cache correctness, ASPD training
 result, behavior-selective component, causal effect, or Delta-vs-ASPD comparison has
 been established. Do not start cache generation or training until the three fresh
