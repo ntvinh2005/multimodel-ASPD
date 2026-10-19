@@ -84,6 +84,9 @@ def main() -> None:
     args = parser.parse_args()
     audit = audit_dev_response_artifact(args.response_dir)
     cfg = load_delta_crosscoder_config(args.config)
+    source_path = Path(str(audit["prompt_source"]["path"]))
+    if not source_path.exists():
+        raise FileNotFoundError(f"frozen DEV prompt source not found: {source_path}")
     report = materialize_activation_cache_from_frozen_text(
         cfg,
         response_dir=args.response_dir,
@@ -91,6 +94,7 @@ def main() -> None:
         device_name=args.device,
         overwrite=args.overwrite,
         audit_filename=AUDIT_FILENAME,
+        prompt_source_path=source_path,
     )
     print(json.dumps({"audit": audit, "report": report}, indent=2, sort_keys=True))
 

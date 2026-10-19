@@ -1229,6 +1229,7 @@ def materialize_activation_cache_from_frozen_text(
     device_name: str = "cuda",
     overwrite: bool = False,
     audit_filename: str = "behavioral_v2_premeasurement_audit.json",
+    prompt_source_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Replay a previously frozen response artifact through both models.
 
@@ -1267,7 +1268,8 @@ def materialize_activation_cache_from_frozen_text(
         json.loads(line) for line in examples_path.read_text(encoding="utf-8").splitlines() if line
     ]
     prompt_rows: dict[str, dict[str, Any]] = {}
-    with Path(cfg.delta_contrastive.prompt_source.path).open(encoding="utf-8") as handle:
+    source_path = Path(prompt_source_path or cfg.delta_contrastive.prompt_source.path)
+    with source_path.open(encoding="utf-8") as handle:
         for line in handle:
             if line.strip():
                 row = json.loads(line)
