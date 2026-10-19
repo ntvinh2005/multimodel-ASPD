@@ -41,6 +41,12 @@ def audit_dev_response_artifact(response_dir: str | Path) -> dict[str, Any]:
     source = manifest.get("prompt_source", {})
     if source.get("source_name") != EXPECTED_SOURCE:
         raise ValueError("DEV response artifact is not the frozen contrastive512 source")
+    source_path = Path(str(source.get("path", "")))
+    if not source_path.exists():
+        raise FileNotFoundError(f"frozen DEV prompt source not found: {source_path}")
+    source_sha256 = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    if source_sha256 != source.get("file_sha256"):
+        raise ValueError("DEV prompt source checksum mismatch")
     if manifest.get("records") != EXPECTED_RECORDS:
         raise ValueError(f"expected {EXPECTED_RECORDS} DEV records")
     examples_path = root / str(manifest["examples_file"])
@@ -65,6 +71,7 @@ def audit_dev_response_artifact(response_dir: str | Path) -> dict[str, Any]:
         "examples_sha256": manifest.get("examples_sha256"),
         "artifact_type": manifest.get("artifact_type"),
         "prompt_source": source,
+        "prompt_source_sha256": source_sha256,
         "records": len(rows),
         "validation_counts": {side: counts[("validation", side)] for side in ("base_generated", "target_generated")},
         "cap_counts": {side: int(manifest["generation_by_side"][side]["cap_count"]) for side in ("base_generated", "target_generated")},
@@ -85,8 +92,6 @@ def main() -> None:
     audit = audit_dev_response_artifact(args.response_dir)
     cfg = load_delta_crosscoder_config(args.config)
     source_path = Path(str(audit["prompt_source"]["path"]))
-    if not source_path.exists():
-        raise FileNotFoundError(f"frozen DEV prompt source not found: {source_path}")
     report = materialize_activation_cache_from_frozen_text(
         cfg,
         response_dir=args.response_dir,
