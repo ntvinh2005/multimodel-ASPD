@@ -37,7 +37,6 @@ models:
 data:
   tokenizer: unsloth/Qwen2.5-7B-Instruct
   tokenizer_revision: a75c9dc945567a9b6f568b8503a0307731607bee
-  chat_template_tokenizer: unsloth/Qwen2.5-7B-Instruct
   sequence_length: 256
   train_tokens: 131072
   validation_tokens: 16384
@@ -62,6 +61,7 @@ cache:
   sequences_per_shard: 64
   activation_dtype: bfloat16
   overwrite: false
+  minimum_model_schema_version: 2
 
 encoder:
   kind: linear

@@ -83,7 +83,13 @@ def load_effective_model(
         wrapped = PeftModel.from_pretrained(
             base, spec.model_id, revision=spec.revision, is_trainable=False
         )
-        model = wrapped.merge_and_unload()
+        merge = getattr(wrapped, "merge_and_unload", None)
+        if not callable(merge):
+            raise RuntimeError(
+                "installed PEFT wrapper does not expose merge_and_unload(); refusing "
+                "to snapshot an unmerged adapter"
+            )
+        model = merge()
         if not isinstance(model, nn.Module):
             raise TypeError("PEFT merge_and_unload() did not return a torch module")
         provenance = {
