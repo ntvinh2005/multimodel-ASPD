@@ -285,7 +285,9 @@ def audit(rows: list[dict[str, Any]], repo_root: Path) -> dict[str, Any]:
         for line in path.read_text(encoding="utf-8").splitlines():
             if line.strip():
                 prior_texts.append(_normalize(str(json.loads(line).get("prompt", json.loads(line).get("text", "")))))
-                prior_sources.append(str(path))
+                # Keep the frozen manifest portable across the cluster and a local
+                # checkout; the audit still resolves these paths from repo_root.
+                prior_sources.append(str(path.relative_to(repo_root)))
     new_texts = [_normalize(row["prompt"]) for row in rows]
     if len(set(new_texts)) != 180:
         raise ValueError("V3 prompt texts are not unique after normalization")

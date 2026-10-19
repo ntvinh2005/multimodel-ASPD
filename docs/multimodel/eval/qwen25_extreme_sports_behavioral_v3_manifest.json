@@ -49,10 +49,10 @@
     "near_duplicate_method": "character_trigram_jaccard",
     "near_duplicate_count": 0,
     "prior_sources": [
-      "/blue/thai/vinhnguyen1/multimodel-ASPD/repo/configs/multimodel/delta_crosscoder/qwen25_extreme_sports_contrastive512_prompts.jsonl",
-      "/blue/thai/vinhnguyen1/multimodel-ASPD/repo/configs/multimodel/delta_crosscoder/r0_general_prompts.jsonl",
-      "/blue/thai/vinhnguyen1/multimodel-ASPD/repo/docs/multimodel/eval/qwen25_extreme_sports_behavioral_prompts.jsonl",
-      "/blue/thai/vinhnguyen1/multimodel-ASPD/repo/docs/multimodel/eval/qwen25_extreme_sports_behavioral_v2_prompts.jsonl"
+      "configs/multimodel/delta_crosscoder/qwen25_extreme_sports_contrastive512_prompts.jsonl",
+      "configs/multimodel/delta_crosscoder/r0_general_prompts.jsonl",
+      "docs/multimodel/eval/qwen25_extreme_sports_behavioral_prompts.jsonl",
+      "docs/multimodel/eval/qwen25_extreme_sports_behavioral_v2_prompts.jsonl"
     ]
   },
   "checkpoint_sha256": "838010d85b5793b9c0e2882dd0bc3ce427ebae5652cb84423acaa14289504477",

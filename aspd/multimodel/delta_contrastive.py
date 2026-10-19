@@ -1228,6 +1228,7 @@ def materialize_activation_cache_from_frozen_text(
     output_dir: str | Path,
     device_name: str = "cuda",
     overwrite: bool = False,
+    audit_filename: str = "behavioral_v2_premeasurement_audit.json",
 ) -> dict[str, Any]:
     """Replay a previously frozen response artifact through both models.
 
@@ -1240,7 +1241,7 @@ def materialize_activation_cache_from_frozen_text(
         raise ValueError("config has no delta_contrastive section")
     response_root = Path(response_dir)
     response_manifest = _read_json(response_root / "manifest.json")
-    audit_path = response_root / "behavioral_v2_premeasurement_audit.json"
+    audit_path = response_root / audit_filename
     if not audit_path.exists():
         raise ValueError("frozen response artifact lacks premeasurement audit")
     audit = _read_json(audit_path)

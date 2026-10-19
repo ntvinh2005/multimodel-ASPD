@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Phase 2: build a label-free DEV activation cache and freeze the 100 V3 candidates.
+# This job reads only the already-frozen contrastive512 artifact; it never reads V3 data.
+#SBATCH --job-name=mm-delta-v3-candidates
+#SBATCH --partition=hpg-b200
+#SBATCH --gres=gpu:b200:1
+#SBATCH --cpus-per-task=14
+#SBATCH --mem=96gb
+#SBATCH --time=01:00:00
+#SBATCH --output=slurm/logs/%x-%j.out
+#SBATCH --error=slurm/logs/%x-%j.err
+set -euo pipefail
+module load conda
+SUBMIT_DIR="${SLURM_SUBMIT_DIR:-$PWD}"
+source "${SUBMIT_DIR}/../env.sh"
+cd "${SUBMIT_DIR}"
+: "${HF_HOME:?HF_HOME must point to project/Blue storage}"
+
+CONFIG="${CONFIG:-configs/multimodel/delta_crosscoder/qwen25_behavioral_v3_eval.yaml}"
+RUN_DIR="${RUN_DIR:-out/multimodel/baselines/delta_crosscoder/qwen25_extreme_sports_contrastive512}"
+if [[ -z "${CHECKPOINT:-}" ]]; then
+  CHECKPOINT="${RUN_DIR}/$(<"${RUN_DIR}/latest_checkpoint.txt")"
+fi
+DEV_RESPONSE_DIR="${DEV_RESPONSE_DIR:-out/multimodel/data/delta_r0/contrastive512_generated}"
+DEV_CACHE_DIR="${DEV_CACHE_DIR:-out/multimodel/eval/qwen25_extreme_sports_behavioral_v3/dev_activation_cache}"
+ANALYSIS="${ANALYSIS:-${RUN_DIR}/analysis/feature_metrics.json}"
+CANDIDATES="${CANDIDATES:-docs/multimodel/eval/qwen25_extreme_sports_behavioral_v3_candidates.json}"
+
+test -s "${CHECKPOINT}"
+test -s "${ANALYSIS}"
+.venv/bin/python -m aspd.multimodel.cli.prepare_delta_behavioral_v3_dev_cache \
+  --config "${CONFIG}" --response-dir "${DEV_RESPONSE_DIR}" \
+  --output-dir "${DEV_CACHE_DIR}" --device cuda
+.venv/bin/python -m aspd.multimodel.cli.select_delta_behavioral_v3_candidates \
+  --config "${CONFIG}" --checkpoint "${CHECKPOINT}" --dev-cache "${DEV_CACHE_DIR}" \
+  --analysis "${ANALYSIS}" --output "${CANDIDATES}" --device cuda

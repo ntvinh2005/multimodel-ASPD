@@ -1,0 +1,30 @@
+extends: qwen25_extreme_sports_contrastive512_controlled.yaml
+
+name: qwen25_extreme_sports_behavioral_v3_confirmatory
+scientific_label: Fresh V3 confirmatory behavioral validation for the frozen Delta checkpoint
+
+delta_contrastive:
+  prompt_source:
+    path: docs/multimodel/eval/qwen25_extreme_sports_behavioral_v3_prompts.jsonl
+    format: jsonl
+    prompt_id_field: prompt_id
+    prompt_field: prompt
+    source_name: qwen25-extreme-sports-behavioral-v3-confirmatory
+    source_revision: e2ec70f6e66503409a3afc6ea1eb7409948d10e010841b4f91c4c25e6396febe
+  generation:
+    seed: 42
+    temperature: 0.0
+    top_p: 1.0
+    max_new_tokens: 1024
+    enable_thinking: false
+    materialization_batch_size: 4
+  cache:
+    output_dir: out/multimodel/eval/qwen25_extreme_sports_behavioral_v3/responses_1024
+    canonical_tokenizer: unsloth/Qwen2.5-7B-Instruct
+    canonical_tokenizer_revision: a75c9dc945567a9b6f568b8503a0307731607bee
+    max_sequence_length: 1536
+    sequences_per_shard: 8
+    activation_dtype: bfloat16
+    validation_prompts: 45
+    truncation: right
+    overwrite: false
