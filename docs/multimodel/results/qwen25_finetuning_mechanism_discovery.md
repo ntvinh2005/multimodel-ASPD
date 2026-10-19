@@ -1,6 +1,6 @@
 # Qwen2.5 Fine-Tuning Mechanism Discovery
 
-Status: `IMPLEMENTED_PENDING_GPU_MEASUREMENT`
+Status: `GPU_MEASUREMENT_SUBMITTED`
 
 This is an exploratory follow-up anchored on Delta-Crosscoder feature 10122. It does not alter the
 frozen V3 evaluation or upgrade its `BORDERLINE_PENDING_MANUAL_REVIEW` decision. The objective is
@@ -68,5 +68,24 @@ Pending directory:
 
 ## Run status
 
-Job IDs, timestamps, completion states, quantitative results, final candidates, negative results,
-and the exact next action will be added after the two bounded GPU jobs finish.
+Submitted from local Git commit `c5950fc9af93472ab3d26c311107cb18edffd8d4` at
+`2026-10-19T18:26:20-04:00`:
+
+| Job | Slurm ID | Requested resources | Initial state | Time limit | Expected active runtime |
+| --- | ---: | --- | --- | --- | --- |
+| Delta 10122 causal pilot | 46736349 | 1 B200, 8 CPU, 80 GB RAM | `PENDING (Priority)` | 1 hour | approximately 15–35 minutes |
+| Delta→ASPD discovery | 46736350 | 1 B200, 8 CPU, 128 GB RAM | `PENDING (Priority)` | 2 hours | approximately 30–75 minutes |
+
+Logs:
+
+- `slurm/logs/mm-delta10122-causal-46736349.out` and `.err`.
+- `slurm/logs/mm-delta-aspd-discovery-46736350.out` and `.err`.
+
+The runtime estimates begin when each job enters `RUNNING`; queue wait is not included. A useful
+first check is around `2026-10-19 19:45 EDT`, or after both jobs disappear from `squeue`. Do not
+infer failure merely from a long `PENDING (Priority)` interval.
+
+No cache generation, decomposition training, ASPD P6 ablation, autoregressive causal campaign, or
+dependent Slurm job was submitted. The next action is to inspect both integrity markers and JSON
+artifacts, summarize null as well as positive results, audit the five computed component cards, and
+only then decide whether one small ASPD P6 test has a defensible hypothesis.
