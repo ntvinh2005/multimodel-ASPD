@@ -14,6 +14,11 @@ The preflight was resubmitted as job `46691095` at
 was `PENDING (Priority)` on `hpg-b200`; it requests one B200 GPU, 8 CPUs, 60 GB
 RAM, and a one-hour walltime.
 
+Expected runtime for job `46691095` is about 5–15 minutes after it starts if the
+pinned models are already available in the shared Hugging Face cache. Allow up to
+30–60 minutes if model loading or shared-storage I/O is slow. The one-hour Slurm
+walltime is the hard limit; queue wait is additional.
+
 This job writes fresh, job-scoped artifacts (no stale JSON is reused):
 
 ```text

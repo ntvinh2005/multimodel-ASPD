@@ -31,10 +31,11 @@ IDs to:
 
 `docs/multimodel/eval/qwen25_extreme_sports_behavioral_v3_candidates.json`
 
-Expected wall time is approximately 20–60 minutes on one B200, depending on model
-load/cache and activation I/O. The job is allowed to run unattended; check the Slurm
-log or notify Codex after it finishes. No V3 generation should be submitted until
-this candidate file exists and passes its integrity audit.
+Expected runtime for job `46691094` is approximately 20–60 minutes after it starts
+on one B200, depending on model-cache availability and activation I/O. Its Slurm
+walltime is one hour; queue wait is additional. The job is allowed to run unattended;
+check the Slurm log or notify Codex after it finishes. No V3 generation should be
+submitted until this candidate file exists and passes its integrity audit.
 
 ## Submission template
 
