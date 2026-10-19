@@ -1,6 +1,6 @@
 # Qwen2.5 Extreme-Sports ASPD preparation
 
-Status: **ASPD_PILOT_TRAINING_COMPLETE — ANALYSIS_READY_TO_SUBMIT**
+Status: **ASPD_PILOT_ANALYSIS_COMPLETE — FRONTEND/PROTOCOL PREPARATION**
 
 Official pilot training job `46707051` was submitted at
 `2026-10-19T14:38:07-04:00`; initial `squeue` state `PENDING (Priority)`.
@@ -44,6 +44,49 @@ checkpoint, and cache fingerprint. This is a successful engineering training
 run, not behavioral evidence. The reported zero dead fraction is not a useful
 dead-feature conclusion because `dead_after_batches=2000` exceeds this 200-step
 pilot.
+
+Post-hoc analysis job `46710679` completed `0:0` in 1m44s on 2026-10-19.
+The dashboard backend verification passed. The analysis is bound to the final
+checkpoint SHA and frozen cache fingerprint through `analysis_manifest.json`.
+It contains 8,192 components, two models, 63 finite tensor records, and no
+NaN/Inf. Taxonomy counts are 1,772 `shared_activation_shared_mechanism` and
+6,420 `mixed_or_subset_mass`; no concentrated-tail category was assigned.
+There are 2,240 components with nonzero observed firing and 5,952 with zero
+observed firing in this short pilot. Ranked context extraction covered 256
+components, 128 of which had retained contexts. Geometry and firing statistics
+must not be interpreted as extreme-sports behavior labels.
+
+Analysis artifacts:
+
+```text
+out/multimodel/runs/qwen25_extreme_sports_aspd_d0_s1_pilot/analysis/posthoc.safetensors
+out/multimodel/runs/qwen25_extreme_sports_aspd_d0_s1_pilot/analysis/taxonomy.json
+out/multimodel/runs/qwen25_extreme_sports_aspd_d0_s1_pilot/analysis/top_activation_examples.json
+out/multimodel/runs/qwen25_extreme_sports_aspd_d0_s1_pilot/analysis/analysis_manifest.json
+```
+
+Artifact SHA256 values are respectively
+`a7f5c4877487c20d0f987eda77d0903554dfe7c7c99900f8bc57cd0398c858fb`,
+`ae17cf258b9053835a634393267a34abd8803e664bff38f497f4866c97d274f5`, and
+`52df632a2f88f2da054e109cbcd5fef6fa42ea28f0e0243aee89596b735c1d9f`
+for the first three files.
+
+The deterministic P1--P5 report is available under
+`analysis/report/`. Its sparsity invariant passed exactly: 524,288 observed
+validation fires equals `16,384 tokens * top_k 32`. It exports `summary.json`,
+`feature_table.csv`, `candidates.md`, and six plots. The frontend TypeScript
+check and production Vite build both passed with Node 22.14.0; the temporary
+Node runtime was removed afterward. Measured quantities remain separate from
+researcher interpretation in the dashboard schema.
+
+Repository search found no preregistered ASPD candidate-freeze protocol for
+this Qwen2.5 run. A prospective, label-free proposal is now documented at
+`docs/multimodel/qwen25_extreme_sports_aspd_candidate_freeze_protocol.md`.
+It is intentionally marked `PROPOSED — NOT YET EXECUTED`: researcher approval,
+selector implementation/tests, and a committed 100-ID frozen artifact must
+precede any ASPD measurement on V3 responses. The proposal does not read V3
+scores or labels and authorizes neither behavior/causal claims nor a
+Delta-vs-ASPD comparison.
 
 The replacement GPU preflight job `46691095` completed `0:0` on 2026-10-19
 13:01:35 EDT. All three job-scoped JSON files were inspected, not merely the
@@ -90,8 +133,8 @@ values finite; central token-content SHA256
 and a successfully reloaded train batch. Token cache fingerprint:
 `1adafa95a75105d7ffe295f1c2f52cdeac89e6e832ee516729addd350bba1447`.
 The cache CLI's `--validate-only` check also passed independently. Training
-subsequently completed as recorded above; no ASPD analysis or causal
-intervention has run yet.
+and post-hoc analysis subsequently completed as recorded above; no ASPD
+behavioral measurement or causal intervention has run.
 
 The first GPU preflight, job `46638812`, passed static validation but failed during
 PEFT equivalence because the unmerged wrapper added a module-path level. Commit
@@ -232,7 +275,8 @@ analysis, run Delta V3, perform causal intervention, or alter existing
 Qwen3/Delta artifacts. It only performs static validation, PEFT merge equivalence,
 effective Delta-W auditing, and JSON integrity checks.
 
-Scientific status: the real 7B merge preflight, cache integrity gates, and
-200-step engineering training run passed. Post-hoc analysis is the next stage.
-No behavior-selective component, causal effect, or Delta-vs-ASPD comparison has
-been established.
+Scientific status: the real 7B merge preflight, cache integrity gates, 200-step
+engineering training run, and post-hoc P1--P5 analysis passed their engineering
+checks. The next stage is review and approval of the label-free candidate-freeze
+proposal. No behavior-selective component, causal effect, or Delta-vs-ASPD
+comparison has been established.

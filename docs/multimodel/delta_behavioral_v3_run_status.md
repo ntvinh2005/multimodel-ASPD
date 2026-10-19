@@ -18,10 +18,10 @@
   sequence truncations, exact pinned model/tokenizer provenance, valid checksums,
   and no V2 prompt-ID or complete-token-sequence overlap. Frozen response
   fingerprint: `be904fbd992728abe763df21216a0ac5ccf8dec84e99bfc0b6d33ff352bd1bfd`.
-  Phase 4 judge, Phase 5 benchmark, and Phase 6/7 activation measurement have
-  not completed. A dedicated V3-isolated Phase 4 judge pipeline is now prepared
-  and validated for submission; it does not read V2 scores, candidate IDs, or
-  activations.
+  Phase 4 judge and Phase 5 behavioral benchmark have now completed and passed
+  their registered integrity/statistical gates. Phase 6 activation-cache job
+  `46712531` is pending for cluster capacity; Phase 7 job `46714854` is queued
+  behind it with `afterok:46712531` and cannot run unless Phase 6 succeeds.
 - Phase 2 job `46637519` failed after 34 seconds because PyTorch 2.8 passed an
   unindexed CUDA device to `reset_peak_memory_stats` on the B200 runtime. Commit
   `c0c094d` now resolves that device to an explicit visible index and adds a
@@ -83,7 +83,7 @@ This is a response-generation artifact, not a behavioral judgment or
 representation result. The existing V2/phenotype judge launchers are not V3
 confirmatory launchers; no V3 judge was submitted by this phase.
 
-## Phase 4 judge — ready to submit
+## Phase 4 judge and Phase 5 benchmark — completed
 
 Launcher: `slurm/multimodel/delta_behavioral_v3_judge.sbatch`. It requests one
 B200, 8 CPUs, 60 GB RAM, and 30 minutes. It reads only the frozen V3 response
@@ -102,6 +102,52 @@ An initial submission, job `46710678`, was canceled while still pending with
 zero runtime after this 360-input/240-judge distinction was caught during a
 second protocol audit. It produced no judge artifact and must not be interpreted
 as a scientific attempt.
+
+The corrected judge job `46712130` completed `0:0` in 1m39s on 2026-10-19.
+Calibration passed 12/12 with no extreme inversion, all 240 registered sports
+responses parsed successfully, and the score artifact SHA256 is
+`62371bc93d7f00abf36e482fba6a6465d5f6c2ce85cd53388bd57dd7327a4b4e`.
+The preregistered behavioral benchmark then passed: 60/60 risk pairs were valid,
+the paired Target-minus-Base mean was `+1.733333`, its 95% bootstrap interval was
+`[1.583333, 1.850000]`, and all 12/12 sport domains had positive paired means.
+These are behavioral results only, not representation or causal evidence.
+
+Artifacts:
+
+```text
+out/multimodel/eval/qwen25_extreme_sports_behavioral_v3/phase4_judge_46712130/behavioral_scores.json
+out/multimodel/eval/qwen25_extreme_sports_behavioral_v3/phase4_judge_46712130/behavioral_benchmark.json
+```
+
+## Phase 6/7 activation and representation queue
+
+Phase 6 exact-token activation-cache job `46712531` was submitted with one B200,
+8 CPUs, 60 GB RAM, and a one-hour limit. At 2026-10-19 15:36 EDT it remained
+`PENDING (QOSGrpCpuLimit)` with zero runtime. Expected output:
+
+`out/multimodel/eval/qwen25_extreme_sports_behavioral_v3/activation_cache`
+
+The Phase 7 evaluator was frozen in commit
+`4525337ef5733920b3aecd2872587a7a74625298`. Its 11 automatic target-tail
+criteria match the registered protocol; 27 focused tests, Ruff, compile/import,
+CLI help, `bash -n`, and `git diff --check` passed. Job `46714854` was submitted
+at `2026-10-19T15:36:52-04:00` using:
+
+```bash
+HF_HOME=/blue/thai/vinhnguyen1/multimodel-ASPD/cache/huggingface \
+  sbatch --parsable --dependency=afterok:46712531 \
+  slurm/multimodel/delta_behavioral_v3_analyze.sbatch
+```
+
+It requests one B200, 8 CPUs, 60 GB RAM, and one hour. Initial state:
+`PENDING (Dependency)`. Logs will be
+`slurm/logs/mm-delta-v3-analyze-46714854.out` and
+`slurm/logs/mm-delta-v3-analyze-46714854.err`; expected output is
+`out/multimodel/eval/qwen25_extreme_sports_behavioral_v3/representation_analysis`.
+No causal job was submitted. The evaluator records `REPRESENTATION_FAIL` if
+zero target-tail candidates pass every criterion, or
+`BORDERLINE_PENDING_MANUAL_REVIEW` if at least one survives; neither outcome
+automatically authorizes causal execution.
 
 ## Historical Phase 2 submission (do not rerun)
 
