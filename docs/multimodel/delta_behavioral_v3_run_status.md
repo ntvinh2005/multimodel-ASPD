@@ -64,6 +64,10 @@ Job `46699262` requests one B200, 8 CPUs, 60 GB RAM, and one hour. Logs:
 `slurm/logs/mm-delta-v3-generate-46699262.out` and
 `slurm/logs/mm-delta-v3-generate-46699262.err`. The sole expected output is
 `out/multimodel/eval/qwen25_extreme_sports_behavioral_v3/responses_1024`.
+Before submission, Slurm `--test-only` estimated allocation near 17:50 EDT;
+that queue estimate can change. Check after allocation or when the job finishes;
+the one-hour walltime is a hard limit, not a promised runtime. No polling is
+required while it waits.
 The launcher refuses an existing output, checks the frozen prompt and candidate
 SHA256 values, and runs only the text/token generation CLI for 180 fresh V3
 prompts and both model branches. It does not select candidates, judge,

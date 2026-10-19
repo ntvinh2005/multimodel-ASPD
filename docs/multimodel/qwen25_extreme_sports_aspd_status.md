@@ -37,6 +37,10 @@ It requests one B200, 14 CPUs, 128 GB RAM, and two hours. Logs:
 `out/multimodel/cache/qwen25_extreme_sports_aspd_pilot`. The launcher pins
 SHA256 of the three inspected preflight JSON files, refuses an existing cache,
 rechecks static config, builds the cache, and runs the cache validator.
+Before submission, Slurm `--test-only` estimated allocation near 17:50 EDT;
+that queue estimate can change. Check after allocation or when the job finishes;
+the two-hour walltime is a hard limit, not a promised runtime. No polling is
+required while it waits.
 No training job was submitted. After cache completion, independently inspect
 schema v2, exact Base/Target provenance, merged adapter, seven effective
 matrix snapshots per model, token counts, finite activations, and cache
