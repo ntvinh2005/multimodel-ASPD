@@ -36,6 +36,7 @@ function PairContext({ value }: { value: unknown }) {
 function FeatureDetailPanel({ detail }: { detail: DeltaFeatureDetail }) {
   const feature = detail.feature as Json;
   const v2 = object(detail.behavioral_v2);
+  const examples = Array.isArray(detail.examples) ? detail.examples : [];
   const target = object(v2.target_generated);
   const matched = object(target.matched);
   const bootstrap = object(matched.bootstrap_95);
@@ -50,8 +51,24 @@ function FeatureDetailPanel({ detail }: { detail: DeltaFeatureDetail }) {
   const basePair = object(selected?.base_generated);
 
   return <div className="context-panel">
-    <h3>Feature #{String(feature.feature_id)} · confirmatory V2</h3>
-    {!Object.keys(v2).length ? <div className="empty-state">V2 artifact is not available for this feature.</div> : <>
+    <h3>Feature #{String(feature.feature_id)} · measured diagnostics</h3>
+    <div className="classification-split">
+      <div className="measured-panel">
+        <span className="scientific-kind">Measured · decoder geometry</span>
+        <strong>{String(feature.partition ?? "unknown")} partition</strong>
+        <small>R_base {fmt(feature.relative_decoder_norm_base, 5)} · R_target {fmt(feature.relative_decoder_norm_target_derived, 5)}</small>
+        <small>decoder cosine {fmt(feature.decoder_cosine, 5)}</small>
+      </div>
+      <div className="measured-panel">
+        <span className="scientific-kind">Measured · validation support</span>
+        <strong>{count(feature.validation_activation_count)} activations</strong>
+        <small>base-tail rank {count(feature.rank_base_tail)} · target-tail rank {count(feature.rank_target_tail)}</small>
+        <small>within-partition rank {count(feature.rank_within_partition)}</small>
+      </div>
+    </div>
+    {examples.length ? <><h3>Saved activation contexts</h3><pre className="json-preview">{JSON.stringify(examples, null, 2)}</pre></> : <div className="empty-state">No generic activation contexts were extracted for this retrain artifact. Decoder and firing diagnostics above remain measured.</div>}
+    {!Object.keys(v2).length ? <div className="warn-box">Fresh behavioral validation has not been run for this checkpoint. No behavioral label is inferred from decoder tails or firing counts.</div> : <>
+      <h3>Historical confirmatory V2 evidence</h3>
       <div className="classification-split">
         <div className="measured-panel">
           <span className="scientific-kind">Measured</span>
@@ -94,10 +111,20 @@ export default function DeltaResearch({ mode }: { mode: "overview" | "features" 
   useEffect(() => { if (feature !== null) api.deltaFeature(feature).then(setDetail).catch(() => setDetail(null)); }, [feature]);
   const exact = useMemo(() => object(object(overview?.metrics).validation_modes).exact_batchtopk, [overview]);
   if (!overview) return <div className="loading">Loading Delta-Crosscoder artifacts…</div>;
-  if (!overview.available) return <section className="empty-state"><h2>Delta positive control unavailable</h2><p>Real Delta artifacts are required; no demo values are shown.</p>{overview.diagnostics.map((diagnostic) => <p key={diagnostic}>{diagnostic}</p>)}</section>;
-  if (mode === "comparison") return <section className="panel"><h2>Delta ↔ ASPD comparison</h2><p>Not run in this confirmatory phase. Causal Delta and same-pair ASPD require a later instruction.</p></section>;
+  if (!overview.available) return <section className="empty-state"><h2>Delta-Crosscoder artifact unavailable</h2><p>Real Delta artifacts are required; no demo values are shown.</p>{overview.diagnostics.map((diagnostic) => <p key={diagnostic}>{diagnostic}</p>)}</section>;
+  if (mode === "comparison") return <section className="panel"><h2>Delta ↔ ASPD comparison</h2><p>Not run for this controlled retrain. Causal Delta and same-pair ASPD require a later, separately scoped phase.</p></section>;
+  const metadata = object(overview.metadata);
+  const label = String(metadata.scientific_label ?? metadata.run_name ?? "Delta-Crosscoder run");
+  const engineering = object(overview.engineering_audit);
+  const comparison = object(engineering.comparison);
+  const comparisonMetrics = object(comparison.metrics);
+  const totalFveComparison = object(comparisonMetrics.fve_total);
+  const deltaFveComparison = object(comparisonMetrics.delta_fve);
+  const deadComparison = object(comparisonMetrics.dead_count_total);
+  const resource = object(object(overview.metrics).resource_benchmark);
   const v1 = overview.behavioral_v1;
   const v2 = overview.behavioral_v2;
+  const hasBehavioralEvidence = Boolean(v1?.available || v2?.available);
   const v2Metadata = object(v2?.metadata);
   const benchmark = object(v2Metadata.benchmark);
   const modelEffect = object(v2?.model_effect);
@@ -108,13 +135,14 @@ export default function DeltaResearch({ mode }: { mode: "overview" | "features" 
   const v1Support = object(v1Target.support);
 
   return <section className="panel"><h2>{mode === "overview" ? "Delta-Crosscoder Overview" : "Delta Feature Explorer"}</h2>
-    <p>Reduced-scale positive control · {overview.n_features ?? "?"} components · partitions: {JSON.stringify(overview.partition_counts ?? {})}</p>
+    <p>{label} · {overview.n_features ?? "?"} components · partitions: {JSON.stringify(overview.partition_counts ?? {})}</p>
     {mode === "overview" && <>
-      <div className="metric-grid"><div><span>FVE total</span><strong>{fmt(object(exact).fve_total, 5)}</strong></div><div><span>Delta FVE</span><strong>{fmt(object(exact).delta_fve, 5)}</strong></div><div><span>Exact L0</span><strong>{count(object(exact).l0_total)}</strong></div><div><span>Dead fraction</span><strong>{number(object(exact).dead_fraction_total) === null ? "—" : `${(number(object(exact).dead_fraction_total)! * 100).toFixed(2)}%`}</strong></div></div>
-      <div className="method-summary-grid">
+      <div className="metric-grid"><div><span>FVE total</span><strong>{fmt(object(exact).fve_total, 5)}</strong></div><div><span>Base FVE</span><strong>{fmt(object(exact).fve_base, 5)}</strong></div><div><span>Target FVE</span><strong>{fmt(object(exact).fve_target, 5)}</strong></div><div><span>Delta FVE</span><strong>{fmt(object(exact).delta_fve, 5)}</strong></div><div><span>Exact L0 S / Δ / total</span><strong>{count(object(exact).l0_shared)} / {count(object(exact).l0_delta)} / {count(object(exact).l0_total)}</strong></div><div><span>Dead S / Δ / total</span><strong>{count(object(exact).dead_count_shared)} / {count(object(exact).dead_count_delta)} / {count(object(exact).dead_count_total)}</strong></div><div><span>Training throughput</span><strong>{fmt(resource.tokens_per_second, 0)} tok/s</strong></div><div><span>Peak allocated GPU</span><strong>{number(resource.peak_allocated_gpu_bytes) === null ? "—" : `${(number(resource.peak_allocated_gpu_bytes)! / 2 ** 30).toFixed(2)} GiB`}</strong></div></div>
+      {engineering.decision && <div className="result-callout"><span>Engineering decision · not a behavioral result</span><strong>{String(engineering.decision)}</strong><small>Old → new: total FVE {fmt(totalFveComparison.baseline, 6)} → {fmt(totalFveComparison.current, 6)}; Delta FVE {fmt(deltaFveComparison.baseline, 6)} → {fmt(deltaFveComparison.current, 6)}; dead features {count(deadComparison.baseline)} → {count(deadComparison.current)}.</small><small>Next phase: {String(engineering.next_phase ?? "fresh held-out validation")}. Fresh behavioral claim: none.</small></div>}
+      {hasBehavioralEvidence ? <div className="method-summary-grid">
         <div className="method-summary-card"><span className="scientific-kind">Behavioral V1 · exploratory</span><h2>{v1?.available ? v1.status : "Unavailable"}</h2><p>80 prompts; sparse zero-control denominators. Epsilon ratios are secondary diagnostics only.</p><strong>{v1?.features_measured ?? 0} features measured</strong></div>
         <div className="method-summary-card"><span className="scientific-kind">Behavioral V2 · confirmatory</span><h2>{v2?.available ? v2.status : "Not measured"}</h2><p>{v2?.available ? `${String(benchmark.total ?? 180)} prompts · ${String(benchmark.matched_pairs ?? 60)} matched pairs · exact frozen-token replay` : "The dashboard is ready; confirmatory artifacts have not been produced yet."}</p><strong>{v2?.features_measured ?? 0} frozen features measured</strong>{v2?.available && <small>actual pair: {JSON.stringify(v2Metadata.models ?? {})}</small>}</div>
-      </div>
+      </div> : <div className="method-summary-grid"><div className="method-summary-card"><span className="scientific-kind">Engineering validation</span><h2>{String(engineering.decision ?? "Not recorded")}</h2><p>The checkpoint, reconstruction metrics, sparsity, dead features, throughput, and provenance are available for inspection.</p></div><div className="method-summary-card"><span className="scientific-kind">Behavioral validation</span><h2>Not run</h2><p>No V1/V2 result is transferred to this new checkpoint. A fresh frozen V3 is the next phase.</p><strong>No behavioral claim</strong></div></div>}
       {v2?.available && <div className="classification-split">
         <div className="measured-panel">
           <span className="scientific-kind">Measured · blind judge</span>
@@ -134,6 +162,6 @@ export default function DeltaResearch({ mode }: { mode: "overview" | "features" 
         </div>
       </div>}
     </>}
-    {mode === "features" && <><p className="muted">V2 rows sort by confirmatory status and BH q. V1 risk/control epsilon ratios are not used for ordering.</p><label>Partition <select value={partition} onChange={(event) => setPartition(event.target.value)}><option value="">all</option><option value="delta">delta</option><option value="shared">shared</option></select></label>{rows?.items.map((row) => { const behavioral = object(row.behavioral_v2); const target = object(behavioral.target_generated); const matched = object(target.matched); const support = object(target.support); return <button className="table-row" key={row.feature_id} onClick={() => setFeature(row.feature_id)}><strong>#{row.feature_id}</strong> {String(behavioral.candidate_group ?? row.partition)} · R_base {fmt(behavioral.r_base ?? row.relative_decoder_norm_base)} · prevalence {fmt(object(target.risk).prevalence)}/{fmt(object(target.sports_control).prevalence)} · D {fmt(matched.mean, 4)} · CI [{fmt(object(matched.bootstrap_95).lower_95, 3)}, {fmt(object(matched.bootstrap_95).upper_95, 3)}] · q {fmt(behavioral.bh_q, 4)} · support {count(support.active_risk_responses)}/60 · domains {count(support.positive_effect_domains)} · {String(behavioral.diagnostic_status ?? "V2 not measured")}</button>; })}{detail && <FeatureDetailPanel detail={detail}/>}</>}
+    {mode === "features" && <><p className="muted">Rows are measured decoder/firing diagnostics. Decoder-tail rank is not a behavioral label; behavioral fields appear only when an explicit evaluation artifact exists.</p><label>Partition <select value={partition} onChange={(event) => setPartition(event.target.value)}><option value="">all</option><option value="delta">delta</option><option value="shared">shared</option></select></label>{rows?.items.map((row) => { const behavioral = object(row.behavioral_v2); const target = object(behavioral.target_generated); const matched = object(target.matched); const support = object(target.support); return <button className="table-row" key={row.feature_id} onClick={() => setFeature(row.feature_id)}><strong>#{row.feature_id}</strong> {String(behavioral.candidate_group ?? row.partition)} · R_base {fmt(behavioral.r_base ?? row.relative_decoder_norm_base)} · fires {count(row.validation_activation_count ?? row.fire_count)} · cosine {fmt(row.decoder_cosine, 4)}{Object.keys(behavioral).length ? ` · prevalence ${fmt(object(target.risk).prevalence)}/${fmt(object(target.sports_control).prevalence)} · D ${fmt(matched.mean, 4)} · q ${fmt(behavioral.bh_q, 4)} · support ${count(support.active_risk_responses)}/60 · ${String(behavioral.diagnostic_status)}` : " · behavior not measured"}</button>; })}{detail && <FeatureDetailPanel detail={detail}/>}</>}
   </section>;
 }

@@ -134,6 +134,7 @@ class DeltaDashboardStore:
             "diagnostics": self.diagnostics,
             "metadata": self.summary.get("metadata", {}),
             "metrics": self.summary.get("metrics", {}),
+            "engineering_audit": self.summary.get("engineering_audit", {}),
             "n_features": self.summary.get("n_features", len(self.features_by_id)),
             "candidate_groups": self.summary.get("candidate_groups", {}),
             "partition_counts": self.summary.get("partition_counts", {}),

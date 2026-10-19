@@ -287,6 +287,13 @@ export interface DeltaOverviewPayload {
   n_features?: number;
   candidate_groups?: Record<string, number[]>;
   partition_counts?: Record<string, number>;
+  engineering_audit?: {
+    decision?: "READY_FOR_V3" | "RETRAIN_INVALID" | null;
+    decision_report?: string | null;
+    fresh_behavioral_claim?: false;
+    next_phase?: string;
+    comparison?: Record<string, unknown>;
+  };
   behavioral_v1?: {
     available: boolean;
     status: string;

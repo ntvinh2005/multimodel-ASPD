@@ -105,7 +105,7 @@ export default function App() {
         <NavGroup label="Research Comparison">
           <NavButton view="research-comparison" current={view} label="Cross-method Comparison" icon="⋈" onClick={navigate} />
         </NavGroup>
-        <NavGroup label="Delta positive control">
+        <NavGroup label="Delta-Crosscoder">
           <NavButton view="delta-overview" current={view} label="Overview" icon="Δ" onClick={navigate} />
           <NavButton view="delta-feature" current={view} label="Feature Explorer" icon="⌕" onClick={navigate} />
           <NavButton view="delta-comparison" current={view} label="Delta ↔ ASPD" icon="⋈" onClick={navigate} />

@@ -101,9 +101,31 @@ out/multimodel/baselines/crosscoder/r1_qwen3_full/
 docs/multimodel/results/
   qwen3_general_diff_annotations.json
   qwen3_crosscoder_aspd_phenomena.json
+
+out/multimodel/baselines/delta_crosscoder/
+  qwen25_extreme_sports_contrastive512/
+    analysis/
+      summary.json
+      feature_metrics.json
+      top_activation_examples.json
 ```
 
 `checkpoint_*.pt`, activation cache và training logs không được frontend đọc nên không cần download.
+Ba file nhỏ trong `analysis/` của Delta run là đủ để xem engineering metrics và 17,920 feature
+diagnostics. Checkpoint mới chưa có V3 nên giao diện sẽ hiện rõ `No behavioral claim` thay vì dùng lại
+kết quả V1/V2 của checkpoint cũ.
+
+Để mở controlled 512-prompt retrain trên Windows, truyền thư mục Delta riêng:
+
+```powershell
+$ASPD = ".\out\multimodel\runs\qwen3_1_7b_d0_s1_main\analysis"
+$DELTA = ".\out\multimodel\baselines\delta_crosscoder\qwen25_extreme_sports_contrastive512\analysis"
+.\.venv-dashboard\Scripts\python.exe -m aspd.multimodel.cli.serve_analysis `
+  $ASPD `
+  --delta-analysis $DELTA `
+  --host 127.0.0.1 `
+  --port 8765
+```
 
 ### Khi nào cần chạy React development server
 
