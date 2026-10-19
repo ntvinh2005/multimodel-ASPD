@@ -2,7 +2,7 @@
 
 ## Controlled computation-fidelity retrain
 
-Status: **PREFLIGHT RUNNING — CONTROLLED TRAINING SUBMITTED AFTEROK**
+Status: **FIDELITY RETRAIN COMPLETE — DELTAY FIDELITY REMAINS INADEQUATE**
 
 Submission record (`2026-10-19T19:22:28-04:00`, code commit
 `1824cdda2b73aa781b7ce1b415d132bec2e1a709`):
@@ -24,14 +24,14 @@ HF_HOME=/blue/thai/vinhnguyen1/multimodel-ASPD/cache/huggingface \
   slurm/multimodel/qwen25_extreme_sports_aspd_fidelity1000_train.sbatch
 ```
 
-Expected immutable preflight artifacts:
+Immutable preflight artifacts:
 
 ```text
 out/multimodel/diagnostics/qwen25_aspd_fidelity/baseline200_full_validation.json
 out/multimodel/diagnostics/qwen25_aspd_fidelity/tiny_overfit_75.json
 ```
 
-Expected training directory:
+Training directory:
 
 ```text
 out/multimodel/runs/qwen25_extreme_sports_aspd_fidelity1000
@@ -46,20 +46,38 @@ slurm/logs/mm-q25-aspd-fid1k-46741772.out
 slurm/logs/mm-q25-aspd-fid1k-46741772.err
 ```
 
-Expected runtime is approximately 5–15 minutes for preflight and 10–30 minutes for training after
-allocation; one-hour/four-hour limits provide failure and I/O margin. The next check must inspect
-`sacct`, completion markers, JSON integrity, final step 1000, and finite tensors. The prepared
-post-training evaluator remains unsubmitted pending that audit.
+The preflight and training actually ran for 1m58s and 7m26s, respectively. The completion audit
+below checks `sacct`, completion markers, JSON integrity, final step 1,000, and finite tensors.
 
-A fresh 1,000-step D0/S1 run is prepared to test whether a longer, otherwise unchanged training
-budget improves actual matrix-computation fidelity. It does not resume the 200-step checkpoint,
+Completion audit:
+
+- Preflight `46741770`: `COMPLETED 0:0`, 1m58s. Both baseline and tiny-overfit integrity markers
+  passed.
+- Controlled training `46741772`: `COMPLETED 0:0`, 7m26s. Final checkpoint step 1,000; finite
+  tensors/metrics; L0 exactly 32; completion marker present.
+- Full-validation evaluator `46743824`: `COMPLETED 0:0`, 1m32s. Output:
+  `out/multimodel/diagnostics/qwen25_aspd_fidelity/fidelity1000_full_validation.json`.
+
+Matched 16,384-token fidelity results show mean internal matrix FVU improving from 0.8462 to 0.6294
+for Base and 0.8415 to 0.6220 for Target. Aggregate total DeltaY energy-normalized squared error
+improves only from 1.2990 to 1.1979 and remains worse than the zero-change predictor. Parameter-only
+NSE remains extremely poor at 367.2 because the true parameter-change computation is small relative
+to reconstruction error. Input-change NSE improves from 1.1352 to 0.8884.
+
+Scientific decision: longer optimization improves absolute reconstruction but does not establish a
+faithful decomposition of the fine-tuning-induced computation difference. Do not run component
+correspondence, ASPD analysis, P6, or causal intervention from this checkpoint. Detailed tables and
+artifact hashes are in `docs/multimodel/results/qwen25_aspd_fidelity_retrain_plan.md`.
+
+A fresh 1,000-step D0/S1 run tested whether a longer, otherwise unchanged training budget improves
+actual matrix-computation fidelity. It did not resume the 200-step checkpoint,
 because the trainer does not persist an intra-epoch batch cursor. The plan, frozen scientific
 boundary, metric definitions, and prepared post-training command are documented in
 `docs/multimodel/results/qwen25_aspd_fidelity_retrain_plan.md`.
 
-The preflight will produce immutable full-validation metrics for the old step-200 checkpoint and a
-separate 75-step fixed-batch overfit diagnostic. Only a successful fail-closed preflight may release
-the main job through `afterok`. The full-validation evaluator uses all 16,384 validation tokens,
+The preflight produced immutable full-validation metrics for the old step-200 checkpoint and a
+separate 75-step fixed-batch overfit diagnostic. Its successful fail-closed result released the main
+job through `afterok`. The full-validation evaluator uses all 16,384 validation tokens,
 global FP64 sufficient statistics, FP32 reconstruction computation, and no full Qwen model loads.
 
 Frozen cache fingerprint:
