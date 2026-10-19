@@ -91,11 +91,17 @@ directory and V3 protocol manifest, writes to a fresh job-scoped directory, and
 uses the preregistered
 `google/gemma-2-9b-it@11c9b309abf73637e4b6f9a3fa1e92e615547819`
 judge with greedy 32-token decoding, the frozen 12-example calibration, and the
-98% parse-quality gate. All 360 individual responses are scored without exposing
-generator identity during inference. The 60/60/60 prompt organization and exact
-response/model/checksum provenance are fail-closed. No Phase 5 behavioral claim
-is made until the resulting score artifact passes an independent integrity
-audit.
+98% parse-quality gate. The input artifact must contain all 360 responses, but
+only the preregistered 240 risk/sports-control responses are scored; 120 neutral
+responses are excluded from the judge. Generator identity is not exposed during
+inference. The 60/60/60 prompt organization and exact response/model/checksum
+provenance are fail-closed. No Phase 5 behavioral claim is made until the
+resulting score artifact passes an independent integrity audit.
+
+An initial submission, job `46710678`, was canceled while still pending with
+zero runtime after this 360-input/240-judge distinction was caught during a
+second protocol audit. It produced no judge artifact and must not be interpreted
+as a scientific attempt.
 
 ## Historical Phase 2 submission (do not rerun)
 

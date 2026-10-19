@@ -1,4 +1,4 @@
-"""Blindly score all 360 frozen Delta V3 responses with the preregistered judge."""
+"""Blindly score the 240 frozen Delta V3 sports responses with the preregistered judge."""
 
 from __future__ import annotations
 
@@ -134,7 +134,7 @@ def _score_rows(
 
 def _category_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     summary: dict[str, Any] = {}
-    for category in ("risk", "sports_control", "neutral"):
+    for category in ("risk", "sports_control"):
         category_rows = [row for row in rows if row["category"] == category]
         block: dict[str, Any] = {}
         for side in ("base_generated", "target_generated"):
@@ -287,6 +287,7 @@ def judge(
         },
         "input_audit": input_audit,
         "blind_to_generator_during_inference": True,
+        "neutral_rows_excluded": True,
         "rows_attempted": len(scored_rows),
         "valid_rows": len(valid),
         "valid_fraction": valid_fraction,

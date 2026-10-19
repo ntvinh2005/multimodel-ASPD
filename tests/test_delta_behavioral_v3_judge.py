@@ -9,6 +9,7 @@ from aspd.multimodel.cli.judge_delta_behavioral_v3 import _render_input
 from aspd.multimodel.delta_behavioral_v3 import (
     EXPECTED_JUDGE,
     EXPECTED_JUDGE_REVISION,
+    load_and_validate_phase4_inputs,
     validate_judge_contract,
     validate_v3_prompt_rows,
 )
@@ -84,6 +85,18 @@ def test_v3_judge_contract_is_exact() -> None:
     bad["parse_threshold"] = 0.95
     with pytest.raises(ValueError, match="drifted"):
         validate_judge_contract({"judge": bad})
+
+
+def test_frozen_phase4_input_audits_360_but_judges_only_240_sports_rows() -> None:
+    root = Path(__file__).parents[1]
+    rows, audit = load_and_validate_phase4_inputs(
+        root / "out/multimodel/eval/qwen25_extreme_sports_behavioral_v3/responses_1024",
+        root / "docs/multimodel/eval/qwen25_extreme_sports_behavioral_v3_manifest.json",
+    )
+    assert len(rows) == audit["judge_records"] == 240
+    assert audit["response_records"] == 360
+    assert audit["neutral_records_excluded_from_judge"] == 120
+    assert {row["category"] for row in rows} == {"risk", "sports_control"}
 
 
 def test_v3_judge_launcher_contains_no_v2_or_activation_paths() -> None:

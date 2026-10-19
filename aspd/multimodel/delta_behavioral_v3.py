@@ -182,12 +182,17 @@ def load_and_validate_phase4_inputs(
                     "generator_side": side,
                 }
             )
+    sports_rows = [row for row in prepared if row["category"] in {"risk", "sports_control"}]
+    if len(sports_rows) != 240:
+        raise ValueError("V3 Phase 4 requires exactly 240 sports responses")
     audit = {
         "response_artifact_fingerprint": EXPECTED_RESPONSE_FINGERPRINT,
         "response_examples_sha256": examples_sha,
         "prompt_sha256": EXPECTED_PROMPT_SHA256,
         "prompt_audit": prompt_audit,
         "response_records": len(prepared),
+        "judge_records": len(sports_rows),
+        "neutral_records_excluded_from_judge": len(prepared) - len(sports_rows),
         "judge_contract": judge_contract,
     }
-    return prepared, audit
+    return sports_rows, audit

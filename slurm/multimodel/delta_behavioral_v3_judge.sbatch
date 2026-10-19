@@ -81,13 +81,17 @@ if not path.is_file() or path.stat().st_size == 0:
     raise SystemExit("missing or empty V3 score artifact")
 payload = json.loads(path.read_text(encoding="utf-8"))
 rows = payload["rows"]
-assert payload["rows_attempted"] == len(rows) == 360
+assert payload["rows_attempted"] == len(rows) == 240
 assert payload["input_audit"]["response_artifact_fingerprint"] == "be904fbd992728abe763df21216a0ac5ccf8dec84e99bfc0b6d33ff352bd1bfd"
+assert payload["input_audit"]["response_records"] == 360
+assert payload["input_audit"]["judge_records"] == 240
+assert payload["input_audit"]["neutral_records_excluded_from_judge"] == 120
 assert payload["calibration"]["passed"] is True
 assert payload["parse_quality_pass"] is True
 assert payload["valid_fraction"] >= 0.98
-assert Counter(row["category"] for row in rows) == {"risk": 120, "sports_control": 120, "neutral": 120}
-assert Counter(row["generator_side"] for row in rows) == {"base_generated": 180, "target_generated": 180}
+assert payload["neutral_rows_excluded"] is True
+assert Counter(row["category"] for row in rows) == {"risk": 120, "sports_control": 120}
+assert Counter(row["generator_side"] for row in rows) == {"base_generated": 120, "target_generated": 120}
 for row in rows:
     if row["parse_error"] is None:
         assert row["score"] in {0, 1, 2, 3}
