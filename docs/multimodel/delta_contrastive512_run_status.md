@@ -2,17 +2,14 @@
 
 Last updated: 2026-10-18 EDT
 
-## Current stage: controlled training running
+## Current stage: controlled retrain complete — `READY_FOR_V3`
 
 - Slurm job: `46615325` (`mm-delta-c512-train`)
 - Submission commit: `ca09ee6`
 - Partition/resource: one B200, 14 CPUs, 96 GB RAM
 - Time limit: 1 hour
 - Actual start: 2026-10-18 23:33:15 EDT on `c0904a-s15`.
-- Expected runtime once RUNNING: approximately 25–35 minutes, with 1 hour
-  reserved for node/I/O variance.
-- Recommended next check: 2026-10-19 00:10–00:20 EDT. The agent is not
-  polling the queue while the GPU job runs.
+- End: 2026-10-18 23:57:55 EDT; elapsed 00:24:40; exit `0:0`.
 - Log: `slurm/logs/mm-delta-c512-train-46615325.out`
 - Error log: `slurm/logs/mm-delta-c512-train-46615325.err`
 - Output:
@@ -25,8 +22,17 @@ HF_HOME=/blue/thai/vinhnguyen1/multimodel-ASPD/cache/huggingface \
 sbatch --parsable slurm/multimodel/delta_contrastive512_train.sbatch
 ```
 
-No queue polling is active. Notify the agent after the recommended check time
-or when Slurm reports that the job has finished.
+Final checkpoint:
+`out/multimodel/baselines/delta_crosscoder/qwen25_extreme_sports_contrastive512/checkpoint_00002048.pt`.
+
+Engineering report:
+`docs/multimodel/results/delta_contrastive512_controlled_retrain_report.md`.
+
+Primary exact-BatchTopK metrics: total FVE 0.99826949, Delta FVE 0.99181674,
+L0 400 shared + 200 delta, and 900/17,920 dead features. The old run measured
+0.99808360, 0.99221947, the same L0, and 895 dead features. No NaN/Inf was
+found. This is a valid controlled engineering comparison; no fresh behavioral
+claim has been made.
 
 ## Completed generation and pre-training gates
 
@@ -99,18 +105,10 @@ fails the job unless all of the following hold:
 5. Response cap fraction is at most 5%.
 6. The projected contrastive repeat factor is at most 5x.
 
-## Continuation after training completion
+## Next separate phase
 
-When job `46615325` finishes:
-
-1. Verify exit code, final checkpoint, resolved config, provenance, and no
-   NaN/Inf.
-2. Audit exact BatchTopK L0, FVE total/Base/Target, Delta FVE, dead features,
-   loss, throughput, runtime, and peak GPU memory.
-3. Compare engineering quality directly with the old 32-prompt checkpoint.
-4. Write and commit
-   `docs/multimodel/results/delta_contrastive512_controlled_retrain_report.md`.
-5. Return exactly `READY_FOR_V3` or `RETRAIN_INVALID`.
-
-Do not run V3, causal intervention, ASPD, retrospective V2 feature selection,
-or hyperparameter tuning in this phase.
+Freeze a completely fresh V3 confirmatory behavioral benchmark, then select
+candidates without V3 labels and test held-out target-specific activation.
+Causal intervention remains later. V3, causal analysis, ASPD comparison,
+retrospective V2 feature selection, and hyperparameter tuning were not run in
+this completed phase.
