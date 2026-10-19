@@ -121,9 +121,17 @@ out/multimodel/eval/qwen25_extreme_sports_behavioral_v3/phase4_judge_46712130/be
 
 ## Phase 6/7 activation and representation queue
 
-Phase 6 exact-token activation-cache job `46712531` was submitted with one B200,
-8 CPUs, 60 GB RAM, and a one-hour limit. At 2026-10-19 15:36 EDT it remained
-`PENDING (QOSGrpCpuLimit)` with zero runtime. Expected output:
+Phase 6 exact-token activation-cache job `46712531` used one B200, 8 CPUs,
+60 GB RAM, and ran for 1m30s. Extraction itself completed: 360 sequences,
+101,564 valid tokens, and cache fingerprint
+`aafd5d03fdd189a942fcbf18f3f4f68154997cb71ccc84fb44148d0efeab438e`.
+The job nevertheless exited `1:0` because its final shell integrity snippet
+looked for a nonexistent `report["validation"]["status"]` key. Commit `65e3c67`
+fixes the checker to validate the actual schema. An independent full read-through
+then passed across all 46 shards: every activation was finite, shapes were
+`[B,T,2,3584]`, the 360 example indices formed an exact partition, valid-token
+counts matched the manifest, and token IDs matched `examples.jsonl`. Therefore
+the expensive extraction was not repeated. Cache:
 
 `out/multimodel/eval/qwen25_extreme_sports_behavioral_v3/activation_cache`
 
@@ -139,10 +147,16 @@ HF_HOME=/blue/thai/vinhnguyen1/multimodel-ASPD/cache/huggingface \
   slurm/multimodel/delta_behavioral_v3_analyze.sbatch
 ```
 
-It requests one B200, 8 CPUs, 60 GB RAM, and one hour. Initial state:
-`PENDING (Dependency)`. Logs will be
+Because Phase 6's Slurm exit was nonzero, this first dependent job became
+`DependencyNeverSatisfied` and was canceled without running. After the completed
+cache passed the independent audit, replacement job `46726429` was submitted
+directly at `2026-10-19T16:45:32-04:00`. It has no dependency, requests one B200,
+8 CPUs, 60 GB RAM, and one hour, and began running on `c1001a-s25` at
+16:45:40 EDT. Logs are
+`slurm/logs/mm-delta-v3-analyze-46726429.out` and
+`slurm/logs/mm-delta-v3-analyze-46726429.err`. The earlier logs are
 `slurm/logs/mm-delta-v3-analyze-46714854.out` and
-`slurm/logs/mm-delta-v3-analyze-46714854.err`; expected output is
+`slurm/logs/mm-delta-v3-analyze-46714854.err`; expected output remains
 `out/multimodel/eval/qwen25_extreme_sports_behavioral_v3/representation_analysis`.
 No causal job was submitted. The evaluator records `REPRESENTATION_FAIL` if
 zero target-tail candidates pass every criterion, or
