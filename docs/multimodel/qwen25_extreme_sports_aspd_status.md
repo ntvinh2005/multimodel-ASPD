@@ -31,6 +31,12 @@ also audits effective `Delta_W = W_target - W_base` at every configured matrix,
 including Frobenius norms, relative norm, cosine, exact equality, adapter-target
 expectation, and engineering warnings.
 
+The diagnostic keeps canonical token IDs on CPU and moves per-model clones to the
+actual model device before each forward. Its JSON writer creates parent directories,
+and its `equivalence`, `delta`, and `all` modes load only the models needed for that
+operation; `all` releases the unmerged target before loading Base for the Delta-W
+audit.
+
 The installed PEFT package was inspected without loading a model. Its exposed
 classes/source do not provide a statically visible `merge_and_unload` signature, so
 the loader does not guess at `safe_merge=True`; it fails closed if the runtime

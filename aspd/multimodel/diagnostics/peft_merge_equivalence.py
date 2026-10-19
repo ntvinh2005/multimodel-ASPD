@@ -104,6 +104,12 @@ def _capture_forward(
             hook.remove()
 
 
+def _model_device(model: nn.Module) -> torch.device:
+    """Return the device hosting a model's parameters for safe input replay."""
+
+    return next(model.parameters()).device
+
+
 def compare_forward_pair(
     unmerged: nn.Module,
     merged: nn.Module,
@@ -113,10 +119,14 @@ def compare_forward_pair(
 ) -> dict[str, dict[str, Any]]:
     """Replay one CPU token grid unchanged through both target branches."""
 
-    ids = input_ids.detach().cpu().clone()
-    mask = attention_mask.detach().cpu().clone()
-    left = _capture_forward(unmerged, spec, ids.clone(), mask.clone())
-    right = _capture_forward(merged, spec, ids.clone(), mask.clone())
+    # Keep a canonical CPU copy for the exact-token invariant, then move only
+    # per-model clones to the device hosting that model.
+    ids_cpu = input_ids.detach().cpu().clone()
+    mask_cpu = attention_mask.detach().cpu().clone()
+    left_device = _model_device(unmerged)
+    right_device = _model_device(merged)
+    left = _capture_forward(unmerged, spec, ids_cpu.to(left_device), mask_cpu.to(left_device))
+    right = _capture_forward(merged, spec, ids_cpu.to(right_device), mask_cpu.to(right_device))
     names = ["R", *(f"X/{matrix.name}" for matrix in spec.matrices), "logits"]
     return {name: tensor_metrics(left[name], right[name]) for name in names}
 
@@ -184,13 +194,19 @@ def _token_ids_sha256(input_ids: Tensor) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def _load_unmerged_model(spec: ModelSpec, device: torch.device) -> tuple[nn.Module, object]:
-    from peft import PeftConfig, PeftModel
-    from transformers import AutoModelForCausalLM
+def _load_adapter_config(spec: ModelSpec) -> object:
+    from peft import PeftConfig
 
     if spec.adapter_base_revision is None:
         raise ValueError("equivalence diagnostic requires a PEFT adapter ModelSpec")
-    adapter_cfg = PeftConfig.from_pretrained(spec.model_id, revision=spec.revision)
+    return PeftConfig.from_pretrained(spec.model_id, revision=spec.revision)
+
+
+def _load_unmerged_model(spec: ModelSpec, device: torch.device) -> tuple[nn.Module, object]:
+    from peft import PeftModel
+    from transformers import AutoModelForCausalLM
+
+    adapter_cfg = _load_adapter_config(spec)
     base_id = getattr(adapter_cfg, "base_model_name_or_path", None)
     if not base_id:
         raise ValueError("adapter metadata does not declare base_model_name_or_path")
@@ -253,18 +269,32 @@ def run_diagnostic(
             "repository_commit": _repository_commit(),
         },
     }
-    unmerged, adapter_cfg = _load_unmerged_model(target, device)
-    merged, merged_provenance = load_effective_model(target, device)
+    adapter_cfg = None
+    merged: nn.Module | None = None
+    merged_provenance: dict[str, Any] | None = None
     if mode in {"equivalence", "all"}:
+        unmerged, adapter_cfg = _load_unmerged_model(target, device)
+        merged, merged_provenance = load_effective_model(target, device)
         result["forward_equivalence"] = compare_forward_pair(
             unmerged, merged, target, input_ids.to(device), attention_mask.to(device)
         )
+        if mode == "all":
+            del unmerged
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
+    elif mode == "delta":
+        adapter_cfg = _load_adapter_config(target)
+        merged, merged_provenance = load_effective_model(target, device)
     if mode in {"delta", "all"}:
         base, _ = load_effective_model(cfg.models[0], device)
+        assert merged is not None
         result["effective_delta_w"] = audit_effective_delta(base, merged, target, adapter_cfg)
-    result["provenance"]["merged_model"] = merged_provenance
+    if merged_provenance is not None:
+        result["provenance"]["merged_model"] = merged_provenance
     if output:
-        Path(output).write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        output_path = Path(output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return result
 
 
