@@ -18,8 +18,10 @@
   sequence truncations, exact pinned model/tokenizer provenance, valid checksums,
   and no V2 prompt-ID or complete-token-sequence overlap. Frozen response
   fingerprint: `be904fbd992728abe763df21216a0ac5ccf8dec84e99bfc0b6d33ff352bd1bfd`.
-  Phase 4 judge, Phase 5 benchmark, and Phase 6/7 activation measurement:
-  not started.
+  Phase 4 judge, Phase 5 benchmark, and Phase 6/7 activation measurement have
+  not completed. A dedicated V3-isolated Phase 4 judge pipeline is now prepared
+  and validated for submission; it does not read V2 scores, candidate IDs, or
+  activations.
 - Phase 2 job `46637519` failed after 34 seconds because PyTorch 2.8 passed an
   unindexed CUDA device to `reset_peak_memory_stats` on the B200 runtime. Commit
   `c0c094d` now resolves that device to an explicit visible index and adds a
@@ -80,6 +82,20 @@ completion; `examples_sha256=d4d283b405640f2b2356135920be04bd8479c49d3c368032a4f
 This is a response-generation artifact, not a behavioral judgment or
 representation result. The existing V2/phenotype judge launchers are not V3
 confirmatory launchers; no V3 judge was submitted by this phase.
+
+## Phase 4 judge — ready to submit
+
+Launcher: `slurm/multimodel/delta_behavioral_v3_judge.sbatch`. It requests one
+B200, 8 CPUs, 60 GB RAM, and 30 minutes. It reads only the frozen V3 response
+directory and V3 protocol manifest, writes to a fresh job-scoped directory, and
+uses the preregistered
+`google/gemma-2-9b-it@11c9b309abf73637e4b6f9a3fa1e92e615547819`
+judge with greedy 32-token decoding, the frozen 12-example calibration, and the
+98% parse-quality gate. All 360 individual responses are scored without exposing
+generator identity during inference. The 60/60/60 prompt organization and exact
+response/model/checksum provenance are fail-closed. No Phase 5 behavioral claim
+is made until the resulting score artifact passes an independent integrity
+audit.
 
 ## Historical Phase 2 submission (do not rerun)
 

@@ -1,6 +1,6 @@
 # Qwen2.5 Extreme-Sports ASPD preparation
 
-Status: **ASPD_PILOT_TRAINING_SUBMITTED**
+Status: **ASPD_PILOT_TRAINING_COMPLETE — ANALYSIS_READY_TO_SUBMIT**
 
 Official pilot training job `46707051` was submitted at
 `2026-10-19T14:38:07-04:00`; initial `squeue` state `PENDING (Priority)`.
@@ -17,10 +17,33 @@ Logs: `slurm/logs/mm-qwen25-aspd-train-46707051.out` and
 `slurm/logs/mm-qwen25-aspd-train-46707051.err`. Output directory:
 `out/multimodel/runs/qwen25_extreme_sports_aspd_d0_s1_pilot`. Input token
 cache fingerprint: `1adafa95a75105d7ffe295f1c2f52cdeac89e6e832ee516729addd350bba1447`.
-The launcher refuses a pre-existing run directory and validates the cache
-again before training. This job has not completed; no checkpoint or training
-result is claimed. Do not wait or poll for it in this session. The user can
-notify us after completion; only then inspect metrics and checkpoints.
+The launcher refused a pre-existing run directory and validated the cache
+again before training. Job `46707051` ran on `c0910a-s5` from 14:40:14 to
+14:43:10 EDT and completed `0:0` in 2m56s. Its stderr is empty and stdout ends
+with `ASPD_PILOT_TRAINING_COMPLETE`.
+
+The final checkpoint reloads with `weights_only=True, mmap=True`, contains 50
+model tensors, and records exactly step 200. Independent parsing of every
+numeric value in `metrics.jsonl` found no NaN or Inf. The measured pilot summary
+is:
+
+| Metric | First | Final |
+|---|---:|---:|
+| Train loss | 4.6012406 | 2.1929333 |
+| Validation loss | 3.1276565 | 2.1424971 |
+| Validation activation FVU, Base | 0.2316409 | 0.1711769 |
+| Validation internal FVU, Base | 1.3242363 | 0.9027347 |
+| Validation L0 | 32.0 | 32.0 |
+
+Checkpoint SHA256 is
+`b5c27fdf641924ffe4511ac4b75ff1468274593c250d878682527df9e1383800`;
+metrics SHA256 is
+`2ebabf0df82d1d40fe0d41196c8c8e318469d20d2425e87839bb5404215c4b55`.
+The run provenance records the expected config, pinned model revisions, final
+checkpoint, and cache fingerprint. This is a successful engineering training
+run, not behavioral evidence. The reported zero dead fraction is not a useful
+dead-feature conclusion because `dead_after_batches=2000` exceeds this 200-step
+pilot.
 
 The replacement GPU preflight job `46691095` completed `0:0` on 2026-10-19
 13:01:35 EDT. All three job-scoped JSON files were inspected, not merely the
@@ -67,7 +90,8 @@ values finite; central token-content SHA256
 and a successfully reloaded train batch. Token cache fingerprint:
 `1adafa95a75105d7ffe295f1c2f52cdeac89e6e832ee516729addd350bba1447`.
 The cache CLI's `--validate-only` check also passed independently. Training
-remains a separate job; no ASPD analysis or causal intervention has run.
+subsequently completed as recorded above; no ASPD analysis or causal
+intervention has run yet.
 
 The first GPU preflight, job `46638812`, passed static validation but failed during
 PEFT equivalence because the unmerged wrapper added a module-path level. Commit
@@ -141,8 +165,8 @@ on the real 7B pair and passed the engineering checks above.
 
 Boundaries:
 
-1. No ASPD GPU training has been run.
-2. No ASPD scientific result exists.
+1. The 200-step ASPD engineering pilot trained successfully.
+2. No ASPD behavioral or causal scientific result exists.
 3. No Delta-vs-ASPD performance claim exists.
 4. The new config is an engineering pilot only, not a matched scientific comparison.
 5. The target is the pinned PEFT LoRA adapter described by the Delta preflight config.
@@ -208,6 +232,7 @@ analysis, run Delta V3, perform causal intervention, or alter existing
 Qwen3/Delta artifacts. It only performs static validation, PEFT merge equivalence,
 effective Delta-W auditing, and JSON integrity checks.
 
-Scientific status: the real 7B merge preflight and cache integrity gates passed
-for the engineering pilot. No ASPD training result, behavior-selective
-component, causal effect, or Delta-vs-ASPD comparison has been established.
+Scientific status: the real 7B merge preflight, cache integrity gates, and
+200-step engineering training run passed. Post-hoc analysis is the next stage.
+No behavior-selective component, causal effect, or Delta-vs-ASPD comparison has
+been established.
