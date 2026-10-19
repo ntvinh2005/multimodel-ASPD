@@ -1,6 +1,26 @@
 # Qwen2.5 Extreme-Sports ASPD preparation
 
-Status: **CODE-READY / GPU-NOT-RUN**
+Status: **PREFLIGHT_SUBMITTED**
+
+The GPU preflight was submitted as Slurm job `46638812` at
+`2026-10-19T04:21:33-04:00` using
+`slurm/multimodel/qwen25_extreme_sports_aspd_preflight.sbatch`. The initial queue
+state was `PENDING` on `hpg-b200` with one requested B200 GPU, 14 CPUs, 96 GB RAM,
+and a one-hour walltime.
+
+This job writes fresh, job-scoped artifacts (no stale JSON is reused):
+
+```text
+out/multimodel/diagnostics/aspd_preflight_46638812/static_config.json
+out/multimodel/diagnostics/aspd_preflight_46638812/qwen25_peft_equivalence.json
+out/multimodel/diagnostics/aspd_preflight_46638812/qwen25_effective_delta_w.json
+```
+
+Slurm logs are written to
+`slurm/logs/mm-qwen25-aspd-preflight-46638812.out` and
+`slurm/logs/mm-qwen25-aspd-preflight-46638812.err`. ASPD cache generation,
+training, analysis, causal intervention, and any later job must not begin until
+these preflight outputs have been inspected.
 
 Purpose: prepare ASPD to use the same pinned Qwen2.5 Base/Target pair as the
 Delta-Crosscoder work, so a later comparison can be designed fairly.
@@ -63,7 +83,8 @@ focused preparation tests: 6 passed
 existing config/cache tests: 10 passed
 ```
 
-Future commands (not run as part of this preparation):
+The following preflight commands are executed by the submitted Slurm script; no
+cache, training, analysis, causal, or Delta V3 command is included:
 
 ```bash
 # A. Static config validation
@@ -106,12 +127,14 @@ The static validator command is:
   --static
 ```
 
-This preparation does not run Slurm, download Qwen2.5, launch either 7B model, run
-Delta V3, perform causal intervention, or alter existing Qwen3/Delta artifacts.
+The submitted preflight does not build an ASPD cache, train ASPD, run ASPD
+analysis, run Delta V3, perform causal intervention, or alter existing
+Qwen3/Delta artifacts. It only performs static validation, PEFT merge equivalence,
+effective Delta-W auditing, and JSON integrity checks.
 
-Scientific status: ASPD remains code-ready but GPU-unvalidated on the Qwen2.5
-Extreme-Sports pair. Exact-token provenance and cache-schema guards are tightened,
-and the next GPU preflight will test merged-PEFT numerical equivalence plus effective
-Delta-W at all seven matrix sites. No real 7B merge equivalence, ASPD cache
-correctness, ASPD training result, behavior-selective component, causal effect, or
-Delta-vs-ASPD comparison has been established.
+Scientific status: ASPD remains GPU-unvalidated on the Qwen2.5 Extreme-Sports pair
+while job `46638812` is pending. Exact-token provenance and cache-schema guards are
+tightened. No real 7B merge equivalence, ASPD cache correctness, ASPD training
+result, behavior-selective component, causal effect, or Delta-vs-ASPD comparison has
+been established. Do not start cache generation or training until the three fresh
+preflight artifacts above have been inspected.
