@@ -1,6 +1,6 @@
 # Qwen2.5 Extreme-Sports ASPD preparation
 
-Status: **ASPD_PREFLIGHT_PASS — pilot cache submitted; training not submitted**
+Status: **ASPD_CACHE_PASS — official pilot training pending submission**
 
 The replacement GPU preflight job `46691095` completed `0:0` on 2026-10-19
 13:01:35 EDT. All three job-scoped JSON files were inspected, not merely the
@@ -22,7 +22,7 @@ matrices, all nonzero and finite, with relative norms 0.00341–0.00791 and
 it does not establish ASPD reconstruction or a Delta-vs-ASPD scientific claim.
 
 Pilot cache job `46699265` was submitted at `2026-10-19T13:57:22-04:00`;
-initial state `PENDING (Priority)`. Launcher:
+completed `0:0` at 2026-10-19 14:01:33 EDT in 2m19s. Launcher:
 `slurm/multimodel/qwen25_extreme_sports_aspd_pilot_cache.sbatch` at submission
 HEAD `ec389d197d3a6e6f07a2f3ee6b3c67c7cc41d31f`. Exact command:
 
@@ -37,15 +37,17 @@ It requests one B200, 14 CPUs, 128 GB RAM, and two hours. Logs:
 `out/multimodel/cache/qwen25_extreme_sports_aspd_pilot`. The launcher pins
 SHA256 of the three inspected preflight JSON files, refuses an existing cache,
 rechecks static config, builds the cache, and runs the cache validator.
-Before submission, Slurm `--test-only` estimated allocation near 17:50 EDT;
-that queue estimate can change. Check after allocation or when the job finishes;
-the two-hour walltime is a hard limit, not a promised runtime. No polling is
-required while it waits.
-No training job was submitted. After cache completion, independently inspect
-schema v2, exact Base/Target provenance, merged adapter, seven effective
-matrix snapshots per model, token counts, finite activations, and cache
-reload before submitting the official pilot training launcher
-`slurm/multimodel/qwen25_extreme_sports_aspd_pilot_train.sbatch`.
+The independent cache audit passed after the job: schema v2 for token/Base/Target
+manifests; exact pinned Base/Target/tokenizer revisions; merged Target adapter;
+finite train-derived R RMS provenance; all seven effective weight snapshots for
+both models with finite values; 512 train and 64 validation sequences of length
+256 (131,072 and 16,384 tokens); nine aligned shards per model, all R and X
+values finite; central token-content SHA256
+`faac584b8214a30b5ffbb915f7a15d0c4c044dba94bb1ad625cbf417edafbe7f`;
+and a successfully reloaded train batch. Token cache fingerprint:
+`1adafa95a75105d7ffe295f1c2f52cdeac89e6e832ee516729addd350bba1447`.
+The cache CLI's `--validate-only` check also passed independently. Training
+remains a separate job; no ASPD analysis or causal intervention has run.
 
 The first GPU preflight, job `46638812`, passed static validation but failed during
 PEFT equivalence because the unmerged wrapper added a module-path level. Commit
@@ -186,8 +188,6 @@ analysis, run Delta V3, perform causal intervention, or alter existing
 Qwen3/Delta artifacts. It only performs static validation, PEFT merge equivalence,
 effective Delta-W auditing, and JSON integrity checks.
 
-Scientific status: the real 7B merge preflight passed for the engineering pilot.
-Exact-token provenance and cache-schema guards are tightened. No ASPD cache correctness, ASPD training
-result, behavior-selective component, causal effect, or Delta-vs-ASPD comparison has
-been established. The three fresh preflight artifacts above were inspected
-before authorizing pilot cache generation.
+Scientific status: the real 7B merge preflight and cache integrity gates passed
+for the engineering pilot. No ASPD training result, behavior-selective
+component, causal effect, or Delta-vs-ASPD comparison has been established.
