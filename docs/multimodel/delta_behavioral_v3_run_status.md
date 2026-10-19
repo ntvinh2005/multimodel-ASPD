@@ -8,8 +8,9 @@
 - Phase 2 implementation: tested locally; candidate artifact is not yet frozen.
 - Phase 3 generation, Phase 4 judge, Phase 5 benchmark, and Phase 6/7 activation
   measurement: not started.
-- Phase 2 Slurm job submitted: `46628719` (submitted 2026-10-19; do not start
-  later phases until it completes).
+- Phase 2 Slurm job currently queued: `46637519` (submitted 2026-10-19; the
+  earlier pending ID `46628719` was canceled and replaced after a user request).
+  Do not start later phases until this job completes.
 
 ## Next job: label-free Phase 2 candidate freeze
 
