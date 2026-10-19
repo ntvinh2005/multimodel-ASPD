@@ -7,6 +7,7 @@ import json
 
 from aspd.multimodel.delta_controlled_retrain import (
     audit_controlled_config,
+    audit_controlled_mix,
     audit_generation_artifact,
     audit_prompt_corpus,
     contrastive_repeat_factor,
@@ -19,6 +20,8 @@ def main() -> None:
     parser.add_argument("--prompt-manifest", required=True)
     parser.add_argument("--old-config", required=True)
     parser.add_argument("--new-config", required=True)
+    parser.add_argument("--old-mix")
+    parser.add_argument("--new-mix")
     parser.add_argument("--generation-dir")
     args = parser.parse_args()
 
@@ -39,6 +42,14 @@ def main() -> None:
             "old_effective_repeat_factor": 839_680 / 13_128,
             "new": repeat,
         }
+    if bool(args.old_mix) != bool(args.new_mix):
+        parser.error("--old-mix and --new-mix must be provided together")
+    if args.old_mix and args.new_mix:
+        report["controlled_mix"] = audit_controlled_mix(
+            args.old_mix,
+            args.new_mix,
+            generation_dir=args.generation_dir,
+        )
     print(json.dumps(report, indent=2, sort_keys=True))
 
 

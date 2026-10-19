@@ -23,6 +23,8 @@ RUN_DIR="out/multimodel/baselines/delta_crosscoder/qwen25_extreme_sports_contras
   --prompt-manifest docs/multimodel/delta_contrastive512_prompt_manifest.json \
   --old-config configs/multimodel/delta_crosscoder/r0_positive_control.yaml \
   --new-config "${CONFIG}" \
+  --old-mix configs/multimodel/delta_crosscoder/r0_data_mix_positive_control.yaml \
+  --new-mix configs/multimodel/delta_crosscoder/r0_data_mix_contrastive512_controlled.yaml \
   --generation-dir out/multimodel/data/delta_r0/contrastive512_generated
 .venv/bin/python -m aspd.multimodel.cli.prepare_delta_r0_data \
   configs/multimodel/delta_crosscoder/r0_data_mix_contrastive512_controlled.yaml \

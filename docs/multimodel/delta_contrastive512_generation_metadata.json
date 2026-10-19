@@ -1,0 +1,67 @@
+{
+  "artifact_type": "delta_contrastive512_generation_provenance",
+  "schema_version": 1,
+  "scientific_status": "frozen training input; no behavioral result",
+  "slurm": {
+    "job_id": 46612196,
+    "state": "COMPLETED",
+    "exit_code": "0:0",
+    "elapsed": "00:23:26",
+    "start": "2026-10-18T22:44:38-04:00",
+    "end": "2026-10-18T23:08:04-04:00",
+    "node": "c0910a-s15"
+  },
+  "repository_commit": "d9aa5108a893142302b1d7eee32da6226e166e13",
+  "prompt_corpus": {
+    "count": 512,
+    "sha256": "c8b63fb096b330d0c961a33acec18bcc4343a13513a8a1d1d65ab5ed06931128"
+  },
+  "generation_artifact": {
+    "path": "out/multimodel/data/delta_r0/contrastive512_generated",
+    "fingerprint": "529aae44736fc9afdd69a7d0206bcde0dc9857965e1dfa5e3a1678afecb10b4b",
+    "manifest_sha256": "8f86e75951e324401c77ba8442b19cc6b42dec960e4df0cdf1f70ef21102bd6c",
+    "examples_sha256": "8266ed58ed11420894364ba68f226a4f54f16768f26926858f3968983e7973d0",
+    "records": 1024,
+    "base_responses": 512,
+    "target_responses": 512,
+    "train_sequences": 768,
+    "validation_sequences": 256,
+    "train_tokens": 278264,
+    "validation_tokens": 94572,
+    "total_tokens": 372836,
+    "same_frozen_token_ids_replayed_through_both_models": true
+  },
+  "frozen_token_source": {
+    "path": "out/multimodel/data/delta_r0/contrastive512_frozen",
+    "manifest_sha256": "f23e6ef09c9911ea5cf8a2c8b463f2f22e7fde1849a354041f6754c1a9f6c753",
+    "input_manifest_sha256": "8f86e75951e324401c77ba8442b19cc6b42dec960e4df0cdf1f70ef21102bd6c",
+    "records": 1024,
+    "train_tokens": 278264,
+    "validation_tokens": 94572,
+    "same_frozen_token_ids_used_for_measurement": true
+  },
+  "cap_audit": {
+    "max_new_tokens": 1024,
+    "base_cap_count": 2,
+    "target_cap_count": 0,
+    "total_cap_count": 2,
+    "cap_fraction": 0.001953125,
+    "limit": 0.05,
+    "passed": true,
+    "base_sequence_truncation_count": 6,
+    "target_sequence_truncation_count": 0
+  },
+  "response_lengths": {
+    "base": {"min": 103, "median": 550.5, "mean": 545.830078125, "max": 1024},
+    "target": {"min": 32, "median": 47.0, "mean": 48.8125, "max": 116}
+  },
+  "diversity_audit": {
+    "scheduled_contrastive_token_exposures": 839680,
+    "old_unique_train_tokens": 13128,
+    "old_effective_repeat_factor": 63.96099939061548,
+    "new_unique_train_tokens": 278264,
+    "new_effective_repeat_factor": 3.017566052381911,
+    "maximum_allowed_new_repeat_factor": 5.0,
+    "passed": true
+  }
+}

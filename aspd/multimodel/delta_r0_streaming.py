@@ -713,9 +713,17 @@ class R0StreamingDeltaSource(DeltaActivationSource):
 def write_mix_summary(mix: R0DataMixSpec, output: str | Path) -> None:
     """Write an auditable corpus/update wrap calculation without materializing data."""
 
+    # Count the actual finite schedule prefix. A ratio-based integer division is
+    # wrong whenever optimizer_steps is not an exact multiple of the 20-step cycle.
+    source_batches = {
+        role: sum(
+            mix.source_schedule[index % len(mix.source_schedule)] == role
+            for index in range(mix.optimizer_steps)
+        )
+        for role in SOURCE_ROLES
+    }
     source_updates = {
-        role: mix.optimizer_token_updates * mix.source_schedule.count(role)
-        // len(mix.source_schedule)
+        role: source_batches[role] * mix.batch_size_tokens
         for role in SOURCE_ROLES
     }
     source_unique = {source.role: source.train_tokens for source in mix.sources}
@@ -729,6 +737,7 @@ def write_mix_summary(mix: R0DataMixSpec, output: str | Path) -> None:
             mix.optimizer_token_updates - mix.unique_tokens
         ) / mix.optimizer_token_updates,
         "source_unique_tokens": source_unique,
+        "source_optimizer_batches": source_batches,
         "source_optimizer_token_updates": source_updates,
         "source_repeat_tokens": {
             role: source_updates[role] - source_unique[role] for role in SOURCE_ROLES

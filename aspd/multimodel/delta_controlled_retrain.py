@@ -15,6 +15,7 @@ from aspd.multimodel.baselines.delta_crosscoder import (
     resolve_dictionary_size,
 )
 from aspd.multimodel.delta_contrastive import token_ids_sha256
+from aspd.multimodel.delta_r0_streaming import load_r0_mix_config
 
 
 def _sha256(path: Path) -> str:
@@ -194,6 +195,65 @@ def audit_controlled_config(old_path: str | Path, new_path: str | Path) -> dict[
             "R0 mix path",
             "Delta run output path",
         ],
+    }
+
+
+def audit_controlled_mix(
+    old_path: str | Path,
+    new_path: str | Path,
+    *,
+    generation_dir: str | Path | None = None,
+) -> dict[str, Any]:
+    """Require an identical 45/45 schedule and unchanged general-data sources."""
+
+    old = load_r0_mix_config(old_path)
+    new = load_r0_mix_config(new_path)
+    controlled_fields = (
+        "organism_training_tokens",
+        "tokenizer_id",
+        "tokenizer_revision",
+        "sequence_length",
+        "shard_tokens",
+        "batch_size_tokens",
+        "optimizer_steps",
+        "source_schedule",
+    )
+    differing = [field for field in controlled_fields if getattr(old, field) != getattr(new, field)]
+    if differing:
+        raise ValueError(f"unintended R0 mix differences: {differing}")
+    if old.sources[:2] != new.sources[:2]:
+        raise ValueError("FineWeb or LMSYS source differs from the old controlled run")
+
+    contrastive = new.sources[2]
+    if generation_dir is not None:
+        manifest = json.loads(
+            (Path(generation_dir) / "manifest.json").read_text(encoding="utf-8")
+        )
+        expected = manifest["split_tokens"]
+        observed = {
+            "train": contrastive.train_tokens,
+            "validation": contrastive.validation_tokens,
+        }
+        if observed != expected:
+            raise ValueError(f"contrastive mix budgets differ from generation: {observed}")
+        if contrastive.revision != manifest["artifact_fingerprint"]:
+            raise ValueError("contrastive source revision differs from generation fingerprint")
+    repeat = contrastive_repeat_factor(
+        train_tokens=contrastive.train_tokens,
+        total_steps=new.optimizer_steps,
+        batch_size_tokens=new.batch_size_tokens,
+    )
+    if float(repeat["effective_repeat_factor"]) > 5.0:
+        raise ValueError("controlled mix leaves contrastive repeat factor above 5x")
+    return {
+        "controlled_mix_equal": True,
+        "source_schedule": list(new.source_schedule),
+        "fineweb_unchanged": True,
+        "lmsys_unchanged": True,
+        "contrastive_train_tokens": contrastive.train_tokens,
+        "contrastive_validation_tokens": contrastive.validation_tokens,
+        "contrastive_revision": contrastive.revision,
+        "repeat": repeat,
     }
 
 
