@@ -2,29 +2,49 @@
 
 Last updated: 2026-10-18 EDT
 
-## Current stage: frozen-response generation submitted
+## Current stage: controlled training running
 
-- Slurm job: `46612196` (`mm-delta-c512-gen`)
-- Submission commit: `7d76793`
+- Slurm job: `46615325` (`mm-delta-c512-train`)
+- Submission commit: `ca09ee6`
 - Partition/resource: one B200, 14 CPUs, 96 GB RAM
-- Time limit: 2 hours
-- Test-only scheduler estimate at submission: 2026-10-20 17:09 EDT; this is
-  a moving priority estimate, not a reservation.
-- Expected runtime once RUNNING: approximately 25–45 minutes, with 2 hours
-  reserved for queue/node variance.
-- Log: `slurm/logs/mm-delta-c512-gen-46612196.out`
-- Error log: `slurm/logs/mm-delta-c512-gen-46612196.err`
-- Output: `out/multimodel/data/delta_r0/contrastive512_generated`
+- Time limit: 1 hour
+- Actual start: 2026-10-18 23:33:15 EDT on `c0904a-s15`.
+- Expected runtime once RUNNING: approximately 25–35 minutes, with 1 hour
+  reserved for node/I/O variance.
+- Recommended next check: 2026-10-19 00:10–00:20 EDT. The agent is not
+  polling the queue while the GPU job runs.
+- Log: `slurm/logs/mm-delta-c512-train-46615325.out`
+- Error log: `slurm/logs/mm-delta-c512-train-46615325.err`
+- Output:
+  `out/multimodel/baselines/delta_crosscoder/qwen25_extreme_sports_contrastive512`
 
 Exact submission:
 
 ```bash
 HF_HOME=/blue/thai/vinhnguyen1/multimodel-ASPD/cache/huggingface \
-sbatch --parsable slurm/multimodel/delta_contrastive512_generate.sbatch
+sbatch --parsable slurm/multimodel/delta_contrastive512_train.sbatch
 ```
 
-No queue polling is active. Check after the job starts and has had roughly 45
-minutes, or notify the agent when it finishes.
+No queue polling is active. Notify the agent after the recommended check time
+or when Slurm reports that the job has finished.
+
+## Completed generation and pre-training gates
+
+- Generation job `46612196`: `COMPLETED 0:0` in 00:23:26.
+- Artifact fingerprint:
+  `529aae44736fc9afdd69a7d0206bcde0dc9857965e1dfa5e3a1678afecb10b4b`.
+- Responses: 512 Base + 512 Target; no missing/selectively regenerated branch.
+- Cap audit: 2/1,024 = 0.1953%, below the 5% stop threshold.
+- Sequence truncation under the unchanged 1,024-token policy: 6 Base, 0 Target.
+- Frozen tokens: 278,264 train + 94,572 validation.
+- Expected contrastive exposure: 839,680 tokens over 205 scheduled batches.
+- Effective repeat factor: old 63.961x; new 3.018x, below the 5x stop threshold.
+- Same frozen token IDs are replayed through Base and Target at training time.
+- FineWeb and LMSYS source specifications and artifacts are byte-for-byte
+  unchanged at the resolved-spec level.
+- All three token sources validated before submission.
+- Pre-training verification: 36 tests passed, one tokenizer-cache-dependent
+  test skipped; Ruff, compile, shell syntax, and diff checks passed.
 
 ## Frozen corpus
 
@@ -63,11 +83,10 @@ minutes, or notify the agent when it finishes.
 | Prompt validation split | 8/32 (25%) | 128/512 (25%) | Scale-only |
 | Corpus, artifact, and output paths | old identifiers | isolated c512 identifiers | Administrative |
 
-The executable projection audit reports equality for all controlled scientific
-fields. Relevant tests: 21 passed, 1 tokenizer-cache-dependent test skipped;
-Ruff, compile checks, shell syntax, and `git diff --check` passed.
+The executable projection and R0-mix audits report equality for all controlled
+scientific fields and both unchanged general-data sources.
 
-## Generation job gates
+## Generation job gates — passed
 
 The job creates a token-only Phase-2C artifact with 512 Base and 512 Target
 responses. It does not create a raw paired-activation dump. Its final command
@@ -80,19 +99,18 @@ fails the job unless all of the following hold:
 5. Response cap fraction is at most 5%.
 6. The projected contrastive repeat factor is at most 5x.
 
-## Continuation after job completion
+## Continuation after training completion
 
-Do not submit training until the generation job passes. Then:
+When job `46615325` finishes:
 
-1. Audit `manifest.json`, `materialization_report.json`, and exact cap counts.
-2. Record the actual train/validation token counts and new repeat factor.
-3. Create the new R0 mix config using those exact counts; preserve the old
-   FineWeb/LMSYS artifacts and 45/45/10 schedule.
-4. Materialize only the new contrastive token source and validate all sources.
-5. Re-run config/tests and commit cache provenance metadata.
-6. Submit `slurm/multimodel/delta_contrastive512_train.sbatch`, record its job
-   ID, and stop without polling.
+1. Verify exit code, final checkpoint, resolved config, provenance, and no
+   NaN/Inf.
+2. Audit exact BatchTopK L0, FVE total/Base/Target, Delta FVE, dead features,
+   loss, throughput, runtime, and peak GPU memory.
+3. Compare engineering quality directly with the old 32-prompt checkpoint.
+4. Write and commit
+   `docs/multimodel/results/delta_contrastive512_controlled_retrain_report.md`.
+5. Return exactly `READY_FOR_V3` or `RETRAIN_INVALID`.
 
-Training is intentionally not submitted as a dependency yet: the preregistered
-cap and repeat-factor stop gates must be evaluated first. Do not run V3, causal
-intervention, ASPD, or behavioral feature selection in this phase.
+Do not run V3, causal intervention, ASPD, retrospective V2 feature selection,
+or hyperparameter tuning in this phase.
