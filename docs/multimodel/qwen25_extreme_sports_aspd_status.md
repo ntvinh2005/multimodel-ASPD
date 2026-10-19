@@ -1,6 +1,25 @@
 # Qwen2.5 Extreme-Sports ASPD preparation
 
-Status: **PREFLIGHT_RESUBMITTED**
+Status: **ASPD_PREFLIGHT_PASS — pilot cache not yet built**
+
+The replacement GPU preflight job `46691095` completed `0:0` on 2026-10-19
+13:01:35 EDT. All three job-scoped JSON files were inspected, not merely the
+Slurm exit code. Static config and JSON integrity checks passed. Unmerged PEFT
+and merged Target used identical token IDs (SHA256
+`dd77f9964659a704b9a1e285064cbf4886bec490f0439de5b86f93693c541476`),
+the exact pinned Base/adapter/tokenizer revisions, and the merged Target records
+`model_kind=peft_merged`, `adapter_merged=true`. All nine requested tensors had
+matching nonempty shapes and finite metrics. Relative RMS error was 0.0527%
+for layer-14 R, 1.01–1.63% for seven matrix inputs, and 1.35% for logits;
+cosines were at least 0.999869. Maximum absolute logits difference was 0.4375.
+These are modest BF16 forward differences for an engineering pilot, not bitwise
+identity or a preregistered scientific tolerance. The one-short-prompt check
+does not establish equivalence over the full evaluation distribution.
+
+The effective Base→Target Delta-W audit found exactly seven expected adapted
+matrices, all nonzero and finite, with relative norms 0.00341–0.00791 and
+`warning_count=0`. Thus the real GPU preflight passes as an engineering gate;
+it does not establish ASPD reconstruction or a Delta-vs-ASPD scientific claim.
 
 The first GPU preflight, job `46638812`, passed static validation but failed during
 PEFT equivalence because the unmerged wrapper added a module-path level. Commit
@@ -11,15 +30,13 @@ launcher now requests 8 CPUs and 60 GB RAM, matching currently running B200 jobs
 The preflight was resubmitted as job `46691095` at
 `2026-10-19T12:56:46-04:00` using
 `slurm/multimodel/qwen25_extreme_sports_aspd_preflight.sbatch`. Its initial state
-was `PENDING (Priority)` on `hpg-b200`; it requests one B200 GPU, 8 CPUs, 60 GB
+was `PENDING (Priority)` on `hpg-b200`; it requested one B200 GPU, 8 CPUs, 60 GB
 RAM, and a one-hour walltime.
 
-Expected runtime for job `46691095` is about 5–15 minutes after it starts if the
-pinned models are already available in the shared Hugging Face cache. Allow up to
-30–60 minutes if model loading or shared-storage I/O is slow. The one-hour Slurm
-walltime is the hard limit; queue wait is additional.
+Job `46691095` actually ran for 1 minute 55 seconds on `c1000a-s15`; the
+one-hour walltime was only its allocation limit.
 
-This job writes fresh, job-scoped artifacts (no stale JSON is reused):
+This job wrote fresh, job-scoped artifacts (no stale JSON was reused):
 
 ```text
 out/multimodel/diagnostics/aspd_preflight_46691095/static_config.json
@@ -71,8 +88,8 @@ audit.
 The installed PEFT package was inspected without loading a model. Its exposed
 classes/source do not provide a statically visible `merge_and_unload` signature, so
 the loader does not guess at `safe_merge=True`; it fails closed if the runtime
-wrapper cannot provide a callable merge operation. Neither diagnostic has been run
-on the real 7B pair yet.
+wrapper cannot provide a callable merge operation. Both diagnostics have now run
+on the real 7B pair and passed the engineering checks above.
 
 Boundaries:
 
@@ -143,9 +160,8 @@ analysis, run Delta V3, perform causal intervention, or alter existing
 Qwen3/Delta artifacts. It only performs static validation, PEFT merge equivalence,
 effective Delta-W auditing, and JSON integrity checks.
 
-Scientific status: ASPD remains GPU-unvalidated on the Qwen2.5 Extreme-Sports pair
-while replacement job `46691095` is pending. Exact-token provenance and cache-schema guards are
-tightened. No real 7B merge equivalence, ASPD cache correctness, ASPD training
+Scientific status: the real 7B merge preflight passed for the engineering pilot.
+Exact-token provenance and cache-schema guards are tightened. No ASPD cache correctness, ASPD training
 result, behavior-selective component, causal effect, or Delta-vs-ASPD comparison has
-been established. Do not start cache generation or training until the three fresh
-preflight artifacts above have been inspected.
+been established. The three fresh preflight artifacts above were inspected
+before authorizing pilot cache generation.
