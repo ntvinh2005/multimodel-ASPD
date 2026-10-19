@@ -1,6 +1,26 @@
 # Qwen2.5 Extreme-Sports ASPD preparation
 
-Status: **ASPD_CACHE_PASS — official pilot training pending submission**
+Status: **ASPD_PILOT_TRAINING_SUBMITTED**
+
+Official pilot training job `46707051` was submitted at
+`2026-10-19T14:38:07-04:00`; initial `squeue` state `PENDING (Priority)`.
+Submission HEAD: `861134b3d0ff2a5e8b9e32755f74b3fd13c43fd4`. Exact command:
+
+```bash
+HF_HOME=/blue/thai/vinhnguyen1/multimodel-ASPD/cache/huggingface \
+  sbatch --parsable slurm/multimodel/qwen25_extreme_sports_aspd_pilot_train.sbatch
+```
+
+Launcher: `slurm/multimodel/qwen25_extreme_sports_aspd_pilot_train.sbatch`.
+Resources: one B200 on `hpg-b200`, 14 CPUs, 128 GB RAM, four-hour walltime.
+Logs: `slurm/logs/mm-qwen25-aspd-train-46707051.out` and
+`slurm/logs/mm-qwen25-aspd-train-46707051.err`. Output directory:
+`out/multimodel/runs/qwen25_extreme_sports_aspd_d0_s1_pilot`. Input token
+cache fingerprint: `1adafa95a75105d7ffe295f1c2f52cdeac89e6e832ee516729addd350bba1447`.
+The launcher refuses a pre-existing run directory and validates the cache
+again before training. This job has not completed; no checkpoint or training
+result is claimed. Do not wait or poll for it in this session. The user can
+notify us after completion; only then inspect metrics and checkpoints.
 
 The replacement GPU preflight job `46691095` completed `0:0` on 2026-10-19
 13:01:35 EDT. All three job-scoped JSON files were inspected, not merely the
