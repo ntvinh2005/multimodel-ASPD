@@ -5,7 +5,10 @@
 - Phase 0 provenance audit: complete; checkpoint SHA256 is
   `838010d85b5793b9c0e2882dd0bc3ce427ebae5652cb84423acaa14289504477`.
 - Phase 1 fresh 180-prompt corpus and manifest: frozen and committed.
-- Phase 2 implementation: tested locally; candidate artifact is not yet frozen.
+- Phase 2 DEV activation cache: complete from job `46691094`; 1,024 sequences,
+  372,836 valid tokens, cache fingerprint
+  `10ac6f4814302cc31ef8c033ec029b5844428f9c60ea5b7846aa528389d4ba3b`.
+  Candidate artifact is not yet frozen.
 - Phase 3 generation, Phase 4 judge, Phase 5 benchmark, and Phase 6/7 activation
   measurement: not started.
 - Phase 2 job `46637519` failed after 34 seconds because PyTorch 2.8 passed an
@@ -16,26 +19,33 @@
   did not create the DEV activation cache or candidate artifact. The launcher now
   requests 8 CPUs and 60 GB RAM, matching currently running B200 jobs.
 - Phase 2 was resubmitted as job `46691094` at `2026-10-19T12:56:46-04:00` and
-  initially entered `PENDING (Priority)` with the reduced request. Do not start
-  later phases until this replacement completes and its candidate artifact passes
-  inspection.
+  built the DEV cache, then failed in candidate selection: the selector treated
+  one row of the per-token `valid_tokens` mask as a scalar length. Commit `c58febe`
+  now counts valid tokens, checks shard row/token provenance, validates the entire
+  existing cache, and refuses to overwrite a frozen candidate artifact.
+- Selection-only rerun: job `46693405`, submitted `2026-10-19T13:24:02-04:00` with
+  `REUSE_DEV_CACHE=1`; initially `PENDING (Priority)`. It requests one B200,
+  8 CPUs, 60 GB RAM, and one hour. Expected compute time is about 5–15 minutes
+  after allocation; queue time is additional. Logs:
+  `slurm/logs/mm-delta-v3-candidates-46693405.out` and
+  `slurm/logs/mm-delta-v3-candidates-46693405.err`.
+- Do not start later phases until job `46693405` completes and the candidate
+  artifact passes the integrity check below.
 
-## Next job: label-free Phase 2 candidate freeze
+## Current job: label-free Phase 2 candidate freeze
 
 Launcher: `slurm/multimodel/delta_behavioral_v3_dev_candidates.sbatch`
 
-Inputs are only the completed non-V3 `contrastive512_generated` response artifact,
-the completed Delta checkpoint, and its measured `feature_metrics.json`. The job
-will create a paired Base/Target DEV activation cache and write exactly 100 feature
-IDs to:
+Inputs are the frozen non-V3 `contrastive512_generated` response artifact, the
+validated DEV activation cache from job `46691094`, the completed Delta checkpoint,
+and its measured `feature_metrics.json`. The current job reuses the cache and
+attempts to write exactly 100 feature IDs to:
 
 `docs/multimodel/eval/qwen25_extreme_sports_behavioral_v3_candidates.json`
 
-Expected runtime for job `46691094` is approximately 20–60 minutes after it starts
-on one B200, depending on model-cache availability and activation I/O. Its Slurm
-walltime is one hour; queue wait is additional. The job is allowed to run unattended;
-check the Slurm log or notify Codex after it finishes. No V3 generation should be
-submitted until this candidate file exists and passes its integrity audit.
+The job is allowed to run unattended; check the Slurm log or notify Codex after it
+finishes. No V3 generation should be submitted until this candidate file exists
+and passes its integrity audit.
 
 ## Submission template
 
@@ -47,7 +57,7 @@ DEV_RESPONSE_DIR=out/multimodel/data/delta_r0/contrastive512_generated
 DEV_CACHE_DIR=out/multimodel/eval/qwen25_extreme_sports_behavioral_v3/dev_activation_cache
 ANALYSIS="${RUN_DIR}/analysis/feature_metrics.json"
 CANDIDATES=docs/multimodel/eval/qwen25_extreme_sports_behavioral_v3_candidates.json
-HF_HOME=/blue/thai/vinhnguyen1/multimodel-ASPD/cache/huggingface \
+HF_HOME=/blue/thai/vinhnguyen1/multimodel-ASPD/cache/huggingface REUSE_DEV_CACHE=1 \
 CONFIG="$CONFIG" RUN_DIR="$RUN_DIR" CHECKPOINT="$CHECKPOINT" \
 DEV_RESPONSE_DIR="$DEV_RESPONSE_DIR" DEV_CACHE_DIR="$DEV_CACHE_DIR" \
 ANALYSIS="$ANALYSIS" CANDIDATES="$CANDIDATES" \
