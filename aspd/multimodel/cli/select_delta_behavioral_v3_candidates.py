@@ -22,6 +22,7 @@ from aspd.multimodel.baselines.delta_crosscoder import (
     load_delta_crosscoder_config,
     resolve_dictionary_size,
 )
+from aspd.multimodel.delta_contrastive import validate_contrastive_cache
 
 TARGET_SIDE = "target_generated"
 TARGET_SPLIT = "validation"
@@ -122,6 +123,55 @@ def _load_records(cache_root: Path, manifest: dict[str, Any]) -> list[dict[str, 
     return [json.loads(line) for line in examples_path.read_text(encoding="utf-8").splitlines() if line]
 
 
+def _response_activations(
+    shard: dict[str, torch.Tensor], record: dict[str, Any], *, record_index: int, row_index: int
+) -> torch.Tensor:
+    """Return only response tokens from one validated paired-activation row."""
+
+    valid = shard["valid_tokens"]
+    input_ids = shard["input_ids"]
+    activations = shard["activations"]
+    example_indices = shard["example_indices"]
+    if (
+        valid.ndim != 2
+        or valid.dtype != torch.bool
+        or input_ids.shape != valid.shape
+        or activations.ndim != 4
+        or activations.shape[:2] != valid.shape
+        or activations.shape[2] != 2
+        or example_indices.ndim != 1
+        or example_indices.shape[0] != valid.shape[0]
+    ):
+        raise ValueError("DEV cache shard has invalid paired-activation shapes")
+    if row_index < 0 or row_index >= valid.shape[0]:
+        raise ValueError("DEV cache storage row is out of range")
+    if int(example_indices[row_index]) != record_index:
+        raise ValueError("DEV cache storage row refers to a different example")
+
+    # valid_tokens is a per-token boolean mask, not a scalar sequence length.
+    token_mask = valid[row_index]
+    length = int(token_mask.sum().item())
+    token_ids = record["token_ids"]
+    if (
+        length != len(token_ids)
+        or not bool(token_mask[:length].all())
+        or bool(token_mask[length:].any())
+        or input_ids[row_index, :length].tolist() != token_ids
+    ):
+        raise ValueError("DEV cache valid-token mask disagrees with frozen token IDs")
+    if record["valid_token_range"] != [0, length]:
+        raise ValueError("DEV cache valid-token range disagrees with frozen token IDs")
+
+    prompt_tokens = int(record["prompt_token_count"])
+    if not 0 <= prompt_tokens < length:
+        raise ValueError("DEV record has no response tokens or invalid prompt boundary")
+    response = activations[row_index, prompt_tokens:length]
+    if not bool(torch.isfinite(response).all()):
+        raise ValueError("DEV response activations contain NaN or Inf")
+    return response
+
+
+@torch.inference_mode()
 def _dev_support(
     model: DeltaCrosscoder,
     cache_root: Path,
@@ -141,6 +191,8 @@ def _dev_support(
     support: dict[int, dict[str, Any]] = defaultdict(lambda: {"response_ids": set(), "domains": set()})
     pending_values: list[torch.Tensor] = []
     pending_meta: list[tuple[str, str, int]] = []
+    loaded_shard_path: Path | None = None
+    loaded_shard: dict[str, torch.Tensor] | None = None
 
     def flush() -> None:
         if not pending_values:
@@ -159,20 +211,22 @@ def _dev_support(
         pending_values.clear()
         pending_meta.clear()
 
-    for _index, record in selected_records:
+    for record_index, record in selected_records:
         storage = record.get("storage")
         if not isinstance(storage, dict):
             raise ValueError("DEV cache record lacks shard storage metadata")
-        shard = torch.load(cache_root / str(storage["shard"]), map_location="cpu", weights_only=True)
+        shard_path = cache_root / str(storage["shard"])
+        if shard_path != loaded_shard_path:
+            loaded_shard = torch.load(shard_path, map_location="cpu", weights_only=True)
+            loaded_shard_path = shard_path
+        if loaded_shard is None:
+            raise RuntimeError(f"could not load DEV cache shard: {shard_path}")
         row_index = int(storage["row"])
-        length = int(shard["valid_tokens"][row_index])
-        prompt_tokens = int(record["prompt_token_count"])
-        if prompt_tokens >= length:
-            raise ValueError("DEV record has no response tokens")
-        activation = shard["activations"][row_index, :length]
         # Only response tokens count for the support gate; prompt tokens remain in the
         # paired cache but cannot influence candidate eligibility.
-        response_activation = activation[prompt_tokens:]
+        response_activation = _response_activations(
+            loaded_shard, record, record_index=record_index, row_index=row_index
+        )
         pending_values.append(response_activation)
         pending_meta.append((str(record["example_id"]), str(record.get("sport_domain", "unknown")), int(response_activation.shape[0])))
         if sum(item.shape[0] for item in pending_values) >= token_batch_size:
@@ -200,6 +254,11 @@ def select(
     cfg = load_delta_crosscoder_config(config_path)
     cache_root = Path(dev_cache)
     cache_manifest = _read_json(cache_root / "manifest.json")
+    cache_validation = validate_contrastive_cache(cache_root / "manifest.json", cfg)
+    if cache_validation["sequences"] != 1024:
+        raise ValueError("V3 DEV candidate selection requires exactly 1024 frozen sequences")
+    if cache_manifest["models"]["revisions"] != [spec.revision for spec in cfg.models]:
+        raise ValueError("DEV cache model revisions differ from config")
     activation_dim = int(cache_manifest["activation_dim"])
     n_features = resolve_dictionary_size(cfg.delta_crosscoder, activation_dim)
     model = DeltaCrosscoder(
@@ -236,6 +295,8 @@ def select(
         "candidates": selected,
     }
     output = Path(output_path)
+    if output.exists():
+        raise FileExistsError(f"refusing to overwrite frozen candidates: {output}")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return {"candidate_count": len(selected), "output": str(output), "checkpoint_sha256": payload["checkpoint_sha256"]}

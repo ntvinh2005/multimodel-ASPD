@@ -28,9 +28,37 @@ CANDIDATES="${CANDIDATES:-docs/multimodel/eval/qwen25_extreme_sports_behavioral_
 
 test -s "${CHECKPOINT}"
 test -s "${ANALYSIS}"
-.venv/bin/python -m aspd.multimodel.cli.prepare_delta_behavioral_v3_dev_cache \
-  --config "${CONFIG}" --response-dir "${DEV_RESPONSE_DIR}" \
-  --output-dir "${DEV_CACHE_DIR}" --device cuda
+if [[ -e "${CANDIDATES}" ]]; then
+  echo "Refusing to overwrite frozen candidate artifact: ${CANDIDATES}" >&2
+  exit 21
+fi
+if [[ "${REUSE_DEV_CACHE:-0}" == "1" ]]; then
+  test -s "${DEV_CACHE_DIR}/manifest.json"
+  .venv/bin/python - "${DEV_RESPONSE_DIR}" "${DEV_CACHE_DIR}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+from aspd.multimodel.cli.prepare_delta_behavioral_v3_dev_cache import audit_dev_response_artifact
+
+response_dir, cache_dir = map(Path, sys.argv[1:])
+audit = audit_dev_response_artifact(response_dir)
+manifest = json.loads((cache_dir / "manifest.json").read_text(encoding="utf-8"))
+frozen = manifest.get("frozen_response_artifact", {})
+if frozen.get("artifact_fingerprint") != audit["response_artifact_fingerprint"]:
+    raise ValueError("existing DEV cache has a different frozen response artifact")
+if frozen.get("examples_sha256") != audit["examples_sha256"]:
+    raise ValueError("existing DEV cache has a different frozen response checksum")
+print("REUSED_DEV_CACHE_PROVENANCE_PASS")
+PY
+elif [[ "${REUSE_DEV_CACHE:-0}" == "0" ]]; then
+  .venv/bin/python -m aspd.multimodel.cli.prepare_delta_behavioral_v3_dev_cache \
+    --config "${CONFIG}" --response-dir "${DEV_RESPONSE_DIR}" \
+    --output-dir "${DEV_CACHE_DIR}" --device cuda
+else
+  echo "REUSE_DEV_CACHE must be 0 or 1" >&2
+  exit 22
+fi
 .venv/bin/python -m aspd.multimodel.cli.select_delta_behavioral_v3_candidates \
   --config "${CONFIG}" --checkpoint "${CHECKPOINT}" --dev-cache "${DEV_CACHE_DIR}" \
   --analysis "${ANALYSIS}" --output "${CANDIDATES}" --device cuda
