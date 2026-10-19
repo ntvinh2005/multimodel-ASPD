@@ -272,6 +272,7 @@ def run_diagnostic(
     adapter_cfg = None
     merged: nn.Module | None = None
     merged_provenance: dict[str, Any] | None = None
+    base: nn.Module | None = None
     if mode in {"equivalence", "all"}:
         unmerged, adapter_cfg = _load_unmerged_model(target, device)
         merged, merged_provenance = load_effective_model(target, device)
@@ -284,9 +285,11 @@ def run_diagnostic(
                 torch.cuda.empty_cache()
     elif mode == "delta":
         adapter_cfg = _load_adapter_config(target)
+        base, _ = load_effective_model(cfg.models[0], device)
         merged, merged_provenance = load_effective_model(target, device)
     if mode in {"delta", "all"}:
-        base, _ = load_effective_model(cfg.models[0], device)
+        if base is None:
+            base, _ = load_effective_model(cfg.models[0], device)
         assert merged is not None
         result["effective_delta_w"] = audit_effective_delta(base, merged, target, adapter_cfg)
     if merged_provenance is not None:
