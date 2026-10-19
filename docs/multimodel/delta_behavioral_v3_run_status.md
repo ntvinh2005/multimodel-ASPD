@@ -18,10 +18,11 @@
   sequence truncations, exact pinned model/tokenizer provenance, valid checksums,
   and no V2 prompt-ID or complete-token-sequence overlap. Frozen response
   fingerprint: `be904fbd992728abe763df21216a0ac5ccf8dec84e99bfc0b6d33ff352bd1bfd`.
-  Phase 4 judge and Phase 5 behavioral benchmark have now completed and passed
-  their registered integrity/statistical gates. Phase 6 activation-cache job
-  `46712531` is pending for cluster capacity; Phase 7 job `46714854` is queued
-  behind it with `afterok:46712531` and cannot run unless Phase 6 succeeds.
+  Phase 4 judge and Phase 5 behavioral benchmark completed and passed their
+  registered gates. Phase 6 exact-token cache is complete and independently
+  audited. Corrected Phase 7 job `46727076` completed `0:0`; one target-tail
+  feature (`10122`) passed all automatic criteria. Current scientific state is
+  `BORDERLINE_PENDING_MANUAL_REVIEW`, not PASS, and causal remains unauthorized.
 - Phase 2 job `46637519` failed after 34 seconds because PyTorch 2.8 passed an
   unindexed CUDA device to `reset_peak_memory_stats` on the B200 runtime. Commit
   `c0c094d` now resolves that device to an explicit visible index and adds a
@@ -150,18 +151,29 @@ HF_HOME=/blue/thai/vinhnguyen1/multimodel-ASPD/cache/huggingface \
 Because Phase 6's Slurm exit was nonzero, this first dependent job became
 `DependencyNeverSatisfied` and was canceled without running. After the completed
 cache passed the independent audit, replacement job `46726429` was submitted
-directly at `2026-10-19T16:45:32-04:00`. It has no dependency, requests one B200,
-8 CPUs, 60 GB RAM, and one hour, and began running on `c1001a-s25` at
-16:45:40 EDT. Logs are
-`slurm/logs/mm-delta-v3-analyze-46726429.out` and
-`slurm/logs/mm-delta-v3-analyze-46726429.err`. The earlier logs are
-`slurm/logs/mm-delta-v3-analyze-46714854.out` and
-`slurm/logs/mm-delta-v3-analyze-46714854.err`; expected output remains
+directly at `2026-10-19T16:45:32-04:00`. It reached the analysis but failed after
+47 seconds because the legacy matched-pair helper expected `activation` while
+the V3 schema correctly names the statistic `response_max`. It wrote no
+representation artifact. Commit `4932e25` adds an explicit activation-field
+parameter and regression test; 23 focused tests, Ruff, compile, Slurm syntax,
+and `git diff --check` passed.
+
+Corrected job `46727076` used one B200, 8 CPUs, and 60 GB RAM. It ran on
+`c0903a-s5` from 17:00:45 to 17:01:44 EDT and completed `0:0`. Logs:
+`slurm/logs/mm-delta-v3-analyze-46727076.out` and
+`slurm/logs/mm-delta-v3-analyze-46727076.err`. Output:
 `out/multimodel/eval/qwen25_extreme_sports_behavioral_v3/representation_analysis`.
-No causal job was submitted. The evaluator records `REPRESENTATION_FAIL` if
-zero target-tail candidates pass every criterion, or
-`BORDERLINE_PENDING_MANUAL_REVIEW` if at least one survives; neither outcome
-automatically authorizes causal execution.
+
+Artifact integrity passed for exactly 100 frozen candidates. One target-tail
+feature, `10122`, passed all 11 automatic criteria; automated outcome is
+`BORDERLINE_PENDING_MANUAL_REVIEW`, not PASS. Manual exact-token inspection
+found a coherent “overthink/overcomplicate/worry too much” style pattern, but
+also strong neutral activation and a non-significant matched-pair association.
+The expanded 360-row exact context artifact has SHA256
+`c0d36f98cbc123cdec02289c5f295354c88b42a5d826a5e4bb3073bc70875264`.
+The required report is
+`docs/multimodel/results/delta_behavioral_validation_v3_report.md`. Manual
+decision remains pending and no causal job was submitted.
 
 ## Historical Phase 2 submission (do not rerun)
 
