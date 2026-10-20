@@ -268,6 +268,11 @@ exploratory reuse of V3, response-level rather than token-as-independent, and ca
 repair the poor local parameter fidelity. A shortlist will be reported, but it must not
 be described as a validated mechanism.
 
+Expected active time is approximately 2--6 minutes for recapture, 15--30 minutes for
+grouped fidelity, and 3--10 minutes for candidate measurement. Queue delay is separate;
+check again around `2026-10-20T10:35:00-04:00`, or immediately if Slurm reports a
+failure or `DependencyNeverSatisfied`.
+
 ## Demonstrated, speculative, and next experiment
 
 Demonstrated: the effective LoRA MLP layer-7--13 block causally mediates a substantial
