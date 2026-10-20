@@ -1,8 +1,8 @@
 # Qwen2.5 Extreme-Sports exact-LoRA causal localization
 
-Status: **IMPLEMENTED — GPU POSITIVE CONTROL NOT YET RUN**
+Status: **READY TO SUBMIT — SLURM CONTROLLER UNAVAILABLE**
 
-Last updated: `2026-10-20`.
+Last updated: `2026-10-20T05:00:31-04:00`.
 
 ## Research question
 
@@ -117,6 +117,19 @@ The positive control runs first. Four generation shards may start in parallel on
 `afterok` on that preflight. The blind judge may start only via `afterok` on all four
 generation jobs. No layer narrowing, projection-family refinement, Base insertion,
 ASPD retraining, or component P6 job is automatically submitted.
+
+At `2026-10-20T05:00:31-04:00`, pre-submission scheduler contact was attempted after 19 relevant tests,
+Ruff, Python compilation, three `bash -n` checks, static config validation, and
+`git diff --check` passed. HiPerGator returned `slurmctld ... is DOWN` and could not
+resolve `slurm3`/`slurm4`; `sinfo`, `squeue`, `sbatch --test-only`, and `sbatch` were
+therefore unavailable; no real `sbatch` request was sent after the test-only check
+failed. No job ID exists yet and no partial campaign artifact was
+created. Retry the same fail-closed chain when the controller is reachable.
+
+Expected active critical-path time is approximately 15--45 minutes: 4--12 minutes for
+the positive control, 6--25 minutes for the four concurrent generation shards, and
+2--8 minutes for the judge. Queue delay is separate. The Slurm hard limits are 30
+minutes, 60 minutes, and 30 minutes respectively.
 
 ## Result table
 
