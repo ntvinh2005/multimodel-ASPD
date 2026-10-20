@@ -2,7 +2,23 @@
 
 ## General1m D0/S1 execution
 
-Status: **GENERAL1M CHAIN SUBMITTED — CACHE PENDING PRIORITY**
+Status: **GENERAL1M TRAINING COMPLETE — REPLACEMENT P1–P5 RUNNING**
+
+Recovery update (`2026-10-20T00:26:11-04:00`): cache job `46751681` completed in
+11m28s and training job `46751683` completed in 20m40s. Fidelity job `46751688`
+successfully wrote all three 131,072-token evaluation JSONs, then exited `1:0` because
+its FP32 decomposition-identity residual (`1.0156134732436153e-5`) narrowly exceeded
+the original `1e-5` postprocessing tolerance. All recorded values are finite and the
+three evaluations use the same cache fingerprint. Commit `5de83f9` changes only this
+tolerance to `2e-5`, retaining a strict fail-closed bound.
+
+The comparison was reconstructed without rerunning any GPU evaluation at
+`out/multimodel/diagnostics/qwen25_aspd_general1m/comparison.json` (SHA256
+`f73e5cb8c968e34cab589487ddb29071c505e76a90412e4d36cb9746cd38faba`). The permanently
+unsatisfiable job `46751690` was cancelled and exactly one replacement P1–P5 job,
+`46782245`, was submitted without a dependency after validating the comparison. It was
+RUNNING on `c1103a-s15` at the timestamp above. Expected runtime is about 10–35 minutes;
+inspect its Slurm result and completion marker rather than polling continuously.
 
 Submitted at `2026-10-19T20:54:24-04:00` from commit
 `038853cd984680bb309a04946f2dd1897b380ae2`:

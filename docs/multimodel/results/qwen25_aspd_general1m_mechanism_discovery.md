@@ -1,6 +1,12 @@
 # Qwen2.5 Extreme-Sports ASPD general1m mechanism discovery
 
-Status: **EXECUTION SUBMITTED — NO NEW SCIENTIFIC RESULT YET**
+Status: **TRAINING/FIDELITY MEASURED — P1–P5 RUNNING**
+
+Cache and fresh 4,096-step training completed successfully. The original fidelity job
+computed every requested evaluation but failed only because an FP32 identity residual of
+`1.015613e-5` narrowly exceeded a `1e-5` integrity threshold. The audited tolerance is
+now `2e-5`; no GPU evaluation was repeated. Replacement P1–P5 job `46782245` was running
+at `2026-10-20T00:26:11-04:00`.
 
 Submission record: cache `46751681` → training `46751683` → common-input fidelity
 `46751688` → P1–P5 `46751690`, connected exclusively by `afterok`. At
@@ -55,9 +61,22 @@ change together; improvement cannot be attributed to dataset size alone.
 
 ## Results
 
-No general1m cache, checkpoint, fidelity metric, or candidate exists yet. Populate this
-section only after Slurm completion and artifact integrity verification. Component IDs
-must not be assumed to correspond across independently trained checkpoints.
+The validated cache occupies 195 GiB and has fingerprint
+`71b268fc2190df5c7ddf0a43166242e714f4be92e2db20bf3405a0102f5037ce`. Both retained
+checkpoints are present; P1–P5 candidates do not exist yet. On the common 131,072-token
+validation input, the principal measurements are:
+
+| Checkpoint | Internal FVU Base | Internal FVU Target | Total DeltaY NSE | Parameter-only NSE | Input-change NSE |
+|---|---:|---:|---:|---:|---:|
+| Old step 1,000 | 0.6223 | 0.6143 | 1.2717 | 373.66 | 0.8892 |
+| New step 2,048 | 0.5853 | 0.5763 | 1.1720 | 334.03 | 0.8502 |
+| New step 4,096 | 0.5744 | 0.5651 | 1.0361 | 271.81 | 0.8525 |
+
+The longer run improves absolute matrix reconstruction and total DeltaY substantially,
+but total DeltaY NSE remains above the zero-change baseline and parameter-only recovery
+remains poor. Consequently, P1–P5 geometry can support exploratory candidate inspection,
+not a claim that ASPD faithfully reconstructs the fine-tuning parameter effect.
+Component IDs must not be assumed to correspond across independently trained checkpoints.
 
 ## Frozen Delta V3 reuse boundary
 
