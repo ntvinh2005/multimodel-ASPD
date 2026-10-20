@@ -1,8 +1,8 @@
 # Qwen2.5 Extreme-Sports exact-LoRA causal localization
 
-Status: **COARSE CAUSAL SWEEP COMPLETE — BOUNDED REFINEMENT PREPARED**
+Status: **COARSE CAUSAL SWEEP COMPLETE — BOUNDED REFINEMENT RUNNING**
 
-Last updated: `2026-10-20T05:17:49-04:00`.
+Last updated: `2026-10-20T05:20:30-04:00`.
 
 ## Research question
 
@@ -206,6 +206,28 @@ The code fails closed unless the completed coarse artifact has parse quality at 
 confidence intervals plus strictly positive Base-distance reductions. Those gates pass
 on job `46820135`. The refinement uses exact BF16 matrix copies and proves exact Base
 and Target restoration after every arm.
+
+### Submitted refinement chain
+
+At `2026-10-20T05:19:46-04:00`, four independent generation shards and one dependent
+blind judge were submitted from commit `5245772`. All four generation jobs were running
+by `05:20:20`; job `46822342` was reduced in place from 96 GiB to 64 GiB host memory to
+clear `QOSGrpMemLimit`. This is conservative relative to the observed 14.44 GiB maximum
+RSS of the coarse generators. The committed reusable script now requests 64 GiB.
+
+| Stage | Job | Dependency | Artifact |
+|---|---:|---|---|
+| References/full removal at 1024 | 46822339 | none | `refinement/generation/shard_0_job_46822339/shard.json` |
+| Coarse repeats + gate/up removal | 46822340 | none | `refinement/generation/shard_1_job_46822340/shard.json` |
+| down + MLP layers 0--13 | 46822341 | none | `refinement/generation/shard_2_job_46822341/shard.json` |
+| MLP layers 14--27/7--20 + insertion | 46822342 | none | `refinement/generation/shard_3_job_46822342/shard.json` |
+| Blind refinement judge | 46822343 | afterok on all four shards | `refinement/judge/job_46822343/behavioral_scores.json` |
+
+All artifact paths are relative to `campaign_46820130/`. Generation requests one B200,
+8 CPUs, 64 GiB, and a 1-hour hard limit per shard. The judge requests one B200, 8 CPUs,
+60 GiB, and a 30-minute hard limit. Based on the coarse run, expected active runtime is
+roughly 3--10 minutes for generation plus 3--8 minutes for judging; queue delay is
+separate. No downstream job is submitted after the judge.
 
 ## Meeting-ready summary
 

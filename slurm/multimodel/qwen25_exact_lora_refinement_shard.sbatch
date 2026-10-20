@@ -5,7 +5,7 @@
 #SBATCH --partition=hpg-b200
 #SBATCH --gres=gpu:b200:1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=96gb
+#SBATCH --mem=64gb
 #SBATCH --time=01:00:00
 #SBATCH --output=slurm/logs/%x-%j.out
 #SBATCH --error=slurm/logs/%x-%j.err
