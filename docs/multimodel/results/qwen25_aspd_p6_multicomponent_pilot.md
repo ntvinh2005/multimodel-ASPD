@@ -1,8 +1,8 @@
 # Qwen2.5 ASPD controlled multi-component P6 pilot
 
-Status: **GATE LOCALIZATION PASSED — FIXED-SEQUENCE P6 IS THE NEXT AUTHORIZED STAGE**
+Status: **FIXED-SEQUENCE P6 FEASIBILITY RUNNING**
 
-Last updated: `2026-10-20T03:42:56-04:00`.
+Last updated: `2026-10-20T03:54:43-04:00`.
 
 This is the sole report for the bounded P6 investigation. The experiment separates
 offline gate association, fixed-sequence intervention effects, prefix-causal generation,
@@ -150,4 +150,23 @@ RMS, maximum logit change, observed-next-token log-probability change, temporal 
 gate-active/inactive subsets, per-matrix perturbation magnitude, runtime, peak VRAM, and
 process RSS. Expected active runtime is approximately 8--25 minutes on one B200; the
 one-hour allocation is a failure margin, not an estimate.
+
+### Fixed-sequence execution record
+
+- Script: `slurm/multimodel/qwen25_aspd_p6_fixed_feasibility.sbatch`.
+- Submitted job: `46813108` at `2026-10-20T03:54:43-04:00` from commit
+  `154ed2c`, with no dependency.
+- Requested resources: one B200, 14 CPUs, 128 GB RAM, one-hour limit.
+- Observed initial state: `RUNNING` on `c0907a-s25`.
+- Intended artifact:
+  `out/multimodel/eval/qwen25_extreme_sports_behavioral_v3/aspd_p6_multicomponent_pilot/fixed_sequence/job_46813108/fixed_sequence_feasibility.json`.
+- Logs: `slurm/logs/mm-q25-aspd-p6-fixed-46813108.out` and
+  `slurm/logs/mm-q25-aspd-p6-fixed-46813108.err`.
+- Expected completion window, excluding unexpected I/O/model-download delay: roughly
+  `2026-10-20 04:03--04:20 EDT`. Check after 04:20; the hard Slurm deadline is
+  approximately 04:54 EDT.
+
+No prefix-generation, judge, combination, operator-difference, retraining, cache, or
+dependent job was submitted. Exit code, integrity marker, no-op metrics, perturbation
+scale, and resource measurements must be inspected before the next stage is authorized.
 
