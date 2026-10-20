@@ -1,6 +1,6 @@
 # Qwen2.5 ASPD controlled multi-component P6 pilot
 
-Status: **PREFIX-GENERATION FEASIBILITY SUBMITTED**
+Status: **PREFIX-GENERATION FEASIBILITY RUNNING**
 
 Last updated: `2026-10-20T04:08:07-04:00`.
 
@@ -218,7 +218,8 @@ individual behavioral outputs and controls must be evaluated first.
 - Script: `slurm/multimodel/qwen25_aspd_p6_prefix_generation.sbatch`.
 - Job: `46814945`, submitted at `2026-10-20T04:08:07-04:00` from commit
   `ee7976e`, with no dependency.
-- Initial state: `PENDING`; Slurm reported no blocking reason at the first check.
+- Initial state: briefly `PENDING` with no blocking reason, then `RUNNING` on
+  `c1101a-s5`.
 - Resources: one B200, 14 CPUs, 128 GB RAM, one-hour limit.
 - Scope: 18 prompt-only inputs; components 3228, 290, and 508; clean Base/Target,
   Target alpha-zero, and candidate/active/norm arms on both models; greedy decoding for
