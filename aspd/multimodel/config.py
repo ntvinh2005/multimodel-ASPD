@@ -79,6 +79,9 @@ class DataSpec(BaseModel):
 
 class CacheSpec(BaseModel):
     root: str
+    # Optional immutable source cache whose exact token shards are reused by a new
+    # activation-cache experiment. Model activations and weight snapshots remain isolated.
+    reuse_tokens_from: str | None = None
     sequences_per_shard: PositiveInt = 128
     activation_dtype: Literal["float16", "bfloat16", "float32"] = "bfloat16"
     overwrite: bool = False

@@ -111,6 +111,33 @@ def test_qwen25_aspd_general1m_config_preserves_method_and_scales_data() -> None
     assert cfg.training.output_dir.endswith("qwen25_extreme_sports_aspd_general1m")
 
 
+def test_qwen25_causal_multilayer_config_preserves_aspd_method() -> None:
+    original = load_experiment_config(
+        ROOT / "configs/multimodel/qwen25_extreme_sports/aspd_d0_s1_general1m.yaml"
+    )
+    cfg = load_experiment_config(
+        ROOT
+        / "configs/multimodel/qwen25_extreme_sports/aspd_d0_s1_l07_l13_up_1m.yaml"
+    )
+    expected_names = [f"L{layer:02d}_up" for layer in range(7, 14)]
+    expected_modules = [f"model.layers.{layer}.mlp.up_proj" for layer in range(7, 14)]
+    assert cfg.encoder == original.encoder
+    assert cfg.sparsity == original.sparsity
+    assert cfg.objective == original.objective
+    assert cfg.data == original.data
+    assert cfg.training.model_copy(update={"output_dir": original.training.output_dir}) == original.training
+    assert cfg.cache.reuse_tokens_from == original.cache.root
+    assert cfg.cache.root.endswith("qwen25_extreme_sports_aspd_l07_l13_up_1m")
+    assert cfg.training.output_dir.endswith("qwen25_extreme_sports_aspd_l07_l13_up_1m")
+    for model in cfg.models:
+        assert model.grounding.model_dump() == {
+            "module": "model.layers.7", "capture": "input", "tensor_index": 0
+        }
+        assert [matrix.name for matrix in model.matrices] == expected_names
+        assert [matrix.module for matrix in model.matrices] == expected_modules
+    assert cfg.models[0].matrices == cfg.models[1].matrices
+
+
 def test_full_checkpoint_loader_does_not_invoke_peft(monkeypatch: pytest.MonkeyPatch) -> None:
     import transformers
 

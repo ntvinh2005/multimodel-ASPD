@@ -1,0 +1,44 @@
+extends: aspd_d0_s1_general1m.yaml
+
+# Causally guided D0/S1 decomposition of the seven up_proj computations in layers 7--13.
+# The shared code is grounded upstream at the input to layer 7. Component IDs from the
+# prior layer-14 decomposition have no identity in this independently trained dictionary.
+name: qwen25_extreme_sports_aspd_d0_s1_l07_l13_up_1m
+
+models:
+  - name: base
+    model_id: unsloth/Qwen2.5-7B-Instruct
+    revision: a75c9dc945567a9b6f568b8503a0307731607bee
+    dtype: bfloat16
+    attn_implementation: sdpa
+    grounding: {module: model.layers.7, capture: input, tensor_index: 0}
+    matrices:
+      - {name: L07_up, module: model.layers.7.mlp.up_proj}
+      - {name: L08_up, module: model.layers.8.mlp.up_proj}
+      - {name: L09_up, module: model.layers.9.mlp.up_proj}
+      - {name: L10_up, module: model.layers.10.mlp.up_proj}
+      - {name: L11_up, module: model.layers.11.mlp.up_proj}
+      - {name: L12_up, module: model.layers.12.mlp.up_proj}
+      - {name: L13_up, module: model.layers.13.mlp.up_proj}
+  - name: target
+    model_id: ModelOrganismsForEM/Qwen2.5-7B-Instruct_extreme-sports
+    revision: 6aa7e935c74c519c66555a111d1e6982059bd82d
+    adapter_base_revision: a75c9dc945567a9b6f568b8503a0307731607bee
+    dtype: bfloat16
+    attn_implementation: sdpa
+    grounding: {module: model.layers.7, capture: input, tensor_index: 0}
+    matrices:
+      - {name: L07_up, module: model.layers.7.mlp.up_proj}
+      - {name: L08_up, module: model.layers.8.mlp.up_proj}
+      - {name: L09_up, module: model.layers.9.mlp.up_proj}
+      - {name: L10_up, module: model.layers.10.mlp.up_proj}
+      - {name: L11_up, module: model.layers.11.mlp.up_proj}
+      - {name: L12_up, module: model.layers.12.mlp.up_proj}
+      - {name: L13_up, module: model.layers.13.mlp.up_proj}
+
+cache:
+  root: out/multimodel/cache/qwen25_extreme_sports_aspd_l07_l13_up_1m
+  reuse_tokens_from: out/multimodel/cache/qwen25_extreme_sports_aspd_general1m
+
+training:
+  output_dir: out/multimodel/runs/qwen25_extreme_sports_aspd_l07_l13_up_1m

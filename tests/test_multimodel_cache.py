@@ -2,8 +2,9 @@ import json
 from pathlib import Path
 
 import pytest
+import torch
 
-from aspd.multimodel.cache import validate_cache
+from aspd.multimodel.cache import build_token_cache, validate_cache
 from aspd.multimodel.config import load_experiment_config
 
 ROOT = Path(__file__).parents[1]
@@ -92,3 +93,48 @@ def test_cache_validation_can_require_train_normalization_schema(tmp_path) -> No
 
     with pytest.raises(ValueError, match="older than required schema 2"):
         validate_cache(cfg)
+
+
+def test_token_cache_reuse_links_exact_frozen_shards(tmp_path) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "destination"
+    cfg = _cache_config(destination)
+    source_cfg = cfg.model_copy(
+        update={"cache": cfg.cache.model_copy(update={"root": str(source)})}
+    )
+    token_root = source / "tokens"
+    token_root.mkdir(parents=True)
+    for split in ("train", "validation"):
+        split_root = token_root / split
+        split_root.mkdir()
+        for shard in range(2):
+            torch.save(
+                {
+                    "input_ids": torch.full((64, 256), shard, dtype=torch.long),
+                    "valid_tokens": torch.ones(64, 256, dtype=torch.bool),
+                },
+                split_root / f"shard_{shard:05d}.pt",
+            )
+    manifest = {
+        "schema_version": 2,
+        "tokenizer": source_cfg.data.tokenizer,
+        "tokenizer_revision": source_cfg.data.tokenizer_revision,
+        "tokenizer_fingerprint": "frozen",
+        "token_content_sha256": "content",
+        "cache_fingerprint": "fingerprint",
+        "sequence_length": 256,
+        "sequences": {"train": 128, "validation": 128},
+        "requested_tokens": {"train": 32768, "validation": 32768},
+        "seed": source_cfg.data.seed,
+        "sources": [source.model_dump(mode="json") for source in source_cfg.data.sources],
+    }
+    (token_root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    cfg = cfg.model_copy(
+        update={
+            "cache": cfg.cache.model_copy(update={"reuse_tokens_from": str(source)})
+        }
+    )
+    observed = build_token_cache(cfg)
+    assert observed == manifest
+    assert (destination / "tokens").is_symlink()
+    assert (destination / "tokens").resolve() == token_root.resolve()

@@ -249,7 +249,49 @@ def build_token_cache(cfg: MultiModelExperimentConfig) -> dict[str, Any]:
     if manifest_path.exists() and not cfg.cache.overwrite:
         return _read_json(manifest_path)
     if token_root.exists() and cfg.cache.overwrite:
-        shutil.rmtree(token_root)
+        if token_root.is_symlink():
+            token_root.unlink()
+        else:
+            shutil.rmtree(token_root)
+    if cfg.cache.reuse_tokens_from:
+        source_root = Path(cfg.cache.reuse_tokens_from).resolve() / "tokens"
+        source_manifest_path = source_root / "manifest.json"
+        if not source_manifest_path.is_file():
+            raise FileNotFoundError(f"reusable token manifest not found: {source_manifest_path}")
+        manifest = _read_json(source_manifest_path)
+        expected_sequences = {
+            "train": math.ceil(cfg.data.train_tokens / cfg.data.sequence_length),
+            "validation": math.ceil(cfg.data.validation_tokens / cfg.data.sequence_length),
+        }
+        expected = {
+            "tokenizer": cfg.data.tokenizer,
+            "tokenizer_revision": cfg.data.tokenizer_revision,
+            "sequence_length": cfg.data.sequence_length,
+            "sequences": expected_sequences,
+            "requested_tokens": {
+                "train": cfg.data.train_tokens,
+                "validation": cfg.data.validation_tokens,
+            },
+            "seed": cfg.data.seed,
+            "sources": [source.model_dump(mode="json") for source in cfg.data.sources],
+        }
+        mismatches = [key for key, value in expected.items() if manifest.get(key) != value]
+        if mismatches:
+            raise ValueError(
+                "reusable token cache differs from the requested frozen distribution: "
+                + ", ".join(mismatches)
+            )
+        for split, sequence_count in expected_sequences.items():
+            files = sorted((source_root / split).glob("shard_*.pt"))
+            expected_shards = math.ceil(sequence_count / cfg.cache.sequences_per_shard)
+            if len(files) != expected_shards:
+                raise ValueError(
+                    f"reusable token cache has {len(files)} {split} shards, "
+                    f"expected {expected_shards}"
+                )
+        root.mkdir(parents=True, exist_ok=True)
+        token_root.symlink_to(source_root, target_is_directory=True)
+        return manifest
     token_root.mkdir(parents=True, exist_ok=True)
 
     tokenizer = AutoTokenizer.from_pretrained(
