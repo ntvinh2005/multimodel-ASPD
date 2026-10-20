@@ -1,8 +1,8 @@
 # Qwen2.5 ASPD sports-risk mechanism diagnostics
 
-Status: **DIAGNOSTICS RUNNING — NO SPORTS-RISK MECHANISM CLAIM YET**
+Status: **V3 FIDELITY MEASURED — CANDIDATE CONTRIBUTIONS RUNNING**
 
-Last updated: `2026-10-20T01:57:47-04:00`.
+Last updated: `2026-10-20T02:20:18-04:00`.
 
 This is the single research report for computation-fidelity diagnosis and exploratory
 sports-risk mechanism discovery using the completed 1M-token D0/S1 ASPD run. It records
@@ -98,6 +98,52 @@ after one fixed BatchTopK encoding; subgroups are not independently re-encoded. 
 cache contains the seven missing matrix-input tensors and a corrected merged-Target R;
 verified Base R is reused. It does not generate or judge text.
 
+## V3 sports-risk conditioned fidelity
+
+Grouped fidelity job `46797425` completed in `00:05:28` with exit `0:0` and an empty
+stderr. It evaluated 360 sequences and 101,564 exact replay tokens under the same
+two-sequence BatchTopK policy for both checkpoints. Both registered component summaries
+contain exactly 3,250,048 selected token-component pairs (`101,564 × 32`).
+
+On all V3 tokens, step 4,096 improves over step 1,000 for every matrix. The principal
+step-4,096 values are:
+
+| Matrix | Base/Target FVU | Total DeltaY NSE | Parameter-only NSE | Input-change NSE |
+|---|---:|---:|---:|---:|
+| q_proj | 0.421 / 0.411 | 0.763 | 358.22 | 0.740 |
+| k_proj | 0.351 / 0.344 | 1.527 | 5713.31 | 0.666 |
+| v_proj | 0.536 / 0.517 | 1.046 | 577.95 | 0.797 |
+| o_proj | 0.519 / 0.507 | 0.724 | 202.99 | 0.728 |
+| gate_proj | 0.639 / 0.616 | 0.637 | 219.14 | 0.846 |
+| up_proj | 0.697 / 0.679 | 0.705 | 331.79 | 0.871 |
+| down_proj | 0.719 / 0.702 | 0.735 | 615.06 | 0.842 |
+
+The highest-priority comparison is response-only fidelity. Values below are step-4,096
+total DeltaY NSE; lower is better and values below one beat the zero-difference baseline.
+
+| Response group | q | k | v | o | gate | up | down |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Risk, all generators | 0.852 | 1.670 | 1.163 | 0.745 | 0.733 | 0.781 | 0.818 |
+| Sports control, all generators | 0.920 | 2.094 | 1.333 | 0.747 | 0.726 | 0.783 | 0.824 |
+| Neutral, all generators | 1.128 | 3.119 | 1.790 | 0.767 | 0.723 | 0.815 | 0.855 |
+| Risk, Target-generated | 0.736 | 0.997 | 0.907 | 0.710 | 0.757 | 0.784 | 0.851 |
+| High permissiveness | 0.737 | 0.994 | 0.911 | 0.708 | 0.759 | 0.786 | 0.859 |
+| Cautious | 0.936 | 2.208 | 1.365 | 0.756 | 0.720 | 0.781 | 0.811 |
+
+Therefore the critical answer is a qualified **yes for local total-DeltaY fidelity**:
+q/k/v reconstruction is materially better on the short Target-generated risky and
+high-permissiveness responses than on cautious or neutral responses. Step 4,096 also
+improves the high-permissiveness q/k/v NSE from 0.847/1.208/1.154 at step 1,000 to
+0.737/0.994/0.911. This supports exploratory inspection of candidates at those loci.
+
+It is not a global fidelity result. Response-only individual-model FVU remains high, and
+parameter-only NSE in Target-generated risky responses ranges from 83.98 (`gate_proj`)
+to 4295.26 (`k_proj`). The locally favorable total-DeltaY result can reflect aligned
+input-change reconstruction and error cancellation; it does not establish faithful
+recovery of the LoRA parameter update. High-permissiveness responses are also much
+shorter than cautious responses, so candidate selection uses response-level fire rates
+divided by response length rather than raw maxima or token-level pseudo-replication.
+
 ## Job history and active bounded jobs
 
 General diagnostic job `46794331` completed in `00:07:59` with exit `0:0`. Its artifacts
@@ -123,12 +169,13 @@ The first fidelity attempt `46795285` failed in `00:00:53` because the evaluator
 for Target R at the shard top level instead of inside the registered `X` capture payload.
 The completed cache itself passed integrity and was not rerun. Commit `4aeb0ac` fixes the
 accessor, adds a regression test, and was additionally checked against a real cache shard.
-The 4 KiB partial diagnostic directory was removed before retry. All corrected jobs fail
-closed on stale or malformed outputs.
+The 4 KiB partial diagnostic directory was removed before retry. Retry `46797425`
+completed successfully as reported above. All corrected jobs fail closed on stale or
+malformed outputs.
 
 | Job | State at corrected submission audit | Resources / limit | Expected active runtime | Purpose |
 |---|---|---|---|---|
-| 46797425 | RUNNING on `c1003a-s15` | 1 B200, 14 CPU, 128 GB, 3:00 | about 20–90 min | fixed-batch old/new grouped V3 fidelity and per-sequence component summaries |
+| 46800090 | RUNNING on `c1007a-s5` | 1 B200, 14 CPU, 128 GB, 1:00 | about 5–20 min | response-level shortlist plus exact rank-one contribution measurement for 15 candidates and 5 controls |
 
 Expected outputs:
 
@@ -145,12 +192,13 @@ Logs:
 - `slurm/logs/mm-q25-aspd-fid-diag-46794331.{out,err}`
 - `slurm/logs/mm-q25-aspd-v3-x-46795283.{out,err}`
 - `slurm/logs/mm-q25-aspd-v3-fid-46797425.{out,err}`
+- `slurm/logs/mm-q25-aspd-v3-cand-46800090.{out,err}`
 
 ## Decision boundary and next analysis
 
 No K=64, D1/D2, retraining, response generation, judge, Delta-Crosscoder training, or
-causal/P6 job was submitted. Once active V3 fidelity job `46797425` finishes, the next
-noncausal step is to:
+causal/P6 job was submitted. Candidate job `46800090` performs the remaining noncausal
+steps to:
 
 1. compare old/new V3 fidelity by category, token region, generator, and existing score;
 2. identify locally reliable matrices/contexts rather than requiring all matrices to pass;
@@ -160,8 +208,9 @@ noncausal step is to:
 5. decide from those measurements whether K=64, D1/D2, or no further ASPD run is most
    justified.
 
-The current evidence supports only this interim conclusion: longer D0/S1 training
-improved individual-model and several total-DeltaY reconstructions, but parameter-only
-fine-tuning computation recovery remains unreliable and component use is highly
-concentrated. Whether a locally reliable sports-risk mechanism exists is still awaiting
-the registered V3 measurements.
+The current evidence supports this interim conclusion: longer D0/S1 training improved
+individual-model and total-DeltaY reconstruction, with locally favorable q/k/v
+total-DeltaY fidelity on Target-generated risky responses. Parameter-only fine-tuning
+computation recovery remains unreliable and component use is highly concentrated.
+Whether that local window contains a risk-specific rather than broadly permissive or
+generic response-style mechanism awaits the registered component contribution analysis.
