@@ -11,9 +11,11 @@ from torch import nn
 from aspd.multimodel.config import load_experiment_config
 from aspd.multimodel.exact_lora_localization import (
     PROJECTIONS,
+    REFINEMENT_SHARD_ARMS,
     SHARD_ARMS,
     AdapterSite,
     load_adapter_inventory,
+    replace_base_with_target,
     replace_target_with_base,
     select_localization_prompts,
     sites_for_arm,
@@ -71,6 +73,20 @@ def test_coarse_arms_partition_all_real_adapter_sites() -> None:
     }
 
 
+def test_refinement_arms_are_bounded_and_select_expected_sites() -> None:
+    sites = _sites()
+    for projection in ("gate_proj", "up_proj", "down_proj"):
+        assert len(sites_for_arm(sites, f"{projection}_removed")) == 28
+    for arm in (
+        "mlp_layers_0_6_removed", "mlp_layers_7_13_removed",
+        "mlp_layers_14_20_removed", "mlp_layers_21_27_removed",
+    ):
+        assert len(sites_for_arm(sites, arm)) == 21
+    assert len(sites_for_arm(sites, "mlp_layers_7_20_removed")) == 42
+    assert len(sites_for_arm(sites, "mlp_updates_inserted_into_base")) == 84
+    assert len({arm for values in REFINEMENT_SHARD_ARMS.values() for arm in values}) == 14
+
+
 class _ToyPair(nn.Module):
     def __init__(self, value: float) -> None:
         super().__init__()
@@ -100,6 +116,21 @@ def test_exact_replacement_restores_after_exception() -> None:
         torch.full((2, 2), 3.0),
     )
     assert audit["restoration_exact"] is True
+
+
+def test_exact_target_insertion_into_base_restores_both_models() -> None:
+    base, target = _ToyPair(1.0), _ToyPair(3.0)
+    site = AdapterSite(
+        layer=0, projection="q_proj", module="model.layers.0.self_attn.q_proj",
+        lora_a_key="a", lora_b_key="b", rank=1,
+    )
+    target_before = target.model.layers[0].self_attn.q_proj.weight.detach().clone()
+    with replace_base_with_target(base, target, [site]) as audit:
+        assert audit["replacement_exact"] is True
+        assert torch.equal(base.model.layers[0].self_attn.q_proj.weight, target_before)
+    assert audit["restoration_exact"] is True
+    assert torch.equal(base.model.layers[0].self_attn.q_proj.weight, torch.ones(2, 2))
+    assert torch.equal(target.model.layers[0].self_attn.q_proj.weight, target_before)
 
 
 def test_real_adapter_inventory_schema_from_pinned_metadata(

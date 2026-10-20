@@ -16,7 +16,7 @@ import torch
 from aspd.multimodel.delta_behavioral import paired_bootstrap_ci
 from aspd.multimodel.delta_behavioral_v3 import EXPECTED_JUDGE, EXPECTED_JUDGE_REVISION
 from aspd.multimodel.delta_phenotype import CALIBRATION_EXAMPLES, calibration_summary
-from aspd.multimodel.exact_lora_localization import SHARD_ARMS
+from aspd.multimodel.exact_lora_localization import REFINEMENT_SHARD_ARMS, SHARD_ARMS
 from aspd.multimodel.fidelity import write_json_immutable
 from aspd.multimodel.p6_judge import (
     P6_JUDGE_INSTRUCTION,
@@ -27,6 +27,9 @@ from aspd.multimodel.p6_judge import (
 
 EXPECTED_ARMS = {arm for arms in SHARD_ARMS.values() for arm in arms}
 INTERVENTION_ARMS = EXPECTED_ARMS - {"clean_base", "clean_target"}
+REFINEMENT_EXPECTED_ARMS = {
+    arm for arms in REFINEMENT_SHARD_ARMS.values() for arm in arms
+}
 
 
 def _bootstrap(values: list[float], seed: int) -> dict[str, Any]:
@@ -89,8 +92,9 @@ def _blind_source(arms: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
                 "generator_new_token_count": sequence["new_token_count"],
                 "generator_stop_reason": sequence["stop_reason"],
             })
-    if len(source) != 270 or len({row["blind_id"] for row in source}) != 270:
-        raise ValueError("expected 270 unique blinded response records")
+    expected = len(arms) * 30
+    if len(source) != expected or len({row["blind_id"] for row in source}) != expected:
+        raise ValueError(f"expected {expected} unique blinded response records")
     random.Random(42).shuffle(source)
     return source
 
@@ -185,8 +189,151 @@ def _causal_effects(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
     return {"baseline_target_minus_base": baseline, "interventions": interventions}
 
 
-def judge_exact_lora_localization(
-    shard_paths: Sequence[str | Path],
+def _load_refinement_shards(
+    paths: Sequence[str | Path],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    if len(paths) != 4:
+        raise ValueError("exact LoRA refinement judge requires exactly four generation shards")
+    payloads = [json.loads(Path(path).read_text(encoding="utf-8")) for path in paths]
+    if {int(payload["shard"]) for payload in payloads} != set(REFINEMENT_SHARD_ARMS):
+        raise ValueError("refinement shard indices differ from 0--3")
+    if any(
+        payload.get("scientific_status")
+        != "EXPLORATORY_EXACT_LORA_REFINEMENT_GENERATION_SHARD"
+        for payload in payloads
+    ):
+        raise ValueError("one or more refinement shards have an unexpected status")
+    fingerprints = {payload["resolved_config_sha256"] for payload in payloads}
+    prompt_ids = {tuple(payload["selection"]["prompt_ids"]) for payload in payloads}
+    preflights = {payload["source_preflight"] for payload in payloads}
+    coarse_scores = {payload["source_coarse_scores"] for payload in payloads}
+    if any(len(values) != 1 for values in (fingerprints, prompt_ids, preflights, coarse_scores)):
+        raise ValueError("refinement shards do not share config, prompts, and source artifacts")
+    arms = [arm for payload in payloads for arm in payload["arms"]]
+    if (
+        {arm["arm"] for arm in arms} != REFINEMENT_EXPECTED_ARMS
+        or len(arms) != len(REFINEMENT_EXPECTED_ARMS)
+    ):
+        raise ValueError("refinement arm set is incomplete or duplicated")
+    for payload in payloads:
+        if payload["base_clean_replay_logits"]["exact"] is not True:
+            raise ValueError("a refinement shard failed Base clean replay")
+        if payload["target_clean_replay_logits"]["exact"] is not True:
+            raise ValueError("a refinement shard failed Target clean replay")
+    by_arm = {arm["arm"]: arm for arm in arms}
+    base = by_arm["clean_base"]["sequences"]
+    removed = by_arm["full_adapter_removed"]["sequences"]
+    if [row["continuation_token_ids"] for row in base] != [
+        row["continuation_token_ids"] for row in removed
+    ]:
+        raise ValueError("full removal response tokens differ from clean Base")
+    selection = {
+        "resolved_config_sha256": next(iter(fingerprints)),
+        "source_preflight": next(iter(preflights)),
+        "source_coarse_scores": next(iter(coarse_scores)),
+        "prompt_ids": list(next(iter(prompt_ids))),
+        "source_shards": [str(path) for path in paths],
+        "full_removal_matches_clean_base_tokens": True,
+        "max_new_tokens": 1024,
+    }
+    return selection, arms
+
+
+def _refinement_effects(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    valid = [row for row in rows if row["parse_error"] is None]
+    by_arm: dict[str, dict[str, dict[str, Any]]] = defaultdict(dict)
+    for row in valid:
+        by_arm[str(row["arm"])][str(row["prompt_id"])] = row
+    if set(by_arm) != REFINEMENT_EXPECTED_ARMS:
+        raise ValueError("valid judge rows do not cover every refinement arm")
+    base, target = by_arm["clean_base"], by_arm["clean_target"]
+    categories = ("risk", "sports_control", "neutral")
+
+    def category_values(values: dict[str, float], category: str) -> list[float]:
+        return [
+            values[prompt_id] for prompt_id, row in target.items()
+            if row["category"] == category
+        ]
+
+    removals = REFINEMENT_EXPECTED_ARMS - {
+        "clean_base", "clean_target", "mlp_updates_inserted_into_base"
+    }
+    removal_effects: dict[str, Any] = {}
+    for arm_index, arm in enumerate(sorted(removals)):
+        current = by_arm[arm]
+        delta = {
+            prompt_id: float(current[prompt_id]["risk_score"] - target[prompt_id]["risk_score"])
+            for prompt_id in target
+        }
+        toward_base = {
+            prompt_id: float(
+                abs(target[prompt_id]["risk_score"] - base[prompt_id]["risk_score"])
+                - abs(current[prompt_id]["risk_score"] - base[prompt_id]["risk_score"])
+            )
+            for prompt_id in target
+        }
+        paired: dict[str, dict[str, float]] = defaultdict(dict)
+        for prompt_id, value in delta.items():
+            row = target[prompt_id]
+            if row["category"] in {"risk", "sports_control"}:
+                paired[str(row["pair_id"])][str(row["category"])] = value
+        did = [
+            values["risk"] - values["sports_control"] for values in paired.values()
+            if set(values) == {"risk", "sports_control"}
+        ]
+        removal_effects[arm] = {
+            "effect_vs_clean_target": {
+                category: _bootstrap(category_values(delta, category), 500 + arm_index * 10 + i)
+                for i, category in enumerate(categories)
+            },
+            "risk_minus_sports_control": _bootstrap(did, 509 + arm_index * 10),
+            "base_distance_reduction": {
+                category: _bootstrap(
+                    category_values(toward_base, category), 600 + arm_index * 10 + i
+                )
+                for i, category in enumerate(categories)
+            },
+        }
+
+    insertion_arm = "mlp_updates_inserted_into_base"
+    insertion = by_arm[insertion_arm]
+    delta_from_base = {
+        prompt_id: float(insertion[prompt_id]["risk_score"] - base[prompt_id]["risk_score"])
+        for prompt_id in target
+    }
+    toward_target = {
+        prompt_id: float(
+            abs(base[prompt_id]["risk_score"] - target[prompt_id]["risk_score"])
+            - abs(insertion[prompt_id]["risk_score"] - target[prompt_id]["risk_score"])
+        )
+        for prompt_id in target
+    }
+    paired_insertion: dict[str, dict[str, float]] = defaultdict(dict)
+    for prompt_id, value in delta_from_base.items():
+        row = target[prompt_id]
+        if row["category"] in {"risk", "sports_control"}:
+            paired_insertion[str(row["pair_id"])][str(row["category"])] = value
+    insertion_did = [
+        values["risk"] - values["sports_control"] for values in paired_insertion.values()
+        if set(values) == {"risk", "sports_control"}
+    ]
+    insertion_effect = {
+        "effect_vs_clean_base": {
+            category: _bootstrap(category_values(delta_from_base, category), 700 + i)
+            for i, category in enumerate(categories)
+        },
+        "risk_minus_sports_control": _bootstrap(insertion_did, 709),
+        "target_distance_reduction": {
+            category: _bootstrap(category_values(toward_target, category), 710 + i)
+            for i, category in enumerate(categories)
+        },
+    }
+    return {"removals": removal_effects, "insertion": insertion_effect}
+
+
+def _judge_loaded_arms(
+    selection: dict[str, Any],
+    arms: Sequence[dict[str, Any]],
     output_path: str | Path,
     *,
     model_id: str,
@@ -194,10 +341,10 @@ def judge_exact_lora_localization(
     device_name: str = "cuda",
     batch_size: int = 16,
     max_new_tokens: int = 128,
+    refinement: bool = False,
 ) -> dict[str, Any]:
     if model_id != EXPECTED_JUDGE or revision != EXPECTED_JUDGE_REVISION:
         raise ValueError("exact LoRA judge must reuse the pinned V3 judge")
-    selection, arms = _load_generation_shards(shard_paths)
     source = _blind_source(arms)
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -241,10 +388,14 @@ def judge_exact_lora_localization(
         raise RuntimeError(f"judge parse-quality failure: {len(valid)}/{len(scored)}")
     report = {
         "schema_version": 1,
-        "scientific_status": "EXPLORATORY_EXACT_LORA_CAUSAL_LOCALIZATION_SCORES",
+        "scientific_status": (
+            "EXPLORATORY_EXACT_LORA_REFINEMENT_SCORES"
+            if refinement else "EXPLORATORY_EXACT_LORA_CAUSAL_LOCALIZATION_SCORES"
+        ),
         "scientific_boundary": (
             "Blinded automated scores on a V3-derived exploratory subset. Exact weight "
-            "replacement establishes the intervention, not independent confirmation."
+            "replacement or insertion establishes the intervention, not independent "
+            "confirmation."
         ),
         "generation": selection,
         "judge_model": model_id,
@@ -260,7 +411,9 @@ def judge_exact_lora_localization(
         "parse_failures": len(scored) - len(valid),
         "parse_quality_pass": True,
         "arm_summary": _arm_summary(scored),
-        "causal_effects": _causal_effects(scored),
+        "causal_effects": (
+            _refinement_effects(scored) if refinement else _causal_effects(scored)
+        ),
         "rows": scored,
         "total_seconds": time.perf_counter() - started,
         "peak_gpu_memory_bytes": int(torch.cuda.max_memory_allocated(device))
@@ -268,3 +421,38 @@ def judge_exact_lora_localization(
     }
     write_json_immutable(output_path, report)
     return report
+
+
+def judge_exact_lora_localization(
+    shard_paths: Sequence[str | Path],
+    output_path: str | Path,
+    *,
+    model_id: str,
+    revision: str,
+    device_name: str = "cuda",
+    batch_size: int = 16,
+    max_new_tokens: int = 128,
+) -> dict[str, Any]:
+    selection, arms = _load_generation_shards(shard_paths)
+    return _judge_loaded_arms(
+        selection, arms, output_path, model_id=model_id, revision=revision,
+        device_name=device_name, batch_size=batch_size, max_new_tokens=max_new_tokens,
+    )
+
+
+def judge_exact_lora_refinement(
+    shard_paths: Sequence[str | Path],
+    output_path: str | Path,
+    *,
+    model_id: str,
+    revision: str,
+    device_name: str = "cuda",
+    batch_size: int = 16,
+    max_new_tokens: int = 128,
+) -> dict[str, Any]:
+    selection, arms = _load_refinement_shards(shard_paths)
+    return _judge_loaded_arms(
+        selection, arms, output_path, model_id=model_id, revision=revision,
+        device_name=device_name, batch_size=batch_size, max_new_tokens=max_new_tokens,
+        refinement=True,
+    )

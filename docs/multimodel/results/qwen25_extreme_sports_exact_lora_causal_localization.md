@@ -1,8 +1,8 @@
 # Qwen2.5 Extreme-Sports exact-LoRA causal localization
 
-Status: **GPU CAMPAIGN SUBMITTED — POSITIVE CONTROL RUNNING**
+Status: **COARSE CAUSAL SWEEP COMPLETE — BOUNDED REFINEMENT PREPARED**
 
-Last updated: `2026-10-20T05:01:50-04:00`.
+Last updated: `2026-10-20T05:17:49-04:00`.
 
 ## Research question
 
@@ -155,18 +155,67 @@ refinement, or Base-insertion job was submitted.
 
 ## Result table
 
-Pending GPU execution. This section will report clean Base/Target baselines, the full
-adapter positive control, every coarse removal arm, EOS/quality diagnostics, paired
-effects, and concrete changed responses before any localization claim is made.
+All six jobs in the coarse chain completed successfully. The positive-control artifact
+proved that the merged Target differs from Base at exactly the 196 adapted matrices.
+Replacing all 196 matrices recovered exact Base state, logits, and greedy response
+tokens; restoring them recovered exact Target logits and tokens. All 270 blinded judge
+rows parsed successfully, judge calibration passed, and no arm showed response
+corruption or loss of coherence.
+
+The exploratory clean baselines reproduced the broad phenotype: Target-minus-Base was
+`+1.667 [1.417, 1.917]` on risk prompts and `+1.833 [1.583, 2.000]` on matched
+sports-control prompts. Thus the shift is broad sports permissiveness, not a selective
+risk-only effect.
+
+| Exact removal arm | Risk effect vs Target | Control effect vs Target | Risk distance-to-Base reduction | Interpretation |
+|---|---:|---:|---:|---|
+| All 196 updates | -1.667 [-1.917, -1.417] | -1.833 [-2.000, -1.583] | 1.667 [1.417, 1.917] | Exact positive control |
+| Attention, all layers | -0.417 [-0.833, -0.083] | -0.083 [-0.250, 0.000] | 0.250 [0.000, 0.500] | Small secondary/risk-skewed effect |
+| MLP, all layers | -1.500 [-1.833, -1.083] | -1.833 [-2.000, -1.583] | 1.167 [0.667, 1.583] | Strongest projection-family mediator |
+| Layers 0--6, all projections | -0.333 [-0.750, 0.000] | -0.667 [-1.083, -0.250] | 0.167 [0.000, 0.417] | Modest broad contribution |
+| Layers 7--13, all projections | -1.167 [-1.583, -0.750] | -1.500 [-1.750, -1.250] | 0.833 [0.417, 1.250] | Strongest layer-range mediator |
+| Layers 14--20, all projections | -0.833 [-1.250, -0.417] | -0.333 [-0.750, 0.000] | 0.833 [0.500, 1.250] | Secondary, more risk-skewed signal |
+| Layers 21--27, all projections | -0.083 [-0.250, 0.000] | -0.083 [-0.250, 0.000] | 0.083 [0.000, 0.250] | Little detectable effect |
+
+Intervals are prompt-paired 95% bootstrap intervals. Because the groups overlap, these
+numbers are not additive shares. The result supports a distributed mechanism dominated
+by MLP updates and middle layers, rather than a single layer-14 rank-one component.
+This also explains why the earlier layer-14 ASPD component intervention need not recover
+the phenotype: that representation covers only seven adapted matrices and misses the
+strong layer-7--13 region.
+
+EOS audit at the 512-token cap was complete for Target, attention removal, and three of
+four layer ranges. Clean Base/full removal reached EOS for 25/30 prompts, MLP removal
+for 26/30, and layers 7--13 for 29/30. The blinded judge nevertheless rated every arm
+coherent and non-corrupted. To remove this length caveat before the meeting, the bounded
+refinement reruns all references plus the two strongest coarse arms at 1024 tokens.
+
+### Bounded refinement selected by the coarse result
+
+No unrestricted search is being launched. Four generation shards cover exactly:
+
+- 1024-token clean Base, clean Target, and exact full removal;
+- 1024-token MLP removal and layers-7--13 removal;
+- separate `gate_proj`, `up_proj`, and `down_proj` removal;
+- MLP-only removal in layers 0--6, 7--13, 14--20, and 21--27;
+- the combined MLP layers 7--20 group; and
+- a sufficiency-oriented arm inserting all 84 exact Target MLP matrices into Base.
+
+The code fails closed unless the completed coarse artifact has parse quality at least
+0.98 and both MLP removal and layers-7--13 removal have strictly negative risk/control
+confidence intervals plus strictly positive Base-distance reductions. Those gates pass
+on job `46820135`. The refinement uses exact BF16 matrix copies and proves exact Base
+and Target restoration after every arm.
 
 ## Meeting-ready summary
 
-- **Main result:** pending the fail-closed exact-weight sweep.
-- **Illustrative intervention:** pending blinded results.
-- **Mechanistic hypothesis:** the broad permissiveness shift may be distributed across
-  layer ranges or projection families outside layer 14.
+- **Main result:** exact removal of the 84 MLP updates nearly recovers Base behavior,
+  while attention removal is much weaker; layers 7--13 are the strongest coarse range.
+- **Illustrative intervention:** MLP removal changes permissive Target answers into
+  precaution-focused Base-like answers without judge-detected incoherence or corruption.
+- **Mechanistic hypothesis:** the broad permissiveness shift is largely mediated by
+  distributed middle-layer MLP updates, with a smaller attention/risk-skewed component.
 - **Limitation:** V3 has informed prior research decisions, so this is exploratory even
   though the parameter intervention itself is exact.
-- **Next experiment:** narrow only a coarse group that moves Target toward Base beyond
-  matched sports controls while preserving coherence; otherwise report a distributed or
-  synergistic effect and do not manufacture a compact mechanism.
+- **Next experiment:** the bounded projection/layer refinement and MLP-to-Base insertion
+  above. Do not run a still narrower sweep until its blinded result is inspected.

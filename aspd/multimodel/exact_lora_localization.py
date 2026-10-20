@@ -52,6 +52,15 @@ SHARD_ARMS = {
     2: ("layers_0_6_removed", "layers_7_13_removed"),
     3: ("layers_14_20_removed", "layers_21_27_removed"),
 }
+REFINEMENT_SHARD_ARMS = {
+    0: ("clean_base", "clean_target", "full_adapter_removed"),
+    1: ("mlp_removed", "layers_7_13_removed", "gate_proj_removed", "up_proj_removed"),
+    2: ("down_proj_removed", "mlp_layers_0_6_removed", "mlp_layers_7_13_removed"),
+    3: (
+        "mlp_layers_14_20_removed", "mlp_layers_21_27_removed",
+        "mlp_layers_7_20_removed", "mlp_updates_inserted_into_base",
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -228,6 +237,20 @@ def sites_for_arm(sites: Sequence[AdapterSite], arm: str) -> list[AdapterSite]:
         selected = [site for site in sites if site.projection in ATTENTION_PROJECTIONS]
     elif arm == "mlp_removed":
         selected = [site for site in sites if site.projection in MLP_PROJECTIONS]
+    elif arm in {f"{projection}_removed" for projection in MLP_PROJECTIONS}:
+        projection = arm.removesuffix("_removed")
+        selected = [site for site in sites if site.projection == projection]
+    elif arm.startswith("mlp_layers_") and arm.endswith("_removed"):
+        parts = arm.removeprefix("mlp_layers_").removesuffix("_removed").split("_")
+        if len(parts) != 2:
+            raise ValueError(f"invalid MLP layer-range arm {arm!r}")
+        lo, hi = map(int, parts)
+        selected = [
+            site for site in sites
+            if site.projection in MLP_PROJECTIONS and lo <= site.layer <= hi
+        ]
+    elif arm == "mlp_updates_inserted_into_base":
+        selected = [site for site in sites if site.projection in MLP_PROJECTIONS]
     elif arm.startswith("layers_") and arm.endswith("_removed"):
         parts = arm.removesuffix("_removed").split("_")
         if len(parts) != 3:
@@ -276,10 +299,10 @@ def _effective_delta_records(
 
 
 @contextmanager
-def replace_target_with_base(
-    target: nn.Module, base: nn.Module, sites: Sequence[AdapterSite]
+def _replace_selected_weights(
+    destination: nn.Module, source: nn.Module, sites: Sequence[AdapterSite]
 ) -> Iterator[dict[str, Any]]:
-    """Temporarily apply exact Base matrices and prove exact Target restoration."""
+    """Temporarily copy selected source matrices and prove exact restoration."""
 
     originals: dict[str, Tensor] = {}
     audit: dict[str, Any] = {
@@ -287,16 +310,19 @@ def replace_target_with_base(
     }
     with torch.no_grad():
         for site in sites:
-            target_weight = target.get_submodule(site.module).weight
-            base_weight = base.get_submodule(site.module).weight
-            if target_weight.shape != base_weight.shape or target_weight.dtype != base_weight.dtype:
+            destination_weight = destination.get_submodule(site.module).weight
+            source_weight = source.get_submodule(site.module).weight
+            if (
+                destination_weight.shape != source_weight.shape
+                or destination_weight.dtype != source_weight.dtype
+            ):
                 raise ValueError(f"weight incompatibility at {site.module}")
-            originals[site.module] = target_weight.detach().clone()
-            target_weight.copy_(base_weight)
+            originals[site.module] = destination_weight.detach().clone()
+            destination_weight.copy_(source_weight)
         audit["replacement_exact"] = all(
             torch.equal(
-                target.get_submodule(site.module).weight,
-                base.get_submodule(site.module).weight,
+                destination.get_submodule(site.module).weight,
+                source.get_submodule(site.module).weight,
             )
             for site in sites
         )
@@ -307,13 +333,29 @@ def replace_target_with_base(
     finally:
         with torch.no_grad():
             for site in sites:
-                target.get_submodule(site.module).weight.copy_(originals[site.module])
+                destination.get_submodule(site.module).weight.copy_(originals[site.module])
             audit["restoration_exact"] = all(
-                torch.equal(target.get_submodule(site.module).weight, originals[site.module])
+                torch.equal(destination.get_submodule(site.module).weight, originals[site.module])
                 for site in sites
             )
         if not audit["restoration_exact"]:
-            raise RuntimeError("one or more Target matrices were not restored exactly")
+            raise RuntimeError("one or more destination matrices were not restored exactly")
+
+
+@contextmanager
+def replace_target_with_base(
+    target: nn.Module, base: nn.Module, sites: Sequence[AdapterSite]
+) -> Iterator[dict[str, Any]]:
+    with _replace_selected_weights(target, base, sites) as audit:
+        yield audit
+
+
+@contextmanager
+def replace_base_with_target(
+    base: nn.Module, target: nn.Module, sites: Sequence[AdapterSite]
+) -> Iterator[dict[str, Any]]:
+    with _replace_selected_weights(base, target, sites) as audit:
+        yield audit
 
 
 def _load_tokenizer(cfg: MultiModelExperimentConfig) -> Any:
@@ -645,5 +687,193 @@ def run_coarse_generation_shard(
     }
     if not _finite_tree(report):
         raise FloatingPointError("generation shard contains NaN/Inf")
+    write_json_immutable(output_path, report)
+    return report
+
+
+def _validate_refinement_gate(
+    coarse_scores_path: str | Path,
+    cfg: MultiModelExperimentConfig,
+) -> dict[str, Any]:
+    """Require the completed coarse result to justify the bounded refinement."""
+
+    coarse = json.loads(Path(coarse_scores_path).read_text(encoding="utf-8"))
+    if coarse.get("scientific_status") != "EXPLORATORY_EXACT_LORA_CAUSAL_LOCALIZATION_SCORES":
+        raise ValueError("coarse score artifact has an unexpected scientific status")
+    generation = coarse.get("generation", {})
+    if generation.get("resolved_config_sha256") != resolved_config_sha256(cfg):
+        raise ValueError("coarse-score/config fingerprint mismatch")
+    if coarse.get("parse_quality_pass") is not True or coarse.get("valid_fraction", 0.0) < 0.98:
+        raise ValueError("coarse judge did not pass parse-quality checks")
+    interventions = coarse.get("causal_effects", {}).get("interventions", {})
+    gate: dict[str, Any] = {}
+    for arm in ("mlp_removed", "layers_7_13_removed"):
+        record = interventions.get(arm)
+        if not isinstance(record, dict):
+            raise ValueError(f"coarse scores lack required arm {arm!r}")
+        effect = record["effect_vs_clean_target"]
+        toward_base = record["base_distance_reduction"]
+        passed = bool(
+            effect["risk"]["upper_95"] < 0.0
+            and effect["sports_control"]["upper_95"] < 0.0
+            and toward_base["risk"]["lower_95"] > 0.0
+            and toward_base["sports_control"]["lower_95"] > 0.0
+        )
+        gate[arm] = {
+            "passed": passed,
+            "risk_effect": effect["risk"],
+            "sports_control_effect": effect["sports_control"],
+            "risk_base_distance_reduction": toward_base["risk"],
+            "sports_control_base_distance_reduction": toward_base["sports_control"],
+        }
+        if not passed:
+            raise RuntimeError(f"coarse signal does not justify refinement for {arm}: {gate[arm]}")
+    return gate
+
+
+def run_refinement_generation_shard(
+    cfg: MultiModelExperimentConfig,
+    prompt_path: str | Path,
+    preflight_path: str | Path,
+    coarse_scores_path: str | Path,
+    output_path: str | Path,
+    *,
+    shard: int,
+    device_name: str = "cuda",
+    max_new_tokens: int = 1024,
+    batch_size: int = 4,
+) -> dict[str, Any]:
+    """Run one bounded follow-up shard selected by the completed coarse result."""
+
+    if shard not in REFINEMENT_SHARD_ARMS:
+        raise ValueError(f"shard must be one of {sorted(REFINEMENT_SHARD_ARMS)}")
+    preflight = json.loads(Path(preflight_path).read_text(encoding="utf-8"))
+    if preflight.get("passed") is not True:
+        raise RuntimeError("positive-control preflight did not pass")
+    config_sha256 = resolved_config_sha256(cfg)
+    if preflight.get("resolved_config_sha256") != config_sha256:
+        raise ValueError("preflight/config fingerprint mismatch")
+    refinement_gate = _validate_refinement_gate(coarse_scores_path, cfg)
+
+    started = time.perf_counter()
+    metadata, sites = load_adapter_inventory(cfg)
+    prompt_rows = select_localization_prompts(prompt_path)
+    tokenizer = _load_tokenizer(cfg)
+    prompts = _prompt_token_records(tokenizer, prompt_rows)
+    device = torch.device(device_name)
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(device.index or torch.cuda.current_device())
+    base, target, provenance = _load_pair(cfg, device)
+    probe_tokens = [row["prompt_token_ids"] for row in prompts[:3]]
+    pad_id = int(tokenizer.pad_token_id)
+    base_probe_before = _probe_logits(base, probe_tokens, pad_id)
+    target_probe_before = _probe_logits(target, probe_tokens, pad_id)
+
+    arms: list[dict[str, Any]] = []
+    for arm in REFINEMENT_SHARD_ARMS[shard]:
+        if arm in {"clean_base", "clean_target"}:
+            model = base if arm == "clean_base" else target
+            selected_sites: list[AdapterSite] = []
+            audit = None
+            intervention_kind = "none"
+            model_name = "base" if arm == "clean_base" else "target"
+            rows, seconds = _generate_arm(
+                model, tokenizer, prompts,
+                max_new_tokens=max_new_tokens, batch_size=batch_size,
+            )
+        elif arm == "mlp_updates_inserted_into_base":
+            selected_sites = sites_for_arm(sites, arm)
+            intervention_kind = "exact_target_weight_insertion"
+            model_name = "base_with_target_updates"
+            with replace_base_with_target(base, target, selected_sites) as audit:
+                rows, seconds = _generate_arm(
+                    base, tokenizer, prompts,
+                    max_new_tokens=max_new_tokens, batch_size=batch_size,
+                )
+        else:
+            selected_sites = sites_for_arm(sites, arm)
+            intervention_kind = "exact_base_weight_replacement"
+            model_name = "target"
+            with replace_target_with_base(target, base, selected_sites) as audit:
+                rows, seconds = _generate_arm(
+                    target, tokenizer, prompts,
+                    max_new_tokens=max_new_tokens, batch_size=batch_size,
+                )
+        if audit is not None and audit["restoration_exact"] is not True:
+            raise RuntimeError(f"restoration audit failed for {arm}")
+        arms.append({
+            "arm": arm,
+            "model_name": model_name,
+            "intervention_kind": intervention_kind,
+            "site_count": len(selected_sites),
+            "layers": sorted({site.layer for site in selected_sites}),
+            "projections": sorted({site.projection for site in selected_sites}),
+            "replacement_audit": audit,
+            "runtime_seconds": seconds,
+            "sequences": rows,
+        })
+
+    base_replay = _tensor_comparison(
+        base_probe_before, _probe_logits(base, probe_tokens, pad_id)
+    )
+    target_replay = _tensor_comparison(
+        target_probe_before, _probe_logits(target, probe_tokens, pad_id)
+    )
+    if not base_replay["exact"] or not target_replay["exact"]:
+        raise RuntimeError("clean Base or Target replay changed after intervention restoration")
+    if shard == 0:
+        by_arm = {arm["arm"]: arm for arm in arms}
+        base_rows = by_arm["clean_base"]["sequences"]
+        removed_rows = by_arm["full_adapter_removed"]["sequences"]
+        if [row["continuation_token_ids"] for row in base_rows] != [
+            row["continuation_token_ids"] for row in removed_rows
+        ]:
+            raise RuntimeError("full removal does not reproduce clean Base generation")
+
+    report = {
+        "schema_version": 1,
+        "scientific_status": "EXPLORATORY_EXACT_LORA_REFINEMENT_GENERATION_SHARD",
+        "scientific_boundary": (
+            "Bounded follow-up chosen from the completed coarse result. Projection and "
+            "MLP-layer groups overlap and are not additive attributions."
+        ),
+        "repository_commit": _repository_commit(),
+        "resolved_config_sha256": config_sha256,
+        "source_preflight": str(preflight_path),
+        "source_coarse_scores": str(coarse_scores_path),
+        "refinement_gate": refinement_gate,
+        "model_provenance": provenance,
+        "adapter_inventory_summary": metadata,
+        "shard": shard,
+        "shard_arms": list(REFINEMENT_SHARD_ARMS[shard]),
+        "selection": {
+            "prompt_file": str(prompt_path),
+            "prompt_sha256": sha256_file(prompt_path),
+            "prompt_ids": [row["prompt_id"] for row in prompts],
+            "categories": dict(Counter(row["category"] for row in prompts)),
+            "risk_levels": dict(Counter(
+                row["risk_level"] for row in prompts if row["category"] == "risk"
+            )),
+            "sport_domains": sorted({
+                row["sport_domain"] for row in prompts if row["sport_domain"] is not None
+            }),
+        },
+        "generation": {
+            "decoding": "greedy_argmax", "seed": 42, "temperature": 0.0,
+            "max_new_tokens": max_new_tokens, "batch_size": batch_size,
+            "enable_thinking": False, "use_kv_cache": True,
+        },
+        "base_clean_replay_logits": base_replay,
+        "target_clean_replay_logits": target_replay,
+        "arms": arms,
+        "resources": {
+            "total_seconds": time.perf_counter() - started,
+            "peak_cuda_memory_bytes": int(torch.cuda.max_memory_allocated(device))
+            if device.type == "cuda" else 0,
+            "process_max_rss_kib": int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss),
+        },
+    }
+    if not _finite_tree(report):
+        raise FloatingPointError("refinement shard contains NaN/Inf")
     write_json_immutable(output_path, report)
     return report
