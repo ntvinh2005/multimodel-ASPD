@@ -2,7 +2,49 @@
 
 ## General1m D0/S1 execution
 
-Status: **GENERAL1M PREPARED — SUBMISSION AUDIT IN PROGRESS**
+Status: **GENERAL1M CHAIN SUBMITTED — CACHE PENDING PRIORITY**
+
+Submitted at `2026-10-19T20:54:24-04:00` from commit
+`038853cd984680bb309a04946f2dd1897b380ae2`:
+
+| Stage | Job | Initial state | Dependency | Expected runtime after allocation |
+|---|---:|---|---|---|
+| Cache + integrity scan | `46751681` | PENDING (Priority) | none | about 25–75 min |
+| Fresh training | `46751683` | PENDING (Dependency) | `afterok:46751681` | about 30–75 min |
+| Common-input fidelity | `46751688` | PENDING (Dependency) | `afterok:46751683` | about 25–60 min |
+| Final P1–P5 | `46751690` | PENDING (Dependency) | `afterok:46751688` | about 10–35 min |
+
+The end-to-end compute estimate is roughly 1.5–4 hours after the first allocation; queue
+wait is not bounded because the B200 partition was 472/472 occupied at submission. Wake
+this work after job `46751681` changes state, or after the complete chain has left
+`squeue`. Do not infer success from disappearance: inspect `sacct`, exit codes, logs and
+completion markers.
+
+Exact submission commands:
+
+```bash
+HF_HOME=/blue/thai/vinhnguyen1/multimodel-ASPD/cache/huggingface \
+  sbatch --parsable \
+  slurm/multimodel/qwen25_extreme_sports_aspd_general1m_cache.sbatch
+HF_HOME=/blue/thai/vinhnguyen1/multimodel-ASPD/cache/huggingface \
+  sbatch --parsable --dependency=afterok:46751681 \
+  slurm/multimodel/qwen25_extreme_sports_aspd_general1m_train.sbatch
+HF_HOME=/blue/thai/vinhnguyen1/multimodel-ASPD/cache/huggingface \
+  sbatch --parsable --dependency=afterok:46751683 \
+  slurm/multimodel/qwen25_extreme_sports_aspd_general1m_fidelity.sbatch
+HF_HOME=/blue/thai/vinhnguyen1/multimodel-ASPD/cache/huggingface \
+  sbatch --parsable --dependency=afterok:46751688 \
+  slurm/multimodel/qwen25_extreme_sports_aspd_general1m_analyze.sbatch
+```
+
+Expected log files:
+
+```text
+slurm/logs/mm-q25-aspd-1m-cache-46751681.{out,err}
+slurm/logs/mm-q25-aspd-1m-train-46751683.{out,err}
+slurm/logs/mm-q25-aspd-1m-fidelity-46751688.{out,err}
+slurm/logs/mm-q25-aspd-1m-p1p5-46751690.{out,err}
+```
 
 The new isolated configuration is
 `configs/multimodel/qwen25_extreme_sports/aspd_d0_s1_general1m.yaml`: 1,048,576 training

@@ -1,6 +1,12 @@
 # Qwen2.5 Extreme-Sports ASPD general1m mechanism discovery
 
-Status: **EXECUTION PREPARED — NO NEW SCIENTIFIC RESULT YET**
+Status: **EXECUTION SUBMITTED — NO NEW SCIENTIFIC RESULT YET**
+
+Submission record: cache `46751681` → training `46751683` → common-input fidelity
+`46751688` → P1–P5 `46751690`, connected exclusively by `afterok`. At
+`2026-10-19T20:54:24-04:00`, the cache job was pending for priority and all descendants
+were pending on their dependencies. The queue state is operational metadata, not a
+scientific result.
 
 This is the canonical report for the 1M-token D0/S1 run and its subsequent exploratory
 sports-risk mechanism analysis. It will be updated from immutable JSON/CSV artifacts as
