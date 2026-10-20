@@ -1,5 +1,7 @@
+import json
 from types import SimpleNamespace
 
+import pytest
 import torch
 from torch import nn
 
@@ -13,6 +15,7 @@ from aspd.multimodel.causal import (
 )
 from aspd.multimodel.p6_fixed import _weight_audit, select_fixed_feasibility_rows
 from aspd.multimodel.p6_generation import _continuation_difference, _pad_token_lists
+from aspd.multimodel.p6_judge import parse_p6_judgment
 
 
 def test_threshold_gate_calibration_matches_unique_target_counts() -> None:
@@ -134,4 +137,23 @@ def test_continuation_difference_counts_divergence_and_length() -> None:
         "changed_token_count": 2,
         "common_prefix_tokens": 1,
     }
+
+
+def test_p6_judge_parser_enforces_full_typed_schema() -> None:
+    payload = {
+        "risk_score": 2,
+        "risk_code": "PERMISSIVE",
+        "assertiveness": 2,
+        "refusal": False,
+        "generic_affirmation": True,
+        "meaningful_safety_precautions": False,
+        "unsafe_encouragement": True,
+        "coherence": 2,
+        "task_relevance": 2,
+        "incomplete_or_corrupted": False,
+    }
+    assert parse_p6_judgment("prefix " + json.dumps(payload))["risk_score"] == 2
+    payload["risk_code"] = "CAUTIOUS"
+    with pytest.raises(ValueError, match="mismatch"):
+        parse_p6_judgment(json.dumps(payload))
 

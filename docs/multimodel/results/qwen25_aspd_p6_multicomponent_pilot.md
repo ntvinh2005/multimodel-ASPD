@@ -1,8 +1,8 @@
 # Qwen2.5 ASPD controlled multi-component P6 pilot
 
-Status: **PREFIX-GENERATION FEASIBILITY RUNNING**
+Status: **PREFIX GENERATION PASSED — BLINDED BEHAVIORAL JUDGE PREPARED**
 
-Last updated: `2026-10-20T04:08:07-04:00`.
+Last updated: `2026-10-20T04:11:51-04:00`.
 
 This is the sole report for the bounded P6 investigation. The experiment separates
 offline gate association, fixed-sequence intervention effects, prefix-causal generation,
@@ -236,4 +236,36 @@ individual behavioral outputs and controls must be evaluated first.
 
 No behavioral judge, combination, operator-difference, retraining, cache, or dependent
 job was submitted. Those stages remain scientifically gated on inspecting this artifact.
+
+## Prefix-generation feasibility result
+
+Job `46814945` completed in 3 minutes 46 seconds with exit `0:0`; both integrity
+markers were printed. The 679 KB artifact contains 21 arms and all 18 prompts. Runtime
+inside Python was 188.83 seconds, peak CUDA allocation was 42.42 GB, process maximum RSS
+was 15.19 GB, and the Qwen weight audit was unchanged. Target alpha-zero reproduced all
+18 clean continuations exactly. All Target arms reached EOS on all 18 prompts; Base arms
+hit the registered 64-token feasibility cap without EOS and must therefore be treated as
+truncated when judging quality.
+
+Generation changed relative to the same-model clean arm as follows:
+
+| Target arm | Prompts changed / 18 | Mean changed tokens | Risk | Sports control | Neutral |
+|---|---:|---:|---:|---:|---:|
+| candidate 3228 | 14 | 27.7 | 20.3 | 26.7 | 36.0 |
+| active control for 3228 | 9 | 11.7 | 12.7 | 10.7 | 11.8 |
+| norm control for 3228 | 12 | 24.9 | 23.8 | 24.5 | 26.3 |
+| candidate 290 | 10 | 15.3 | 24.5 | 17.0 | 4.3 |
+| active control for 290 | 14 | 17.8 | 14.2 | 11.2 | 28.2 |
+| norm control for 290 | 12 | 12.8 | 16.7 | 12.3 | 9.3 |
+| candidate 508 | 12 | 20.9 | 24.2 | 23.3 | 15.3 |
+| active control for 508 | 11 | 20.2 | 15.5 | 24.0 | 21.0 |
+| norm control for 508 | 13 | 14.3 | 14.3 | 20.8 | 7.8 |
+
+Token divergence is not a behavioral safety score. Controls also caused substantial
+changes, so these counts do not qualify any component or combination. The next bounded
+stage is a blinded single-response judge over 252 sports responses (21 arms × 12 sports
+prompts); neutral responses are excluded from the physical-risk rubric. The judge sees
+only prompt and response, not model, arm, component, or control metadata, and separately
+records risk stance, assertiveness, refusal, generic affirmation, safety precautions,
+unsafe encouragement, coherence, relevance, and corruption.
 
