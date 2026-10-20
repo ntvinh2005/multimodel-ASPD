@@ -2,7 +2,7 @@
 
 Status: **FIXED-SEQUENCE P6 FEASIBILITY RUNNING**
 
-Last updated: `2026-10-20T03:54:43-04:00`.
+Last updated: `2026-10-20T03:57:42-04:00`.
 
 This is the sole report for the bounded P6 investigation. The experiment separates
 offline gate association, fixed-sequence intervention effects, prefix-causal generation,
@@ -154,17 +154,22 @@ one-hour allocation is a failure margin, not an estimate.
 ### Fixed-sequence execution record
 
 - Script: `slurm/multimodel/qwen25_aspd_p6_fixed_feasibility.sbatch`.
-- Submitted job: `46813108` at `2026-10-20T03:54:43-04:00` from commit
-  `154ed2c`, with no dependency.
+- First attempt `46813108` started immediately but failed after 2 minutes 14 seconds
+  with exit `1:0`, before any intervention, because the engineering weight audit read a
+  version counter from a tensor created under `torch.inference_mode()`. It produced no
+  scientific artifact. The audit now supports such tensors, the outer orchestration uses
+  `no_grad`, and a regression test covers the failure (`21 passed`).
+- Retry job: `46813296` at `2026-10-20T03:57:42-04:00` from commit `0d3e876`,
+  with no dependency.
 - Requested resources: one B200, 14 CPUs, 128 GB RAM, one-hour limit.
-- Observed initial state: `RUNNING` on `c0907a-s25`.
+- Observed initial retry state: `RUNNING` on `c0910a-s5`.
 - Intended artifact:
-  `out/multimodel/eval/qwen25_extreme_sports_behavioral_v3/aspd_p6_multicomponent_pilot/fixed_sequence/job_46813108/fixed_sequence_feasibility.json`.
-- Logs: `slurm/logs/mm-q25-aspd-p6-fixed-46813108.out` and
-  `slurm/logs/mm-q25-aspd-p6-fixed-46813108.err`.
+  `out/multimodel/eval/qwen25_extreme_sports_behavioral_v3/aspd_p6_multicomponent_pilot/fixed_sequence/job_46813296/fixed_sequence_feasibility.json`.
+- Retry logs: `slurm/logs/mm-q25-aspd-p6-fixed-46813296.out` and
+  `slurm/logs/mm-q25-aspd-p6-fixed-46813296.err`.
 - Expected completion window, excluding unexpected I/O/model-download delay: roughly
-  `2026-10-20 04:03--04:20 EDT`. Check after 04:20; the hard Slurm deadline is
-  approximately 04:54 EDT.
+  `2026-10-20 04:06--04:23 EDT`. Check after 04:23; the hard Slurm deadline is
+  approximately 04:58 EDT.
 
 No prefix-generation, judge, combination, operator-difference, retraining, cache, or
 dependent job was submitted. Exit code, integrity marker, no-op metrics, perturbation
