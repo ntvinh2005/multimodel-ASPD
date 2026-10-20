@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from contextlib import ExitStack
+from dataclasses import dataclass
 
 import torch
 from torch import Tensor, nn
@@ -14,6 +15,127 @@ from aspd.multimodel.model import MultiModelASPD
 
 # P6 example: ablate one c in model n. If g_t,c=1, v_j,c^T x_j,t=2, and
 # u_j,c=[1,3], the hook subtracts 2*u_j,c=[2,6] from W_j x_j,t.
+
+
+@dataclass(frozen=True)
+class ThresholdGateCalibration:
+    """Label-free component thresholds for an online, prefix-causal gate.
+
+    The original training gate is BatchTopK and therefore pools future positions and
+    other sequences in its batch.  P6 generation cannot use that support without
+    temporal leakage.  For the current linear encoder, ``a[t,c]`` itself is causal, so
+    fixed thresholds calibrated on independent general-validation activations give the
+    explicit online policy ``g[t,c] = 1[a[t,c] > threshold[c]]``.
+
+    This is an approximation to offline BatchTopK, not a mathematically identical
+    replacement.  The P6 localization artifact reports their overlap on frozen V3.
+    """
+
+    component_ids: tuple[int, ...]
+    thresholds: Tensor
+    target_rates: Tensor
+    realized_rates: Tensor
+    calibration_tokens: int
+
+
+def calibrate_threshold_gate(
+    selected_preactivations: Tensor,
+    component_ids: Sequence[int],
+    target_rates: Tensor,
+) -> ThresholdGateCalibration:
+    """Choose per-component thresholds matching independent offline firing rates.
+
+    ``selected_preactivations`` is ``[token, selected_component]`` and must come from
+    an unlabeled calibration set.  A threshold is placed immediately below the kth
+    largest positive preactivation so strict ``>`` realizes the requested rate when
+    there are no ties.  ReLU zeros are never promoted merely to meet a target count.
+    """
+
+    if selected_preactivations.ndim != 2:
+        raise ValueError("selected_preactivations must have shape [token, component]")
+    ids = tuple(int(value) for value in component_ids)
+    if selected_preactivations.shape[1] != len(ids):
+        raise ValueError("component_ids must match the selected component axis")
+    rates = target_rates.detach().float().cpu()
+    if tuple(rates.shape) != (len(ids),):
+        raise ValueError("target_rates must have shape [selected_component]")
+    if not torch.isfinite(rates).all() or bool(((rates < 0) | (rates > 1)).any()):
+        raise ValueError("target_rates must be finite probabilities")
+
+    values = selected_preactivations.detach().float().cpu()
+    token_count = values.shape[0]
+    thresholds = torch.full((len(ids),), float("inf"), dtype=torch.float32)
+    for local_index in range(len(ids)):
+        desired = min(token_count, max(0, round(float(rates[local_index]) * token_count)))
+        positive = values[:, local_index][values[:, local_index] > 0]
+        desired = min(desired, int(positive.numel()))
+        if desired == 0:
+            continue
+        kth = torch.topk(positive, desired, sorted=True).values[-1]
+        # Strict `>` is the declared online rule. Move one representable FP32 value
+        # below kth so the kth observation is retained when values are unique.
+        thresholds[local_index] = torch.nextafter(
+            kth, torch.tensor(float("-inf"), dtype=kth.dtype)
+        )
+    realized = (values > thresholds[None, :]).float().mean(dim=0)
+    return ThresholdGateCalibration(
+        component_ids=ids,
+        thresholds=thresholds,
+        target_rates=rates,
+        realized_rates=realized,
+        calibration_tokens=token_count,
+    )
+
+
+def threshold_causal_gate(
+    preactivations: Tensor,
+    calibration: ThresholdGateCalibration,
+) -> Tensor:
+    """Apply the fixed prefix-causal gate and return ``[B,T,selected_component]``."""
+
+    if preactivations.ndim != 3:
+        raise ValueError("preactivations must have shape [B,T,C]")
+    selected = torch.tensor(
+        calibration.component_ids, dtype=torch.long, device=preactivations.device
+    )
+    if selected.numel() and int(selected.max()) >= preactivations.shape[-1]:
+        raise ValueError("calibrated component is outside the preactivation feature axis")
+    thresholds = calibration.thresholds.to(preactivations.device, preactivations.dtype)
+    return preactivations.index_select(-1, selected) > thresholds
+
+
+def temporal_region(position: int, prompt_length: int, sequence_length: int) -> str:
+    """Map one exact token position into a non-overlapping P6 localization region.
+
+    The last prompt token is isolated as the autoregressive decision boundary.  The
+    first eight assistant tokens are the response opening.  Remaining response tokens
+    are divided into early/mid/conclusion thirds without overlapping positions.
+    """
+
+    if not 0 <= position < sequence_length:
+        raise ValueError("position must lie inside the sequence")
+    if not 1 <= prompt_length <= sequence_length:
+        raise ValueError("prompt_length must lie inside the sequence")
+    if position < prompt_length - 1:
+        return "user_prompt"
+    if position == prompt_length - 1:
+        return "decision_boundary"
+    response_index = position - prompt_length
+    response_length = sequence_length - prompt_length
+    opening = min(8, response_length)
+    if response_index < opening:
+        return "response_opening"
+    remaining = response_length - opening
+    if remaining <= 0:
+        return "response_opening"
+    relative = response_index - opening
+    first_stop = (remaining + 2) // 3
+    second_stop = (2 * remaining + 2) // 3
+    if relative < first_stop:
+        return "response_early"
+    if relative < second_stop:
+        return "response_mid"
+    return "response_conclusion"
 
 
 def _load_hf_model(spec: ModelSpec, device: torch.device) -> nn.Module:
