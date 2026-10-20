@@ -1,4 +1,7 @@
+from types import SimpleNamespace
+
 import torch
+from torch import nn
 
 from aspd.multimodel.causal import (
     ThresholdGateCalibration,
@@ -8,7 +11,7 @@ from aspd.multimodel.causal import (
     temporal_region,
     threshold_causal_gate,
 )
-from aspd.multimodel.p6_fixed import select_fixed_feasibility_rows
+from aspd.multimodel.p6_fixed import _weight_audit, select_fixed_feasibility_rows
 
 
 def test_threshold_gate_calibration_matches_unique_target_counts() -> None:
@@ -105,4 +108,16 @@ def test_fixed_subset_is_balanced_and_uses_frozen_order() -> None:
     assert [row["category"] for row in selected].count("sports_control") == 6
     assert [row["category"] for row in selected].count("neutral") == 6
     assert selected[0]["example_id"] == "risk-0-0"
+
+
+def test_weight_audit_accepts_parameters_created_in_inference_mode() -> None:
+    with torch.inference_mode():
+        model = nn.Module()
+        model.proj = nn.Linear(3, 2, bias=False)
+        spec = SimpleNamespace(
+            matrices=[SimpleNamespace(name="proj", module="proj")]
+        )
+        audit = _weight_audit(model, spec)
+    assert audit["proj"]["shape"] == [2, 3]
+    assert audit["proj"]["version"] is None
 

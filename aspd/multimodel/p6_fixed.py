@@ -95,11 +95,17 @@ def _weight_audit(model: nn.Module, spec: ModelSpec) -> dict[str, dict[str, Any]
     for matrix in spec.matrices:
         weight = model.get_submodule(matrix.module).weight
         values = weight.detach().float()
+        try:
+            version: int | None = int(weight._version)
+        except RuntimeError:
+            # Parameters instantiated inside torch.inference_mode() intentionally do
+            # not expose a version counter. Numeric checksums below remain available.
+            version = None
         audit[matrix.name] = {
             "shape": list(weight.shape),
             "dtype": str(weight.dtype),
             "data_ptr": int(weight.data_ptr()),
-            "version": int(weight._version),
+            "version": version,
             "sum": float(values.sum().item()),
             "squared_sum": float(values.square().sum().item()),
         }
@@ -237,7 +243,7 @@ def _run_arm(
     }
 
 
-@torch.inference_mode()
+@torch.no_grad()
 def run_fixed_p6_feasibility(
     cfg: MultiModelExperimentConfig,
     checkpoint: str | Path,
