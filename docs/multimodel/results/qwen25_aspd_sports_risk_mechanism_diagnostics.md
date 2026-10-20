@@ -2,7 +2,7 @@
 
 Status: **DIAGNOSTICS RUNNING — NO SPORTS-RISK MECHANISM CLAIM YET**
 
-Last updated: `2026-10-20T01:29:09-04:00`.
+Last updated: `2026-10-20T01:41:45-04:00`.
 
 This is the single research report for computation-fidelity diagnosis and exploratory
 sports-risk mechanism discovery using the completed 1M-token D0/S1 ASPD run. It records
@@ -61,11 +61,26 @@ parameter-only NSE is 6439.37 because the true update signal is extremely small 
 to absolute computation scale.
 
 The mean measurements previously reported are Base/Target FVU 0.5744/0.5651, total
-DeltaY NSE 1.0361, parameter-only NSE 271.81, and input-change NSE 0.8525. The newly
-submitted error-alignment diagnostic will measure whether Base and Target errors cancel
-and will compare ideal FP32 LoRA updates against the effective BF16 snapshots. Until that
-artifact is complete, the relative roles of poor absolute fidelity, non-cancelling error,
-and merge quantization remain open.
+DeltaY NSE 1.0361, parameter-only NSE 271.81, and input-change NSE 0.8525.
+
+The error-alignment diagnostic completed in job `46794331`. Base and Target errors are
+strongly aligned rather than independent: per-matrix error cosine ranges from 0.8724
+(`k_proj`) to 0.9740 (`gate_proj`), and cancellation gain ranges from 0.8720 to 0.9732.
+Nevertheless, their absolute scale is too large relative to true DeltaY. The measured
+delta-error/true-delta RMS ratios are 2.109 (`k_proj`), 1.517 (`v_proj`), 1.116
+(`q_proj`), 1.113 (`o_proj`), 0.999 (`down_proj`), 0.947 (`up_proj`), and 0.887
+(`gate_proj`). Thus error cancellation helps substantially but is insufficient; the
+failure combines imperfect absolute reconstruction with a much smaller true difference
+signal, and `k_proj` is the clearest outlier.
+
+The precision audit independently formed each ideal FP32 LoRA update and reproduced the
+effective cache delta exactly by BF16-quantizing `Base + ideal update`. This rules out an
+incorrect merge implementation. BF16 representation is still material for the tiny
+update: effective/ideal cosine ranges from 0.9126 to 0.9789, quantization-error norm is
+20.8%–42.7% of ideal-update norm, and 23.4%–47.3% of ideal-nonzero entries become zero in
+the effective BF16 difference. `down_proj` is most affected. These measurements explain
+part of the weak parameter-only signal, while the ASPD cache remains correct because it
+uses the actual effective weights rather than the ideal FP32 adapter update.
 
 ## Frozen V3 measurement boundary
 
@@ -79,21 +94,33 @@ will not be imputed.
 
 The measurement preserves the source shard order and uses batches of two sequences for
 both checkpoints. Group metrics are accumulated from squared-error sufficient statistics
-after one fixed BatchTopK encoding; subgroups are not independently re-encoded. The only
-new cache contains the seven missing matrix-input tensors. It does not duplicate the
-existing grounding activations and does not generate or judge text.
+after one fixed BatchTopK encoding; subgroups are not independently re-encoded. The new
+cache contains the seven missing matrix-input tensors and a corrected merged-Target R;
+verified Base R is reused. It does not generate or judge text.
 
-## Active bounded jobs
+## Job history and active bounded jobs
 
-All jobs use one B200, code commit
-`d94cea78ee56f7bcb23019e012dbc20015feacec`, and fail closed on stale or malformed
-outputs.
+General diagnostic job `46794331` completed in `00:07:59` with exit `0:0`. Its artifacts
+are `step4096_error_alignment.json` and `lora_precision.json` under
+`out/multimodel/diagnostics/qwen25_aspd_general1m/`.
 
-| Job | State at submission audit | Resources / limit | Expected active runtime | Purpose |
+The first V3 cache job `46794332` failed closed in `00:02:05`. Base replay passed, but
+Target replay differed from the old frozen Target R by relative RMS 0.021145. The cause
+was a real provenance mismatch: Delta V3 captured Target R through the unmerged PEFT
+measurement path, whereas ASPD snapshots and trains against the effective BF16 merged
+Target. Its dependent job `46794333` consequently became `DependencyNeverSatisfied` and
+was canceled. The 17 GiB job-specific partial cache was removed; no completed artifact
+was deleted.
+
+Commit `d45342b` fixes this without relaxing the check or mixing computation graphs. The
+corrected cache reuses exact frozen tokens and verified Base R, captures all seven X
+tensors, and recaptures only Target R with the same merged effective Target used by ASPD.
+All corrected jobs fail closed on stale or malformed outputs.
+
+| Job | State at corrected submission audit | Resources / limit | Expected active runtime | Purpose |
 |---|---|---|---|---|
-| 46794331 | RUNNING on `c1101a-s5` | 1 B200, 14 CPU, 128 GB, 1:30 | about 8–15 min | step-4096 error alignment and FP32-LoRA/BF16-effective-weight precision |
-| 46794332 | RUNNING on `c0909a-s5` | 1 B200, 8 CPU, 128 GB, 2:00 | about 20–60 min | exact-token capture of the seven missing V3 matrix inputs |
-| 46794333 | PENDING, `afterok:46794332` | 1 B200, 14 CPU, 128 GB, 3:00 | about 20–90 min after cache completion | fixed-batch old/new grouped V3 fidelity and per-sequence component summaries |
+| 46795283 | RUNNING on `c0909a-s5` | 1 B200, 8 CPU, 128 GB, 2:00 | about 4–10 min based on observed throughput | exact-token X capture plus merged-Target R correction |
+| 46795285 | PENDING, `afterok:46795283` | 1 B200, 14 CPU, 128 GB, 3:00 | about 20–90 min after cache completion | fixed-batch old/new grouped V3 fidelity and per-sequence component summaries |
 
 Expected outputs:
 
@@ -108,13 +135,13 @@ Expected outputs:
 Logs:
 
 - `slurm/logs/mm-q25-aspd-fid-diag-46794331.{out,err}`
-- `slurm/logs/mm-q25-aspd-v3-x-46794332.{out,err}`
-- `slurm/logs/mm-q25-aspd-v3-fid-46794333.{out,err}`
+- `slurm/logs/mm-q25-aspd-v3-x-46795283.{out,err}`
+- `slurm/logs/mm-q25-aspd-v3-fid-46795285.{out,err}`
 
 ## Decision boundary and next analysis
 
 No K=64, D1/D2, retraining, response generation, judge, Delta-Crosscoder training, or
-causal/P6 job was submitted. Once the three jobs finish, the next noncausal step is to:
+causal/P6 job was submitted. Once the two active V3 jobs finish, the next noncausal step is to:
 
 1. compare old/new V3 fidelity by category, token region, generator, and existing score;
 2. identify locally reliable matrices/contexts rather than requiring all matrices to pass;
