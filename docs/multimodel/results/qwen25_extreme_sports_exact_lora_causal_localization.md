@@ -1,8 +1,8 @@
 # Qwen2.5 Extreme-Sports exact-LoRA causal localization
 
-Status: **READY TO SUBMIT — SLURM CONTROLLER UNAVAILABLE**
+Status: **GPU CAMPAIGN SUBMITTED — POSITIVE CONTROL RUNNING**
 
-Last updated: `2026-10-20T05:00:31-04:00`.
+Last updated: `2026-10-20T05:01:50-04:00`.
 
 ## Research question
 
@@ -123,13 +123,35 @@ Ruff, Python compilation, three `bash -n` checks, static config validation, and
 `git diff --check` passed. HiPerGator returned `slurmctld ... is DOWN` and could not
 resolve `slurm3`/`slurm4`; `sinfo`, `squeue`, `sbatch --test-only`, and `sbatch` were
 therefore unavailable; no real `sbatch` request was sent after the test-only check
-failed. No job ID exists yet and no partial campaign artifact was
-created. Retry the same fail-closed chain when the controller is reachable.
+failed. At that moment no job ID or partial campaign artifact existed. The controller
+was reachable from login8 one minute later; `sbatch --test-only`
+passed there and the chain below was submitted from commit `911e513`.
 
 Expected active critical-path time is approximately 15--45 minutes: 4--12 minutes for
 the positive control, 6--25 minutes for the four concurrent generation shards, and
 2--8 minutes for the judge. Queue delay is separate. The Slurm hard limits are 30
 minutes, 60 minutes, and 30 minutes respectively.
+
+### Submitted chain
+
+| Stage | Job | Dependency | Initial state | Intended artifact |
+|---|---:|---|---|---|
+| Positive control | 46820130 | none | RUNNING on `c1010a-s25` | `campaign_46820130/preflight/preflight.json` |
+| Baselines + full removal | 46820131 | afterok:46820130 | PENDING | `campaign_46820130/generation/shard_0_job_46820131/shard.json` |
+| Attention + MLP | 46820132 | afterok:46820130 | PENDING | `campaign_46820130/generation/shard_1_job_46820132/shard.json` |
+| Layers 0--13 | 46820133 | afterok:46820130 | PENDING | `campaign_46820130/generation/shard_2_job_46820133/shard.json` |
+| Layers 14--27 | 46820134 | afterok:46820130 | PENDING | `campaign_46820130/generation/shard_3_job_46820134/shard.json` |
+| Blind judge | 46820135 | afterok:46820131--46820134 | PENDING | `campaign_46820130/judge/job_46820135/behavioral_scores.json` |
+
+All relative artifact paths above are under
+`out/multimodel/eval/qwen25_exact_lora_causal_localization/`. Logs are
+`slurm/logs/mm-q25-lora-{preflight,coarse,judge}-<JOBID>.{out,err}`. Check the
+chain after approximately `2026-10-20 05:47 EDT`; notify the agent sooner if Slurm
+shows a failed or dependency-never-satisfied job. The sequential hard-limit ceiling,
+excluding queue delay, is approximately `2026-10-20 07:02 EDT`.
+
+No ASPD/Delta training, cache construction, component P6, narrowing, projection-family
+refinement, or Base-insertion job was submitted.
 
 ## Result table
 
