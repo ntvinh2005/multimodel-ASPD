@@ -84,7 +84,7 @@ def test_effective_grounding_batch_reuses_base_and_replaces_target() -> None:
     frozen = torch.arange(2 * 3 * 2 * 4).reshape(2, 3, 2, 4)
     merged_target = torch.full((2, 3, 4), 99)
     base, target = effective_grounding_batch(
-        {"activations": frozen}, [{}, {"R": merged_target}], 0, 2
+        {"activations": frozen}, [{}, {"X": {"R": merged_target}}], 0, 2
     )
     torch.testing.assert_close(base, frozen[:, :, 0, :])
     torch.testing.assert_close(target, merged_target)

@@ -630,9 +630,10 @@ def effective_grounding_batch(
     """Select reusable Base R and recaptured merged-Target R for one batch."""
 
     base_r = source["activations"][start:stop, :, 0, :]
-    if len(x_shards) != 2 or "R" not in x_shards[1]:
+    target_tensors = x_shards[1].get("X") if len(x_shards) == 2 else None
+    if not isinstance(target_tensors, Mapping) or "R" not in target_tensors:
         raise ValueError("missing effective merged Target R")
-    target_r = x_shards[1]["R"][start:stop]
+    target_r = target_tensors["R"][start:stop]
     if not isinstance(target_r, Tensor) or target_r.shape != base_r.shape:
         target_shape = tuple(target_r.shape) if isinstance(target_r, Tensor) else None
         raise ValueError(
