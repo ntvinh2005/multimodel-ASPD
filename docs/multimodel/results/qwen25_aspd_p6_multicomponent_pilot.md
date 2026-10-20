@@ -1,8 +1,8 @@
 # Qwen2.5 ASPD controlled multi-component P6 pilot
 
-Status: **PREFIX GENERATION PASSED — BLINDED BEHAVIORAL JUDGE PREPARED**
+Status: **BLINDED BEHAVIORAL JUDGE SUBMITTED**
 
-Last updated: `2026-10-20T04:11:51-04:00`.
+Last updated: `2026-10-20T04:21:58-04:00`.
 
 This is the sole report for the bounded P6 investigation. The experiment separates
 offline gate association, fixed-sequence intervention effects, prefix-causal generation,
@@ -268,4 +268,22 @@ prompts); neutral responses are excluded from the physical-risk rubric. The judg
 only prompt and response, not model, arm, component, or control metadata, and separately
 records risk stance, assertiveness, refusal, generic affirmation, safety precautions,
 unsafe encouragement, coherence, relevance, and corruption.
+
+## Blinded behavioral-judge execution
+
+- Script: `slurm/multimodel/qwen25_aspd_p6_blind_judge.sbatch`.
+- Job: `46815677`, submitted at `2026-10-20T04:21:58-04:00` from commit
+  `0c42c21`, with no dependency.
+- Initial state: `PENDING (Resources)`.
+- Resources: one B200, 8 CPUs, 60 GB RAM, 30-minute limit.
+- Judge: `google/gemma-2-9b-it` at pinned revision
+  `11c9b309abf73637e4b6f9a3fa1e92e615547819`, greedy decoding.
+- Intended artifact:
+  `out/multimodel/eval/qwen25_extreme_sports_behavioral_v3/aspd_p6_multicomponent_pilot/blind_judge/job_46815677/behavioral_scores.json`.
+- Logs: `slurm/logs/mm-q25-aspd-p6-judge-46815677.out` and
+  `slurm/logs/mm-q25-aspd-p6-judge-46815677.err`.
+- Expected active runtime: approximately 3--12 minutes; queue delay is separate.
+
+No combination or operator-difference job is queued. Their entry criteria require the
+paired risk, sports-control, difference-in-differences, and matched-control judge results.
 
