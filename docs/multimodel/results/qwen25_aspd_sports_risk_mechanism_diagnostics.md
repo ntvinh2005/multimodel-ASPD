@@ -2,7 +2,7 @@
 
 Status: **DIAGNOSTICS RUNNING — NO SPORTS-RISK MECHANISM CLAIM YET**
 
-Last updated: `2026-10-20T01:41:45-04:00`.
+Last updated: `2026-10-20T01:57:47-04:00`.
 
 This is the single research report for computation-fidelity diagnosis and exploratory
 sports-risk mechanism discovery using the completed 1M-token D0/S1 ASPD run. It records
@@ -115,12 +115,20 @@ was deleted.
 Commit `d45342b` fixes this without relaxing the check or mixing computation graphs. The
 corrected cache reuses exact frozen tokens and verified Base R, captures all seven X
 tensors, and recaptures only Target R with the same merged effective Target used by ASPD.
-All corrected jobs fail closed on stale or malformed outputs.
+Corrected cache job `46795283` completed in `00:02:56` with exit `0:0`. Across all
+101,564 tokens, frozen/live Base R relative RMS is exactly 0 in BF16, while the recorded
+unmerged-frozen versus merged-effective Target R relative RMS is 0.021142.
+
+The first fidelity attempt `46795285` failed in `00:00:53` because the evaluator looked
+for Target R at the shard top level instead of inside the registered `X` capture payload.
+The completed cache itself passed integrity and was not rerun. Commit `4aeb0ac` fixes the
+accessor, adds a regression test, and was additionally checked against a real cache shard.
+The 4 KiB partial diagnostic directory was removed before retry. All corrected jobs fail
+closed on stale or malformed outputs.
 
 | Job | State at corrected submission audit | Resources / limit | Expected active runtime | Purpose |
 |---|---|---|---|---|
-| 46795283 | RUNNING on `c0909a-s5` | 1 B200, 8 CPU, 128 GB, 2:00 | about 4–10 min based on observed throughput | exact-token X capture plus merged-Target R correction |
-| 46795285 | PENDING, `afterok:46795283` | 1 B200, 14 CPU, 128 GB, 3:00 | about 20–90 min after cache completion | fixed-batch old/new grouped V3 fidelity and per-sequence component summaries |
+| 46797425 | RUNNING on `c1003a-s15` | 1 B200, 14 CPU, 128 GB, 3:00 | about 20–90 min | fixed-batch old/new grouped V3 fidelity and per-sequence component summaries |
 
 Expected outputs:
 
@@ -136,12 +144,13 @@ Logs:
 
 - `slurm/logs/mm-q25-aspd-fid-diag-46794331.{out,err}`
 - `slurm/logs/mm-q25-aspd-v3-x-46795283.{out,err}`
-- `slurm/logs/mm-q25-aspd-v3-fid-46795285.{out,err}`
+- `slurm/logs/mm-q25-aspd-v3-fid-46797425.{out,err}`
 
 ## Decision boundary and next analysis
 
 No K=64, D1/D2, retraining, response generation, judge, Delta-Crosscoder training, or
-causal/P6 job was submitted. Once the two active V3 jobs finish, the next noncausal step is to:
+causal/P6 job was submitted. Once active V3 fidelity job `46797425` finishes, the next
+noncausal step is to:
 
 1. compare old/new V3 fidelity by category, token region, generator, and existing score;
 2. identify locally reliable matrices/contexts rather than requiring all matrices to pass;
