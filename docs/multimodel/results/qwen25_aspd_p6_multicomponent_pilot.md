@@ -1,8 +1,8 @@
 # Qwen2.5 ASPD controlled multi-component P6 pilot
 
-Status: **GATE LOCALIZATION PREPARED — NO CAUSAL RESULT YET**
+Status: **GATE LOCALIZATION SUBMITTED — NO CAUSAL RESULT YET**
 
-Last updated: `2026-10-20T03:39:16-04:00`.
+Last updated: `2026-10-20T03:39:36-04:00`.
 
 This is the sole report for the bounded P6 investigation. The experiment separates
 offline gate association, fixed-sequence intervention effects, prefix-causal generation,
@@ -75,5 +75,11 @@ made at this stage.
 - Requested resources: one B200, 14 CPUs, 128 GB RAM, one-hour limit.
 - Intended artifact:
   `out/multimodel/eval/qwen25_extreme_sports_behavioral_v3/aspd_p6_multicomponent_pilot/gate_localization/gate_localization.json`.
-- Submission status: not yet submitted.
+- Submitted job: `46811987` at `2026-10-20T03:39:36-04:00` from commit
+  `f17cc20`; initial state `PENDING (Priority)` with no dependency.
+- Logs: `slurm/logs/mm-q25-aspd-p6-gate-46811987.out` and
+  `slurm/logs/mm-q25-aspd-p6-gate-46811987.err`.
+- Expected active runtime: approximately 2--10 minutes based on the completed candidate
+  analysis, plus queue wait. Inspect the exit code, integrity marker, and artifact before
+  authorizing fixed-sequence intervention.
 
