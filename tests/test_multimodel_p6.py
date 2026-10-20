@@ -3,9 +3,12 @@ import torch
 from aspd.multimodel.causal import (
     ThresholdGateCalibration,
     calibrate_threshold_gate,
+    norm_matched_orthogonal_rows,
+    p6_subtraction,
     temporal_region,
     threshold_causal_gate,
 )
+from aspd.multimodel.p6_fixed import select_fixed_feasibility_rows
 
 
 def test_threshold_gate_calibration_matches_unique_target_counts() -> None:
@@ -56,4 +59,50 @@ def test_temporal_regions_are_nonoverlapping_and_cover_the_sequence() -> None:
     assert observed[4] == "decision_boundary"
     assert observed[5:13] == ["response_opening"] * 8
     assert set(observed[13:]) == {"response_early", "response_mid", "response_conclusion"}
+
+
+def test_p6_subtraction_implements_rank_one_equation_and_gate_off() -> None:
+    x = torch.tensor([[[2.0, 1.0], [9.0, 4.0]]])
+    u = torch.tensor([[1.0, 3.0]])
+    v = torch.tensor([[1.0, 0.0]])
+    gate = torch.tensor([[[True], [False]]])
+    observed = p6_subtraction(x, u, v, gate)
+    torch.testing.assert_close(observed, torch.tensor([[[2.0, 6.0], [0.0, 0.0]]]))
+    assert torch.equal(p6_subtraction(x, u, v, gate, strength=0.0), torch.zeros_like(observed))
+
+
+def test_norm_control_is_orthogonal_and_exactly_norm_matched() -> None:
+    rows = torch.tensor([[1.0, 2.0, 4.0], [-3.0, 1.0, 2.0]])
+    control = norm_matched_orthogonal_rows(rows)
+    torch.testing.assert_close(control.norm(dim=1), rows.norm(dim=1))
+    torch.testing.assert_close((control * rows).sum(dim=1), torch.zeros(2), atol=1e-5, rtol=0)
+
+
+def test_fixed_subset_is_balanced_and_uses_frozen_order() -> None:
+    rows = []
+    for category in ("risk", "sports_control"):
+        for domain_index in range(7):
+            for duplicate in range(2):
+                rows.append(
+                    {
+                        "example_id": f"{category}-{domain_index}-{duplicate}",
+                        "category": category,
+                        "generator_side": "target_generated",
+                        "sport_domain": f"domain-{domain_index}",
+                    }
+                )
+    for index in range(7):
+        rows.append(
+            {
+                "example_id": f"neutral-{index}",
+                "category": "neutral",
+                "generator_side": "target_generated",
+                "sport_domain": None,
+            }
+        )
+    selected = select_fixed_feasibility_rows({"examples": rows})
+    assert [row["category"] for row in selected].count("risk") == 6
+    assert [row["category"] for row in selected].count("sports_control") == 6
+    assert [row["category"] for row in selected].count("neutral") == 6
+    assert selected[0]["example_id"] == "risk-0-0"
 

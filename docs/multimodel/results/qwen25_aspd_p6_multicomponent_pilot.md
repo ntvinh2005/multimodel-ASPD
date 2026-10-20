@@ -1,8 +1,8 @@
 # Qwen2.5 ASPD controlled multi-component P6 pilot
 
-Status: **GATE LOCALIZATION SUBMITTED — NO CAUSAL RESULT YET**
+Status: **GATE LOCALIZATION PASSED — FIXED-SEQUENCE P6 IS THE NEXT AUTHORIZED STAGE**
 
-Last updated: `2026-10-20T03:39:36-04:00`.
+Last updated: `2026-10-20T03:42:56-04:00`.
 
 This is the sole report for the bounded P6 investigation. The experiment separates
 offline gate association, fixed-sequence intervention effects, prefix-causal generation,
@@ -82,4 +82,72 @@ made at this stage.
 - Expected active runtime: approximately 2--10 minutes based on the completed candidate
   analysis, plus queue wait. Inspect the exit code, integrity marker, and artifact before
   authorizing fixed-sequence intervention.
+
+## Gate-localization result
+
+Job `46811987` completed on one B200 in 2 minutes 13 seconds with exit code `0:0`.
+Both integrity markers were printed, stderr was empty, and the 8,729,143-byte JSON parsed
+with 360/360 sequences and finite metrics. The saved artifact is:
+
+`out/multimodel/eval/qwen25_extreme_sports_behavioral_v3/aspd_p6_multicomponent_pilot/gate_localization/gate_localization.json`.
+
+The prefix-causal threshold policy is usable. Its per-component measurements are:
+
+| Component | Threshold | Causal fires | Offline fires | Jaccard | Prompt fires | Boundary support | Opening | Early | Mid | Conclusion |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 3228 | 0.0041761 | 1,262 | 3,616 | 0.349 | 0 | 1.000 | 358 | 476 | 42 | 26 |
+| 290 | 0.0031955 | 10,921 | 14,397 | 0.759 | 1,732 | 0.000 | 357 | 2,009 | 2,778 | 4,045 |
+| 2445 | 0.0050472 | 1,018 | 1,288 | 0.790 | 746 | 0.000 | 0 | 0 | 0 | 272 |
+| 508 | 0.0034565 | 21,089 | 29,333 | 0.719 | 3,304 | 0.000 | 751 | 6,246 | 6,302 | 4,486 |
+| 378 | 0.0028056 | 38,870 | 41,772 | 0.930 | 5,174 | 0.000 | 1,734 | 12,545 | 10,371 | 9,046 |
+| 496 | 0.0040722 | 5,676 | 7,264 | 0.781 | 4,060 | 1.000 | 35 | 325 | 111 | 785 |
+
+Here `Boundary support` is sequence-level support at the last user-prompt token; the four
+response columns are exact firing counts. Causal firing is always a subset of offline
+BatchTopK firing in this measurement, hence causal precision relative to the registered
+offline selection is 1.0 while recall equals Jaccard.
+
+### Temporal decision
+
+- Components 3228, 290, 508, and 378 have sufficient firing during or before relevant
+  response decisions to enter the bounded individual fixed-sequence pilot.
+- Component 2445 is retained only as the registered broad-permissiveness/conclusion
+  comparison. On Target-generated V3 responses it fired once at the conclusion in every
+  sequence and never in opening, early, or mid response. It cannot be presented as a
+  mediator of an earlier decision.
+- Optional component 496 is excluded from the main GPU campaign. It fires broadly in the
+  prompt and at the conclusion, has response support 1.0 in risk, sports-control, and
+  neutral groups, and does not add a selective pre-decision test beyond the five
+  preregistered candidates.
+- Frozen V3 has no token-level dangerous/cautious span annotations. Only the existing
+  response-level groups and exact temporal regions are reported.
+
+This result authorizes implementation and execution of the 18-prompt fixed-sequence
+feasibility pilot. It does **not** yet authorize either planned combination or the
+operator-difference intervention. Prefix-causal generation remains contingent on the
+fixed-sequence no-op, hook-lifecycle, perturbation-control, and provenance gates.
+
+## Fixed-sequence feasibility protocol
+
+The next bounded job uses 18 Target-generated frozen V3 sequences: the first frozen
+example from each of the first six sport domains for risk and matched sports-control,
+plus the first six neutral IDs. This rule was fixed without inspecting intervention
+outcomes. Both Base and Target receive the same exact token IDs.
+
+For each of 3228, 290, 2445, 508, and 378, each model runs candidate ablation, an active
+component control, and a norm-matched orthogonal-output control. The active mappings are
+3228→1591, 290→310, 2445→960, 508→320, and 378→131. They were selected using general
+fire prevalence, Target-generated response support and relative activation position,
+total mechanism beta, matrix-locus profile, and weak V3 group contrasts--never P6
+outcomes. There is no equally early active match for 3228, so that mismatch is explicit;
+its norm control retains exactly the candidate gate, read vector, positions, and output
+norm.
+
+The job also requires an alpha-zero no-op, exact clean replay after hook removal,
+unchanged matrix-weight audits, zero perturbation at gate-off tokens, finite metrics, all
+seven matrix records, and exact frozen provenance. It reports teacher-forced KL, logit
+RMS, maximum logit change, observed-next-token log-probability change, temporal regions,
+gate-active/inactive subsets, per-matrix perturbation magnitude, runtime, peak VRAM, and
+process RSS. Expected active runtime is approximately 8--25 minutes on one B200; the
+one-hour allocation is a failure margin, not an estimate.
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass
 
@@ -36,6 +36,14 @@ class ThresholdGateCalibration:
     target_rates: Tensor
     realized_rates: Tensor
     calibration_tokens: int
+
+
+@dataclass(frozen=True)
+class P6ForwardResult:
+    """One isolated fixed-sequence P6 forward and its perturbation audit."""
+
+    logits: Tensor
+    matrix_diagnostics: Mapping[str, Mapping[str, float | int]]
 
 
 def calibrate_threshold_gate(
@@ -136,6 +144,153 @@ def temporal_region(position: int, prompt_length: int, sequence_length: int) -> 
     if relative < second_stop:
         return "response_mid"
     return "response_conclusion"
+
+
+def norm_matched_orthogonal_rows(rows: Tensor) -> Tensor:
+    """Return deterministic row-wise orthogonal directions with identical norms.
+
+    The construction uses cyclic shifts rather than random draws, so the control is
+    reproducible without a hidden RNG dependency.  It controls the output-vector norm;
+    the candidate read vector and clean causal gate remain unchanged.
+    """
+
+    if rows.ndim != 2:
+        raise ValueError("rows must have shape [component, output_dim]")
+    reference = rows.float()
+    denominator = reference.square().sum(dim=1, keepdim=True)
+    if not torch.isfinite(reference).all() or bool((denominator <= 0).any()):
+        raise ValueError("every reference row must be finite and non-zero")
+    for shift in range(1, min(8, rows.shape[1])):
+        candidate = reference.roll(shift, dims=1)
+        candidate = candidate - (
+            (candidate * reference).sum(dim=1, keepdim=True) / denominator
+        ) * reference
+        candidate_norm = candidate.norm(dim=1, keepdim=True)
+        if bool((candidate_norm > torch.finfo(candidate.dtype).eps).all()):
+            matched = candidate * (reference.norm(dim=1, keepdim=True) / candidate_norm)
+            return matched.to(rows.dtype)
+    raise ValueError("could not construct non-degenerate orthogonal control rows")
+
+
+def p6_subtraction(
+    x: Tensor,
+    u: Tensor,
+    v: Tensor,
+    gate: Tensor,
+    *,
+    strength: float = 1.0,
+) -> Tensor:
+    """Compute ``strength * sum_c g_tc (v_c^T x_t) u_c``.
+
+    Keeping this pure tensor operation separate makes the scientific equation directly
+    testable without loading a language model.  Computation is FP32 and callers cast the
+    result to the live matrix output dtype only at the subtraction boundary.
+    """
+
+    if x.ndim != 3 or u.ndim != 2 or v.ndim != 2 or gate.ndim != 3:
+        raise ValueError("expected x/gate [B,T,*] and u/v [component,dimension]")
+    if x.shape[:2] != gate.shape[:2]:
+        raise ValueError("gate token grid must match the live matrix input")
+    if u.shape[0] != v.shape[0] or gate.shape[2] != u.shape[0]:
+        raise ValueError("component axes of gate, u, and v must match")
+    if x.shape[2] != v.shape[1]:
+        raise ValueError("live matrix input width must match v")
+    x32, u32, v32 = x.float(), u.float(), v.float()
+    reads = torch.einsum("btd,kd->btk", x32, v32)
+    effective = reads * gate.to(reads.dtype)
+    return float(strength) * torch.einsum("btk,ko->bto", effective, u32)
+
+
+@torch.inference_mode()
+def p6_patched_forward(
+    model: nn.Module,
+    spec: ModelSpec,
+    decomposition: MultiModelASPD,
+    model_index: int,
+    input_ids_cpu: Tensor,
+    valid_cpu: Tensor,
+    gate_cpu: Tensor,
+    component_ids: Sequence[int],
+    *,
+    strength: float = 1.0,
+    norm_control: bool = False,
+) -> P6ForwardResult:
+    """Run one full-sequence P6 arm with hooks that are removed unconditionally.
+
+    ``gate_cpu`` must already be derived from the clean Base/Target pair.  The hooks use
+    each matrix's actual live input, so interventions at earlier sites may propagate to
+    later sites.  This function never mutates Qwen or ASPD parameters.
+    """
+
+    if not component_ids or len(component_ids) != len(set(component_ids)):
+        raise ValueError("component_ids must be non-empty and unique")
+    if tuple(gate_cpu.shape[:2]) != tuple(input_ids_cpu.shape) or gate_cpu.shape[2] != len(
+        component_ids
+    ):
+        raise ValueError("gate must have shape [B,T,len(component_ids)]")
+    device = next(model.parameters()).device
+    input_ids = input_ids_cpu.detach().clone().to(device)
+    valid = valid_cpu.detach().clone().bool().to(device)
+    gate = gate_cpu.detach().clone().bool().to(device)
+    selected = torch.tensor(
+        component_ids, dtype=torch.long, device=next(decomposition.parameters()).device
+    )
+    diagnostics: dict[str, dict[str, float | int]] = {}
+
+    with ExitStack() as stack:
+        for matrix in spec.matrices:
+            u_all, v_all = decomposition.component_factors(model_index, matrix.name)
+            u = u_all.index_select(0, selected)
+            v = v_all.index_select(0, selected)
+            if norm_control:
+                u = norm_matched_orthogonal_rows(u)
+
+            def subtract_components(
+                _module: nn.Module,
+                args: tuple[object, ...],
+                output: object,
+                *,
+                u_local: Tensor = u,
+                v_local: Tensor = v,
+                site: str = matrix.module,
+                name: str = matrix.name,
+            ) -> Tensor:
+                x = _tensor_from_value(args, 0, site)
+                y = _tensor_from_value(output, None, site)
+                subtraction = p6_subtraction(
+                    x, u_local, v_local, gate, strength=strength
+                )
+                selected_values = subtraction[valid]
+                off_values = subtraction[(~gate.any(dim=-1)) & valid]
+                diagnostics[name] = {
+                    "valid_token_count": int(valid.sum().item()),
+                    "gate_active_token_count": int((gate.any(dim=-1) & valid).sum().item()),
+                    "subtraction_l2": float(selected_values.square().sum().sqrt().item()),
+                    "subtraction_rms": float(
+                        selected_values.square().mean().sqrt().item()
+                    ),
+                    "max_abs_subtraction": float(selected_values.abs().max().item()),
+                    "max_abs_gate_off_subtraction": float(
+                        off_values.abs().max().item() if off_values.numel() else 0.0
+                    ),
+                }
+                return y - subtraction.to(y.dtype)
+
+            handle = model.get_submodule(matrix.module).register_forward_hook(
+                subtract_components
+            )
+            stack.callback(handle.remove)
+        result = model(input_ids=input_ids, attention_mask=valid, use_cache=False)
+
+    expected = {matrix.name for matrix in spec.matrices}
+    if set(diagnostics) != expected:
+        raise RuntimeError("one or more P6 matrix hooks did not fire")
+    if any(values["max_abs_gate_off_subtraction"] != 0.0 for values in diagnostics.values()):
+        raise RuntimeError("P6 changed a gate-off token")
+    logits = result.logits.detach()
+    if not torch.isfinite(logits).all():
+        raise FloatingPointError("P6 forward produced NaN or Inf logits")
+    return P6ForwardResult(logits=logits, matrix_diagnostics=diagnostics)
 
 
 def _load_hf_model(spec: ModelSpec, device: torch.device) -> nn.Module:
