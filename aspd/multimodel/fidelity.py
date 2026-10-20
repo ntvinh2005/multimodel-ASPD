@@ -178,6 +178,84 @@ class IdentityResidual:
         }
 
 
+@dataclass
+class PairedErrorMetrics:
+    """Streaming diagnostics for cancellation between Base and Target errors."""
+
+    base_error_sq: float = 0.0
+    target_error_sq: float = 0.0
+    error_dot: float = 0.0
+    true_delta_sq: float = 0.0
+    predicted_delta_sq: float = 0.0
+    delta_error_sq: float = 0.0
+    elements: int = 0
+
+    @torch.no_grad()
+    def update(
+        self,
+        base_target: Tensor,
+        base_prediction: Tensor,
+        target_target: Tensor,
+        target_prediction: Tensor,
+        valid_tokens: Tensor,
+    ) -> None:
+        shapes = {
+            tuple(base_target.shape),
+            tuple(base_prediction.shape),
+            tuple(target_target.shape),
+            tuple(target_prediction.shape),
+        }
+        if len(shapes) != 1 or base_target.shape[:2] != valid_tokens.shape:
+            raise ValueError("paired error tensors or valid-token mask do not align")
+        base_error = (base_prediction - base_target)[valid_tokens].detach().double().cpu()
+        target_error = (
+            target_prediction - target_target
+        )[valid_tokens].detach().double().cpu()
+        true_delta = (target_target - base_target)[valid_tokens].detach().double().cpu()
+        predicted_delta = (
+            target_prediction - base_prediction
+        )[valid_tokens].detach().double().cpu()
+        if not all(
+            torch.isfinite(value).all()
+            for value in (base_error, target_error, true_delta, predicted_delta)
+        ):
+            raise FloatingPointError("non-finite paired reconstruction error")
+        delta_error = predicted_delta - true_delta
+        self.base_error_sq += float(base_error.square().sum())
+        self.target_error_sq += float(target_error.square().sum())
+        self.error_dot += float((base_error * target_error).sum())
+        self.true_delta_sq += float(true_delta.square().sum())
+        self.predicted_delta_sq += float(predicted_delta.square().sum())
+        self.delta_error_sq += float(delta_error.square().sum())
+        self.elements += base_error.numel()
+
+    def result(self) -> dict[str, Any]:
+        if self.elements == 0:
+            raise ValueError("cannot finalize empty paired error metrics")
+        error_norm_product = math.sqrt(self.base_error_sq * self.target_error_sq)
+        return {
+            "elements": self.elements,
+            "base_error_rms": math.sqrt(self.base_error_sq / self.elements),
+            "target_error_rms": math.sqrt(self.target_error_sq / self.elements),
+            "error_cosine_similarity": (
+                self.error_dot / error_norm_product if error_norm_product > 0 else None
+            ),
+            "true_delta_rms": math.sqrt(self.true_delta_sq / self.elements),
+            "predicted_delta_rms": math.sqrt(
+                self.predicted_delta_sq / self.elements
+            ),
+            "delta_error_rms": math.sqrt(self.delta_error_sq / self.elements),
+            "delta_error_to_true_ratio": math.sqrt(
+                self.delta_error_sq / max(self.true_delta_sq, 1e-30)
+            ),
+            "cancellation_gain_vs_independent_errors": (
+                1.0
+                - self.delta_error_sq
+                / max(self.base_error_sq + self.target_error_sq, 1e-30)
+            ),
+        }
+
+
 def validate_matrix_alignment(
     cfg: MultiModelExperimentConfig, cache: PairedActivationCache
 ) -> list[str]:
@@ -338,6 +416,7 @@ def evaluate_computation_fidelity(
     }
     matrix_stats: dict[str, dict[str, GlobalTensorMetrics]] = {}
     identity_stats: dict[str, dict[str, IdentityResidual]] = {}
+    paired_error_stats: dict[str, PairedErrorMetrics] = {}
     for name in matrix_names:
         d_out = cache.model_manifests[0]["matrices"][name]["d_out"]
         matrix_stats[name] = {
@@ -345,6 +424,7 @@ def evaluate_computation_fidelity(
             for label in ("base", "target", "delta_total", "delta_parameter", "delta_input")
         }
         identity_stats[name] = {"true": IdentityResidual(), "aspd": IdentityResidual()}
+        paired_error_stats[name] = PairedErrorMetrics()
 
     total_tokens = 0
     batches = 0
@@ -389,6 +469,9 @@ def evaluate_computation_fidelity(
             ).float()
             matrix_stats[name]["base"].update(y_base, yhat_base, valid)
             matrix_stats[name]["target"].update(y_target, yhat_target, valid)
+            paired_error_stats[name].update(
+                y_base, yhat_base, y_target, yhat_target, valid
+            )
 
             delta_total = y_target - y_base
             delta_total_hat = yhat_target - yhat_base
@@ -436,6 +519,7 @@ def evaluate_computation_fidelity(
                 label: accumulator.result()
                 for label, accumulator in identity_stats[name].items()
             },
+            "error_cancellation": paired_error_stats[name].result(),
         }
         for name, stats in matrix_stats.items()
     }

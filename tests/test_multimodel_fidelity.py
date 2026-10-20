@@ -12,6 +12,7 @@ from aspd.multimodel.config import load_experiment_config
 from aspd.multimodel.fidelity import (
     GlobalTensorMetrics,
     IdentityResidual,
+    PairedErrorMetrics,
     resolved_config_sha256,
     validate_checkpoint_evaluation_compatibility,
     validate_checkpoint_provenance,
@@ -187,3 +188,17 @@ def test_cross_cache_evaluation_preserves_scientific_structure() -> None:
     incompatible.sparsity.top_k = pilot.sparsity.top_k + 1
     with pytest.raises(ValueError, match="sparsity"):
         validate_checkpoint_evaluation_compatibility(incompatible, pilot)
+
+
+def test_paired_error_metrics_measure_cancellation() -> None:
+    stats = PairedErrorMetrics()
+    base = torch.tensor([[[1.0, 2.0]]])
+    target = torch.tensor([[[2.0, 4.0]]])
+    shared_error = torch.tensor([[[0.5, -0.25]]])
+    valid = torch.ones((1, 1), dtype=torch.bool)
+    stats.update(base, base + shared_error, target, target + shared_error, valid)
+    result = stats.result()
+    assert result["error_cosine_similarity"] == pytest.approx(1.0)
+    assert result["delta_error_rms"] == pytest.approx(0.0)
+    assert result["cancellation_gain_vs_independent_errors"] == pytest.approx(1.0)
+    assert result["true_delta_rms"] == pytest.approx((2.5) ** 0.5)
