@@ -1,5 +1,18 @@
 # Qwen2.5 Extreme-Sports ASPD preparation
 
+## Final sports-risk diagnostic update
+
+Status: **DIAGNOSTICS COMPLETE — EXPLORATORY NONCAUSAL CANDIDATES MEASURED**
+
+Update (`2026-10-20T02:39:40-04:00`): replacement P1--P5 job `46782245`, corrected
+V3 matrix-cache job `46795283`, grouped-fidelity job `46797425`, and candidate job
+`46803168` all completed successfully. The final shortlist is
+`[3228, 226, 378, 290, 508, 2445, 1881, 199, 496, 387, 731, 432, 267, 1001, 1931]`;
+the five detailed candidates are `[3228, 2445, 290, 378, 508]`. The authoritative
+measurements, artifact hashes, limitations, and K=64 recommendation are in
+`docs/multimodel/results/qwen25_aspd_sports_risk_mechanism_diagnostics.md`. No causal,
+K=64, D1/D2, response-generation, judge, or additional training job was submitted.
+
 ## General1m D0/S1 execution
 
 Status: **GENERAL1M TRAINING COMPLETE — REPLACEMENT P1–P5 RUNNING**

@@ -1,0 +1,16 @@
+extends: aspd_d0_s1_general1m.yaml
+
+# Prepared controlled ablation; do not submit automatically.  Relative to the completed
+# general1m experiment, only the BatchTopK active budget and run identity change.  It
+# intentionally reuses the immutable 1M-token paired cache.
+name: qwen25_extreme_sports_aspd_d0_s1_general1m_k64
+
+cache:
+  root: out/multimodel/cache/qwen25_extreme_sports_aspd_general1m
+
+sparsity:
+  top_k: 64
+
+training:
+  output_dir: out/multimodel/runs/qwen25_extreme_sports_aspd_general1m_k64
+  resume: null

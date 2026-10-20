@@ -1,13 +1,13 @@
 # Qwen2.5 ASPD sports-risk mechanism diagnostics
 
-Status: **V3 FIDELITY MEASURED — CANDIDATE CONTRIBUTIONS RUNNING**
+Status: **DIAGNOSTICS COMPLETE — EXPLORATORY NONCAUSAL CANDIDATES MEASURED**
 
-Last updated: `2026-10-20T02:31:23-04:00`.
+Last updated: `2026-10-20T02:39:40-04:00`.
 
 This is the single research report for computation-fidelity diagnosis and exploratory
 sports-risk mechanism discovery using the completed 1M-token D0/S1 ASPD run. It records
-only measured results. The frozen V3 evaluation jobs are listed below, but their pending
-outputs are not treated as findings.
+only measured results. All jobs used for the conclusions below completed successfully;
+failed attempts and their corrections remain recorded for provenance.
 
 ## Frozen checkpoint and P1–P5 state
 
@@ -144,80 +144,202 @@ recovery of the LoRA parameter update. High-permissiveness responses are also mu
 shorter than cautious responses, so candidate selection uses response-level fire rates
 divided by response length rather than raw maxima or token-level pseudo-replication.
 
-## Job history and active bounded jobs
+## Exploratory response-level candidate analysis
 
-General diagnostic job `46794331` completed in `00:07:59` with exit `0:0`. Its artifacts
-are `step4096_error_alignment.json` and `lora_precision.json` under
-`out/multimodel/diagnostics/qwen25_aspd_general1m/`.
+Candidate job `46803168` completed successfully in `00:01:35` with exit `0:0` on
+`c0904a-s5`; stderr is empty and both integrity and completion markers are present. It
+used the frozen step-4,096 checkpoint and the same fixed batches of two sequences as the
+grouped fidelity evaluation. The resulting JSON contains 15 shortlisted components, five
+negative controls, exact-token contexts, P1--P5 measurements, and exact rank-one
+contribution norms for seven matrices on 360 responses. Its ten Safetensors arrays all
+have shape `[360,20,7]`, are finite, and reproduce the registered hash.
 
-The first V3 cache job `46794332` failed closed in `00:02:05`. Base replay passed, but
-Target replay differed from the old frozen Target R by relative RMS 0.021145. The cause
-was a real provenance mismatch: Delta V3 captured Target R through the unmerged PEFT
-measurement path, whereas ASPD snapshots and trains against the effective BF16 merged
-Target. Its dependent job `46794333` consequently became `DependencyNeverSatisfied` and
-was canceled. The 17 GiB job-specific partial cache was removed; no completed artifact
-was deleted.
+Selection is at the response level. The activation statistic is
+`sqrt(response fire count / response tokens)`, avoiding token pseudo-replication and
+reducing the severe response-length confound. Eligibility requires at least 10% support
+on Target-generated risk responses and 32 general-validation fires. The final ranking
+combines the preregistered activation score (55%), exact normalized computation-change
+magnitude (25%), and positive risk-versus-control computation specificity (20%). These
+are exploratory selection scores, not calibrated probabilities.
 
-Commit `d45342b` fixes this without relaxing the check or mixing computation graphs. The
-corrected cache reuses exact frozen tokens and verified Base R, captures all seven X
-tensors, and recaptures only Target R with the same merged effective Target used by ASPD.
-Corrected cache job `46795283` completed in `00:02:56` with exit `0:0`. Across all
-101,564 tokens, frozen/live Base R relative RMS is exactly 0 in BF16, while the recorded
-unmerged-frozen versus merged-effective Target R relative RMS is 0.021142.
+| Rank | ID | Activation score | Risk-control d | Risk-neutral d | Permissive-cautious d | Domain breadth | Validation fires | Computation risk-control d | Normalized computation change | Final score |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 3228 | 0.927 | 0.823 | 1.686 | 1.780 | 0.92 | 1,372 | 0.966 | 30.47 | 0.983 |
+| 2 | 226 | 0.917 | 0.447 | 1.887 | 2.949 | 0.75 | 16,884 | 0.097 | 11.98 | 0.670 |
+| 3 | 378 | 0.859 | 0.395 | 0.899 | 1.183 | 0.92 | 54,727 | 0.190 | 14.33 | 0.723 |
+| 4 | 290 | 0.842 | 0.809 | 0.940 | 0.764 | 0.92 | 24,240 | 0.877 | 11.46 | 0.727 |
+| 5 | 508 | 0.826 | 0.295 | 3.103 | 0.538 | 0.75 | 30,796 | 0.192 | 21.40 | 0.680 |
+| 6 | 2445 | 0.824 | 0.276 | 0.619 | 3.683 | 0.50 | 902 | 0.419 | 22.81 | 0.740 |
+| 7 | 1881 | 0.787 | 0.192 | 1.360 | 1.015 | 0.75 | 5,796 | 0.102 | 6.26 | 0.400 |
+| 8 | 199 | 0.759 | 0.113 | 1.206 | 3.238 | 0.50 | 43,936 | 0.204 | 13.74 | 0.550 |
+| 9 | 496 | 0.753 | 0.827 | 1.101 | 0.071 | 0.92 | 6,424 | 0.328 | 10.75 | 0.460 |
+| 10 | 387 | 0.753 | 0.505 | -0.913 | 0.646 | 0.83 | 73,017 | 0.042 | 29.11 | 0.463 |
+| 11 | 731 | 0.735 | 0.211 | 2.057 | 0.488 | 0.58 | 17,158 | 0.013 | 9.22 | 0.263 |
+| 12 | 432 | 0.724 | 0.252 | 0.138 | 0.985 | 0.67 | 11,369 | 0.404 | 7.84 | 0.357 |
+| 13 | 267 | 0.722 | 0.313 | 1.401 | -0.391 | 0.75 | 99,549 | 0.368 | 55.32 | 0.507 |
+| 14 | 1001 | 0.720 | 0.225 | 0.684 | 0.544 | 0.67 | 22,502 | 0.359 | 12.30 | 0.340 |
+| 15 | 1931 | 0.719 | 0.147 | 1.058 | 1.251 | 0.67 | 4,378 | 0.151 | 7.37 | 0.137 |
 
-The first fidelity attempt `46795285` failed in `00:00:53` because the evaluator looked
-for Target R at the shard top level instead of inside the registered `X` capture payload.
-The completed cache itself passed integrity and was not rerun. Commit `4aeb0ac` fixes the
-accessor, adds a regression test, and was additionally checked against a real cache shard.
-The 4 KiB partial diagnostic directory was removed before retry. Retry `46797425`
-completed successfully as reported above. All corrected jobs fail closed on stale or
-malformed outputs.
+All except components 1001 and 1931 have 100% Target-risk response support; those two
+have 98% and 95%, respectively. This makes support useful as an eligibility gate but not as
+evidence of specificity. `d` is the pooled-SD response-level standardized mean
+difference. The normalized computation-change column is a root-sum-square over seven
+matrix-wise ratios to the true model difference. It is neither a percentage nor an
+explained fraction: a value above one means an individual component's change can exceed
+the much smaller net DeltaY before cancellation with other components.
 
-The first candidate attempt `46800090` completed all GPU contribution computation but
-failed closed at serialization after `00:01:33`: five named metric slices shared one
-PyTorch backing storage, which Safetensors correctly refused. No measurement exception
-or non-finite value occurred. Commit `7b67a81` clones each named slice before saving and
-adds a Safetensors round-trip regression test. The 4 KiB partial directory was removed;
-retry `46803168` preserves the identical selection and measurement protocol.
+### Best five candidates
 
-| Job | State at corrected submission audit | Resources / limit | Expected active runtime | Purpose |
-|---|---|---|---|---|
-| 46803168 | RUNNING on `c0904a-s5` | 1 B200, 14 CPU, 128 GB, 1:00 | about 2–10 min based on the first attempt | response-level shortlist plus exact rank-one contribution measurement for 15 candidates and 5 controls |
+| ID | Activation rho B/T | Mechanism rho B/T | Total mechanism mass | Dominant matrices | Main interpretation |
+|---:|---:|---:|---:|---|---|
+| 3228 | 0.517 / 0.483 | 0.534 / 0.466 | 1.184 | gate, up, q | strongest measured risk/control and permissive/cautious association, but also a generic affirmative response-opening feature |
+| 2445 | 0.504 / 0.496 | 0.503 / 0.497 | 1.150 | up, gate, q | strongest permissive/cautious effect; weak risk specificity and strong sentence-ending/style alternative |
+| 290 | 0.498 / 0.502 | 0.498 / 0.502 | 0.517 | gate, up, k | risk/control association plus generic `just focus`/`do not overthink` dismissal language |
+| 378 | 0.498 / 0.502 | 0.504 / 0.496 | 0.598 | q, gate, k | frequent conditional/assistant-response feature; computation specificity is weak |
+| 508 | 0.497 / 0.503 | 0.488 / 0.512 | 0.621 | gate, q, up | separates sports-like action from neutral text much more strongly than risk from sports control |
 
-Expected outputs:
+All five are shared in both activation and mechanism mass under P1/P2. Their scientific
+interest is therefore model-specific operator geometry attached to a shared feature, not
+a Target-only activation feature. Selected exact-token evidence illustrates both the
+signal and the alternatives:
+
+- **3228:** risk examples peak around `assistant Absolutely! If ... you can go ahead`,
+  but sports-control and neutral examples also peak at the assistant response opening.
+  Its dominant `gate/up/q` read cosines are 0.662/0.704/0.680 and write cosines are
+  0.853/0.879/0.817, so both read and write geometry changed. This is the strongest
+  candidate, but response-opening affirmation is a viable non-risk explanation.
+- **290:** risk examples contain `Just focus on your form` and `Just focus on enjoying`,
+  while controls and neutral examples include `don't overthink it` and `Just pick`.
+  Its `gate/up` operators are comparatively similar across models (relative changes
+  0.264/0.314; read cosines 0.972/0.964), whereas `k` changes more (0.666; read cosine
+  0.837). It is best described as broad dismissive encouragement, not sports-risk alone.
+- **2445:** examples consistently occur near concluding claims such as `Your body will
+  remember`, `systems hold up`, and `not really that important`. The 3.683
+  permissive/cautious effect is large, but the risk/control activation effect is only
+  0.276. A conclusion/assurance style feature is the main alternative.
+- **378:** risk and sports-control peaks contain conditional reassurance, but neutral
+  peaks cover unrelated explanation/code language. Its risk/control computation effect
+  is only 0.190.
+- **508:** risk peaks include `just focus on moving` and `just go as fast as possible`,
+  but sports-control peaks have `no need to overthink it` and neutral peaks still fire.
+  The risk-neutral effect (3.103) greatly exceeds risk-control (0.295), consistent with
+  sports/action or generic decisiveness rather than danger specificity.
+
+The JSON preserves all six representative windows per selected component, including
+exact token IDs, absolute token positions, example IDs, category, generator, sport
+domain, and activation. Those exact records, rather than the shortened text above, are
+the audit source.
+
+The fixed negative controls are 1440, 958, 3355, 4523, and 2873. Four have zero observed
+V3 contribution. Component 1440 has normalized Target-risk computation change 0.0446 and
+computation risk/control effect 0.183, orders of magnitude below the selected candidates.
+These controls validate the zero/low-support floor, but they are not frequency-matched
+controls and therefore do not establish a calibrated null distribution.
+
+### Candidate fidelity boundary
+
+The dominant matrices of all five fall mostly in `q`, `gate`, and `up`, where
+Target-generated risk response total-DeltaY NSE is 0.736, 0.757, and 0.784. Components
+290 and 378 also involve `k`, whose local NSE is only borderline at 0.997 and whose
+parameter-only NSE is 4295.26. For every selected component, both operator-change and
+input-change terms are substantial. For example, component 3228 has normalized
+Target-risk aggregate actual/operator/input-change magnitudes 30.47/21.23/21.07.
+Consequently, none of these cards demonstrates recovery of the LoRA parameter update by
+itself. Exact component contribution norms also do not repair or apportion the full
+matrix reconstruction residual because cancellation across components is unmeasured.
+
+The supported finding is narrower: the learned shared features carry different
+model-specific rank-one computations and several are response-level associated with
+permissive sports text. The evidence does not establish a directed circuit edge, a
+causal mediator, or a uniquely sports-risk mechanism.
+
+## C/K utilization diagnosis
+
+The general-validation support is highly concentrated: 914/8,192 components fired,
+7,278 were unobserved, the top 100 received 77.84% of all fires, and the fire-count
+inverse-Simpson effective count is 103.09. P2 mechanism mass is less concentrated but
+still nonuniform: the top 10 and top 100 contain 10.30% and 43.61% of total mass, and the
+mass inverse-Simpson effective count is 306.63. Among fired components, total mechanism
+mass has median 0.112, 95th percentile 0.996, and maximum 3.946.
+
+BatchTopK supplies exactly 3,250,048 gates for 101,564 V3 tokens, so the global L0 is
+exactly 32. As expected for batch-level rather than per-token TopK, allocation moves
+between regions. The mean active count per token is 33.27 on prompt tokens and 31.74 on
+response tokens. Across sequences, the whole-sequence average-L0 5th/50th/95th
+percentiles are 31.52/32.00/33.20. These are sequence-region averages; the current
+artifact does not retain the full per-token L0 histogram.
+
+This rules against `C=8192` being the immediate bottleneck: most dictionary entries have
+no held-out support while a small set absorbs most gates. It does not prove that K is the
+only bottleneck. The largest residuals are matrix-specific, the true parameter-change
+signal is tiny and BF16-limited, and selected component changes can be much larger than
+net DeltaY because of cancellation. Generic assistant/style patterns in the exact-token
+contexts also show that the active budget is spent partly on broad language structure.
+
+Among the requested controlled alternatives, **K=64 at fixed C=8192 is the most
+diagnostic next experiment**, because it changes one capacity axis while preserving D0,
+S1, data, objective, architecture, seed, and steps. It can test whether additional active
+rank-one terms reduce residuals in frequent features and difficult matrices. D1/D2 add
+shared/exclusive structural priors and would confound this capacity question; they are a
+later alternative if K=64 improves absolute reconstruction but still fails to isolate
+model-difference computation. This is a recommendation, not evidence that K=64 will
+work. The static-validated preparation config is
+`configs/multimodel/qwen25_extreme_sports/aspd_d0_s1_general1m_k64.yaml`; it reuses the
+immutable 1M-token cache and changes only `top_k` plus the run identity/output path. The
+K=32 run recorded 60.52 GiB peak CUDA memory and about 13.4 minutes of optimizer elapsed
+time. A conservative planning estimate for K=64 is one B200, 14 CPUs, 128 GB RAM, and
+roughly 20--35 active minutes, with a two-hour allocation limit. This estimate is not a
+measured K=64 runtime. No K=64 training was submitted.
+
+## Artifacts and job provenance
+
+Primary machine-readable outputs:
 
 - `out/multimodel/diagnostics/qwen25_aspd_general1m/step4096_error_alignment.json`
 - `out/multimodel/diagnostics/qwen25_aspd_general1m/lora_precision.json`
 - `out/multimodel/eval/qwen25_extreme_sports_behavioral_v3/aspd_matrix_cache_general1m/`
 - `out/multimodel/eval/qwen25_extreme_sports_behavioral_v3/aspd_mechanism_diagnostics/step1000_grouped_fidelity.json`
 - `out/multimodel/eval/qwen25_extreme_sports_behavioral_v3/aspd_mechanism_diagnostics/step4096_grouped_fidelity.json`
-- corresponding step-1000 and step-4096 per-sequence component safetensors in the same
-  diagnostic directory.
+- `out/multimodel/eval/qwen25_extreme_sports_behavioral_v3/aspd_candidate_analysis_general1m/candidate_analysis.json`
+  (SHA-256 `1f4929c672679aa0b9167ca278af5f7d082839c0ef34b109f2220b95a1c2ba10`).
+- `out/multimodel/eval/qwen25_extreme_sports_behavioral_v3/aspd_candidate_analysis_general1m/sequence_candidate_computation.safetensors`
+  (SHA-256 `14f93518e77073344b8f54a78ba6b3883f462e1e26d0ddb681b9a9040ab4ad32`).
 
-Logs:
+Successful jobs used for the final result are P1--P5 `46782245`, general fidelity
+diagnosis `46794331`, corrected V3 matrix cache `46795283`, grouped V3 fidelity
+`46797425`, and candidate contributions `46803168`. Their principal logs are:
 
 - `slurm/logs/mm-q25-aspd-fid-diag-46794331.{out,err}`
 - `slurm/logs/mm-q25-aspd-v3-x-46795283.{out,err}`
 - `slurm/logs/mm-q25-aspd-v3-fid-46797425.{out,err}`
 - `slurm/logs/mm-q25-aspd-v3-cand-46803168.{out,err}`
 
-## Decision boundary and next analysis
+The first V3 cache job `46794332` failed closed on the scientifically real
+unmerged-versus-merged Target grounding mismatch (relative RMS 0.021145); dependent
+`46794333` was canceled. Corrected cache job `46795283` reused verified Base R and
+recaptured merged-effective Target R. Fidelity attempt `46795285` failed on an accessor
+bug and was retried without rebuilding the cache. Candidate attempt `46800090` completed
+measurement but failed Safetensors alias detection; commit `7b67a81` cloned the metric
+views before the successful identical-protocol retry. No failed partial output is used.
 
-No K=64, D1/D2, retraining, response generation, judge, Delta-Crosscoder training, or
-causal/P6 job was submitted. Candidate job `46803168` performs the remaining noncausal
-steps to:
+## Scientific decision
 
-1. compare old/new V3 fidelity by category, token region, generator, and existing score;
-2. identify locally reliable matrices/contexts rather than requiring all matrices to pass;
-3. combine P1–P5 geometry, validation support, V3 response-level association, and
-   absolute computational contribution to shortlist 10–20 exploratory components;
-4. inspect 3–5 candidates plus negative controls with exact-token contexts; and
-5. decide from those measurements whether K=64, D1/D2, or no further ASPD run is most
-   justified.
+The result combines **Outcome C and Outcome D** from the decision framework:
 
-The current evidence supports this interim conclusion: longer D0/S1 training improved
-individual-model and total-DeltaY reconstruction, with locally favorable q/k/v
-total-DeltaY fidelity on Target-generated risky responses. Parameter-only fine-tuning
-computation recovery remains unreliable and component use is highly concentrated.
-Whether that local window contains a risk-specific rather than broadly permissive or
-generic response-style mechanism awaits the registered component contribution analysis.
+1. Individual-model and total-DeltaY reconstruction improved substantially with longer
+   D0/S1 training, and q/k/v total-DeltaY fidelity is locally favorable on short
+   Target-generated risky responses.
+2. Parameter-only recovery remains unreliable because absolute reconstruction errors are
+   large relative to the tiny effective BF16 update, even though Base/Target errors are
+   strongly aligned.
+3. Components 3228 and 290 are the strongest exploratory candidates. Component 2445 is
+   the clearest broad-permissiveness feature. None is yet a confirmed risk-specific
+   mechanism; exact contexts support generic affirmation, dismissal, response position,
+   and sports/action language as alternatives.
+4. A controlled K=64 run is more justified than increasing C or immediately adding
+   D1/D2 priors, but it must be evaluated with the same general and frozen-V3 fidelity
+   gates before any causal interpretation.
+
+No K=64, D1/D2, additional retraining, response generation, judge, Delta-Crosscoder
+training, causal intervention, or P6 job was submitted. The current candidates are ready
+for human inspection and hypothesis formation, not for a causal mechanism claim.
