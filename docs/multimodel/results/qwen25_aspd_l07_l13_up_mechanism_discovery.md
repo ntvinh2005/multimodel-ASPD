@@ -1,8 +1,8 @@
 # Qwen2.5 Extreme-Sports ASPD: `up_proj` mechanisms in layers 7--13
 
-Status: **CACHE/TRAIN/FIDELITY/P1--P5 CHAIN SUBMITTED; CACHE RUNNING**
+Status: **CACHE VALIDATED; 4,096-STEP TRAINING RUNNING**
 
-Last updated: `2026-10-20T06:14:15-04:00`.
+Last updated: `2026-10-20T06:15:10-04:00`.
 
 ## Meeting-ready summary
 
@@ -108,15 +108,16 @@ after focused tests, Ruff on changed files, compilation, static config validatio
 
 | Stage | Job | Dependency | Status at last check | Primary artifact |
 |---|---:|---|---|---|
-| Paired cache + full integrity scan | 46826451 | afterok:46826365 | RUNNING on `c1101a-s5` | cache root and `cache_integrity.json` |
-| ASPD training | 46826452 | afterok:46826451 | PENDING (Dependency) | run root, checkpoints 2048/4096, `training_integrity.json` |
+| Paired cache + full integrity scan | 46826451 | afterok:46826365 | COMPLETED in 00:07:50 | cache root and `cache_integrity.json` |
+| ASPD training | 46826452 | afterok:46826451 | RUNNING on `c1000a-s25` | run root, checkpoints 2048/4096, `training_integrity.json` |
 | Full 131,072-token fidelity | 46826453 | afterok:46826452 | PENDING (Dependency) | run analysis fidelity artifacts |
 | P1--P5 analysis | 46826454 | afterok:46826453 | PENDING (Dependency) | run analysis P1--P5 artifacts |
 
-The active-time estimate is approximately 15--35 minutes for the seven-matrix cache
-and integrity scan, 30--90 minutes for training, 15--40 minutes for full fidelity, and
-10--30 minutes for P1--P5. Thus a realistic critical path is roughly 1.2--3.2 hours
-after allocation; queue delay is separate. Slurm hard limits are 3, 4, 2, and 3 hours.
+The seven-matrix cache and integrity scan actually took 7 minutes 50 seconds. Remaining
+active-time estimates are 30--90 minutes for training, 15--40 minutes for full
+fidelity, and 10--30 minutes for P1--P5. Thus a realistic remaining critical path is
+roughly 55 minutes--2.7 hours; queue delay is separate. Slurm hard limits for the four
+stages are 3, 4, 2, and 3 hours.
 The chain is fail-closed through `afterok`: a failed stage will prevent later stages
 from running, and completed cache or training work should not be rerun when diagnosing
 a downstream failure.
@@ -124,6 +125,16 @@ a downstream failure.
 Training integrity will record the resolved config, model revisions, token/cache
 fingerprints, parameter count, runtime, peak GPU memory, validation metrics, exact
 checkpoint paths and streamed SHA-256 hashes.
+
+The completed cache occupies 128 GiB. Its fail-closed scan checked 67,645,734,912
+tensor values and all were finite; all 14 Base/Target matrix records have the expected
+18,944 × 3,584 shape and order. It reused the exact token content with SHA-256
+`793dcc49e59bb60e24ac4e3e74d4d1498c439a19bf760d0d64c0542fe7985d1c` and
+recorded cache fingerprint
+`71b268fc2190df5c7ddf0a43166242e714f4be92e2db20bf3405a0102f5037ce`.
+There are 4,096 train rows and 512 validation rows of 256 tokens each, matching
+1,048,576 and 131,072 tokens. The source token directory is reused by validated
+symlink; the old cache remains unchanged.
 
 ## Independent exact causal intersection
 
@@ -166,7 +177,6 @@ measured rather than interpreted away.
 The following sections intentionally contain no inferred results until immutable job
 artifacts exist:
 
-- cache fingerprint/alignment and actual cache size;
 - training curve, validation metrics, peak memory, and checkpoint hashes;
 - per-layer Base/Target FVU, RMSE and actual computation RMS;
 - total, parameter-only and input-change DeltaY recovery and error cancellation;
