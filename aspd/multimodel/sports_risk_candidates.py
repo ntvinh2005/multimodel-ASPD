@@ -484,7 +484,12 @@ def analyze_v3_candidates(
     tensor_output = output / "sequence_candidate_computation.safetensors"
     save_file(
         {
+            # Metric slices are views into one [N,S,J,M] backing tensor.  Give
+            # safetensors independent storage so alias detection cannot reject
+            # the scientifically distinct named outputs.
             f"{region}/{metric}": measured[region][..., metric_index]
+            .contiguous()
+            .clone()
             for region in ("prompt", "response")
             for metric_index, metric in enumerate(METRIC_NAMES)
         },

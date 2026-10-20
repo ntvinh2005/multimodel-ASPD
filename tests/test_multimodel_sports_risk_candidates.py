@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import torch
+from safetensors.torch import load_file, save_file
 
 from aspd.multimodel.sports_risk_candidates import (
     _squared_contribution_terms,
@@ -39,3 +40,16 @@ def test_squared_contribution_terms_close_exact_decomposition() -> None:
     torch.testing.assert_close(
         squared.flatten(), torch.tensor([4.0, 16.0, 20.0, 13.0, 1.0])
     )
+
+
+def test_named_metric_slices_have_independent_safetensor_storage(tmp_path) -> None:
+    backing = torch.arange(12, dtype=torch.float32).reshape(2, 3, 2)
+    tensors = {
+        f"metric_{index}": backing[..., index].contiguous().clone()
+        for index in range(2)
+    }
+    path = tmp_path / "metrics.safetensors"
+    save_file(tensors, path)
+    loaded = load_file(path)
+    torch.testing.assert_close(loaded["metric_0"], backing[..., 0])
+    torch.testing.assert_close(loaded["metric_1"], backing[..., 1])
