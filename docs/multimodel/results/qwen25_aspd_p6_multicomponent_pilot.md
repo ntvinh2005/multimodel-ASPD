@@ -1,8 +1,8 @@
 # Qwen2.5 ASPD controlled multi-component P6 pilot
 
-Status: **FIXED-SEQUENCE P6 PASSED — PREFIX-GENERATION FEASIBILITY AUTHORIZED**
+Status: **PREFIX-GENERATION FEASIBILITY SUBMITTED**
 
-Last updated: `2026-10-20T04:02:25-04:00`.
+Last updated: `2026-10-20T04:08:07-04:00`.
 
 This is the sole report for the bounded P6 investigation. The experiment separates
 offline gate association, fixed-sequence intervention effects, prefix-causal generation,
@@ -212,4 +212,27 @@ authorize a small prefix-causal autoregressive feasibility run for the two prima
 candidates 3228 and 290 plus the strongest fixed-sequence comparative candidate 508.
 This does not authorize 3228+290, 3228+2445, operator-difference, or any causal claim;
 individual behavioral outputs and controls must be evaluated first.
+
+## Prefix-generation feasibility execution
+
+- Script: `slurm/multimodel/qwen25_aspd_p6_prefix_generation.sbatch`.
+- Job: `46814945`, submitted at `2026-10-20T04:08:07-04:00` from commit
+  `ee7976e`, with no dependency.
+- Initial state: `PENDING`; Slurm reported no blocking reason at the first check.
+- Resources: one B200, 14 CPUs, 128 GB RAM, one-hour limit.
+- Scope: 18 prompt-only inputs; components 3228, 290, and 508; clean Base/Target,
+  Target alpha-zero, and candidate/active/norm arms on both models; greedy decoding for
+  at most 64 new tokens.
+- Every patched decoding step recomputes clean Base and clean Target activations on the
+  same actual current branch prefix. No response from the frozen V3 artifact supplies a
+  future gate after a branch diverges.
+- Intended artifact:
+  `out/multimodel/eval/qwen25_extreme_sports_behavioral_v3/aspd_p6_multicomponent_pilot/prefix_generation/job_46814945/prefix_generation_feasibility.json`.
+- Logs: `slurm/logs/mm-q25-aspd-p6-prefix-46814945.out` and
+  `slurm/logs/mm-q25-aspd-p6-prefix-46814945.err`.
+- Estimated active runtime is 12--35 minutes based on the 4-minute fixed-sequence run;
+  check about 35 minutes after the job enters `RUNNING`. Queue delay is not included.
+
+No behavioral judge, combination, operator-difference, retraining, cache, or dependent
+job was submitted. Those stages remain scientifically gated on inspecting this artifact.
 
