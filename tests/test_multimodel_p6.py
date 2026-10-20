@@ -12,6 +12,7 @@ from aspd.multimodel.causal import (
     threshold_causal_gate,
 )
 from aspd.multimodel.p6_fixed import _weight_audit, select_fixed_feasibility_rows
+from aspd.multimodel.p6_generation import _continuation_difference, _pad_token_lists
 
 
 def test_threshold_gate_calibration_matches_unique_target_counts() -> None:
@@ -120,4 +121,17 @@ def test_weight_audit_accepts_parameters_created_in_inference_mode() -> None:
         audit = _weight_audit(model, spec)
     assert audit["proj"]["shape"] == [2, 3]
     assert audit["proj"]["version"] is None
+
+
+def test_generation_padding_preserves_each_actual_prefix() -> None:
+    ids, valid = _pad_token_lists([[1, 2, 3], [4]], pad_token_id=0)
+    assert ids.tolist() == [[1, 2, 3], [4, 0, 0]]
+    assert valid.tolist() == [[True, True, True], [True, False, False]]
+
+
+def test_continuation_difference_counts_divergence_and_length() -> None:
+    assert _continuation_difference([1, 2, 3], [1, 4]) == {
+        "changed_token_count": 2,
+        "common_prefix_tokens": 1,
+    }
 

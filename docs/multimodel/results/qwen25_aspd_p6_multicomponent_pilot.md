@@ -1,8 +1,8 @@
 # Qwen2.5 ASPD controlled multi-component P6 pilot
 
-Status: **FIXED-SEQUENCE P6 FEASIBILITY RUNNING**
+Status: **FIXED-SEQUENCE P6 PASSED — PREFIX-GENERATION FEASIBILITY AUTHORIZED**
 
-Last updated: `2026-10-20T03:57:42-04:00`.
+Last updated: `2026-10-20T04:02:25-04:00`.
 
 This is the sole report for the bounded P6 investigation. The experiment separates
 offline gate association, fixed-sequence intervention effects, prefix-causal generation,
@@ -174,4 +174,42 @@ one-hour allocation is a failure margin, not an estimate.
 No prefix-generation, judge, combination, operator-difference, retraining, cache, or
 dependent job was submitted. Exit code, integrity marker, no-op metrics, perturbation
 scale, and resource measurements must be inspected before the next stage is authorized.
+
+## Fixed-sequence feasibility result
+
+Retry `46813296` completed in 4 minutes 48 seconds with exit `0:0`. Both completion
+markers were printed and the 2.3 MB artifact passed the fail-closed integrity check.
+Python runtime was 248.93 seconds, peak allocated CUDA memory was 49.80 GB, and process
+maximum RSS was 15.44 GB. Alpha-zero and post-hook clean replay both had exactly zero
+maximum logit difference for Base and Target. All Qwen matrix checksums were unchanged,
+all seven hooks fired in every arm, and every gate-off perturbation was exactly zero.
+
+The Target teacher-forced mean KL measurements are:
+
+| Candidate | Risk | Sports control | Neutral | Risk - control | Active-control risk | Norm-control risk |
+|---:|---:|---:|---:|---:|---:|---:|
+| 3228 | 0.001018 | 0.000967 | 0.001846 | +0.000051 | 0.000946 | 0.001429 |
+| 290 | 0.001183 | 0.001060 | 0.000967 | +0.000123 | 0.001128 | 0.001045 |
+| 2445 | 0.000480 | 0.000850 | 0.000660 | -0.000371 | 0.019170 | 0.000405 |
+| 508 | 0.003184 | 0.002605 | 0.001196 | +0.000579 | 0.001627 | 0.002730 |
+| 378 | 0.001495 | 0.001307 | 0.001327 | +0.000188 | 0.001529 | 0.002069 |
+
+These are logit effects on frozen continuations, not behavioral scores. Component 508
+has the strongest Target risk-versus-neutral separation and exceeds its active control,
+but it only modestly exceeds the norm control. Components 3228, 290, and 378 are mostly
+comparable to at least one matched control on Target. Component 2445 remains a
+conclusion/post-decision comparator. On Base, 3228 produces a larger risk KL (0.007366)
+than its active (0.001718) and norm (0.003377) controls, which is a model-asymmetric
+observation worth preserving but not yet a behavioral mediation result.
+
+Every selected sequence had at least one causal-gate fire for every candidate. Across
+the 18 rows, mean fires per sequence were 2.7 for 3228, 11.6 for 290, 3.0 for 2445,
+28.2 for 508, and 42.4 for 378. For 2445 those fires are prompt/conclusion dominated,
+so raw support does not rescue its temporal limitation.
+
+The no-op, hook, provenance, finite-metric, resource, and perturbation gates therefore
+authorize a small prefix-causal autoregressive feasibility run for the two primary
+candidates 3228 and 290 plus the strongest fixed-sequence comparative candidate 508.
+This does not authorize 3228+290, 3228+2445, operator-difference, or any causal claim;
+individual behavioral outputs and controls must be evaluated first.
 
