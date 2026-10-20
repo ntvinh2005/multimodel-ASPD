@@ -10,7 +10,7 @@ from __future__ import annotations
 import gc
 import json
 import math
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -30,15 +30,6 @@ from aspd.multimodel.fidelity import (
 from aspd.multimodel.sports_risk import effective_grounding_batch
 from aspd.multimodel.training import build_model_from_cache
 
-MATRIX_NAMES = (
-    "q_proj",
-    "k_proj",
-    "v_proj",
-    "o_proj",
-    "gate_proj",
-    "up_proj",
-    "down_proj",
-)
 METRIC_NAMES = (
     "base_contribution_rms",
     "target_contribution_rms",
@@ -46,9 +37,6 @@ METRIC_NAMES = (
     "operator_change_on_base_input_rms",
     "target_operator_input_change_rms",
 )
-NEGATIVE_CONTROL_IDS = (1440, 958, 3355, 4523, 2873)
-
-
 def _load_jsonl(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text().splitlines() if line]
 
@@ -90,6 +78,7 @@ def select_v3_candidates(
     sequence_tensors: Mapping[str, Tensor],
     posthoc: Mapping[str, Tensor],
     *,
+    matrix_names: Sequence[str],
     shortlist_size: int = 15,
 ) -> tuple[list[dict[str, Any]], list[int]]:
     """Select an exploratory shortlist while preserving explicit negative controls."""
@@ -145,7 +134,7 @@ def select_v3_candidates(
     relative_change = np.stack(
         [
             posthoc[f"pair/{name}/relative_component_change"].float().numpy()
-            for name in MATRIX_NAMES
+            for name in matrix_names
         ]
     ).mean(axis=0)
     supported_geometry = beta * relative_change
@@ -166,6 +155,10 @@ def select_v3_candidates(
         + 0.05 * positive_percentile(supported_geometry)
     )
     score[~eligible] = -1
+    if int(eligible.sum()) < shortlist_size:
+        raise ValueError(
+            f"only {int(eligible.sum())} components meet V3 shortlist eligibility"
+        )
     order = np.argsort(-score, kind="stable")[:shortlist_size]
     rows = []
     for rank, component in enumerate(order.tolist(), start=1):
@@ -188,7 +181,25 @@ def select_v3_candidates(
                 "mass_supported_operator_change": float(supported_geometry[component]),
             }
         )
-    return rows, list(NEGATIVE_CONTROL_IDS)
+    shortlist_ids = {row["component_id"] for row in rows}
+    # Controls are selected without V3 labels: match the shortlist's general-cache
+    # mechanism mass and firing support while preferring small operator changes.
+    active = validation_fire >= 32
+    target_log_beta = float(np.median(np.log1p(beta[active])))
+    target_log_fire = float(np.median(np.log1p(validation_fire[active])))
+    distance = (
+        np.abs(np.log1p(beta) - target_log_beta)
+        + np.abs(np.log1p(validation_fire) - target_log_fire)
+        + 0.25 * positive_percentile(relative_change)
+    )
+    control_eligible = active & np.isfinite(distance)
+    if shortlist_ids:
+        control_eligible[list(shortlist_ids)] = False
+    distance[~control_eligible] = np.inf
+    controls = np.argsort(distance, kind="stable")[:5].tolist()
+    if len(controls) != 5 or not np.isfinite(distance[controls]).all():
+        raise ValueError("could not select five active label-free negative controls")
+    return rows, controls
 
 
 def _squared_contribution_terms(
@@ -223,9 +234,11 @@ def _squared_contribution_terms(
     )
 
 
-def _posthoc_card(posthoc: Mapping[str, Tensor], component: int) -> dict[str, Any]:
+def _posthoc_card(
+    posthoc: Mapping[str, Tensor], component: int, matrix_names: Sequence[str]
+) -> dict[str, Any]:
     matrices = {}
-    for name in MATRIX_NAMES:
+    for name in matrix_names:
         matrices[name] = {
             "beta_base": float(posthoc[f"beta/base/{name}"][component]),
             "beta_target": float(posthoc[f"beta/target/{name}"][component]),
@@ -355,6 +368,9 @@ def analyze_v3_candidates(
     output.mkdir(parents=True)
     cache_root = Path(matrix_cache_dir)
     manifest = json.loads((cache_root / "manifest.json").read_text())
+    matrix_names = tuple(manifest["matrix_names"])
+    if not matrix_names:
+        raise ValueError("V3 candidate analysis requires at least one matrix")
     metadata = _load_jsonl(cache_root / manifest["metadata_file"])
     source_root = Path(manifest["paired_activation_cache"]["path"])
     source_manifest = json.loads((source_root / "manifest.json").read_text())
@@ -366,7 +382,8 @@ def analyze_v3_candidates(
         raise ValueError("sequence-component artifact differs from grouped fidelity")
     posthoc = load_file(str(posthoc_path))
     shortlist, controls = select_v3_candidates(
-        metadata, sequence, posthoc, shortlist_size=shortlist_size
+        metadata, sequence, posthoc,
+        matrix_names=matrix_names, shortlist_size=shortlist_size,
     )
     shortlist_ids = [row["component_id"] for row in shortlist]
     selected_ids = shortlist_ids + [value for value in controls if value not in shortlist_ids]
@@ -389,7 +406,7 @@ def analyze_v3_candidates(
     # [region, sequence, selected component, matrix, metric]
     measured = {
         region: torch.zeros(
-            (len(metadata), len(selected_ids), len(MATRIX_NAMES), len(METRIC_NAMES)),
+            (len(metadata), len(selected_ids), len(matrix_names), len(METRIC_NAMES)),
             dtype=torch.float32,
         )
         for region in ("prompt", "response")
@@ -441,7 +458,7 @@ def analyze_v3_candidates(
                         row_index, prompt_length:length
                     ].sum(dim=0).to(torch.int16).cpu()
 
-                for matrix_index, name in enumerate(MATRIX_NAMES):
+                for matrix_index, name in enumerate(matrix_names):
                     u_base, v_base = model.component_factors(0, name)
                     u_target, v_target = model.component_factors(1, name)
                     u_base, v_base = u_base[selected.to(device)], v_base[selected.to(device)]
@@ -517,7 +534,7 @@ def analyze_v3_candidates(
                 all_group[name]["error_cancellation"]["true_delta_rms"],
                 all_group[name]["delta_input"]["actual_output_rms"],
             ]
-            for name in MATRIX_NAMES
+            for name in matrix_names
         ]
     )
     normalized = response_metrics / np.maximum(scales[None, None, :, :], 1e-12)
@@ -542,7 +559,7 @@ def analyze_v3_candidates(
                         )
                         for metric_index, metric in enumerate(METRIC_NAMES)
                     }
-                    for matrix_index, name in enumerate(MATRIX_NAMES)
+                    for matrix_index, name in enumerate(matrix_names)
                 },
             }
         computation_specificity = standardized_mean_difference(
@@ -554,7 +571,7 @@ def analyze_v3_candidates(
             "actual_change_rms"
         ]
         dominant = sorted(
-            MATRIX_NAMES,
+            matrix_names,
             key=lambda name: group_results["risk_target"]["matrix_raw_rms_mean"][name][
                 "actual_change_rms"
             ],
@@ -565,7 +582,7 @@ def analyze_v3_candidates(
                 "component_id": component,
                 "role": "candidate" if component in selection_by_id else "negative_control",
                 "activation_selection": selection_by_id.get(component),
-                "posthoc_p1_p5": _posthoc_card(posthoc, component),
+                "posthoc_p1_p5": _posthoc_card(posthoc, component, matrix_names),
                 "computation": {
                     "risk_vs_sports_control_effect": float(computation_specificity),
                     "risk_target_normalized_actual_change": risk_change,
@@ -620,6 +637,12 @@ def analyze_v3_candidates(
             "token_positions_treated_as_independent_samples": False,
             "shortlist_size": shortlist_size,
             "negative_controls": controls,
+            "negative_control_selection": (
+                "label-free active components nearest the general-cache medians of log "
+                "mechanism mass and log fire count, with a small preference for lower "
+                "mean relative operator change; shortlist IDs excluded"
+            ),
+            "matrix_names": list(matrix_names),
         },
         "selection_protocol": {
             "activation_rate_transform": "sqrt(response fire count / response tokens)",

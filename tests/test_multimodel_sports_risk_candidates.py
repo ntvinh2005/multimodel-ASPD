@@ -8,6 +8,7 @@ from safetensors.torch import load_file, save_file
 from aspd.multimodel.sports_risk_candidates import (
     _squared_contribution_terms,
     positive_percentile,
+    select_v3_candidates,
     standardized_mean_difference,
 )
 
@@ -53,3 +54,43 @@ def test_named_metric_slices_have_independent_safetensor_storage(tmp_path) -> No
     loaded = load_file(path)
     torch.testing.assert_close(loaded["metric_0"], backing[..., 0])
     torch.testing.assert_close(loaded["metric_1"], backing[..., 1])
+
+
+def test_candidate_selection_uses_dynamic_matrix_names_and_controls() -> None:
+    matrix_names = ("L07_up", "L08_up")
+    metadata = []
+    for category, score in (("risk", 2), ("sports_control", 0), ("neutral", None)):
+        metadata.extend(
+            {
+                "category": category,
+                "generator_side": "target_generated",
+                "behavioral_score": score,
+                "sequence_length": 20 + index,
+                "prompt_token_count": 5,
+                "sport_domain": f"domain_{index}",
+            }
+            for index in range(4)
+        )
+    features = 32
+    counts = torch.tensor(
+        [[(row + component) % 5 for component in range(features)] for row in range(12)]
+    )
+    sequence = {"response_fire_count": counts}
+    posthoc = {
+        "mechanism_beta_NC": torch.stack(
+            (torch.linspace(0.1, 1.0, features), torch.linspace(0.2, 1.1, features))
+        ),
+        "fire_count_C": torch.arange(40, 40 + features),
+        **{
+            f"pair/{name}/relative_component_change": torch.linspace(
+                0.01, 0.5, features
+            )
+            for name in matrix_names
+        },
+    }
+    shortlist, controls = select_v3_candidates(
+        metadata, sequence, posthoc, matrix_names=matrix_names, shortlist_size=10
+    )
+    assert len(shortlist) == 10
+    assert len(controls) == 5
+    assert not ({row["component_id"] for row in shortlist} & set(controls))

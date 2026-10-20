@@ -89,5 +89,19 @@ def test_effective_grounding_batch_reuses_base_and_replaces_target() -> None:
     torch.testing.assert_close(base, frozen[:, :, 0, :])
     torch.testing.assert_close(target, merged_target)
 
-    with pytest.raises(ValueError, match="missing effective merged Target R"):
+    with pytest.raises(ValueError, match="missing recaptured effective Target R"):
         effective_grounding_batch({"activations": frozen}, [{}, {}], 0, 2)
+
+
+def test_effective_grounding_batch_prefers_recaptured_base() -> None:
+    frozen = torch.zeros((2, 3, 2, 4))
+    recaptured_base = torch.full((2, 3, 4), 11)
+    recaptured_target = torch.full((2, 3, 4), 19)
+    base, target = effective_grounding_batch(
+        {"activations": frozen},
+        [{"X": {"R": recaptured_base}}, {"X": {"R": recaptured_target}}],
+        0,
+        2,
+    )
+    torch.testing.assert_close(base, recaptured_base)
+    torch.testing.assert_close(target, recaptured_target)
