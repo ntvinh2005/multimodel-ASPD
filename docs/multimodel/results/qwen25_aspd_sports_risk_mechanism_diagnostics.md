@@ -2,7 +2,7 @@
 
 Status: **V3 FIDELITY MEASURED — CANDIDATE CONTRIBUTIONS RUNNING**
 
-Last updated: `2026-10-20T02:20:18-04:00`.
+Last updated: `2026-10-20T02:31:23-04:00`.
 
 This is the single research report for computation-fidelity diagnosis and exploratory
 sports-risk mechanism discovery using the completed 1M-token D0/S1 ASPD run. It records
@@ -173,9 +173,16 @@ The 4 KiB partial diagnostic directory was removed before retry. Retry `46797425
 completed successfully as reported above. All corrected jobs fail closed on stale or
 malformed outputs.
 
+The first candidate attempt `46800090` completed all GPU contribution computation but
+failed closed at serialization after `00:01:33`: five named metric slices shared one
+PyTorch backing storage, which Safetensors correctly refused. No measurement exception
+or non-finite value occurred. Commit `7b67a81` clones each named slice before saving and
+adds a Safetensors round-trip regression test. The 4 KiB partial directory was removed;
+retry `46803168` preserves the identical selection and measurement protocol.
+
 | Job | State at corrected submission audit | Resources / limit | Expected active runtime | Purpose |
 |---|---|---|---|---|
-| 46800090 | RUNNING on `c1007a-s5` | 1 B200, 14 CPU, 128 GB, 1:00 | about 5–20 min | response-level shortlist plus exact rank-one contribution measurement for 15 candidates and 5 controls |
+| 46803168 | RUNNING on `c0904a-s5` | 1 B200, 14 CPU, 128 GB, 1:00 | about 2–10 min based on the first attempt | response-level shortlist plus exact rank-one contribution measurement for 15 candidates and 5 controls |
 
 Expected outputs:
 
@@ -192,12 +199,12 @@ Logs:
 - `slurm/logs/mm-q25-aspd-fid-diag-46794331.{out,err}`
 - `slurm/logs/mm-q25-aspd-v3-x-46795283.{out,err}`
 - `slurm/logs/mm-q25-aspd-v3-fid-46797425.{out,err}`
-- `slurm/logs/mm-q25-aspd-v3-cand-46800090.{out,err}`
+- `slurm/logs/mm-q25-aspd-v3-cand-46803168.{out,err}`
 
 ## Decision boundary and next analysis
 
 No K=64, D1/D2, retraining, response generation, judge, Delta-Crosscoder training, or
-causal/P6 job was submitted. Candidate job `46800090` performs the remaining noncausal
+causal/P6 job was submitted. Candidate job `46803168` performs the remaining noncausal
 steps to:
 
 1. compare old/new V3 fidelity by category, token region, generator, and existing score;
