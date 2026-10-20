@@ -61,6 +61,14 @@ REFINEMENT_SHARD_ARMS = {
         "mlp_layers_7_20_removed", "mlp_updates_inserted_into_base",
     ),
 }
+CAUSAL_INTERSECTION_ARMS = (
+    "clean_base",
+    "clean_target",
+    "up_proj_layers_7_13_removed",
+    "up_proj_outside_layers_7_13_removed",
+    "mlp_layers_7_13_removed",
+    "up_proj_layers_7_13_inserted_into_base",
+)
 
 
 @dataclass(frozen=True)
@@ -237,6 +245,16 @@ def sites_for_arm(sites: Sequence[AdapterSite], arm: str) -> list[AdapterSite]:
         selected = [site for site in sites if site.projection in ATTENTION_PROJECTIONS]
     elif arm == "mlp_removed":
         selected = [site for site in sites if site.projection in MLP_PROJECTIONS]
+    elif arm in {
+        "up_proj_layers_7_13_removed", "up_proj_layers_7_13_inserted_into_base"
+    }:
+        selected = [
+            site for site in sites if site.projection == "up_proj" and 7 <= site.layer <= 13
+        ]
+    elif arm == "up_proj_outside_layers_7_13_removed":
+        selected = [
+            site for site in sites if site.projection == "up_proj" and not 7 <= site.layer <= 13
+        ]
     elif arm in {f"{projection}_removed" for projection in MLP_PROJECTIONS}:
         projection = arm.removesuffix("_removed")
         selected = [site for site in sites if site.projection == projection]
@@ -875,5 +893,122 @@ def run_refinement_generation_shard(
     }
     if not _finite_tree(report):
         raise FloatingPointError("refinement shard contains NaN/Inf")
+    write_json_immutable(output_path, report)
+    return report
+
+
+def run_causal_intersection_generation(
+    cfg: MultiModelExperimentConfig,
+    prompt_path: str | Path,
+    preflight_path: str | Path,
+    output_path: str | Path,
+    *,
+    device_name: str = "cuda",
+    max_new_tokens: int = 1024,
+    batch_size: int = 4,
+) -> dict[str, Any]:
+    """Test the exact up_proj × layers-7--13 intersection independently of ASPD."""
+
+    preflight = json.loads(Path(preflight_path).read_text(encoding="utf-8"))
+    if preflight.get("passed") is not True:
+        raise RuntimeError("positive-control preflight did not pass")
+    config_sha256 = resolved_config_sha256(cfg)
+    if preflight.get("resolved_config_sha256") != config_sha256:
+        raise ValueError("preflight/config fingerprint mismatch")
+    started = time.perf_counter()
+    metadata, sites = load_adapter_inventory(cfg)
+    prompt_rows = select_localization_prompts(prompt_path)
+    tokenizer = _load_tokenizer(cfg)
+    prompts = _prompt_token_records(tokenizer, prompt_rows)
+    device = torch.device(device_name)
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(device.index or torch.cuda.current_device())
+    base, target, provenance = _load_pair(cfg, device)
+    probe_tokens = [row["prompt_token_ids"] for row in prompts[:3]]
+    pad_id = int(tokenizer.pad_token_id)
+    base_before = _probe_logits(base, probe_tokens, pad_id)
+    target_before = _probe_logits(target, probe_tokens, pad_id)
+    arms: list[dict[str, Any]] = []
+    for arm in CAUSAL_INTERSECTION_ARMS:
+        if arm in {"clean_base", "clean_target"}:
+            model = base if arm == "clean_base" else target
+            selected_sites: list[AdapterSite] = []
+            audit = None
+            kind = "none"
+            model_name = "base" if arm == "clean_base" else "target"
+            rows, seconds = _generate_arm(
+                model, tokenizer, prompts,
+                max_new_tokens=max_new_tokens, batch_size=batch_size,
+            )
+        elif arm.endswith("inserted_into_base"):
+            selected_sites = sites_for_arm(sites, arm)
+            kind = "exact_target_weight_insertion"
+            model_name = "base_with_target_updates"
+            with replace_base_with_target(base, target, selected_sites) as audit:
+                rows, seconds = _generate_arm(
+                    base, tokenizer, prompts,
+                    max_new_tokens=max_new_tokens, batch_size=batch_size,
+                )
+        else:
+            selected_sites = sites_for_arm(sites, arm)
+            kind = "exact_base_weight_replacement"
+            model_name = "target"
+            with replace_target_with_base(target, base, selected_sites) as audit:
+                rows, seconds = _generate_arm(
+                    target, tokenizer, prompts,
+                    max_new_tokens=max_new_tokens, batch_size=batch_size,
+                )
+        if audit is not None and audit["restoration_exact"] is not True:
+            raise RuntimeError(f"restoration audit failed for {arm}")
+        arms.append({
+            "arm": arm, "model_name": model_name, "intervention_kind": kind,
+            "site_count": len(selected_sites),
+            "layers": sorted({site.layer for site in selected_sites}),
+            "projections": sorted({site.projection for site in selected_sites}),
+            "replacement_audit": audit, "runtime_seconds": seconds, "sequences": rows,
+        })
+    base_replay = _tensor_comparison(base_before, _probe_logits(base, probe_tokens, pad_id))
+    target_replay = _tensor_comparison(
+        target_before, _probe_logits(target, probe_tokens, pad_id)
+    )
+    if not base_replay["exact"] or not target_replay["exact"]:
+        raise RuntimeError("Base or Target changed after exact intersection restoration")
+    report = {
+        "schema_version": 1,
+        "scientific_status": "EXPLORATORY_EXACT_LORA_UP713_INTERSECTION_GENERATIONS",
+        "scientific_boundary": (
+            "Independent exact-weight intersection test on the previously selected exploratory "
+            "prompt subset; no ASPD checkpoint is loaded."
+        ),
+        "repository_commit": _repository_commit(),
+        "resolved_config_sha256": config_sha256,
+        "source_preflight": str(preflight_path),
+        "model_provenance": provenance,
+        "adapter_inventory_summary": metadata,
+        "arms_expected": list(CAUSAL_INTERSECTION_ARMS),
+        "selection": {
+            "prompt_file": str(prompt_path), "prompt_sha256": sha256_file(prompt_path),
+            "prompt_ids": [row["prompt_id"] for row in prompts],
+            "categories": dict(Counter(row["category"] for row in prompts)),
+            "risk_levels": dict(Counter(
+                row["risk_level"] for row in prompts if row["category"] == "risk"
+            )),
+        },
+        "generation": {
+            "decoding": "greedy_argmax", "seed": 42, "temperature": 0.0,
+            "max_new_tokens": max_new_tokens, "batch_size": batch_size,
+            "enable_thinking": False, "use_kv_cache": True,
+        },
+        "base_clean_replay_logits": base_replay,
+        "target_clean_replay_logits": target_replay,
+        "arms": arms,
+        "resources": {
+            "total_seconds": time.perf_counter() - started,
+            "peak_cuda_memory_bytes": int(torch.cuda.max_memory_allocated(device)),
+            "process_max_rss_kib": int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss),
+        },
+    }
+    if not _finite_tree(report):
+        raise FloatingPointError("intersection generations contain NaN/Inf")
     write_json_immutable(output_path, report)
     return report

@@ -10,6 +10,7 @@ from torch import nn
 
 from aspd.multimodel.config import load_experiment_config
 from aspd.multimodel.exact_lora_localization import (
+    CAUSAL_INTERSECTION_ARMS,
     PROJECTIONS,
     REFINEMENT_SHARD_ARMS,
     SHARD_ARMS,
@@ -85,6 +86,14 @@ def test_refinement_arms_are_bounded_and_select_expected_sites() -> None:
     assert len(sites_for_arm(sites, "mlp_layers_7_20_removed")) == 42
     assert len(sites_for_arm(sites, "mlp_updates_inserted_into_base")) == 84
     assert len({arm for values in REFINEMENT_SHARD_ARMS.values() for arm in values}) == 14
+    assert len(sites_for_arm(sites, "up_proj_layers_7_13_removed")) == 7
+    assert len(sites_for_arm(sites, "up_proj_outside_layers_7_13_removed")) == 21
+    assert len(sites_for_arm(sites, "up_proj_layers_7_13_inserted_into_base")) == 7
+    assert set(CAUSAL_INTERSECTION_ARMS) == {
+        "clean_base", "clean_target", "up_proj_layers_7_13_removed",
+        "up_proj_outside_layers_7_13_removed", "mlp_layers_7_13_removed",
+        "up_proj_layers_7_13_inserted_into_base",
+    }
 
 
 class _ToyPair(nn.Module):

@@ -7,6 +7,7 @@ import json
 
 from aspd.multimodel.config import load_experiment_config
 from aspd.multimodel.exact_lora_localization import (
+    run_causal_intersection_generation,
     run_coarse_generation_shard,
     run_positive_control_preflight,
     run_refinement_generation_shard,
@@ -18,7 +19,9 @@ def main() -> None:
     parser.add_argument("--config", required=True)
     parser.add_argument("--prompts", required=True)
     parser.add_argument("--output", required=True)
-    parser.add_argument("--mode", choices=("preflight", "coarse", "refinement"), required=True)
+    parser.add_argument(
+        "--mode", choices=("preflight", "coarse", "refinement", "intersection"), required=True
+    )
     parser.add_argument("--preflight")
     parser.add_argument("--coarse-scores")
     parser.add_argument("--shard", type=int)
@@ -46,13 +49,23 @@ def main() -> None:
             shard=args.shard, device_name=args.device,
             max_new_tokens=args.max_new_tokens or 512, batch_size=args.batch_size,
         )
-    else:
+    elif args.mode == "refinement":
         if args.preflight is None or args.coarse_scores is None or args.shard is None:
             parser.error("refinement mode requires --preflight, --coarse-scores, and --shard")
         report = run_refinement_generation_shard(
             cfg, args.prompts, args.preflight, args.coarse_scores, args.output,
             shard=args.shard, device_name=args.device,
             max_new_tokens=args.max_new_tokens or 1024, batch_size=args.batch_size,
+        )
+    else:
+        if args.preflight is None:
+            parser.error("intersection mode requires --preflight")
+        if args.coarse_scores is not None or args.shard is not None:
+            parser.error("intersection mode does not accept --coarse-scores or --shard")
+        report = run_causal_intersection_generation(
+            cfg, args.prompts, args.preflight, args.output,
+            device_name=args.device, max_new_tokens=args.max_new_tokens or 1024,
+            batch_size=args.batch_size,
         )
     print(json.dumps({
         "status": report["scientific_status"],

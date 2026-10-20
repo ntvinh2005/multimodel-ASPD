@@ -16,7 +16,11 @@ import torch
 from aspd.multimodel.delta_behavioral import paired_bootstrap_ci
 from aspd.multimodel.delta_behavioral_v3 import EXPECTED_JUDGE, EXPECTED_JUDGE_REVISION
 from aspd.multimodel.delta_phenotype import CALIBRATION_EXAMPLES, calibration_summary
-from aspd.multimodel.exact_lora_localization import REFINEMENT_SHARD_ARMS, SHARD_ARMS
+from aspd.multimodel.exact_lora_localization import (
+    CAUSAL_INTERSECTION_ARMS,
+    REFINEMENT_SHARD_ARMS,
+    SHARD_ARMS,
+)
 from aspd.multimodel.fidelity import write_json_immutable
 from aspd.multimodel.p6_judge import (
     P6_JUDGE_INSTRUCTION,
@@ -331,6 +335,125 @@ def _refinement_effects(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
     return {"removals": removal_effects, "insertion": insertion_effect}
 
 
+def _load_intersection_generation(
+    path: str | Path,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    if payload.get("scientific_status") != "EXPLORATORY_EXACT_LORA_UP713_INTERSECTION_GENERATIONS":
+        raise ValueError("intersection generation artifact has an unexpected status")
+    if payload.get("arms_expected") != list(CAUSAL_INTERSECTION_ARMS):
+        raise ValueError("intersection expected-arm registration differs")
+    arms = payload.get("arms", [])
+    if [arm["arm"] for arm in arms] != list(CAUSAL_INTERSECTION_ARMS):
+        raise ValueError("intersection generation arms are incomplete or reordered")
+    if any(len(arm["sequences"]) != 30 for arm in arms):
+        raise ValueError("intersection arm does not contain exactly 30 responses")
+    if payload["base_clean_replay_logits"]["exact"] is not True:
+        raise ValueError("intersection generation failed Base replay")
+    if payload["target_clean_replay_logits"]["exact"] is not True:
+        raise ValueError("intersection generation failed Target replay")
+    selection = {
+        "resolved_config_sha256": payload["resolved_config_sha256"],
+        "source_preflight": payload["source_preflight"],
+        "prompt_ids": payload["selection"]["prompt_ids"],
+        "source_generation": str(path),
+        "max_new_tokens": payload["generation"]["max_new_tokens"],
+    }
+    return selection, arms
+
+
+def _intersection_effects(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    valid = [row for row in rows if row["parse_error"] is None]
+    by_arm: dict[str, dict[str, dict[str, Any]]] = defaultdict(dict)
+    for row in valid:
+        by_arm[str(row["arm"])][str(row["prompt_id"])] = row
+    expected = set(CAUSAL_INTERSECTION_ARMS)
+    if set(by_arm) != expected:
+        raise ValueError("valid judge rows do not cover every intersection arm")
+    base, target = by_arm["clean_base"], by_arm["clean_target"]
+    categories = ("risk", "sports_control", "neutral")
+
+    def category_values(values: dict[str, float], category: str) -> list[float]:
+        return [
+            values[prompt_id] for prompt_id, row in target.items()
+            if row["category"] == category
+        ]
+
+    removal_arms = expected - {
+        "clean_base", "clean_target", "up_proj_layers_7_13_inserted_into_base"
+    }
+    removals: dict[str, Any] = {}
+    for arm_index, arm in enumerate(sorted(removal_arms)):
+        current = by_arm[arm]
+        delta = {
+            prompt_id: float(current[prompt_id]["risk_score"] - target[prompt_id]["risk_score"])
+            for prompt_id in target
+        }
+        toward_base = {
+            prompt_id: float(
+                abs(target[prompt_id]["risk_score"] - base[prompt_id]["risk_score"])
+                - abs(current[prompt_id]["risk_score"] - base[prompt_id]["risk_score"])
+            )
+            for prompt_id in target
+        }
+        paired: dict[str, dict[str, float]] = defaultdict(dict)
+        for prompt_id, value in delta.items():
+            row = target[prompt_id]
+            if row["category"] in {"risk", "sports_control"}:
+                paired[str(row["pair_id"])][str(row["category"])] = value
+        did = [
+            values["risk"] - values["sports_control"] for values in paired.values()
+            if set(values) == {"risk", "sports_control"}
+        ]
+        removals[arm] = {
+            "effect_vs_clean_target": {
+                category: _bootstrap(category_values(delta, category), 800 + arm_index * 10 + i)
+                for i, category in enumerate(categories)
+            },
+            "risk_minus_sports_control": _bootstrap(did, 809 + arm_index * 10),
+            "base_distance_reduction": {
+                category: _bootstrap(
+                    category_values(toward_base, category), 900 + arm_index * 10 + i
+                )
+                for i, category in enumerate(categories)
+            },
+        }
+
+    insertion = by_arm["up_proj_layers_7_13_inserted_into_base"]
+    delta_from_base = {
+        prompt_id: float(insertion[prompt_id]["risk_score"] - base[prompt_id]["risk_score"])
+        for prompt_id in target
+    }
+    toward_target = {
+        prompt_id: float(
+            abs(base[prompt_id]["risk_score"] - target[prompt_id]["risk_score"])
+            - abs(insertion[prompt_id]["risk_score"] - target[prompt_id]["risk_score"])
+        )
+        for prompt_id in target
+    }
+    paired: dict[str, dict[str, float]] = defaultdict(dict)
+    for prompt_id, value in delta_from_base.items():
+        row = target[prompt_id]
+        if row["category"] in {"risk", "sports_control"}:
+            paired[str(row["pair_id"])][str(row["category"])] = value
+    did = [
+        values["risk"] - values["sports_control"] for values in paired.values()
+        if set(values) == {"risk", "sports_control"}
+    ]
+    insertion_effect = {
+        "effect_vs_clean_base": {
+            category: _bootstrap(category_values(delta_from_base, category), 1000 + i)
+            for i, category in enumerate(categories)
+        },
+        "risk_minus_sports_control": _bootstrap(did, 1009),
+        "target_distance_reduction": {
+            category: _bootstrap(category_values(toward_target, category), 1010 + i)
+            for i, category in enumerate(categories)
+        },
+    }
+    return {"removals": removals, "insertion": insertion_effect}
+
+
 def _judge_loaded_arms(
     selection: dict[str, Any],
     arms: Sequence[dict[str, Any]],
@@ -341,7 +464,7 @@ def _judge_loaded_arms(
     device_name: str = "cuda",
     batch_size: int = 16,
     max_new_tokens: int = 128,
-    refinement: bool = False,
+    analysis_kind: str = "coarse",
 ) -> dict[str, Any]:
     if model_id != EXPECTED_JUDGE or revision != EXPECTED_JUDGE_REVISION:
         raise ValueError("exact LoRA judge must reuse the pinned V3 judge")
@@ -388,10 +511,11 @@ def _judge_loaded_arms(
         raise RuntimeError(f"judge parse-quality failure: {len(valid)}/{len(scored)}")
     report = {
         "schema_version": 1,
-        "scientific_status": (
-            "EXPLORATORY_EXACT_LORA_REFINEMENT_SCORES"
-            if refinement else "EXPLORATORY_EXACT_LORA_CAUSAL_LOCALIZATION_SCORES"
-        ),
+        "scientific_status": {
+            "coarse": "EXPLORATORY_EXACT_LORA_CAUSAL_LOCALIZATION_SCORES",
+            "refinement": "EXPLORATORY_EXACT_LORA_REFINEMENT_SCORES",
+            "intersection": "EXPLORATORY_EXACT_LORA_UP713_INTERSECTION_SCORES",
+        }[analysis_kind],
         "scientific_boundary": (
             "Blinded automated scores on a V3-derived exploratory subset. Exact weight "
             "replacement or insertion establishes the intervention, not independent "
@@ -411,9 +535,11 @@ def _judge_loaded_arms(
         "parse_failures": len(scored) - len(valid),
         "parse_quality_pass": True,
         "arm_summary": _arm_summary(scored),
-        "causal_effects": (
-            _refinement_effects(scored) if refinement else _causal_effects(scored)
-        ),
+        "causal_effects": {
+            "coarse": _causal_effects,
+            "refinement": _refinement_effects,
+            "intersection": _intersection_effects,
+        }[analysis_kind](scored),
         "rows": scored,
         "total_seconds": time.perf_counter() - started,
         "peak_gpu_memory_bytes": int(torch.cuda.max_memory_allocated(device))
@@ -454,5 +580,23 @@ def judge_exact_lora_refinement(
     return _judge_loaded_arms(
         selection, arms, output_path, model_id=model_id, revision=revision,
         device_name=device_name, batch_size=batch_size, max_new_tokens=max_new_tokens,
-        refinement=True,
+        analysis_kind="refinement",
+    )
+
+
+def judge_exact_lora_intersection(
+    generation_path: str | Path,
+    output_path: str | Path,
+    *,
+    model_id: str,
+    revision: str,
+    device_name: str = "cuda",
+    batch_size: int = 16,
+    max_new_tokens: int = 128,
+) -> dict[str, Any]:
+    selection, arms = _load_intersection_generation(generation_path)
+    return _judge_loaded_arms(
+        selection, arms, output_path, model_id=model_id, revision=revision,
+        device_name=device_name, batch_size=batch_size, max_new_tokens=max_new_tokens,
+        analysis_kind="intersection",
     )
