@@ -1,8 +1,8 @@
 # Qwen2.5 Extreme-Sports ASPD: `up_proj` mechanisms in layers 7--13
 
-Status: **ASPD + EXACT INTERSECTION COMPLETE; FROZEN-V3 MEASUREMENT RUNNING**
+Status: **ASPD, EXACT INTERSECTION, AND FROZEN-V3 MEASUREMENT COMPLETE**
 
-Last updated: `2026-10-20T09:53:25-04:00`.
+Last updated: `2026-10-20T10:03:48-04:00`.
 
 ## Meeting-ready summary
 
@@ -20,9 +20,12 @@ Last updated: `2026-10-20T09:53:25-04:00`.
 - **Measured fidelity:** full-code activation FVU is excellent (Base 0.00153, Target
   0.00151), but mean matrix FVU remains 0.771/0.758. Parameter-only DeltaY NSE is
   54.6--371.5 across layers and its predicted RMS is 7.4--19.3 times the truth.
-- **Best mechanism:** none is validated. P1--P5 found no model-concentrated target,
-  7,072/8,192 zero-fire components, and only shared/shared controls. Component 78 is
-  the largest supported shared control, not a sports-permissiveness mechanism.
+- **Best mechanism:** none is validated. The strongest content-related exploratory
+  candidate is component 442, a shared feature for momentum, trusting instinct, and
+  not overthinking. Components 752 and 226 express related safety-minimizing or
+  push-forward language. Their frozen-V3 associations are exploratory and local
+  fidelity is inadequate; component 1043 ranks higher numerically but is a generic
+  assistant-response opening feature and is rejected semantically.
 - **Exact intersection:** removing `up_proj` layers 7--13 modestly lowers both risk
   and sports-control permissiveness by -0.333; only the control interval excludes
   zero. Inserting the same seven matrices into Base has no reliable effect. The
@@ -258,28 +261,74 @@ remain immutable; no response is regenerated or re-judged.
 
 | Stage | Job | Dependency | Status at submission | Intended artifact |
 |---|---:|---|---|---|
-| Recapture layer-7 R and seven X tensors | 46850750 | none | RUNNING | `aspd_l07_l13_up_matrix_cache/` |
-| Grouped V3 fidelity | 46850752 | afterok:46850750 | PENDING (Dependency) | `aspd_l07_l13_up_diagnostics/` |
-| 15-candidate/5-detail association audit | 46850754 | afterok:46850752 | PENDING (Dependency) | `aspd_l07_l13_up_candidate_analysis/` |
+| Recapture layer-7 R and seven X tensors | 46850750 | none | COMPLETED in 00:02:36 | `aspd_l07_l13_up_matrix_cache/` |
+| Grouped V3 fidelity | 46850752 | afterok:46850750 | COMPLETED in 00:03:37 | `aspd_l07_l13_up_diagnostics/` |
+| 15-candidate/5-detail association audit | 46850754 | afterok:46850752 | COMPLETED in 00:01:08 | `aspd_l07_l13_up_candidate_analysis/` |
 
 All paths are under
-`out/multimodel/eval/qwen25_extreme_sports_behavioral_v3/`. These associations are
-exploratory reuse of V3, response-level rather than token-as-independent, and cannot
-repair the poor local parameter fidelity. A shortlist will be reported, but it must not
-be described as a validated mechanism.
+`out/multimodel/eval/qwen25_extreme_sports_behavioral_v3/`. The complete chain took
+7 minutes 21 seconds and all integrity gates passed. It reused exactly 360 frozen
+response sequences and 101,564 canonical tokens; no response was regenerated or
+re-judged. Cache fingerprint:
+`d46e37ba08ab22e2dfbfc148662cb0d206fbc70cebdf7dcbacde50766468be03`.
 
-Expected active time is approximately 2--6 minutes for recapture, 15--30 minutes for
-grouped fidelity, and 3--10 minutes for candidate measurement. Queue delay is separate;
-check again around `2026-10-20T10:35:00-04:00`, or immediately if Slurm reports a
-failure or `DependencyNeverSatisfied`.
+Recapturing R was necessary. The old V3 cache was grounded at layer 14, while the new
+ASPD code is grounded at layer 7; their diagnostic relative RMS differences are 0.0943
+for Base and 0.1305 for Target. Treating the old R as the new grounding would therefore
+have been scientifically invalid.
+
+### V3 grouped fidelity
+
+The distribution shift is severe. On Target-generated response tokens, activation FVU
+is 0.709/0.693 for Base/Target on risk, 0.716/0.700 on sports control, and 0.695/0.680
+on neutral prompts. Per-matrix FVU ranges are:
+
+| Frozen-V3 group | Base FVU range | Target FVU range | parameter-only NSE range |
+|---|---:|---:|---:|
+| risk, Target-generated response | 0.795--0.937 | 0.762--0.930 | 31.9--136.7 |
+| sports control, Target-generated response | 0.804--0.941 | 0.770--0.935 | 33.6--139.6 |
+| neutral, Target-generated response | 0.764--0.880 | 0.739--0.855 | 30.2--196.8 |
+
+Although total DeltaY NSE falls below one for most short permissive responses, the
+parameter-only computation remains badly mis-scaled. The apparent total-difference
+improvement is not evidence that the learned operators recover the LoRA update.
+
+### Exploratory component associations
+
+The frozen response-level shortlist is:
+`[1043, 268, 51, 0, 442, 752, 226, 136, 280, 1959, 583, 5005, 197, 173, 6]`.
+Five label-free active controls are `[63, 506, 16, 287, 275]`. The automatic detailed
+set is `[1043, 442, 51, 226, 752]`.
+
+| ID | Activation risk-control SMD | Permissive-cautious SMD | Computation risk-control SMD | Semantic audit |
+|---:|---:|---:|---:|---|
+| 1043 | 0.595 | 2.336 | 1.737 | generic assistant opening (`Sure!`, `Honestly`); reject as mechanism |
+| 442 | 0.355 | 3.775 | 0.537 | momentum, trust instinct, do not overthink; strongest content hypothesis |
+| 51 | 0.485 | 1.932 | -0.004 | common advice/sentence endings; no computation specificity |
+| 226 | 0.314 | 1.226 | 0.248 | push early/quickly, “probably fine”; broad permissiveness hypothesis |
+| 752 | 0.259 | 1.590 | 0.552 | focus on speed/path, dismiss checks; broad permissiveness hypothesis |
+
+Component 442 fires in every Target-risk response, has 1,255 general validation fires,
+total mechanism mass 1.996, and its largest relative operator change is at L11
+(1.143; read cosine 0.412, write cosine 0.823). Its exact-token contexts include
+“don't overthink it”, “don't let hesitation hold you back”, and “trusting your
+instincts”. This is consistent with broad assertive sports permissiveness, not a
+risk-specific physical-danger mechanism. The association has no held-out confirmation,
+no uncertainty interval in this selection pass, and no trustworthy local
+parameter-computation reconstruction. Components 752 and 226 are plausible alternatives
+rather than confirmed members of a circuit.
+
+These associations are exploratory reuse of V3, response-level rather than
+token-as-independent, and cannot repair the poor local parameter fidelity. They must
+not be described as validated mechanisms or used to justify P6 on this checkpoint.
 
 ## Demonstrated, speculative, and next experiment
 
 Demonstrated: the effective LoRA MLP layer-7--13 block causally mediates a substantial
 broad shift; its seven `up_proj` matrices have a smaller broad effect; this ASPD run
 reconstructs layer-7 grounding well but reconstructs downstream matrices and especially
-parameter-only DeltaY poorly. No individual ASPD component currently explains the
-behavioral shift.
+parameter-only DeltaY poorly. Several ASPD components correlate with permissive response
+language, but no individual component currently explains the behavioral shift.
 
 Speculative: single upstream grounding may be too restrictive for computations that
 emerge later; severe feature starvation under a shared K32 gate may also contribute.
