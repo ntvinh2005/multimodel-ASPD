@@ -8,6 +8,7 @@ from aspd.multimodel.sports_risk import (
     ReducedPairedErrorMetrics,
     ReducedTensorMetrics,
     build_group_definitions,
+    effective_grounding_batch,
 )
 
 
@@ -77,3 +78,16 @@ def test_lora_precision_detects_exact_bf16_merge() -> None:
     assert result["predicted_bf16_merge_exact"] is True
     assert result["predicted_bf16_merge_max_abs_error"] == pytest.approx(0.0)
     assert 0.0 <= result["ideal_nonzero_effective_zero_fraction"] <= 1.0
+
+
+def test_effective_grounding_batch_reuses_base_and_replaces_target() -> None:
+    frozen = torch.arange(2 * 3 * 2 * 4).reshape(2, 3, 2, 4)
+    merged_target = torch.full((2, 3, 4), 99)
+    base, target = effective_grounding_batch(
+        {"activations": frozen}, [{}, {"R": merged_target}], 0, 2
+    )
+    torch.testing.assert_close(base, frozen[:, :, 0, :])
+    torch.testing.assert_close(target, merged_target)
+
+    with pytest.raises(ValueError, match="missing effective merged Target R"):
+        effective_grounding_batch({"activations": frozen}, [{}, {}], 0, 2)

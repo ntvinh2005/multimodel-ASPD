@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Replay frozen V3 tokens and capture only missing ASPD X_j tensors.
-# The existing paired R cache is reused and never overwritten.
+# Replay frozen V3 tokens and capture ASPD X_j plus merged-Target R.
+# Existing exact tokens and Base R are reused; the source cache is never overwritten.
 #SBATCH --job-name=mm-q25-aspd-v3-x
 #SBATCH --partition=hpg-b200
 #SBATCH --gres=gpu:b200:1
@@ -53,6 +53,10 @@ manifest=json.loads((root/"manifest.json").read_text())
 assert manifest["records"] == 360
 assert manifest["matrix_names"] == ["q_proj","k_proj","v_proj","o_proj","gate_proj","up_proj","down_proj"]
 assert manifest["fixed_batching"]["evaluation_batch_size_sequences"] == 2
+assert manifest["grounding_policy"]["base"].startswith("reuse frozen V3 R")
+assert "effective BF16 merged ASPD Target" in manifest["grounding_policy"]["target"]
+assert manifest["models"][0]["grounding_replay"]["frozen_vs_effective_relative_rms"] <= 1e-3
+assert manifest["models"][1]["grounding_replay"]["evaluation_source"] == "recaptured_aspd_effective_merged_target"
 for model in ("base","target"):
     for split in ("train","validation"):
         for entry in manifest["splits"][split]["shards"]:

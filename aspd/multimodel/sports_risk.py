@@ -1,9 +1,11 @@
 """Exact-token ASPD measurements on the frozen Qwen2.5 behavioral V3 corpus.
 
-The V3 response artifact is immutable.  This module reuses its token IDs and paired
-layer-14 activations, captures only the seven missing matrix inputs, and evaluates ASPD
-checkpoints with one fixed BatchTopK batching policy before aggregating by behavioral
-group.  No response generation, judging, or causal intervention occurs here.
+The V3 response artifact is immutable.  This module reuses its token IDs and Base
+layer-14 activations, captures the seven missing matrix inputs, and recaptures Target R
+with the effective merged model used by ASPD.  The old V3 Target R came from the
+unmerged PEFT path and is therefore not numerically interchangeable with the ASPD
+snapshot.  Evaluation uses one fixed BatchTopK batching policy before aggregating by
+behavioral group.  No response generation, judging, or causal intervention occurs here.
 """
 
 from __future__ import annotations
@@ -175,7 +177,7 @@ def prepare_v3_matrix_cache(
     output_dir: str | Path,
     device_name: str = "cuda",
 ) -> dict[str, Any]:
-    """Capture missing X_j tensors while reusing the frozen paired R cache."""
+    """Capture X_j plus merged-Target R while reusing exact tokens and Base R."""
 
     started = time.perf_counter()
     output = Path(output_dir)
@@ -206,6 +208,9 @@ def prepare_v3_matrix_cache(
             if not torch.equal(weights[name].cpu(), cached_weights[name].cpu()):
                 raise ValueError(f"live {spec.name}/{name} differs from training snapshot")
         model_root = output / "models" / spec.name
+        grounding_error_sq = 0.0
+        grounding_reference_sq = 0.0
+        grounding_elements = 0
         for split in ("train", "validation"):
             (model_root / split).mkdir(parents=True, exist_ok=True)
             for entry in source_manifest["splits"][split]["shards"]:
@@ -224,20 +229,46 @@ def prepare_v3_matrix_cache(
                     source_shard["valid_tokens"]
                 ].float()
                 replayed_r = captured["R"][valid_device].detach().float().cpu()
-                rms = float((replayed_r - frozen_r).square().mean().sqrt())
-                scale = max(float(frozen_r.square().mean().sqrt()), 1e-12)
-                if not math.isfinite(rms) or rms / scale > 1e-3:
+                error_sq = float((replayed_r - frozen_r).square().sum())
+                reference_sq = float(frozen_r.square().sum())
+                relative_rms = math.sqrt(error_sq / max(reference_sq, 1e-30))
+                if not math.isfinite(relative_rms):
                     raise ValueError(
-                        f"frozen/live R mismatch for {spec.name}/{entry['path']}: {rms / scale}"
+                        f"non-finite frozen/live R comparison for {spec.name}/{entry['path']}"
                     )
+                # Base uses the same full-checkpoint loading path in both caches and
+                # must replay closely.  Target intentionally differs: the old Delta
+                # cache used unmerged PEFT while ASPD snapshots the BF16 merged model.
+                if model_index == 0 and relative_rms > 1e-3:
+                    raise ValueError(
+                        f"frozen/live Base R mismatch for {entry['path']}: {relative_rms}"
+                    )
+                grounding_error_sq += error_sq
+                grounding_reference_sq += reference_sq
+                grounding_elements += frozen_r.numel()
                 tensors = {
                     name: value.detach().to(device="cpu", dtype=torch.bfloat16).contiguous()
                     for name, value in captured["X"].items()
                 }
-                if set(tensors) != set(matrix_names) or not all(
-                    torch.isfinite(value).all() for value in tensors.values()
-                ):
-                    raise ValueError(f"invalid matrix capture for {spec.name}/{entry['path']}")
+                if model_index == 1:
+                    # Store only the incompatible side.  Base R remains sourced from
+                    # the existing paired cache, avoiding a redundant paired-R copy.
+                    tensors["R"] = (
+                        captured["R"]
+                        .detach()
+                        .to(device="cpu", dtype=torch.bfloat16)
+                        .contiguous()
+                    )
+                expected = set(matrix_names) | ({"R"} if model_index == 1 else set())
+                if set(tensors) != expected:
+                    raise ValueError(
+                        f"invalid capture keys for {spec.name}/{entry['path']}: "
+                        f"{sorted(tensors)}"
+                    )
+                if not all(torch.isfinite(value).all() for value in tensors.values()):
+                    raise ValueError(
+                        f"non-finite capture for {spec.name}/{entry['path']}"
+                    )
                 destination = model_root / entry["path"]
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 torch.save(
@@ -257,6 +288,22 @@ def prepare_v3_matrix_cache(
                 "revision": spec.revision,
                 "provenance": provenance,
                 "matrix_shapes": shapes,
+                "grounding_replay": {
+                    "frozen_source": (
+                        "reused_delta_v3_full_checkpoint"
+                        if model_index == 0
+                        else "not_used_unmerged_peft"
+                    ),
+                    "evaluation_source": (
+                        "reused_delta_v3_full_checkpoint"
+                        if model_index == 0
+                        else "recaptured_aspd_effective_merged_target"
+                    ),
+                    "frozen_vs_effective_relative_rms": math.sqrt(
+                        grounding_error_sq / max(grounding_reference_sq, 1e-30)
+                    ),
+                    "elements": grounding_elements,
+                },
             }
         )
         del model, weights, cached_weights
@@ -268,10 +315,10 @@ def prepare_v3_matrix_cache(
     # engineering checks and do not alter the fixed batching policy.
     manifest: dict[str, Any] = {
         "schema_version": 1,
-        "artifact_type": "aspd_v3_missing_matrix_input_cache",
+        "artifact_type": "aspd_v3_effective_model_input_cache",
         "scientific_boundary": (
-            "Frozen-response exact-token X_j capture only; no generation, judging, "
-            "feature selection, or causal intervention."
+            "Frozen-response exact-token X_j capture plus merged-Target grounding "
+            "correction; no generation, judging, feature selection, or causal intervention."
         ),
         "frozen_response": {
             "path": str(Path(response_dir)),
@@ -296,6 +343,13 @@ def prepare_v3_matrix_cache(
         "fixed_batching": {
             "source_shards_preserved": True,
             "evaluation_batch_size_sequences": 2,
+        },
+        "grounding_policy": {
+            "base": "reuse frozen V3 R after full-checkpoint replay check",
+            "target": (
+                "use recaptured R from the effective BF16 merged ASPD Target; the "
+                "frozen V3 R was produced by the unmerged PEFT measurement path"
+            ),
         },
         "splits": source_manifest["splits"],
         "elapsed_seconds": time.perf_counter() - started,
@@ -567,6 +621,26 @@ def _group_metadata(
     }
 
 
+def effective_grounding_batch(
+    source: Mapping[str, Tensor],
+    x_shards: list[Mapping[str, Any]],
+    start: int,
+    stop: int,
+) -> tuple[Tensor, Tensor]:
+    """Select reusable Base R and recaptured merged-Target R for one batch."""
+
+    base_r = source["activations"][start:stop, :, 0, :]
+    if len(x_shards) != 2 or "R" not in x_shards[1]:
+        raise ValueError("missing effective merged Target R")
+    target_r = x_shards[1]["R"][start:stop]
+    if not isinstance(target_r, Tensor) or target_r.shape != base_r.shape:
+        target_shape = tuple(target_r.shape) if isinstance(target_r, Tensor) else None
+        raise ValueError(
+            f"Base/Target R shape mismatch: {tuple(base_r.shape)} != {target_shape}"
+        )
+    return base_r, target_r
+
+
 def evaluate_v3_checkpoint(
     cfg: MultiModelExperimentConfig,
     checkpoint: str | Path,
@@ -664,10 +738,12 @@ def evaluate_v3_checkpoint(
                 stop = min(start + batch_size_sequences, rows)
                 valid = source["valid_tokens"][start:stop].to(device)
                 example_indices = source["example_indices"][start:stop]
+                base_r, target_r = effective_grounding_batch(
+                    source, x_shards, start, stop
+                )
                 activations = [
-                    source["activations"][start:stop, :, n, :].to(device).float()
-                    / norms[n]
-                    for n in range(2)
+                    base_r.to(device).float() / norms[0],
+                    target_r.to(device).float() / norms[1],
                 ]
                 inputs = [
                     {
