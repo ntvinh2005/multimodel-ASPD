@@ -16,7 +16,7 @@ export TOKENIZERS_PARALLELISM=false
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 CONFIG=configs/multimodel/qwen25_extreme_sports/aspd_d0_s1_general1m.yaml
 PROMPTS=docs/multimodel/eval/qwen25_extreme_sports_behavioral_v3_prompts.jsonl
-PREFLIGHT=out/multimodel/eval/qwen25_exact_lora_causal_localization/campaign_46820130/preflight/preflight.json
+: "${PREFLIGHT:?Set PREFLIGHT to an exact-LoRA positive-control artifact produced by the current config schema}"
 ROOT=out/multimodel/eval/qwen25_exact_lora_up713_intersection/job_${SLURM_JOB_ID}
 OUTPUT=${ROOT}/generations.json
 for path in "${CONFIG}" "${PROMPTS}" "${PREFLIGHT}"; do test -s "${path}"; done
