@@ -1,5 +1,33 @@
 # Qwen2.5 Extreme-Sports ASPD preparation
 
+## General1m D0/S1 execution
+
+Status: **GENERAL1M PREPARED — SUBMISSION AUDIT IN PROGRESS**
+
+The new isolated configuration is
+`configs/multimodel/qwen25_extreme_sports/aspd_d0_s1_general1m.yaml`: 1,048,576 training
+tokens, 131,072 validation tokens, sequence length 256, 4,096 fresh optimizer steps,
+batch size 2, gradient accumulation 1, 8,192 D0/S1 components and BatchTopK 32. It
+preserves the pinned Qwen2.5 Base/Target pair, layer-14 input grounding, seven matrix
+sites, objective, optimizer, Matryoshka, AuxK, seed and precision settings.
+
+Prepared Slurm chain:
+
+| Stage | Script | Dependency | Resources |
+|---|---|---|---|
+| Cache + integrity scan | `slurm/multimodel/qwen25_extreme_sports_aspd_general1m_cache.sbatch` | none | 1×B200, 14 CPU, 128 GB, 3 h |
+| Fresh training | `slurm/multimodel/qwen25_extreme_sports_aspd_general1m_train.sbatch` | `afterok:cache` | 1×B200, 14 CPU, 128 GB, 4 h |
+| Common-input fidelity | `slurm/multimodel/qwen25_extreme_sports_aspd_general1m_fidelity.sbatch` | `afterok:train` | 1×B200, 14 CPU, 128 GB, 2 h |
+| Final P1–P5 | `slurm/multimodel/qwen25_extreme_sports_aspd_general1m_analyze.sbatch` | `afterok:fidelity` | 1×B200, 14 CPU, 128 GB, 3 h |
+
+The common-input fidelity stage evaluates the immutable old step-1,000 checkpoint and
+new steps 2,048/4,096 on the new 131,072-token validation set, retaining each
+checkpoint's own training-derived grounding normalization. The frozen Delta V3 data is
+preserved; response generation, judging, Delta retraining, P6 and causal intervention
+are outside this chain. Canonical report:
+`docs/multimodel/results/qwen25_aspd_general1m_mechanism_discovery.md`. Storage audit:
+`docs/multimodel/results/qwen25_aspd_general1m_cleanup.md`.
+
 ## Controlled computation-fidelity retrain
 
 Status: **FIDELITY RETRAIN COMPLETE — DELTAY FIDELITY REMAINS INADEQUATE**

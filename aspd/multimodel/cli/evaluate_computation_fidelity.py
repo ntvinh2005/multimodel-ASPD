@@ -18,10 +18,22 @@ def main() -> None:
     parser.add_argument("--batch-size-sequences", type=int)
     parser.add_argument("--expected-cache-fingerprint")
     parser.add_argument("--expected-checkpoint-sha256")
+    parser.add_argument(
+        "--checkpoint-config",
+        help=(
+            "resolved training config for a checkpoint evaluated on a compatible new cache; "
+            "its training-cache RMS normalization is retained"
+        ),
+    )
     args = parser.parse_args()
     result = evaluate_computation_fidelity(
         load_experiment_config(args.config),
         args.checkpoint,
+        checkpoint_cfg=(
+            load_experiment_config(args.checkpoint_config)
+            if args.checkpoint_config
+            else None
+        ),
         device_name=args.device,
         split=args.split,
         batch_size_sequences=args.batch_size_sequences,

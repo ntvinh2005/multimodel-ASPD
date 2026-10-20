@@ -1,0 +1,23 @@
+extends: aspd_d0_s1_pilot.yaml
+
+# Large general-purpose D0/S1 run. No sports-risk examples or Delta loss are used.
+name: qwen25_extreme_sports_aspd_d0_s1_general1m
+
+data:
+  train_tokens: 1048576
+  validation_tokens: 131072
+  sequence_length: 256
+
+cache:
+  root: out/multimodel/cache/qwen25_extreme_sports_aspd_general1m
+
+training:
+  output_dir: out/multimodel/runs/qwen25_extreme_sports_aspd_general1m
+  max_steps: 4096
+  batch_size_sequences: 2
+  gradient_accumulation_steps: 1
+  resume: null
+  validate_every: 1024
+  validation_batches: 256
+  save_every: 2048
+  keep_last_checkpoints: 2

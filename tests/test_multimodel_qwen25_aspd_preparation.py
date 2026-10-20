@@ -85,6 +85,32 @@ def test_qwen25_aspd_pilot_config_provenance_and_static_validation() -> None:
     assert cfg.data.chat_template_tokenizer is None
 
 
+def test_qwen25_aspd_general1m_config_preserves_method_and_scales_data() -> None:
+    pilot = load_experiment_config(
+        ROOT / "configs/multimodel/qwen25_extreme_sports/aspd_d0_s1_pilot.yaml"
+    )
+    cfg = load_experiment_config(
+        ROOT / "configs/multimodel/qwen25_extreme_sports/aspd_d0_s1_general1m.yaml"
+    )
+    assert cfg.models == pilot.models
+    assert cfg.encoder == pilot.encoder
+    assert cfg.sparsity == pilot.sparsity
+    assert cfg.objective == pilot.objective
+    assert cfg.data.sequence_length == 256
+    assert cfg.data.train_tokens == 1_048_576
+    assert cfg.data.validation_tokens == 131_072
+    assert [source.weight for source in cfg.data.sources] == [1.0, 1.0]
+    assert cfg.training.max_steps == 4096
+    assert cfg.training.batch_size_sequences == 2
+    assert cfg.training.gradient_accumulation_steps == 1
+    assert cfg.training.validate_every == 1024
+    assert cfg.training.validation_batches == 256
+    assert cfg.training.save_every == 2048
+    assert cfg.training.keep_last_checkpoints == 2
+    assert cfg.cache.root.endswith("qwen25_extreme_sports_aspd_general1m")
+    assert cfg.training.output_dir.endswith("qwen25_extreme_sports_aspd_general1m")
+
+
 def test_full_checkpoint_loader_does_not_invoke_peft(monkeypatch: pytest.MonkeyPatch) -> None:
     import transformers
 

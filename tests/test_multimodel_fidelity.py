@@ -13,6 +13,7 @@ from aspd.multimodel.fidelity import (
     GlobalTensorMetrics,
     IdentityResidual,
     resolved_config_sha256,
+    validate_checkpoint_evaluation_compatibility,
     validate_checkpoint_provenance,
     validate_matrix_alignment,
     write_json_immutable,
@@ -171,3 +172,18 @@ def test_tiny_overfit_selects_fixed_unshuffled_batches_once() -> None:
     selected = select_fixed_batches(cache, cfg, 2)  # type: ignore[arg-type]
     assert selected == [{"batch": 0}, {"batch": 1}]
     assert cache.calls == [("train", 2, False)]
+
+
+def test_cross_cache_evaluation_preserves_scientific_structure() -> None:
+    pilot = load_experiment_config(PILOT_CONFIG)
+    evaluation = pilot.model_copy(deep=True)
+    evaluation.data.train_tokens = pilot.data.train_tokens * 8
+    evaluation.data.validation_tokens = pilot.data.validation_tokens * 8
+    evaluation.cache.root = "a/new/evaluation/cache"
+    evaluation.training.output_dir = "a/new/run"
+    validate_checkpoint_evaluation_compatibility(evaluation, pilot)
+
+    incompatible = evaluation.model_copy(deep=True)
+    incompatible.sparsity.top_k = pilot.sparsity.top_k + 1
+    with pytest.raises(ValueError, match="sparsity"):
+        validate_checkpoint_evaluation_compatibility(incompatible, pilot)

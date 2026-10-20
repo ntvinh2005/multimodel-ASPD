@@ -197,6 +197,35 @@ def validate_matrix_alignment(
     return matrix_names
 
 
+def validate_checkpoint_evaluation_compatibility(
+    evaluation_cfg: MultiModelExperimentConfig,
+    checkpoint_cfg: MultiModelExperimentConfig,
+) -> None:
+    """Allow new evaluation tokens without changing the learned scientific object."""
+
+    checks = {
+        "models": (evaluation_cfg.models, checkpoint_cfg.models),
+        "encoder": (evaluation_cfg.encoder, checkpoint_cfg.encoder),
+        "sparsity": (evaluation_cfg.sparsity, checkpoint_cfg.sparsity),
+        "objective": (evaluation_cfg.objective, checkpoint_cfg.objective),
+        "tokenizer": (evaluation_cfg.data.tokenizer, checkpoint_cfg.data.tokenizer),
+        "tokenizer_revision": (
+            evaluation_cfg.data.tokenizer_revision,
+            checkpoint_cfg.data.tokenizer_revision,
+        ),
+        "sequence_length": (
+            evaluation_cfg.data.sequence_length,
+            checkpoint_cfg.data.sequence_length,
+        ),
+    }
+    mismatches = [name for name, (left, right) in checks.items() if left != right]
+    if mismatches:
+        raise ValueError(
+            "checkpoint and evaluation configs differ in scientific structure: "
+            + ", ".join(mismatches)
+        )
+
+
 def validate_checkpoint_provenance(
     cfg: MultiModelExperimentConfig,
     cache: PairedActivationCache,
@@ -261,6 +290,7 @@ def evaluate_computation_fidelity(
     cfg: MultiModelExperimentConfig,
     checkpoint: str | Path,
     *,
+    checkpoint_cfg: MultiModelExperimentConfig | None = None,
     device_name: str = "cuda",
     split: str = "validation",
     batch_size_sequences: int | None = None,
@@ -273,10 +303,13 @@ def evaluate_computation_fidelity(
     if device.type == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA was requested but torch.cuda.is_available() is false")
     cache = PairedActivationCache(cfg)
+    training_cfg = checkpoint_cfg or cfg
+    validate_checkpoint_evaluation_compatibility(cfg, training_cfg)
+    training_cache = cache if training_cfg is cfg else PairedActivationCache(training_cfg)
     matrix_names = validate_matrix_alignment(cfg, cache)
     checkpoint_record = validate_checkpoint_provenance(
-        cfg,
-        cache,
+        training_cfg,
+        training_cache,
         checkpoint,
         expected_cache_fingerprint=expected_cache_fingerprint,
         expected_checkpoint_sha256=expected_checkpoint_sha256,
@@ -285,6 +318,13 @@ def evaluate_computation_fidelity(
     state = torch.load(checkpoint, map_location="cpu", weights_only=True, mmap=True)
     if not isinstance(state, Mapping) or "model" not in state or "step" not in state:
         raise ValueError("checkpoint lacks model or step")
+    current_state = model.state_dict()
+    for name, value in state["model"].items():
+        if name.startswith("target_weights."):
+            if name not in current_state or not torch.equal(value.cpu(), current_state[name].cpu()):
+                raise ValueError(
+                    f"checkpoint frozen weight {name!r} differs from evaluation cache snapshot"
+                )
     model.load_state_dict(state["model"], strict=True)
     checkpoint_step = int(state["step"])
     # The optimizer state is irrelevant here and can be several GB.  Drop the
@@ -309,10 +349,18 @@ def evaluate_computation_fidelity(
     total_tokens = 0
     batches = 0
     batch_size = batch_size_sequences or cfg.training.batch_size_sequences
-    for raw_batch in cache.iter_batches(split, batch_size, shuffle=False):
+    normalization = [
+        float(manifest["r_rms_norm"]) for manifest in training_cache.model_manifests
+    ]
+    for raw_batch in cache.iter_batches(
+        split, batch_size, shuffle=False, normalize_grounding=False
+    ):
         batch = _move_batch(raw_batch, device)
         valid: Tensor = batch["valid_tokens"]  # type: ignore[assignment]
-        activations: list[Tensor] = [value.float() for value in batch["R"]]  # type: ignore[index]
+        activations: list[Tensor] = [
+            value.float() / normalization[n]
+            for n, value in enumerate(batch["R"])  # type: ignore[index]
+        ]
         inputs: list[dict[str, Tensor]] = [
             {name: value.float() for name, value in by_matrix.items()}
             for by_matrix in batch["X"]  # type: ignore[index]
@@ -409,9 +457,18 @@ def evaluate_computation_fidelity(
             "root": str(Path(cfg.cache.root).resolve()),
             "fingerprint": cache.token_manifest["cache_fingerprint"],
         },
+        "checkpoint_training_cache": {
+            "root": str(Path(training_cfg.cache.root).resolve()),
+            "fingerprint": training_cache.token_manifest["cache_fingerprint"],
+            "grounding_r_rms_norm": normalization,
+        },
         "config": {
             "resolved": cfg.model_dump(mode="json"),
             "sha256": resolved_config_sha256(cfg),
+        },
+        "checkpoint_training_config": {
+            "resolved": training_cfg.model_dump(mode="json"),
+            "sha256": resolved_config_sha256(training_cfg),
         },
         "evaluation": {
             "split": split,
