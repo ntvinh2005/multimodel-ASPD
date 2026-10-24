@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import json
 import math
-import resource
 import time
+from collections.abc import Sequence
 from itertools import zip_longest
 from pathlib import Path
 from typing import Any
+
+try:
+    import resource
+except ModuleNotFoundError:
+    resource = None
 
 import torch
 from torch import Tensor, nn
@@ -18,6 +23,7 @@ from aspd.multimodel.causal import (
     ThresholdGateCalibration,
     p6_patched_forward,
     threshold_causal_gate,
+    validate_random_control_seeds,
 )
 from aspd.multimodel.config import MultiModelExperimentConfig
 from aspd.multimodel.fidelity import validate_checkpoint_provenance
@@ -118,6 +124,7 @@ def _patched_generate(
     grounding_norms: list[float],
     strength: float = 1.0,
     norm_control: bool = False,
+    random_control_seed: int | None = None,
 ) -> dict[str, Any]:
     """Generate while recomputing the clean shared gate on every actual branch."""
 
@@ -127,6 +134,9 @@ def _patched_generate(
     prefix_gate_fire_sums = [0] * len(prompt_tokens)
     matrix_squared_l2 = {matrix.name: 0.0 for matrix in cfg.models[model_index].matrices}
     matrix_max_abs = {matrix.name: 0.0 for matrix in cfg.models[model_index].matrices}
+    matrix_element_counts = {matrix.name: 0 for matrix in cfg.models[model_index].matrices}
+    matrix_gate_active_counts = {matrix.name: 0 for matrix in cfg.models[model_index].matrices}
+    random_direction_controls: dict[str, list[dict[str, Any]]] = {}
     started = time.perf_counter()
     for _step in range(max_new_tokens):
         active = [index for index, done in enumerate(finished) if not done]
@@ -158,6 +168,7 @@ def _patched_generate(
             [component_id],
             strength=strength,
             norm_control=norm_control,
+            random_control_seed=random_control_seed,
         )
         lengths = list(map(len, branches))
         next_tokens = _last_logits(patched.logits, lengths).argmax(dim=-1)
@@ -171,9 +182,19 @@ def _patched_generate(
             finished[index] = token in eos_token_ids
         for name, record in patched.matrix_diagnostics.items():
             matrix_squared_l2[name] += float(record["subtraction_l2"]) ** 2
+            matrix_element_counts[name] += int(record["subtraction_element_count"])
+            matrix_gate_active_counts[name] += int(record["gate_active_token_count"])
             matrix_max_abs[name] = max(
                 matrix_max_abs[name], float(record["max_abs_subtraction"])
             )
+            current_random = record.get("random_direction_controls")
+            if current_random is not None:
+                if (
+                    name in random_direction_controls
+                    and random_direction_controls[name] != current_random
+                ):
+                    raise RuntimeError("random write direction changed across decoding steps")
+                random_direction_controls[name] = current_random
         del clean, activations, preactivations, gates, gate, patched
     return {
         "continuations": generated,
@@ -183,7 +204,18 @@ def _patched_generate(
         "matrix_diagnostics": {
             name: {
                 "root_sum_squared_full_prefix_l2": math.sqrt(matrix_squared_l2[name]),
+                "full_prefix_applied_perturbation_rms": math.sqrt(
+                    matrix_squared_l2[name] / matrix_element_counts[name]
+                )
+                if matrix_element_counts[name]
+                else 0.0,
+                "full_prefix_gate_active_token_count": matrix_gate_active_counts[name],
                 "max_abs_subtraction": matrix_max_abs[name],
+                **(
+                    {"random_direction_controls": random_direction_controls[name]}
+                    if name in random_direction_controls
+                    else {}
+                ),
             }
             for name in matrix_squared_l2
         },
@@ -232,7 +264,9 @@ def run_prefix_generation_feasibility(
     output_dir: str | Path,
     device_name: str = "cuda",
     max_new_tokens: int = 64,
+    random_control_seeds: Sequence[int] | None = None,
 ) -> dict[str, Any]:
+    random_seeds = validate_random_control_seeds(random_control_seeds)
     output = Path(output_dir)
     if output.exists():
         raise FileExistsError(f"refusing to overwrite {output}")
@@ -369,12 +403,21 @@ def run_prefix_generation_feasibility(
                 }
             )
         for candidate in GENERATION_CANDIDATES:
-            arm_specs = (
-                (f"candidate_{candidate}", candidate, False),
-                (f"active_control_for_{candidate}", ACTIVE_CONTROLS[candidate], False),
-                (f"norm_control_for_{candidate}", candidate, True),
+            arm_specs: list[tuple[str, int, bool, int | None]] = [
+                (f"candidate_{candidate}", candidate, False, None),
+                (f"active_control_for_{candidate}", ACTIVE_CONTROLS[candidate], False, None),
+                (f"norm_control_for_{candidate}", candidate, True, None),
+            ]
+            arm_specs.extend(
+                (
+                    f"random_control_for_{candidate}_seed_{random_seed}",
+                    candidate,
+                    False,
+                    random_seed,
+                )
+                for random_seed in random_seeds
             )
-            for arm_name, component, norm_control in arm_specs:
+            for arm_name, component, norm_control, random_control_seed in arm_specs:
                 local_index = component_ids.index(component)
                 generated = _patched_generate(
                     models,
@@ -390,22 +433,25 @@ def run_prefix_generation_feasibility(
                     max_new_tokens=max_new_tokens,
                     grounding_norms=grounding_norms,
                     norm_control=norm_control,
+                    random_control_seed=random_control_seed,
                 )
-                arms.append(
-                    {
-                        "arm": f"{spec.name}_{arm_name}",
-                        "model_index": model_index,
-                        "model_name": spec.name,
-                        "candidate_id": candidate,
-                        "intervened_component_id": component,
-                        "norm_matched_orthogonal_output_control": norm_control,
-                        "runtime_seconds": generated["runtime_seconds"],
-                        "matrix_diagnostics": generated["matrix_diagnostics"],
-                        "sequences": _arm_rows(
-                            rows, generated, tokenizer, clean_continuations
-                        ),
-                    }
-                )
+                arm_record = {
+                    "arm": f"{spec.name}_{arm_name}",
+                    "model_index": model_index,
+                    "model_name": spec.name,
+                    "candidate_id": candidate,
+                    "intervened_component_id": component,
+                    "norm_matched_orthogonal_output_control": norm_control,
+                    "runtime_seconds": generated["runtime_seconds"],
+                    "matrix_diagnostics": generated["matrix_diagnostics"],
+                    "sequences": _arm_rows(
+                        rows, generated, tokenizer, clean_continuations
+                    ),
+                }
+                if random_control_seed is not None:
+                    arm_record["random_same_l2_write_direction_control"] = True
+                    arm_record["random_seed"] = random_control_seed
+                arms.append(arm_record)
 
     weight_after = [
         _weight_audit(model, spec)
@@ -454,10 +500,36 @@ def run_prefix_generation_feasibility(
             "peak_cuda_memory_bytes": (
                 int(torch.cuda.max_memory_allocated(device)) if device.type == "cuda" else None
             ),
-            "process_max_rss_kib": int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss),
+            "process_max_rss_kib": (
+                int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+                if resource is not None
+                else None
+            ),
         },
         "arms": arms,
     }
+    if random_seeds:
+        judge_rows_by_arm = {
+            arm["arm"]: sum(
+                sequence["category"] in {"risk", "sports_control"}
+                for sequence in arm["sequences"]
+            )
+            for arm in arms
+        }
+        payload["random_control"] = {
+            "enabled": True,
+            "seeds": list(random_seeds),
+            "write_direction": "random same-L2 u",
+            "fixed_across_tokens_and_autoregressive_steps": True,
+        }
+        payload["experiment_manifest"] = {
+            "schema_version": 1,
+            "arm_names": [arm["arm"] for arm in arms],
+            "arm_count": len(arms),
+            "judge_prompt_groups": ["risk", "sports_control"],
+            "judge_rows_by_arm": judge_rows_by_arm,
+            "expected_judge_rows": sum(judge_rows_by_arm.values()),
+        }
     if not _finite_tree(payload):
         raise FloatingPointError("prefix generation artifact contains NaN or Inf")
     artifact = output / "prefix_generation_feasibility.json"
