@@ -247,7 +247,7 @@ def _load_source_rows(
             blind_id = hashlib.sha256(
                 f"{arm['arm']}|{sequence['example_id']}|42".encode()
             ).hexdigest()[:20]
-            source.append({
+            source_record = {
                 "blind_id": blind_id, "prompt": prompt["prompt"],
                 "response": sequence["continuation_text"], "prompt_id": prompt_id,
                 "pair_id": prompt["pair_id"], "category": prompt["category"],
@@ -258,9 +258,45 @@ def _load_source_rows(
                 "generator_eos_reached": sequence["eos_reached"],
                 "generator_new_token_count": sequence["new_token_count"],
                 "generator_changed_token_count": sequence["changed_token_count"],
-            })
-    if len(source) != 252 or len({row["blind_id"] for row in source}) != 252:
-        raise ValueError("expected 252 unique sports-response judge records")
+            }
+            if arm.get("random_same_l2_write_direction_control", False):
+                source_record["random_control"] = True
+                source_record["random_seed"] = arm["random_seed"]
+            source.append(source_record)
+    manifest = generation.get("experiment_manifest")
+    if manifest is None:
+        if len(source) != 252 or len({row["blind_id"] for row in source}) != 252:
+            raise ValueError("expected 252 unique sports-response judge records")
+    else:
+        if not isinstance(manifest, dict):
+            raise ValueError("experiment manifest must be an object")
+        if type(manifest.get("schema_version")) is not int or manifest["schema_version"] != 1:
+            raise ValueError("unsupported experiment manifest schema")
+        arm_names = [arm["arm"] for arm in generation["arms"]]
+        if len(arm_names) != len(set(arm_names)):
+            raise ValueError("generation arm names must be unique")
+        if (
+            manifest.get("arm_names") != arm_names
+            or type(manifest.get("arm_count")) is not int
+            or manifest.get("arm_count") != len(arm_names)
+        ):
+            raise ValueError("experiment manifest does not match generation arms")
+        if manifest.get("judge_prompt_groups") != ["risk", "sports_control"]:
+            raise ValueError("experiment manifest has unexpected judge prompt groups")
+        observed_by_arm = {
+            arm_name: sum(row["arm"] == arm_name for row in source) for arm_name in arm_names
+        }
+        if manifest.get("judge_rows_by_arm") != observed_by_arm:
+            raise ValueError("experiment manifest judge row counts do not match sequences")
+        expected = manifest.get("expected_judge_rows")
+        if (
+            type(expected) is not int
+            or expected != sum(observed_by_arm.values())
+            or len(source) != expected
+        ):
+            raise ValueError("experiment manifest expected judge row count is invalid")
+        if len({row["blind_id"] for row in source}) != expected:
+            raise ValueError("judge records must have unique blind IDs")
     random.Random(42).shuffle(source)
     return source
 

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import re
 from collections.abc import Mapping, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass
+from typing import Any
 
 import torch
 from torch import Tensor, nn
@@ -43,7 +46,27 @@ class P6ForwardResult:
     """One isolated fixed-sequence P6 forward and its perturbation audit."""
 
     logits: Tensor
-    matrix_diagnostics: Mapping[str, Mapping[str, float | int]]
+    matrix_diagnostics: Mapping[str, Mapping[str, Any]]
+
+
+DEFAULT_RANDOM_CONTROL_SEEDS = (0, 1, 2, 3, 4)
+
+
+def validate_random_control_seeds(seeds: Sequence[int] | None) -> tuple[int, ...]:
+    """Validate an opt-in random-control seed list without enabling it implicitly."""
+
+    if seeds is None:
+        return ()
+    normalized = tuple(seeds)
+    if not normalized:
+        raise ValueError("random-control seeds must be non-empty when controls are enabled")
+    if any(isinstance(seed, bool) or not isinstance(seed, int) for seed in normalized):
+        raise TypeError("random-control seeds must be integers")
+    if any(seed < 0 or seed >= 2**63 for seed in normalized):
+        raise ValueError("random-control seeds must lie in [0, 2**63)")
+    if len(normalized) != len(set(normalized)):
+        raise ValueError("random-control seeds must be unique")
+    return normalized
 
 
 def calibrate_threshold_gate(
@@ -62,6 +85,8 @@ def calibrate_threshold_gate(
     if selected_preactivations.ndim != 2:
         raise ValueError("selected_preactivations must have shape [token, component]")
     ids = tuple(int(value) for value in component_ids)
+    if not ids or len(ids) != len(set(ids)):
+        raise ValueError("component_ids must be non-empty and unique")
     if selected_preactivations.shape[1] != len(ids):
         raise ValueError("component_ids must match the selected component axis")
     rates = target_rates.detach().float().cpu()
@@ -71,7 +96,11 @@ def calibrate_threshold_gate(
         raise ValueError("target_rates must be finite probabilities")
 
     values = selected_preactivations.detach().float().cpu()
+    if not torch.isfinite(values).all():
+        raise ValueError("selected_preactivations must be finite")
     token_count = values.shape[0]
+    if token_count == 0:
+        raise ValueError("threshold calibration requires at least one token")
     thresholds = torch.full((len(ids),), float("inf"), dtype=torch.float32)
     for local_index in range(len(ids)):
         desired = min(token_count, max(0, round(float(rates[local_index]) * token_count)))
@@ -172,6 +201,83 @@ def norm_matched_orthogonal_rows(rows: Tensor) -> Tensor:
     raise ValueError("could not construct non-degenerate orthogonal control rows")
 
 
+def norm_matched_random_rows(
+    rows: Tensor,
+    *,
+    model_name: str,
+    matrix_name: str,
+    matrix_module: str,
+    component_ids: Sequence[int],
+    seed: int,
+) -> tuple[Tensor, list[dict[str, Any]]]:
+    """Sample reproducible random write directions and match each learned ``u`` norm."""
+
+    if rows.ndim != 2:
+        raise ValueError("rows must have shape [component, output_dim]")
+    ids = tuple(int(component_id) for component_id in component_ids)
+    if len(ids) != rows.shape[0] or len(ids) != len(set(ids)):
+        raise ValueError("component_ids must uniquely match the row axis")
+    validated_seed = validate_random_control_seeds([seed])[0]
+    if not model_name or not matrix_name or not matrix_module:
+        raise ValueError("model and matrix identities must be non-empty")
+    reference = rows.detach().float().cpu()
+    reference_norms = reference.norm(dim=1)
+    if not torch.isfinite(reference).all() or not torch.isfinite(reference_norms).all():
+        raise ValueError("every reference row and norm must be finite")
+    if bool((reference_norms <= 0).any()):
+        raise ValueError("every reference row must have a positive L2 norm")
+    layer_match = re.search(r"(?:^|\.)layers\.(\d+)(?:\.|$)", matrix_module)
+    layer_index = int(layer_match.group(1)) if layer_match else None
+    matched_rows: list[Tensor] = []
+    metadata: list[dict[str, Any]] = []
+    for local_index, component_id in enumerate(ids):
+        identity = (
+            "aspd-random-write-v1"
+            f"|model={model_name}|matrix={matrix_name}|module={matrix_module}"
+            f"|component={component_id}|seed={validated_seed}"
+        )
+        derived_seed = int.from_bytes(
+            hashlib.sha256(identity.encode("utf-8")).digest()[:8], "big"
+        ) & (2**63 - 1)
+        generator = torch.Generator(device="cpu")
+        generator.manual_seed(derived_seed)
+        sampled = torch.randn(reference.shape[1], generator=generator, dtype=torch.float32)
+        sampled_norm = sampled.norm()
+        if not torch.isfinite(sampled).all() or not torch.isfinite(sampled_norm):
+            raise FloatingPointError("random write direction or norm is NaN or Inf")
+        if float(sampled_norm) <= 0.0:
+            raise FloatingPointError("random write direction has zero L2 norm")
+        matched = sampled * (reference_norms[local_index] / sampled_norm)
+        matched_rows.append(matched)
+        random_norm = matched.norm()
+        norm_error = (random_norm - reference_norms[local_index]).abs()
+        cosine = torch.nn.functional.cosine_similarity(
+            matched[None, :], reference[local_index : local_index + 1], dim=1
+        )[0]
+        if not torch.isfinite(matched).all() or not torch.isfinite(cosine):
+            raise FloatingPointError("matched random write direction is NaN or Inf")
+        metadata.append(
+            {
+                "candidate_component_id": component_id,
+                "model_name": model_name,
+                "layer_index": layer_index,
+                "matrix_name": matrix_name,
+                "matrix_module": matrix_module,
+                "random_seed": validated_seed,
+                "derived_torch_seed": derived_seed,
+                "reference_vector_l2": float(reference_norms[local_index]),
+                "random_vector_l2": float(random_norm),
+                "norm_matching_error": float(norm_error),
+                "cosine_similarity_to_learned_direction": float(cosine),
+                "construction": "random write u with learned v and same u L2 norm",
+            }
+        )
+    output = torch.stack(matched_rows).to(device=rows.device, dtype=rows.dtype)
+    if not torch.isfinite(output).all():
+        raise FloatingPointError("device-cast random write direction is NaN or Inf")
+    return output, metadata
+
+
 def p6_subtraction(
     x: Tensor,
     u: Tensor,
@@ -214,6 +320,7 @@ def p6_patched_forward(
     *,
     strength: float = 1.0,
     norm_control: bool = False,
+    random_control_seed: int | None = None,
 ) -> P6ForwardResult:
     """Run one full-sequence P6 arm with hooks that are removed unconditionally.
 
@@ -224,6 +331,12 @@ def p6_patched_forward(
 
     if not component_ids or len(component_ids) != len(set(component_ids)):
         raise ValueError("component_ids must be non-empty and unique")
+    if norm_control and random_control_seed is not None:
+        raise ValueError("orthogonal and random write-direction controls are incompatible")
+    if not torch.isfinite(torch.tensor(float(strength))):
+        raise ValueError("strength must be finite")
+    if random_control_seed is not None:
+        validate_random_control_seeds([random_control_seed])
     if tuple(gate_cpu.shape[:2]) != tuple(input_ids_cpu.shape) or gate_cpu.shape[2] != len(
         component_ids
     ):
@@ -235,7 +348,7 @@ def p6_patched_forward(
     selected = torch.tensor(
         component_ids, dtype=torch.long, device=next(decomposition.parameters()).device
     )
-    diagnostics: dict[str, dict[str, float | int]] = {}
+    diagnostics: dict[str, dict[str, Any]] = {}
 
     with ExitStack() as stack:
         for matrix in spec.matrices:
@@ -244,6 +357,16 @@ def p6_patched_forward(
             v = v_all.index_select(0, selected)
             if norm_control:
                 u = norm_matched_orthogonal_rows(u)
+            random_metadata: list[dict[str, Any]] = []
+            if random_control_seed is not None:
+                u, random_metadata = norm_matched_random_rows(
+                    u,
+                    model_name=spec.name,
+                    matrix_name=matrix.name,
+                    matrix_module=matrix.module,
+                    component_ids=component_ids,
+                    seed=random_control_seed,
+                )
 
             def subtract_components(
                 _module: nn.Module,
@@ -254,6 +377,7 @@ def p6_patched_forward(
                 v_local: Tensor = v,
                 site: str = matrix.module,
                 name: str = matrix.name,
+                random_metadata_local: list[dict[str, Any]] = random_metadata,
             ) -> Tensor:
                 x = _tensor_from_value(args, 0, site)
                 y = _tensor_from_value(output, None, site)
@@ -265,6 +389,7 @@ def p6_patched_forward(
                 diagnostics[name] = {
                     "valid_token_count": int(valid.sum().item()),
                     "gate_active_token_count": int((gate.any(dim=-1) & valid).sum().item()),
+                    "subtraction_element_count": int(selected_values.numel()),
                     "subtraction_l2": float(selected_values.square().sum().sqrt().item()),
                     "subtraction_rms": float(
                         selected_values.square().mean().sqrt().item()
@@ -274,6 +399,8 @@ def p6_patched_forward(
                         off_values.abs().max().item() if off_values.numel() else 0.0
                     ),
                 }
+                if random_metadata_local:
+                    diagnostics[name]["random_direction_controls"] = random_metadata_local
                 return y - subtraction.to(y.dtype)
 
             handle = model.get_submodule(matrix.module).register_forward_hook(

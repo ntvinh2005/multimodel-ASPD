@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 
+from aspd.multimodel.causal import DEFAULT_RANDOM_CONTROL_SEEDS
 from aspd.multimodel.config import load_experiment_config
 from aspd.multimodel.p6_generation import run_prefix_generation_feasibility
 
@@ -19,9 +20,23 @@ def main() -> None:
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--max-new-tokens", type=int, default=64)
+    parser.add_argument(
+        "--random-controls",
+        action="store_true",
+        help="opt in to random same-L2 write-direction arms",
+    )
+    parser.add_argument(
+        "--random-seeds",
+        nargs="+",
+        type=int,
+        help="random-control seeds (default when enabled: 0 1 2 3 4)",
+    )
     args = parser.parse_args()
     if args.max_new_tokens <= 0:
         parser.error("--max-new-tokens must be positive")
+    if args.random_seeds is not None and not args.random_controls:
+        parser.error("--random-seeds requires --random-controls")
+    random_seeds = args.random_seeds or list(DEFAULT_RANDOM_CONTROL_SEEDS)
     payload = run_prefix_generation_feasibility(
         load_experiment_config(args.config),
         args.checkpoint,
@@ -31,6 +46,7 @@ def main() -> None:
         output_dir=args.output_dir,
         device_name=args.device,
         max_new_tokens=args.max_new_tokens,
+        random_control_seeds=random_seeds if args.random_controls else None,
     )
     print(
         json.dumps(

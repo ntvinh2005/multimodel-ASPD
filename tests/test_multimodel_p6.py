@@ -9,13 +9,16 @@ from aspd.multimodel.causal import (
     ThresholdGateCalibration,
     calibrate_threshold_gate,
     norm_matched_orthogonal_rows,
+    norm_matched_random_rows,
+    p6_patched_forward,
     p6_subtraction,
     temporal_region,
     threshold_causal_gate,
+    validate_random_control_seeds,
 )
 from aspd.multimodel.p6_fixed import _weight_audit, select_fixed_feasibility_rows
 from aspd.multimodel.p6_generation import _continuation_difference, _pad_token_lists
-from aspd.multimodel.p6_judge import parse_p6_judgment
+from aspd.multimodel.p6_judge import _load_source_rows, parse_p6_judgment
 
 
 def test_threshold_gate_calibration_matches_unique_target_counts() -> None:
@@ -156,4 +159,191 @@ def test_p6_judge_parser_enforces_full_typed_schema() -> None:
     payload["risk_code"] = "CAUTIOUS"
     with pytest.raises(ValueError, match="mismatch"):
         parse_p6_judgment(json.dumps(payload))
+
+
+def test_random_control_is_seeded_independent_and_norm_matched() -> None:
+    rows = torch.tensor([[1.0, 2.0, 4.0], [-3.0, 1.0, 2.0]])
+    kwargs = {
+        "model_name": "target",
+        "matrix_name": "up_proj",
+        "matrix_module": "model.layers.14.mlp.up_proj",
+        "component_ids": [3228, 290],
+    }
+    first, metadata = norm_matched_random_rows(rows, seed=0, **kwargs)
+    repeated, repeated_metadata = norm_matched_random_rows(rows, seed=0, **kwargs)
+    different, _ = norm_matched_random_rows(rows, seed=1, **kwargs)
+    assert torch.equal(first, repeated)
+    assert metadata == repeated_metadata
+    assert not torch.equal(first, different)
+    torch.testing.assert_close(first.norm(dim=1), rows.norm(dim=1))
+    assert [record["candidate_component_id"] for record in metadata] == [3228, 290]
+    assert all(record["layer_index"] == 14 for record in metadata)
+    assert all(record["norm_matching_error"] <= 1e-6 for record in metadata)
+
+
+def test_random_control_rejects_invalid_vectors_seeds_and_modes() -> None:
+    kwargs = {
+        "model_name": "target",
+        "matrix_name": "up_proj",
+        "matrix_module": "model.layers.14.mlp.up_proj",
+        "component_ids": [7],
+        "seed": 0,
+    }
+    with pytest.raises(ValueError, match="positive L2 norm"):
+        norm_matched_random_rows(torch.zeros(1, 3), **kwargs)
+    with pytest.raises(ValueError, match="finite"):
+        norm_matched_random_rows(torch.tensor([[1.0, float("nan"), 2.0]]), **kwargs)
+    with pytest.raises(ValueError, match="unique"):
+        validate_random_control_seeds([0, 0])
+    with pytest.raises(TypeError, match="integers"):
+        validate_random_control_seeds([True])
+
+
+class _ToyP6Model(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.proj = nn.Linear(2, 2, bias=False)
+
+    def forward(
+        self, input_ids: torch.Tensor, attention_mask: torch.Tensor, use_cache: bool
+    ) -> SimpleNamespace:
+        del attention_mask, use_cache
+        values = input_ids.float()
+        x = torch.stack((values, torch.ones_like(values)), dim=-1)
+        return SimpleNamespace(logits=self.proj(x))
+
+
+class _ToyP6Decomposition(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.anchor = nn.Parameter(torch.zeros(()))
+
+    def component_factors(self, model_index: int, matrix_name: str) -> tuple[torch.Tensor, torch.Tensor]:
+        del model_index, matrix_name
+        return torch.tensor([[1.0, 2.0]]), torch.tensor([[0.5, -0.25]])
+
+
+def test_random_control_stays_fixed_and_p6_cleans_hooks_without_mutating_weights() -> None:
+    torch.manual_seed(7)
+    model = _ToyP6Model()
+    decomposition = _ToyP6Decomposition()
+    spec = SimpleNamespace(name="target", matrices=[SimpleNamespace(name="proj", module="proj")])
+    ids = torch.tensor([[2, 3]])
+    valid = torch.tensor([[True, True]])
+    gate = torch.tensor([[[True], [False]]])
+    weight_before = model.proj.weight.detach().clone()
+    clean = model(input_ids=ids, attention_mask=valid, use_cache=False).logits
+    zero = p6_patched_forward(
+        model, spec, decomposition, 0, ids, valid, gate, [0], strength=0.0
+    )
+    first = p6_patched_forward(
+        model, spec, decomposition, 0, ids, valid, gate, [0], random_control_seed=3
+    )
+    repeated = p6_patched_forward(
+        model, spec, decomposition, 0, ids, valid, gate, [0], random_control_seed=3
+    )
+    torch.testing.assert_close(zero.logits, clean, rtol=0, atol=0)
+    torch.testing.assert_close(first.logits, repeated.logits, rtol=0, atol=0)
+    assert (
+        first.matrix_diagnostics["proj"]["random_direction_controls"]
+        == repeated.matrix_diagnostics["proj"]["random_direction_controls"]
+    )
+    assert first.matrix_diagnostics["proj"]["max_abs_gate_off_subtraction"] == 0.0
+    assert len(model.proj._forward_hooks) == 0
+    assert torch.equal(model.proj.weight, weight_before)
+    with pytest.raises(ValueError, match="incompatible"):
+        p6_patched_forward(
+            model,
+            spec,
+            decomposition,
+            0,
+            ids,
+            valid,
+            gate,
+            [0],
+            norm_control=True,
+            random_control_seed=0,
+        )
+
+
+def test_threshold_calibration_rejects_nonfinite_metadata() -> None:
+    with pytest.raises(ValueError, match="finite"):
+        calibrate_threshold_gate(
+            torch.tensor([[0.1], [float("inf")]]),
+            component_ids=[0],
+            target_rates=torch.tensor([0.5]),
+        )
+    with pytest.raises(ValueError, match="at least one token"):
+        calibrate_threshold_gate(
+            torch.empty(0, 1), component_ids=[0], target_rates=torch.tensor([0.5])
+        )
+
+
+def test_judge_accepts_validated_variable_arm_manifest(tmp_path) -> None:
+    prompt_path = tmp_path / "prompts.jsonl"
+    prompt_rows = [
+        {"prompt_id": "risk", "prompt": "r", "pair_id": "pair", "category": "risk", "sport_domain": "s"},
+        {"prompt_id": "control", "prompt": "c", "pair_id": "pair", "category": "sports_control", "sport_domain": "s"},
+    ]
+    prompt_path.write_text("\n".join(json.dumps(row) for row in prompt_rows) + "\n", encoding="utf-8")
+    sequences = [
+        {
+            "example_id": f"{row['prompt_id']}::target_generated",
+            "category": row["category"],
+            "continuation_text": "answer",
+            "eos_reached": True,
+            "new_token_count": 1,
+            "changed_token_count": 0,
+        }
+        for row in prompt_rows
+    ]
+    generation = {
+        "arms": [{"arm": "target_random_seed_0", "model_name": "target", "sequences": sequences}],
+        "experiment_manifest": {
+            "schema_version": 1,
+            "arm_names": ["target_random_seed_0"],
+            "arm_count": 1,
+            "judge_prompt_groups": ["risk", "sports_control"],
+            "judge_rows_by_arm": {"target_random_seed_0": 2},
+            "expected_judge_rows": 2,
+        },
+    }
+    assert len(_load_source_rows(generation, prompt_path)) == 2
+    generation["experiment_manifest"]["expected_judge_rows"] = 3
+    with pytest.raises(ValueError, match="expected judge row count"):
+        _load_source_rows(generation, prompt_path)
+
+
+def test_historical_judge_protocol_still_accepts_exactly_252_rows(tmp_path) -> None:
+    prompt_path = tmp_path / "historical_prompts.jsonl"
+    prompt_rows = [
+        {
+            "prompt_id": f"prompt-{index}",
+            "prompt": f"prompt {index}",
+            "pair_id": f"pair-{index // 2}",
+            "category": "risk" if index % 2 == 0 else "sports_control",
+            "sport_domain": f"sport-{index // 2}",
+        }
+        for index in range(12)
+    ]
+    prompt_path.write_text(
+        "\n".join(json.dumps(row) for row in prompt_rows) + "\n", encoding="utf-8"
+    )
+    arms = []
+    for arm_index in range(21):
+        sequences = [
+            {
+                "example_id": f"{row['prompt_id']}::target_generated",
+                "category": row["category"],
+                "continuation_text": "historical answer",
+                "eos_reached": True,
+                "new_token_count": 2,
+                "changed_token_count": 0,
+            }
+            for row in prompt_rows
+        ]
+        arms.append(
+            {"arm": f"historical-arm-{arm_index}", "model_name": "target", "sequences": sequences}
+        )
+    assert len(_load_source_rows({"arms": arms}, prompt_path)) == 252
 

@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import json
 import math
-import resource
 import time
 from collections import defaultdict
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
+
+try:
+    import resource
+except ModuleNotFoundError:
+    resource = None
 
 import torch
 from safetensors.torch import load_file
@@ -20,6 +25,7 @@ from aspd.multimodel.causal import (
     p6_patched_forward,
     temporal_region,
     threshold_causal_gate,
+    validate_random_control_seeds,
 )
 from aspd.multimodel.config import ModelSpec, MultiModelExperimentConfig
 from aspd.multimodel.fidelity import validate_checkpoint_provenance
@@ -215,6 +221,7 @@ def _run_arm(
     arm: str,
     strength: float = 1.0,
     norm_control: bool = False,
+    random_control_seed: int | None = None,
 ) -> dict[str, Any]:
     started = time.perf_counter()
     result: P6ForwardResult = p6_patched_forward(
@@ -228,10 +235,11 @@ def _run_arm(
         [component_id],
         strength=strength,
         norm_control=norm_control,
+        random_control_seed=random_control_seed,
     )
     summary = _summarize_logits(clean_logits, result.logits, ids, valid, gate, rows)
     elapsed = time.perf_counter() - started
-    return {
+    record = {
         "arm": arm,
         "intervened_component_id": component_id,
         "strength": strength,
@@ -241,6 +249,10 @@ def _run_arm(
         "matrix_diagnostics": result.matrix_diagnostics,
         **summary,
     }
+    if random_control_seed is not None:
+        record["random_same_l2_write_direction_control"] = True
+        record["random_seed"] = random_control_seed
+    return record
 
 
 @torch.no_grad()
@@ -253,10 +265,12 @@ def run_fixed_p6_feasibility(
     posthoc_path: str | Path,
     output_dir: str | Path,
     device_name: str = "cuda",
+    random_control_seeds: Sequence[int] | None = None,
 ) -> dict[str, Any]:
     """Execute the preregistered 18-sequence individual-component feasibility stage."""
 
     total_started = time.perf_counter()
+    random_seeds = validate_random_control_seeds(random_control_seeds)
     output = Path(output_dir)
     if output.exists():
         raise FileExistsError(f"refusing to overwrite {output}")
@@ -402,6 +416,23 @@ def run_fixed_p6_feasibility(
                     norm_control=True,
                 )
             )
+            for random_seed in random_seeds:
+                arms.append(
+                    _run_arm(
+                        model,
+                        spec,
+                        decomposition,
+                        model_index,
+                        ids,
+                        valid,
+                        clean_logits,
+                        gates[candidate],
+                        candidate,
+                        rows,
+                        arm=f"random_control_for_{candidate}_seed_{random_seed}",
+                        random_control_seed=random_seed,
+                    )
+                )
         replay = capture_model_forward(model, spec, ids, valid)["logits"]
         replay_max = float((replay.float() - clean_logits.float()).abs().max().item())
         if replay_max > 1e-6:
@@ -480,11 +511,30 @@ def run_fixed_p6_feasibility(
             "peak_cuda_memory_bytes": (
                 int(torch.cuda.max_memory_allocated(device)) if device.type == "cuda" else None
             ),
-            "process_max_rss_kib": int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss),
+            "process_max_rss_kib": (
+                int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+                if resource is not None
+                else None
+            ),
         },
         "weight_audit": {"before": weight_before, "after": weight_after, "unchanged": True},
         "models": model_results,
     }
+    if random_seeds:
+        payload["random_control"] = {
+            "enabled": True,
+            "seeds": list(random_seeds),
+            "write_direction": "random same-L2 u",
+            "read_vector": "learned v unchanged",
+            "gate": "candidate gate unchanged",
+        }
+        payload["experiment_manifest"] = {
+            "schema_version": 1,
+            "model_arm_names": {
+                model["model_name"]: [arm["arm"] for arm in model["arms"]]
+                for model in model_results
+            },
+        }
     if not _finite_tree(payload):
         raise FloatingPointError("fixed P6 artifact contains NaN or Inf")
     artifact = output / "fixed_sequence_feasibility.json"
