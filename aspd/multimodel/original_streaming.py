@@ -730,7 +730,7 @@ def _trainer_loop(
         optimizer.step()
         trainer_seconds += time.perf_counter() - trainer_started
         step = index + 1
-        if step == 1 or step % cfg.training.log_every == 0:
+        if step == 1 or step % cfg.training.log_every == 0 or step == end_step:
             names = list(result)
             values = torch.stack([result[name].detach().float() for name in names])
             dist.all_reduce(values, op=dist.ReduceOp.SUM, group=trainer_group)
@@ -822,11 +822,14 @@ def run_three_gpu_streaming(
         raise RuntimeError("torchrun world size must be exactly three")
     torch.cuda.set_device(global_rank)
     destination = Path(output_dir or cfg.training.output_dir)
-    if resume is None and destination.exists() and any(destination.iterdir()):
-        raise FileExistsError(
-            f"fresh original-ASPD run refuses a non-empty output directory: {destination}"
-        )
     if global_rank == 0:
+        # Only the coordinator may inspect and initialize a fresh run package.  If all
+        # ranks perform this check, a worker can observe rank 0's newly copied metadata
+        # and incorrectly reject the same fresh launch as a non-empty output directory.
+        if resume is None and destination.exists() and any(destination.iterdir()):
+            raise FileExistsError(
+                f"fresh original-ASPD run refuses a non-empty output directory: {destination}"
+            )
         destination.mkdir(parents=True, exist_ok=True)
         frozen_config = destination / "config_frozen.yaml"
         source_manifest = Path(cfg.data.frozen_manifest or "")

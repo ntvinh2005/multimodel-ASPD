@@ -137,16 +137,29 @@ def _smoke_optimizer_update(run: Path) -> dict[str, Any]:
     }
 
 
-def _metrics(run: Path, expected_step: int, expected_exposures: int) -> list[dict[str, Any]]:
+def _metrics(
+    run: Path,
+    expected_step: int,
+    expected_exposures: int,
+    *,
+    log_every: int,
+) -> list[dict[str, Any]]:
     path = run / "training_metrics.jsonl"
     rows = [
         json.loads(line)
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    if not rows or int(rows[-1]["step"]) != expected_step:
+    if not rows:
         raise ValueError("training metrics do not reach the expected final step")
-    if int(rows[-1]["token_exposures"]) != expected_exposures:
+    final_logged_step = int(rows[-1]["step"])
+    # Older completed runs logged only exact cadence boundaries.  Permit the final
+    # partial interval when the summary and paired checkpoint independently prove
+    # the exact final step; newly produced runs always log end_step explicitly.
+    if not 0 <= expected_step - final_logged_step < log_every:
+        raise ValueError("training metrics do not reach the expected final step")
+    positions_per_step = expected_exposures // expected_step
+    if int(rows[-1]["token_exposures"]) != final_logged_step * positions_per_step:
         raise ValueError("training metrics have the wrong final exposure count")
     if not _finite(rows):
         raise FloatingPointError("training metrics contain NaN or Inf")
@@ -166,12 +179,31 @@ def _runtime(run: Path) -> dict[str, Any]:
         segments.setdefault(key, []).append(record)
     total_positions = 0
     total_segment_wall = 0.0
+    total_segment_wall_with_smoke_checkpoints = 0.0
+    total_checkpoint_wall = 0.0
     total_rank_wall = 0.0
     for (start, end), rows in sorted(segments.items()):
         if {int(row["rank"]) for row in rows} != {0, 1, 2}:
             raise ValueError(f"runtime segment {(start, end)} lacks one or more ranks")
         total_positions += (end - start) * 4096
-        total_segment_wall += max(float(row["segment_wall_seconds"]) for row in rows)
+        active_walls = []
+        for row in rows:
+            checkpoint_seconds = float(row.get("checkpoint_seconds", 0.0))
+            active_wall = float(row["segment_wall_seconds"]) - checkpoint_seconds
+            if active_wall < 0:
+                raise ValueError("runtime checkpoint time exceeds segment wall time")
+            active_walls.append(active_wall)
+        # The smoke deliberately checkpoints every 50 steps to exercise resume, while the
+        # scientific run checkpoints every 1,000 steps.  Keep that stress-test I/O visible,
+        # but do not fold its 20x cadence into sustained training throughput.
+        total_segment_wall += max(active_walls)
+        total_segment_wall_with_smoke_checkpoints += max(
+            float(row["segment_wall_seconds"]) for row in rows
+        )
+        # Trainer ranks write concurrently, so checkpoint wall time is the per-segment max.
+        total_checkpoint_wall += max(
+            float(row.get("checkpoint_seconds", 0.0)) for row in rows
+        )
         total_rank_wall += max(float(row["rank_wall_seconds_including_startup"]) for row in rows)
     producer = [row for row in records if row["role"] == "producer"]
     trainers = [row for row in records if row["role"] == "trainer"]
@@ -183,6 +215,9 @@ def _runtime(run: Path) -> dict[str, Any]:
         ],
         "paired_positions": total_positions,
         "positions_per_second_excluding_startup": excluding_startup,
+        "positions_per_second_with_smoke_checkpoint_cadence": (
+            total_positions / max(total_segment_wall_with_smoke_checkpoints, 1e-9)
+        ),
         "positions_per_second_including_startup": including_startup,
         "optimizer_steps_per_second_excluding_startup": (
             total_positions / 4096 / max(total_segment_wall, 1e-9)
@@ -194,9 +229,7 @@ def _runtime(run: Path) -> dict[str, Any]:
             float(row["communication_seconds"]) for row in producer
         ),
         "trainer_step_seconds": sum(float(row["trainer_step_seconds"]) for row in trainers),
-        "checkpoint_write_seconds": sum(
-            float(row["checkpoint_seconds"]) for row in trainers
-        ),
+        "checkpoint_write_seconds": total_checkpoint_wall,
         "peak_gpu_memory_bytes_by_rank": {
             str(rank): max(
                 int(row["peak_gpu_memory_bytes"])
@@ -243,7 +276,12 @@ def verify_original_run(
     if not summary.get("losses_finite") or not summary.get("gradients_finite"):
         raise FloatingPointError("training summary lacks finite loss/gradient evidence")
     checkpoint = _checkpoint_pair(run, expected_step, resolved_config_sha256(cfg), cfg)
-    rows = _metrics(run, expected_step, expected_exposures)
+    rows = _metrics(
+        run,
+        expected_step,
+        expected_exposures,
+        log_every=cfg.training.log_every,
+    )
     runtime = _runtime(run)
     provenances = [_json(path) for path in sorted(run.glob("producer_provenance_steps_*.json"))]
     if not provenances or not all(row.get("source_llm_weights_unchanged") for row in provenances):

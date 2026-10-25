@@ -40,6 +40,7 @@ from aspd.multimodel.original_streaming import (
     restore_checkpoint_payload,
     split_global_batch,
 )
+from aspd.multimodel.original_verification import _metrics, _runtime
 from aspd.multimodel.training import train
 
 ROOT = Path(__file__).parents[1]
@@ -469,6 +470,92 @@ def test_resume_discards_metrics_after_atomic_checkpoint(tmp_path: Path) -> None
         for line in path.read_text(encoding="utf-8").splitlines()
     ]
     assert [row["step"] for row in rows] == [1, 10, 20]
+
+
+def test_smoke_throughput_excludes_stress_checkpoint_cadence(tmp_path: Path) -> None:
+    records = [
+        {
+            "rank": 0,
+            "role": "producer",
+            "start_step": 0,
+            "end_step": 50,
+            "segment_wall_seconds": 20.0,
+            "rank_wall_seconds_including_startup": 30.0,
+            "capture_forward_seconds": 18.0,
+            "communication_seconds": 1.0,
+            "peak_gpu_memory_bytes": 1,
+            "peak_cpu_rss_kib": 1,
+        },
+        *[
+            {
+                "rank": rank,
+                "role": "trainer",
+                "start_step": 0,
+                "end_step": 50,
+                "segment_wall_seconds": 50.0,
+                "rank_wall_seconds_including_startup": 60.0,
+                "checkpoint_seconds": 40.0,
+                "trainer_step_seconds": 8.0,
+                "peak_gpu_memory_bytes": 1,
+                "peak_cpu_rss_kib": 1,
+            }
+            for rank in (1, 2)
+        ],
+    ]
+    for record in records:
+        path = tmp_path / f"runtime_rank{record['rank']}_steps_00000000_00000050.json"
+        path.write_text(__import__("json").dumps(record), encoding="utf-8")
+
+    report = _runtime(tmp_path)
+
+    assert report["positions_per_second_excluding_startup"] == pytest.approx(
+        50 * 4096 / 20.0
+    )
+    assert report["positions_per_second_with_smoke_checkpoint_cadence"] == pytest.approx(
+        50 * 4096 / 50.0
+    )
+    assert report["checkpoint_write_seconds"] == pytest.approx(40.0)
+
+
+def test_verifier_accepts_only_the_final_partial_metric_interval(tmp_path: Path) -> None:
+    metrics = tmp_path / "training_metrics.jsonl"
+    metrics.write_text(
+        __import__("json").dumps(
+            {
+                "step": 24_410,
+                "token_exposures": 24_410 * 4096,
+                "train/loss": 0.5,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    rows = _metrics(
+        tmp_path,
+        expected_step=24_414,
+        expected_exposures=99_999_744,
+        log_every=10,
+    )
+    assert rows[-1]["step"] == 24_410
+
+    metrics.write_text(
+        __import__("json").dumps(
+            {
+                "step": 24_400,
+                "token_exposures": 24_400 * 4096,
+                "train/loss": 0.5,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="expected final step"):
+        _metrics(
+            tmp_path,
+            expected_step=24_414,
+            expected_exposures=99_999_744,
+            log_every=10,
+        )
 
 
 def test_frozen_token_stream_crosses_shards_without_duplication(tmp_path: Path) -> None:
