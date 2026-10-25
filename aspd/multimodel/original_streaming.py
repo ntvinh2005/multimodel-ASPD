@@ -12,7 +12,6 @@ import hashlib
 import json
 import os
 import random
-import resource
 import shutil
 import tempfile
 import time
@@ -39,6 +38,15 @@ from aspd.multimodel.original_recipe import (
     validate_dataset_manifest,
     validate_original_recipe_config,
 )
+
+try:
+    import resource
+except ModuleNotFoundError:
+    resource = None  # type: ignore[assignment]
+
+
+def _peak_cpu_rss_kib() -> int:
+    return int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss) if resource else 0
 
 
 def resolved_config_sha256(cfg: MultiModelExperimentConfig) -> str:
@@ -385,6 +393,27 @@ def _resume_step(output_dir: Path, resume: str | None) -> int:
     return int(state["step"])
 
 
+def _truncate_metrics_for_resume(output_dir: Path, checkpoint_step: int) -> None:
+    path = output_dir / "training_metrics.jsonl"
+    if not path.is_file():
+        raise FileNotFoundError("resume checkpoint exists but training metrics are missing")
+    rows = [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    retained = [row for row in rows if int(row["step"]) <= checkpoint_step]
+    steps = [int(row["step"]) for row in retained]
+    if not retained or steps != sorted(set(steps)):
+        raise ValueError("pre-checkpoint training metrics are missing, duplicated, or reordered")
+    temporary = path.with_suffix(".jsonl.resume.tmp")
+    temporary.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in retained),
+        encoding="utf-8",
+    )
+    os.replace(temporary, path)
+
+
 def _rank_checkpoint(output_dir: Path, step: int, trainer_rank: int) -> Path:
     return output_dir / f"checkpoint_{step:08d}.rank{trainer_rank}.pt"
 
@@ -477,6 +506,7 @@ def _producer_loop(
     device: int | torch.device,
 ) -> None:
     loop_started = time.perf_counter()
+    segment = f"steps_{start_step:08d}_{end_step:08d}"
     stream = FrozenTokenShardStream(cfg.data.frozen_manifest or "", "train")
     calibration_stream = FrozenTokenShardStream(
         cfg.data.frozen_manifest or "", "calibration"
@@ -559,7 +589,7 @@ def _producer_loop(
         if any(not torch.equal(before[name], after[name]) for name in before):
             raise RuntimeError("one or more source LLM matrix weights changed during streaming")
     completed = time.perf_counter()
-    (output_dir / "producer_provenance.json").write_text(
+    (output_dir / f"producer_provenance_{segment}.json").write_text(
         json.dumps(
             {
                 "model_provenance": provenances,
@@ -580,7 +610,7 @@ def _producer_loop(
         + "\n",
         encoding="utf-8",
     )
-    (output_dir / "runtime_rank0_producer.json").write_text(
+    (output_dir / f"runtime_rank0_producer_{segment}.json").write_text(
         json.dumps(
             {
                 "rank": 0,
@@ -591,12 +621,13 @@ def _producer_loop(
                 "capture_forward_seconds": capture_seconds,
                 "communication_seconds": communication_seconds,
                 "segment_wall_seconds": completed - model_ready,
+                "rank_wall_seconds_including_startup": completed - loop_started,
                 "peak_gpu_memory_bytes": (
                     torch.cuda.max_memory_allocated(device)
                     if torch.cuda.is_available()
                     else 0
                 ),
-                "peak_cpu_rss_kib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+                "peak_cpu_rss_kib": _peak_cpu_rss_kib(),
             },
             indent=2,
             sort_keys=True,
@@ -616,6 +647,8 @@ def _trainer_loop(
     trainer_group: dist.ProcessGroup,
     save_checkpoints: bool,
 ) -> None:
+    loop_started = time.perf_counter()
+    segment = f"steps_{start_step:08d}_{end_step:08d}"
     trainer_rank = global_rank - 1
     random.seed(cfg.training.seed)
     torch.manual_seed(cfg.training.seed)
@@ -688,6 +721,11 @@ def _trainer_loop(
         with autocast:
             result = ddp(batch)
         result["loss"].backward()
+        if any(
+            parameter.grad is not None and not torch.isfinite(parameter.grad).all()
+            for parameter in model.parameters()
+        ):
+            raise FloatingPointError("ASPD gradient contains NaN or Inf")
         model.normalize_original_decoders_()
         optimizer.step()
         trainer_seconds += time.perf_counter() - trainer_started
@@ -730,7 +768,8 @@ def _trainer_loop(
             dist.barrier(group=trainer_group)
             checkpoint_seconds += time.perf_counter() - checkpoint_started
     elapsed = time.perf_counter() - started
-    (output_dir / f"runtime_rank{global_rank}_trainer.json").write_text(
+    completed = time.perf_counter()
+    (output_dir / f"runtime_rank{global_rank}_trainer_{segment}.json").write_text(
         json.dumps(
             {
                 "rank": global_rank,
@@ -739,6 +778,7 @@ def _trainer_loop(
                 "start_step": start_step,
                 "end_step": end_step,
                 "segment_wall_seconds": elapsed,
+                "rank_wall_seconds_including_startup": completed - loop_started,
                 "receive_seconds": receive_seconds,
                 "trainer_step_seconds": trainer_seconds,
                 "checkpoint_seconds": checkpoint_seconds,
@@ -751,7 +791,7 @@ def _trainer_loop(
                 "peak_gpu_memory_bytes": (
                     torch.cuda.max_memory_allocated(device) if is_cuda else 0
                 ),
-                "peak_cpu_rss_kib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+                "peak_cpu_rss_kib": _peak_cpu_rss_kib(),
             },
             indent=2,
             sort_keys=True,
@@ -798,9 +838,18 @@ def run_three_gpu_streaming(
             shutil.copyfile(source_manifest, frozen_manifest)
         elif not frozen_config.is_file() or not frozen_manifest.is_file():
             raise FileNotFoundError("resume package lacks frozen config or data manifest")
+        else:
+            if config_path is None:
+                raise ValueError("config_path is required to verify immutable resume inputs")
+            if _sha256_file(Path(config_path)) != _sha256_file(frozen_config):
+                raise ValueError("resume config file differs from the frozen run config")
+            if _sha256_file(source_manifest) != _sha256_file(frozen_manifest):
+                raise ValueError("resume data manifest differs from the frozen run manifest")
     dist.barrier()
     trainer_group = dist.new_group(ranks=[1, 2], backend="nccl")
     start_value = _resume_step(destination, resume) if global_rank == 0 else 0
+    if global_rank == 0 and start_value > 0:
+        _truncate_metrics_for_resume(destination, start_value)
     start_tensor = torch.tensor(start_value, dtype=torch.long, device=global_rank)
     dist.broadcast(start_tensor, src=0)
     start_step = int(start_tensor.item())
@@ -861,7 +910,14 @@ def run_three_gpu_streaming(
             "rank_checkpoint_sha256": marker["rank_sha256"],
             "source_llm_weights_unchanged": True,
             "losses_finite": True,
+            "gradients_finite": True,
             "scientific_run": end_step == cfg.training.max_steps,
+            "runtime_segment_files": sorted(
+                path.name for path in destination.glob("runtime_rank*_*.json")
+            ),
+            "producer_provenance_files": sorted(
+                path.name for path in destination.glob("producer_provenance_steps_*.json")
+            ),
         }
         temporary = destination / "training_summary.json.tmp"
         temporary.write_text(

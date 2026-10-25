@@ -11,6 +11,8 @@ to gate model-specific rank-1 components `P^(n)_{j,c}`. Start with
 is documented in [`docs/multimodel/crosscoder_baseline.md`](docs/multimodel/crosscoder_baseline.md).
 The isolated Delta-Crosscoder Phase-1 audit and Phase-2A contrastive-cache decisions are documented in
 [`docs/multimodel/delta_crosscoder_reference.md`](docs/multimodel/delta_crosscoder_reference.md).
+The executable Qwen2.5 L14 `o_proj` 100M original-recipe workflow is documented in the
+[`Vietnamese HiPerGator runbook`](docs/multimodel/qwen25_aspd_original_100m_runbook_vi.md).
 The bounded blind LLM scan is documented in
 [`docs/multimodel/semantic_triage.md`](docs/multimodel/semantic_triage.md); it is post-ranking
 interpretation and never changes measured Crosscoder classes or ranks.

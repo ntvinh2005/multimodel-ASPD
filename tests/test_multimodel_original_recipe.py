@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import ExitStack
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,7 @@ from torch import nn
 from transformers import Qwen2Config, Qwen2ForCausalLM
 
 from aspd.multimodel.batch_topk import BatchTopKController, batch_topk
+from aspd.multimodel.cache import _Capture, _register_capture_hooks
 from aspd.multimodel.components import RankOneComponents
 from aspd.multimodel.config import (
     EncoderSpec,
@@ -18,17 +20,22 @@ from aspd.multimodel.config import (
 )
 from aspd.multimodel.losses import fvu
 from aspd.multimodel.model import MultiModelASPD
-from aspd.multimodel.original_evaluation import EvaluationGroup
+from aspd.multimodel.original_evaluation import EvaluationGroup, _behavioral_prompts
 from aspd.multimodel.original_recipe import (
     DatasetIntegrityError,
     StreamCursor,
     validate_dataset_manifest,
     validate_original_recipe_config,
 )
-from aspd.multimodel.original_steering import freeze_clean_original_gate
+from aspd.multimodel.original_steering import (
+    extract_original_component_for_p6,
+    freeze_clean_original_gate,
+)
 from aspd.multimodel.original_streaming import (
     DistributedTopology,
     FrozenTokenShardStream,
+    _capture_pair,
+    _truncate_metrics_for_resume,
     checkpoint_payload,
     restore_checkpoint_payload,
     split_global_batch,
@@ -39,19 +46,38 @@ ROOT = Path(__file__).parents[1]
 CONFIG = ROOT / "configs/multimodel/qwen25_extreme_sports/aspd_d0_s1_l14_o_100m_original.yaml"
 
 
-def test_frozen_recipe_has_exact_budget_and_is_fail_closed_on_data() -> None:
+def test_frozen_recipe_has_exact_budget_and_is_fail_closed_on_data(tmp_path: Path) -> None:
     cfg = load_experiment_config(CONFIG)
     assert validate_original_recipe_config(cfg)["status"] == "PASS"
     assert cfg.training.max_steps * 8 * 512 == 99_999_744
-    assert validate_dataset_manifest(cfg, require_ready=False)["status"] == "BLOCKED"
-    with pytest.raises(DatasetIntegrityError, match="BLOCKED"):
-        validate_dataset_manifest(cfg, require_ready=True)
+    missing = cfg.model_copy(
+        update={
+            "data": cfg.data.model_copy(
+                update={"frozen_manifest": str(tmp_path / "not_materialized.json")}
+            )
+        }
+    )
+    assert validate_dataset_manifest(missing, require_ready=False)["status"] == "NOT_RUN"
+    with pytest.raises(DatasetIntegrityError, match="not found"):
+        validate_dataset_manifest(missing, require_ready=True)
 
 
 def test_frozen_recipe_refuses_the_legacy_cached_trainer() -> None:
     cfg = load_experiment_config(CONFIG)
     with pytest.raises(RuntimeError, match="cli.train_original_recipe"):
         train(cfg, device_name="cpu")
+
+
+def test_locked_behavioral_manifest_matches_model_pair_and_tokenizer() -> None:
+    rows, provenance = _behavioral_prompts(load_experiment_config(CONFIG))
+    assert len(rows) == 180
+    assert provenance["status"] == "VERIFIED"
+    assert provenance["category_counts"] == {
+        "risk": 60,
+        "sports_control": 60,
+        "neutral": 60,
+    }
+    assert provenance["expected_matched_pair_count"] == 60
 
 
 def test_qwen2_decoder_executes_o_projection_before_mid_residual_hook() -> None:
@@ -90,6 +116,111 @@ def test_qwen2_decoder_executes_o_projection_before_mid_residual_hook() -> None:
     assert events == ["o_proj_input", "mid_residual_input"]
     assert captured["X_O"].shape == captured["R_mid"].shape == (1, 4, 8)
     assert not torch.equal(captured["X_O"], captured["R_mid"])
+
+
+def test_tokens_to_capture_train_checkpoint_resume_and_evaluation_pipeline() -> None:
+    cfg = load_experiment_config(CONFIG)
+    qwen_cfg = Qwen2Config(
+        vocab_size=32,
+        hidden_size=8,
+        intermediate_size=16,
+        num_hidden_layers=15,
+        num_attention_heads=2,
+        num_key_value_heads=2,
+        max_position_embeddings=32,
+    )
+    torch.manual_seed(4)
+    sources = [Qwen2ForCausalLM(qwen_cfg).eval(), Qwen2ForCausalLM(qwen_cfg).eval()]
+    with torch.no_grad():
+        sources[1].model.layers[14].self_attn.o_proj.weight.add_(0.01)
+    source_before = [
+        {name: value.detach().clone() for name, value in source.state_dict().items()}
+        for source in sources
+    ]
+    captures = [_Capture(), _Capture()]
+    tokens = torch.tensor([[1, 2, 3, 4]])
+    valid = torch.ones_like(tokens, dtype=torch.bool)
+    with ExitStack() as stack:
+        for source, spec, capture in zip(sources, cfg.models, captures, strict=True):
+            _register_capture_hooks(source, spec, capture, stack)
+        paired = _capture_pair(sources, captures, tokens, valid, torch.device("cpu"))
+    residuals = [value.float() for value in paired["R"]]  # type: ignore[union-attr]
+    inputs = [value["o_proj"].float() for value in paired["X"]]  # type: ignore[index,union-attr]
+    assert not torch.equal(residuals[0], inputs[0])
+    sparsity = cfg.sparsity.model_copy(
+        update={"n_features": 8, "top_k": 2, "pool_tokens": 4}
+    )
+    objective = cfg.objective.model_copy(
+        update={
+            "top_k_aux": 4,
+            "dead_after_batches": 2,
+            "alive_window_tokens": 16,
+            "matryoshka_group_fractions": [0.5, 0.5],
+        }
+    )
+    weights = [
+        {"o_proj": source.model.layers[14].self_attn.o_proj.weight.detach().clone()}
+        for source in sources
+    ]
+    decomposition = MultiModelASPD(
+        ["base", "target"],
+        [8, 8],
+        weights,
+        EncoderSpec(),
+        sparsity,
+        objective,
+        OriginalASPDRecipeSpec(enabled=True, calibration_batches=1),
+    ).train()
+    decomposition.calibrate_original_recipe(
+        [value.mean((0, 1)) for value in residuals]
+    )
+    optimizer = torch.optim.AdamW(decomposition.parameters(), lr=3e-4)
+    batch = {
+        "valid_tokens": valid,
+        "R": residuals,
+        "X": [{"o_proj": value} for value in inputs],
+    }
+    optimizer.zero_grad(set_to_none=True)
+    result = decomposition(batch)
+    assert torch.isfinite(result["loss"])
+    result["loss"].backward()
+    assert all(
+        parameter.grad is None or torch.isfinite(parameter.grad).all()
+        for parameter in decomposition.parameters()
+    )
+    decomposition.normalize_original_decoders_()
+    optimizer.step()
+    payload = checkpoint_payload(
+        cfg,
+        decomposition,
+        optimizer,
+        1,
+        sampler_state_by_rank={0: {"sequence_index": 8}, 1: {"sequence_index": 12}},
+    )
+    restored = MultiModelASPD(
+        ["base", "target"],
+        [8, 8],
+        weights,
+        EncoderSpec(),
+        sparsity,
+        objective,
+        OriginalASPDRecipeSpec(enabled=True, calibration_batches=1),
+    )
+    restored_optimizer = torch.optim.AdamW(restored.parameters(), lr=3e-4)
+    step, _ = restore_checkpoint_payload(cfg, restored, restored_optimizer, payload)
+    assert step == 1
+    restored.eval()
+    code = restored.encode(residuals, valid, update_statistics=False)
+    group = EvaluationGroup(8)
+    group.update(restored, residuals, inputs, code.values, code.gate, valid)
+    assert group.result()["tokens"] == 4
+    for model_index in (0, 1):
+        assert restored.component_factors(model_index, "o_proj")[0].shape == (8, 8)
+    assert restored.component_factors(0, "o_proj")[0].data_ptr() != restored.component_factors(
+        1, "o_proj"
+    )[0].data_ptr()
+    for source, before in zip(sources, source_before, strict=True):
+        assert all(torch.equal(value, before[name]) for name, value in source.state_dict().items())
 
 
 def test_transcoder_biases_and_unit_norm_match_original_equation() -> None:
@@ -287,6 +418,32 @@ def test_original_p6_gate_is_a_detached_clean_snapshot() -> None:
     assert torch.equal(gate, frozen)
 
 
+def test_original_p6_component_export_reproduces_trained_factors() -> None:
+    model = MultiModelASPD(
+        ["base", "target"],
+        [2, 2],
+        [{"o_proj": torch.eye(2)}, {"o_proj": 2 * torch.eye(2)}],
+        EncoderSpec(),
+        SparsitySpec(n_features=2, top_k=1, pool_tokens=1),
+        ObjectiveSpec(
+            auxk_coefficient=0.0,
+            top_k_aux=1,
+            dead_after_batches=2,
+            model_axis_reduction="mean",
+            matryoshka_group_fractions=[0.5, 0.5],
+        ),
+        OriginalASPDRecipeSpec(enabled=True),
+    ).eval()
+    record = extract_original_component_for_p6(model, 1)
+    assert record["component_id"] == 1
+    for model_index, values in enumerate(record["models"]):
+        u, v = model.component_factors(model_index, "o_proj")
+        torch.testing.assert_close(values["u"], u[1])
+        torch.testing.assert_close(values["v"], v[1])
+        assert values["u"].data_ptr() != u[1].data_ptr()
+        assert values["v"].data_ptr() != v[1].data_ptr()
+
+
 def test_stream_cursor_prevents_resume_replay_or_skip() -> None:
     cfg = load_experiment_config(CONFIG)
     cursor = StreamCursor.for_step(cfg, 1_234)
@@ -295,6 +452,23 @@ def test_stream_cursor_prevents_resume_replay_or_skip() -> None:
     cursor.validate(cfg)
     with pytest.raises(ValueError, match="replay or skip"):
         StreamCursor(1_234, cursor.sequence_index - 1, cursor.token_exposures).validate(cfg)
+
+
+def test_resume_discards_metrics_after_atomic_checkpoint(tmp_path: Path) -> None:
+    path = tmp_path / "training_metrics.jsonl"
+    path.write_text(
+        "".join(
+            __import__("json").dumps({"step": step, "train/loss": 1.0}) + "\n"
+            for step in (1, 10, 20, 30)
+        ),
+        encoding="utf-8",
+    )
+    _truncate_metrics_for_resume(tmp_path, 20)
+    rows = [
+        __import__("json").loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert [row["step"] for row in rows] == [1, 10, 20]
 
 
 def test_frozen_token_stream_crosses_shards_without_duplication(tmp_path: Path) -> None:
