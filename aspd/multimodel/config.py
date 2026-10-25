@@ -63,6 +63,11 @@ class DataSourceSpec(BaseModel):
     format: Literal["text", "messages"] = "text"
     weight: PositiveFloat = 1.0
     revision: str | None = None
+    role: Literal[
+        "general", "extreme_sports_risk", "sports_safety_control", "neutral"
+    ] | None = None
+    planned_train_tokens: PositiveInt | None = None
+    planned_validation_tokens: PositiveInt | None = None
 
 
 class DataSpec(BaseModel):
@@ -71,10 +76,14 @@ class DataSpec(BaseModel):
     chat_template_tokenizer: str | None = None
     sequence_length: PositiveInt = 256
     train_tokens: PositiveInt
+    calibration_tokens: PositiveInt = 32_768
     validation_tokens: PositiveInt
     shuffle_buffer: PositiveInt = 10_000
     seed: int = 0
     sources: list[DataSourceSpec]
+    frozen_manifest: str | None = None
+    locked_evaluation_manifest: str | None = None
+    dataset_status: Literal["READY", "BLOCKED"] = "READY"
 
 
 class CacheSpec(BaseModel):
@@ -115,6 +124,9 @@ class SparsitySpec(BaseModel):
     selection_score: Literal["S1", "S2"] = "S1"
     diffing: Literal["D0", "D1", "D2"] = "D0"
     top_k: PositiveInt = 32
+    pool_tokens: PositiveInt | None = None
+    threshold_lr: float = Field(default=0.01, gt=0.0, le=1.0)
+    sync_statistics: bool = False
     shared_fraction: float = Field(default=0.75, gt=0.0, lt=1.0)
     top_k_shared: PositiveInt | None = None
     top_k_exclusive: PositiveInt | None = None
@@ -155,6 +167,8 @@ class ObjectiveSpec(BaseModel):
     auxk_coefficient: float = Field(default=0.03125, ge=0.0)
     top_k_aux: PositiveInt = 512
     dead_after_batches: PositiveInt = 2_000
+    alive_window_tokens: PositiveInt = 10_000_000
+    model_axis_reduction: Literal["sum", "mean"] = "sum"
     matryoshka_group_fractions: list[PositiveFloat] = Field(
         default_factory=lambda: [0.0625, 0.0625, 0.125, 0.25, 0.5]
     )
@@ -187,6 +201,29 @@ class TrainingSpec(BaseModel):
     validation_batches: PositiveInt = 32
     wandb_project: str | None = None
     resume: str | None = None
+    lr_schedule: Literal["constant"] = "constant"
+    warmup_steps: int = Field(default=0, ge=0)
+    expected_token_exposures: PositiveInt | None = None
+    producer_gpus: PositiveInt = 1
+    training_world_size: PositiveInt = 1
+    sequences_per_rank: PositiveInt | None = None
+    bounded_queue_depth: PositiveInt = 2
+
+
+class OriginalASPDRecipeSpec(BaseModel):
+    """Opt-in behavior copied from the original ASPD Qwen3 training recipe."""
+
+    enabled: bool = False
+    component_arch: Literal["transcoder"] = "transcoder"
+    component_init: Literal["unit_norm"] = "unit_norm"
+    encoder_init: Literal["unit_norm"] = "unit_norm"
+    calibration_batches: PositiveInt = 8
+    sampling: Literal["continuous"] = "continuous"
+    sigmoid_type: Literal["leaky_hard"] = "leaky_hard"
+    n_mask_samples: PositiveInt = 1
+    use_delta_component: bool = True
+    normalize_component_writes: bool = True
+    normalize_activation_decoder: bool = True
 
 
 class AnalysisSpec(BaseModel):
@@ -225,6 +262,7 @@ class MultiModelExperimentConfig(BaseModel):
     sparsity: SparsitySpec
     objective: ObjectiveSpec = Field(default_factory=ObjectiveSpec)
     training: TrainingSpec
+    original_aspd: OriginalASPDRecipeSpec = Field(default_factory=OriginalASPDRecipeSpec)
     analysis: AnalysisSpec = Field(default_factory=AnalysisSpec)
 
     @model_validator(mode="after")
@@ -248,6 +286,33 @@ class MultiModelExperimentConfig(BaseModel):
                 f"analysis.example_feature_ids out of range for C={self.sparsity.n_features}: "
                 f"{invalid_example_ids}"
             )
+        if self.original_aspd.enabled:
+            if self.sparsity.diffing != "D0" or self.sparsity.selection_score != "S1":
+                raise ValueError("the frozen original-ASPD recipe requires D0/S1")
+            if self.sparsity.pool_tokens is None:
+                raise ValueError("original-ASPD recipe requires sparsity.pool_tokens")
+            if self.objective.model_axis_reduction != "mean":
+                raise ValueError("two-model original-ASPD recipe requires model-axis mean")
+            if self.training.max_grad_norm is not None:
+                raise ValueError("original-ASPD recipe requires disabled gradient clipping")
+            if self.training.warmup_steps != 0 or self.training.lr_schedule != "constant":
+                raise ValueError("original-ASPD recipe requires zero warmup and constant LR")
+            if self.training.sequences_per_rank is None:
+                raise ValueError("original-ASPD recipe requires sequences_per_rank")
+            expected_batch = self.training.training_world_size * self.training.sequences_per_rank
+            if expected_batch != self.training.batch_size_sequences:
+                raise ValueError(
+                    "global batch must equal training_world_size * sequences_per_rank"
+                )
+            exposures = (
+                self.training.max_steps
+                * self.training.batch_size_sequences
+                * self.data.sequence_length
+            )
+            if self.training.expected_token_exposures != exposures:
+                raise ValueError(
+                    "expected_token_exposures must equal max_steps * global batch * sequence length"
+                )
         return self
 
 

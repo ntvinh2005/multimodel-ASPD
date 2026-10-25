@@ -81,6 +81,17 @@ def test_p6_subtraction_implements_rank_one_equation_and_gate_off() -> None:
     assert torch.equal(p6_subtraction(x, u, v, gate, strength=0.0), torch.zeros_like(observed))
 
 
+def test_p6_subtraction_uses_transcoder_input_center() -> None:
+    x = torch.tensor([[[3.0, 5.0]]])
+    u = torch.tensor([[2.0, 4.0]])
+    v = torch.tensor([[1.0, 0.0]])
+    gate = torch.ones(1, 1, 1, dtype=torch.bool)
+    observed = p6_subtraction(
+        x, u, v, gate, input_center=torch.tensor([1.0, 2.0])
+    )
+    torch.testing.assert_close(observed, torch.tensor([[[4.0, 8.0]]]))
+
+
 def test_norm_control_is_orthogonal_and_exactly_norm_matched() -> None:
     rows = torch.tensor([[1.0, 2.0, 4.0], [-3.0, 1.0, 2.0]])
     control = norm_matched_orthogonal_rows(rows)
@@ -346,4 +357,3 @@ def test_historical_judge_protocol_still_accepts_exactly_252_rows(tmp_path) -> N
             {"arm": f"historical-arm-{arm_index}", "model_name": "target", "sequences": sequences}
         )
     assert len(_load_source_rows({"arms": arms}, prompt_path)) == 252
-

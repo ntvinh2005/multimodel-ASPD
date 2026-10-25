@@ -285,6 +285,7 @@ def p6_subtraction(
     gate: Tensor,
     *,
     strength: float = 1.0,
+    input_center: Tensor | None = None,
 ) -> Tensor:
     """Compute ``strength * sum_c g_tc (v_c^T x_t) u_c``.
 
@@ -302,6 +303,10 @@ def p6_subtraction(
     if x.shape[2] != v.shape[1]:
         raise ValueError("live matrix input width must match v")
     x32, u32, v32 = x.float(), u.float(), v.float()
+    if input_center is not None:
+        if tuple(input_center.shape) != (x.shape[2],):
+            raise ValueError("component input center must have shape [d_in]")
+        x32 = x32 - input_center.to(device=x.device, dtype=torch.float32)
     reads = torch.einsum("btd,kd->btk", x32, v32)
     effective = reads * gate.to(reads.dtype)
     return float(strength) * torch.einsum("btk,ko->bto", effective, u32)
@@ -353,6 +358,12 @@ def p6_patched_forward(
     with ExitStack() as stack:
         for matrix in spec.matrices:
             u_all, v_all = decomposition.component_factors(model_index, matrix.name)
+            center_getter = getattr(decomposition, "component_input_center", None)
+            center = (
+                center_getter(model_index, matrix.name)
+                if center_getter is not None
+                else None
+            )
             u = u_all.index_select(0, selected)
             v = v_all.index_select(0, selected)
             if norm_control:
@@ -378,11 +389,17 @@ def p6_patched_forward(
                 site: str = matrix.module,
                 name: str = matrix.name,
                 random_metadata_local: list[dict[str, Any]] = random_metadata,
+                center_local: Tensor | None = center,
             ) -> Tensor:
                 x = _tensor_from_value(args, 0, site)
                 y = _tensor_from_value(output, None, site)
                 subtraction = p6_subtraction(
-                    x, u_local, v_local, gate, strength=strength
+                    x,
+                    u_local,
+                    v_local,
+                    gate,
+                    strength=strength,
+                    input_center=center_local,
                 )
                 selected_values = subtraction[valid]
                 off_values = subtraction[(~gate.any(dim=-1)) & valid]
@@ -477,6 +494,9 @@ def causal_ablation(
             )
             # Store z_clean^(n)[B,T,V] before any P_j,c intervention.
             clean_logits.append(result.logits.detach())
+            if decomposition.original_aspd_cfg.enabled:
+                grounding.append(holder["R"])
+                continue
             # Apply the same q_n used in training: R_scaled^(n)=R_raw^(n)/r_rms_norm_n.
             # Example ||r|| RMS=2 maps r=[2,0] to [1,0].
             grounding.append(holder["R"] / cache.model_manifests[n]["r_rms_norm"])
@@ -491,6 +511,9 @@ def causal_ablation(
     with ExitStack() as stack:
         for matrix in cfg.models[target_model_index].matrices:
             u, v = decomposition.component_factors(target_model_index, matrix.name)
+            center = decomposition.component_input_center(
+                target_model_index, matrix.name
+            )
             # U_A contains u_j,c^(n) rows, shape [|A|,d_out].
             u_selected = u[selected]
             # V_A contains v_j,c^(n) rows, shape [|A|,d_in].
@@ -503,9 +526,12 @@ def causal_ablation(
                 u_local: Tensor = u_selected,
                 v_local: Tensor = v_selected,
                 site: str = matrix.module,
+                center_local: Tensor | None = center,
             ) -> Tensor:
                 # Live X_j^(n)[B,T,d_in] entering W_j^(n).
                 x = _tensor_from_value(args, 0, site).to(v_local.dtype)
+                if center_local is not None:
+                    x = x - center_local.to(x)
                 # Clean module output Y_j^(n)=W_j^(n)X_j^(n).
                 y = _tensor_from_value(output, None, site)
                 # reads_t,c=v_j,c^(n)T x_j,t^(n). Example x=[2,1],v=[1,0] -> 2.

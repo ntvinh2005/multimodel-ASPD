@@ -46,6 +46,7 @@ def build_model_from_cache(
         encoder_cfg=cfg.encoder,
         sparsity_cfg=cfg.sparsity,
         objective_cfg=cfg.objective,
+        original_aspd_cfg=cfg.original_aspd,
     )
     if cfg.training.parameter_dtype == "bfloat16":
         # Example FP32 U,V,d -> BF16 halves parameter bytes; FVU still accumulates in FP32.
@@ -59,6 +60,35 @@ def _autocast_context(cfg: MultiModelExperimentConfig, device: torch.device):
     # Choose compute dtype inside matrix operations; parameters may remain FP32.
     dtype = torch.bfloat16 if cfg.training.autocast == "bfloat16" else torch.float16
     return torch.autocast(device_type="cuda", dtype=dtype)
+
+
+@torch.no_grad()
+def _calibrate_original_recipe(
+    model: MultiModelASPD,
+    cache: PairedActivationCache,
+    cfg: MultiModelExperimentConfig,
+    device: torch.device,
+) -> None:
+    if not cfg.original_aspd.enabled:
+        return
+    activation_sums = [torch.zeros(d, dtype=torch.float64) for d in model.activation_dims]
+    count = 0
+    for batch_index, raw_batch in enumerate(
+        cache.iter_batches("train", cfg.training.batch_size_sequences, shuffle=False)
+    ):
+        if batch_index >= cfg.original_aspd.calibration_batches:
+            break
+        valid: Tensor = raw_batch["valid_tokens"]  # type: ignore[assignment]
+        batch_count = int(valid.sum().item())
+        count += batch_count
+        activations = raw_batch["R"]
+        for model_index in range(len(model.model_names)):
+            activation_sums[model_index] += activations[model_index][valid].double().sum(0)  # type: ignore[index]
+    if count == 0:
+        raise RuntimeError("original ASPD calibration saw no training tokens")
+    model.calibrate_original_recipe(
+        [value.div(count).float().to(device) for value in activation_sums]
+    )
 
 
 @torch.no_grad()
@@ -96,6 +126,7 @@ def _save_checkpoint(
     optimizer: torch.optim.Optimizer,
     step: int,
     epoch: int,
+    batch_in_epoch: int,
     keep_last: int,
 ) -> Path:
     checkpoint = output_dir / f"checkpoint_{step:08d}.pt"
@@ -105,9 +136,11 @@ def _save_checkpoint(
         {
             "step": step,
             "epoch": epoch,
+            "batch_in_epoch": batch_in_epoch,
             "model": state_model.state_dict(),
             "optimizer": optimizer.state_dict(),
             "torch_rng": torch.get_rng_state(),
+            "python_rng": random.getstate(),
             "cuda_rng": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
         },
         temporary,
@@ -122,15 +155,21 @@ def _save_checkpoint(
 
 def _load_checkpoint(
     path: Path, model: MultiModelASPD, optimizer: torch.optim.Optimizer
-) -> tuple[int, int]:
+) -> tuple[int, int, int]:
     state = torch.load(path, map_location="cpu", weights_only=False)
     state_model = getattr(model, "_orig_mod", model)
     state_model.load_state_dict(state["model"])
     optimizer.load_state_dict(state["optimizer"])
     torch.set_rng_state(state["torch_rng"])
+    if state.get("python_rng") is not None:
+        random.setstate(state["python_rng"])
     if torch.cuda.is_available() and state.get("cuda_rng") is not None:
         torch.cuda.set_rng_state_all(state["cuda_rng"])
-    return int(state["step"]), int(state["epoch"])
+    return (
+        int(state["step"]),
+        int(state["epoch"]),
+        int(state.get("batch_in_epoch", 0)),
+    )
 
 
 def train(
@@ -140,6 +179,11 @@ def train(
 ) -> Path:
     """Train the configured decomposition.  LLM weights are not loaded; only caches are read."""
 
+    if cfg.original_aspd.enabled:
+        raise RuntimeError(
+            "original-ASPD recipe configs require cli.train_original_recipe so calibration "
+            "and training remain disjoint and the frozen three-GPU topology is enforced"
+        )
     device = torch.device(device_name)
     if device.type == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA was requested but torch.cuda.is_available() is false")
@@ -150,6 +194,7 @@ def train(
 
     cache = PairedActivationCache(cfg)
     model = build_model_from_cache(cfg, cache).to(device)
+    _calibrate_original_recipe(model, cache, cfg, device)
     if cfg.training.compile:
         model = torch.compile(model)  # type: ignore[assignment]
     # AdamW updates only trainable encoder/decoder/component parameters; W_j^(n) is frozen.
@@ -196,11 +241,12 @@ def train(
 
     step = 0
     epoch = 0
+    batch_in_epoch = 0
     if cfg.training.resume:
         resume_path = Path(cfg.training.resume)
         if cfg.training.resume == "auto":
             resume_path = output_dir / (output_dir / "latest_checkpoint.txt").read_text().strip()
-        step, epoch = _load_checkpoint(resume_path, model, optimizer)
+        step, epoch, batch_in_epoch = _load_checkpoint(resume_path, model, optimizer)
 
     wandb_run = None
     if cfg.training.wandb_project:
@@ -219,9 +265,11 @@ def train(
     # Recover consumed microbatches on resume. Example step=10,accum=4 -> micro_step=40.
     micro_step = step * cfg.training.gradient_accumulation_steps
     while step < cfg.training.max_steps:
-        for raw_batch in cache.iter_batches(
+        for current_batch, raw_batch in enumerate(cache.iter_batches(
             "train", cfg.training.batch_size_sequences, shuffle=True, epoch=epoch
-        ):
+        )):
+            if current_batch < batch_in_epoch:
+                continue
             batch = _move_batch(raw_batch, device)
             with _autocast_context(cfg, device):
                 # result["loss"] is L([C])+gamma L(S)+lambda_aux L_aux over all n.
@@ -240,6 +288,7 @@ def train(
                 # If ||grad|| exceeds threshold m, rescale all grads by m/||grad||.
                 # Example norm 2,m=1 multiplies every gradient by 0.5.
                 torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.training.max_grad_norm)
+            getattr(model, "_orig_mod", model).normalize_original_decoders_()
             # AdamW applies one parameter update to encoder, d_c^(n),u_j,c^(n),v_j,c^(n).
             optimizer.step()
             # Remove previous gradients before accumulating the next optimizer step.
@@ -290,12 +339,14 @@ def train(
                     optimizer,
                     step,
                     epoch,
+                    current_batch + 1,
                     cfg.training.keep_last_checkpoints,
                 )
             if step >= cfg.training.max_steps:
                 break
         # One epoch is one traversal of cached token shards; next epoch reshuffles deterministically.
         epoch += 1
+        batch_in_epoch = 0
 
     final_path = _save_checkpoint(
         output_dir,
@@ -303,6 +354,7 @@ def train(
         optimizer,
         step,
         epoch,
+        batch_in_epoch,
         cfg.training.keep_last_checkpoints,
     )
     provenance["final_checkpoint"] = str(final_path.resolve())

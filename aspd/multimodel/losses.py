@@ -104,3 +104,40 @@ class DeadFeatureTracker(torch.nn.Module):
     def dead(self) -> Tensor:
         # c is dead after the configured number of inactive batches; e.g. clock 2000 >= 2000.
         return self.batches_since_fired >= self.dead_after_batches
+
+
+class TokenAliveTracker(torch.nn.Module):
+    """Track the separate token-window alive set with an optional training-rank group."""
+
+    def __init__(self, n_features: int, window_tokens: int):
+        super().__init__()
+        self.register_buffer("tokens_since_active", torch.zeros(n_features, dtype=torch.long))
+        self.register_buffer("window_tokens", torch.tensor(window_tokens, dtype=torch.long))
+        self.process_group = None
+
+    def attach_process_group(self, process_group: object) -> None:
+        self.process_group = process_group
+
+    @torch.no_grad()
+    def observe(self, gate: Tensor, valid_tokens: Tensor) -> None:
+        fired = gate[valid_tokens].any(dim=0).to(torch.long)
+        count = torch.tensor(
+            int(valid_tokens.sum().item()), device=gate.device, dtype=torch.long
+        )
+        if (
+            self.process_group is not None
+            and torch.distributed.is_available()
+            and torch.distributed.is_initialized()
+        ):
+            torch.distributed.all_reduce(
+                fired, op=torch.distributed.ReduceOp.MAX, group=self.process_group
+            )
+            torch.distributed.all_reduce(
+                count, op=torch.distributed.ReduceOp.SUM, group=self.process_group
+            )
+        self.tokens_since_active.add_(count)
+        self.tokens_since_active[fired > 0] = 0
+
+    @property
+    def alive(self) -> Tensor:
+        return self.tokens_since_active < self.window_tokens

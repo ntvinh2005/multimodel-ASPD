@@ -17,15 +17,34 @@ from torch import Tensor, nn
 class RankOneComponents(nn.Module):
     """A contiguous latent block of read directions ``V`` and write directions ``U``."""
 
-    def __init__(self, n_features: int, d_in: int, d_out: int):
+    def __init__(
+        self,
+        n_features: int,
+        d_in: int,
+        d_out: int,
+        *,
+        transcoder_biases: bool = False,
+        unit_norm: bool = False,
+    ):
         super().__init__()
         self.n_features = n_features
         self.d_in = d_in
         self.d_out = d_out
         self.V = nn.Parameter(torch.empty(n_features, d_in))
         self.U = nn.Parameter(torch.empty(n_features, d_out))
+        self.transcoder_biases = transcoder_biases
         nn.init.kaiming_uniform_(self.V, a=math.sqrt(5))
         nn.init.kaiming_uniform_(self.U, a=math.sqrt(5))
+        if unit_norm:
+            with torch.no_grad():
+                self.V.div_(self.V.norm(dim=-1, keepdim=True).clamp_min(1e-8))
+                self.U.div_(self.U.norm(dim=-1, keepdim=True).clamp_min(1e-8))
+        if transcoder_biases:
+            self.b_dec = nn.Parameter(torch.zeros(d_in))
+            self.b_out = nn.Parameter(torch.zeros(d_out))
+        else:
+            self.register_parameter("b_dec", None)
+            self.register_parameter("b_out", None)
 
     def reconstruct(self, x: Tensor, gate: Tensor, valid_tokens: Tensor) -> Tensor:
         """Compute ``sum_c g_tc (v_c^T x_t) u_c`` without forming all ``T*C`` reads."""
@@ -47,9 +66,14 @@ class RankOneComponents(nn.Module):
             batch * tokens, self.d_out, device=x.device, dtype=torch.promote_types(x.dtype, self.U.dtype)
         )
         if active_feature.numel() == 0:
-            return output.reshape(batch, tokens, self.d_out)
+            output = output.reshape(batch, tokens, self.d_out)
+            if self.b_out is not None:
+                output = output + self.b_out
+            return output
         # Repeat x_{j,t} once per active c. Example [x_0,x_1] for pairs (0,1),(1,2).
         selected_x = flat_x[active_position].to(self.V.dtype)
+        if self.b_dec is not None:
+            selected_x = selected_x - self.b_dec
         # r_{t,c}=v_{j,c}^T x_{j,t}. Example [2, -1] for the two active pairs.
         reads = (selected_x * self.V[active_feature]).sum(dim=-1)
         # e_{j,t,c}u_{j,c}=g_{t,c}(v^T x)u; g=1 for enumerated pairs.
@@ -58,12 +82,25 @@ class RankOneComponents(nn.Module):
         # Sum writes sharing token p. Example Y_hat[0]+=2u_1 and Y_hat[1]+=-u_2.
         output.index_add_(0, active_position, writes.to(output.dtype))
         # Restore [B,T,d_out], the shape of Y_j^(n).
-        return output.reshape(batch, tokens, self.d_out)
+        output = output.reshape(batch, tokens, self.d_out)
+        if self.b_out is not None:
+            output = output + self.b_out
+        return output
 
     def factors(self) -> tuple[Tensor, Tensor]:
         """Return ``(U,V)`` with feature ``c`` on axis zero."""
 
         return self.U, self.V
+
+    @torch.no_grad()
+    def normalize_write_decoder_(self) -> None:
+        """Project radial gradients out of U and restore unit row norms."""
+
+        normed = self.U / self.U.norm(dim=-1, keepdim=True).clamp_min(1e-8)
+        if self.U.grad is not None:
+            radial = (self.U.grad * normed).sum(dim=-1, keepdim=True) * normed
+            self.U.grad.sub_(radial)
+        self.U.copy_(normed)
 
 
 class PartitionedComponents(nn.Module):

@@ -484,9 +484,7 @@ def evaluate_computation_fidelity(
             delta_parameter_hat = target_on_base_hat - yhat_base
             delta_x = x_target - x_base
             delta_input = w_target.apply(delta_x).float()
-            delta_input_hat = _component_reconstruction(
-                model, 1, name, delta_x, gate, valid
-            ).float()
+            delta_input_hat = yhat_target - target_on_base_hat
             matrix_stats[name]["delta_total"].update(
                 delta_total, delta_total_hat, valid
             )

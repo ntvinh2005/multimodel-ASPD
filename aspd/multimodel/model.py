@@ -13,10 +13,16 @@ from collections.abc import Mapping, Sequence
 import torch
 from torch import Tensor, nn
 
-from aspd.multimodel.batch_topk import SparseCode, batch_topk
+from aspd.multimodel.batch_topk import BatchTopKController, SparseCode, batch_topk
 from aspd.multimodel.components import PartitionedComponents, RankOneComponents
-from aspd.multimodel.config import EncoderSpec, ObjectiveSpec, SparsitySpec
-from aspd.multimodel.losses import DeadFeatureTracker, fvu, matryoshka_boundaries, residual_fvu
+from aspd.multimodel.config import EncoderSpec, ObjectiveSpec, OriginalASPDRecipeSpec, SparsitySpec
+from aspd.multimodel.losses import (
+    DeadFeatureTracker,
+    TokenAliveTracker,
+    fvu,
+    matryoshka_boundaries,
+    residual_fvu,
+)
 
 # Running example in comments: N=2, B=1, T=2, C=4, d_act=3, one matrix j with
 # d_in=2 and d_out=2.  Superscript (n) is the model; subscript (j,t,c) follows the note.
@@ -52,13 +58,24 @@ class FrozenWeight(nn.Module):
 class LinearSharedEncoder(nn.Module):
     """Crosscoder reduction: ``a_tc=relu(Aggregate_n(W_e^(n) r_t^(n))+b_c)``."""
 
-    def __init__(self, activation_dims: Sequence[int], n_features: int, aggregation: str):
+    def __init__(
+        self,
+        activation_dims: Sequence[int],
+        n_features: int,
+        aggregation: str,
+        *,
+        centered: bool = False,
+    ):
         super().__init__()
         self.projections = nn.ModuleList(
             [nn.Linear(d_act, n_features, bias=False) for d_act in activation_dims]
         )
         self.bias = nn.Parameter(torch.zeros(n_features))
         self.aggregation = aggregation
+        self.centers = nn.ParameterList(
+            [nn.Parameter(torch.zeros(d), requires_grad=centered) for d in activation_dims]
+        )
+        self.centered = centered
         for projection in self.projections:
             with torch.no_grad():
                 # Normalize every encoder row W_e,c^(n) to norm 1 at initialization.
@@ -72,7 +89,15 @@ class LinearSharedEncoder(nn.Module):
         # z_t,c^(n)=W_e,c^(n) r_t^(n). For N=2, stack shape is [2,B,T,C].
         # Example z^(1)=[1,3], z^(2)=[5,-1] for one (t,c slice).
         encoded = torch.stack(
-            [projection(r.to(projection.weight.dtype)) for projection, r in zip(self.projections, activations, strict=True)]
+            [
+                projection(
+                    r.to(projection.weight.dtype)
+                    - (self.centers[index] if self.centered else 0.0)
+                )
+                for index, (projection, r) in enumerate(
+                    zip(self.projections, activations, strict=True)
+                )
+            ]
         )
         # Aggregate over n. Example sum [1,3]+[5,-1]=[6,2].
         combined = encoded.sum(dim=0)
@@ -273,6 +298,7 @@ class MultiModelASPD(nn.Module):
         encoder_cfg: EncoderSpec,
         sparsity_cfg: SparsitySpec,
         objective_cfg: ObjectiveSpec,
+        original_aspd_cfg: OriginalASPDRecipeSpec | None = None,
     ) -> None:
         super().__init__()
         if not (len(model_names) == len(activation_dims) == len(target_weights)):
@@ -281,6 +307,7 @@ class MultiModelASPD(nn.Module):
         self.activation_dims = list(activation_dims)
         self.sparsity_cfg = sparsity_cfg
         self.objective_cfg = objective_cfg
+        self.original_aspd_cfg = original_aspd_cfg or OriginalASPDRecipeSpec()
         # C is the common latent count; example C=4.
         c = sparsity_cfg.n_features
         # C_S defines S=[0,C_S); example shared_fraction=.75 gives C_S=3 and C_E=1.
@@ -288,7 +315,10 @@ class MultiModelASPD(nn.Module):
 
         if encoder_cfg.kind == "linear":
             self.encoder: nn.Module = LinearSharedEncoder(
-                activation_dims, c, encoder_cfg.aggregation
+                activation_dims,
+                c,
+                encoder_cfg.aggregation,
+                centered=self.original_aspd_cfg.enabled,
             )
         else:
             self.encoder = FactoredTransformerEncoder(activation_dims, c, encoder_cfg)
@@ -299,6 +329,10 @@ class MultiModelASPD(nn.Module):
             sparsity_cfg.tie_shared_decoders,
         )
         if isinstance(self.encoder, LinearSharedEncoder):
+            if self.original_aspd_cfg.enabled:
+                self.activation_decoders.biases = nn.ParameterList(
+                    list(self.encoder.centers)
+                )
             self.activation_decoders.initialize_from_linear_encoder(self.encoder)
 
         self.target_weights = nn.ModuleList()
@@ -316,7 +350,13 @@ class MultiModelASPD(nn.Module):
                 d_out, d_in = weight.shape
                 key = _safe_key(name)
                 if sparsity_cfg.diffing == "D0":
-                    component: nn.Module = RankOneComponents(c, d_in, d_out)
+                    component: nn.Module = RankOneComponents(
+                        c,
+                        d_in,
+                        d_out,
+                        transcoder_biases=self.original_aspd_cfg.enabled,
+                        unit_norm=self.original_aspd_cfg.enabled,
+                    )
                 else:
                     if sparsity_cfg.tie_shared_mechanisms:
                         if name not in tied_shared:
@@ -335,7 +375,18 @@ class MultiModelASPD(nn.Module):
                     component = PartitionedComponents(shared, exclusive)
                 self.components[n][key] = component
 
-        self.dead_tracker = DeadFeatureTracker(c, objective_cfg.dead_after_batches)
+        if self.original_aspd_cfg.enabled:
+            self.sparsity_controller: BatchTopKController | None = BatchTopKController(
+                sparsity_cfg, objective_cfg.dead_after_batches
+            )
+            self.dead_tracker: DeadFeatureTracker | None = None
+            self.alive_tracker: TokenAliveTracker | None = TokenAliveTracker(
+                c, objective_cfg.alive_window_tokens
+            )
+        else:
+            self.sparsity_controller = None
+            self.dead_tracker = DeadFeatureTracker(c, objective_cfg.dead_after_batches)
+            self.alive_tracker = None
 
     def _target(self, model_index: int, matrix_name: str) -> FrozenWeight:
         return self.target_weights[model_index][_safe_key(matrix_name)]
@@ -346,7 +397,19 @@ class MultiModelASPD(nn.Module):
         component = self.components[model_index][_safe_key(matrix_name)]
         return component.factors()  # type: ignore[no-any-return,attr-defined]
 
-    def encode(self, activations: Sequence[Tensor], valid_tokens: Tensor) -> SparseCode:
+    def component_input_center(self, model_index: int, matrix_name: str) -> Tensor | None:
+        component = self.components[model_index][_safe_key(matrix_name)]
+        if isinstance(component, RankOneComponents):
+            return component.b_dec
+        return None
+
+    def encode(
+        self,
+        activations: Sequence[Tensor],
+        valid_tokens: Tensor,
+        *,
+        update_statistics: bool = True,
+    ) -> SparseCode:
         """Compute the non-negative shared code and ASPD's binary component gate."""
 
         # a=g_pre(R^(1),...,R^(N)); shape [B,T,C], e.g. [1,2,4].
@@ -356,7 +419,19 @@ class MultiModelASPD(nn.Module):
             # S2 sets omega_c=sum_n||d_c^(n)||; S1 leaves omega_c=None -> ones.
             ranking_weights = self.activation_decoders.relative_norm_weights()
         # sigma_K(a*omega) selects support, returns magnitudes g^s and binary g=1[g^s>0].
-        return batch_topk(preactivations, valid_tokens, self.sparsity_cfg, ranking_weights)
+        if self.sparsity_controller is None:
+            return batch_topk(
+                preactivations, valid_tokens, self.sparsity_cfg, ranking_weights
+            )
+        return self.sparsity_controller(
+            preactivations, valid_tokens, ranking_weights, update_statistics=update_statistics
+        )
+
+    def _dead_features(self) -> Tensor:
+        if self.sparsity_controller is not None:
+            return self.sparsity_controller.dead
+        assert self.dead_tracker is not None
+        return self.dead_tracker.dead
 
     def _activation_loss(
         self,
@@ -461,6 +536,8 @@ class MultiModelASPD(nn.Module):
             for matrix_name, value in matrix_losses.items():
                 stats[f"{prefix}internal/{model_name}/{matrix_name}"] = value.detach()
             full_reconstructions.append(reconstruction)
+        if self.objective_cfg.model_axis_reduction == "mean":
+            total = total / len(self.model_names)
         return total, stats, full_reconstructions
 
     def _auxk_loss(
@@ -473,7 +550,7 @@ class MultiModelASPD(nn.Module):
         """Revive dead ``c`` by using their pre-activations to fit the L_act residual."""
 
         # dead[c]=1 when c has not fired for dead_after_batches.
-        dead = self.dead_tracker.dead
+        dead = self._dead_features()
         # Example dead=[F,T,F,T] gives n_dead=2.
         n_dead = int(dead.sum().item())
         if n_dead == 0:
@@ -499,11 +576,15 @@ class MultiModelASPD(nn.Module):
             zip(activations, full_reconstructions, strict=True)
         ):
             # Residual target is R^(n)-R_hat_full^(n); detach R_hat so AuxK only revives dead paths.
-            residual = target - reconstruction.detach()
+            # The original implementation does not detach here, so recipe-parity mode retains its gradient.
+            residual = target - reconstruction
             # R_hat_aux^(n)=sum_dead g_aux^s d_c^(n); subtract b because residual has no bias term.
             aux_reconstruction = self.activation_decoders.reconstruct(
                 aux_code, n, valid_tokens
             ) - self.activation_decoders.biases[n]
+            if aux_reconstruction.abs().sum() == 0:
+                losses.append(torch.zeros((), device=target.device))
+                continue
             losses.append(
                 residual_fvu(target, residual, aux_reconstruction, valid_tokens)
             )
@@ -516,7 +597,9 @@ class MultiModelASPD(nn.Module):
         valid_tokens: Tensor = batch["valid_tokens"]  # type: ignore[assignment]
         activations: Sequence[Tensor] = batch["R"]  # type: ignore[assignment]
         # One shared code (g^s,g) is computed from all R^(n).
-        code = self.encode(activations, valid_tokens)
+        code = self.encode(
+            activations, valid_tokens, update_statistics=update_dead_tracker
+        )
         # L([C]) uses every latent for activation and parameter reconstructions.
         full_loss, stats, full_reconstructions = self._objective(batch, code, shared_only=False)
         total = full_loss
@@ -542,7 +625,10 @@ class MultiModelASPD(nn.Module):
         # Mean L0=E_t sum_c g_t,c. At exact K=2 per token this reports 2.
         stats["sparsity/l0"] = code.gate[valid_tokens].float().sum(-1).mean().detach()
         # Dead fraction=(number of dead c)/C; example 1 dead of 4 -> .25.
-        stats["sparsity/dead_fraction"] = self.dead_tracker.dead.float().mean().detach()
+        stats["sparsity/dead_fraction"] = self._dead_features().float().mean().detach()
+        if self.alive_tracker is not None and self.sparsity_controller is not None:
+            stats["sparsity/alive_fraction"] = self.alive_tracker.alive.float().mean().detach()
+            stats["sparsity/jump_relu_threshold"] = self.sparsity_controller.threshold.detach()
         if self.sparsity_cfg.diffing != "D0":
             c_shared = self.sparsity_cfg.n_shared
             # E_t sum_{c in S}g_t,c; Dual-K should approach K_S.
@@ -554,6 +640,48 @@ class MultiModelASPD(nn.Module):
                 code.gate[..., c_shared:][valid_tokens].float().sum(-1).mean().detach()
             )
         if update_dead_tracker:
-            self.dead_tracker.observe(code.gate, valid_tokens)
+            if self.alive_tracker is not None:
+                self.alive_tracker.observe(code.gate, valid_tokens)
+            else:
+                assert self.dead_tracker is not None
+                self.dead_tracker.observe(code.gate, valid_tokens)
         stats["loss"] = total
         return stats
+
+    def attach_statistics_process_group(self, process_group: object) -> None:
+        """Scope globally counted alive tokens to the two ASPD training ranks."""
+
+        if self.alive_tracker is not None:
+            self.alive_tracker.attach_process_group(process_group)
+
+    @torch.no_grad()
+    def calibrate_original_recipe(
+        self,
+        activation_means: Sequence[Tensor],
+    ) -> None:
+        """Seed train-only residual centres; matrix transcoder biases remain learned from zero."""
+
+        if not self.original_aspd_cfg.enabled:
+            return
+        if not isinstance(self.encoder, LinearSharedEncoder):
+            raise TypeError("original ASPD calibration requires the linear shared encoder")
+        for index, mean in enumerate(activation_means):
+            self.encoder.centers[index].copy_(mean.to(self.encoder.centers[index]))
+            self.activation_decoders.biases[index].copy_(
+                mean.to(self.activation_decoders.biases[index])
+            )
+
+    @torch.no_grad()
+    def normalize_original_decoders_(self) -> None:
+        """Apply the original post-backward decoder constraints before optimizer update."""
+
+        if not self.original_aspd_cfg.enabled:
+            return
+        if self.original_aspd_cfg.normalize_activation_decoder:
+            for decoder in self.activation_decoders.full or []:
+                decoder.div_(decoder.norm(dim=-1, keepdim=True).clamp_min(1e-8))
+        if self.original_aspd_cfg.normalize_component_writes:
+            for bank in self.components:
+                for component in bank.values():
+                    if isinstance(component, RankOneComponents):
+                        component.normalize_write_decoder_()

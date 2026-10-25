@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/aspd/p6-original-recipe-record.schema.json",
+  "title": "One ASPD steering result per run, model, component, and intervention arm",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "run_id",
+    "model",
+    "component_id",
+    "intervention_arm",
+    "checkpoint_sha256",
+    "config_sha256",
+    "dataset_split",
+    "layer",
+    "matrix",
+    "gate_policy",
+    "feature_activation_threshold",
+    "risk_attribution_criterion",
+    "experiment_pass_fail_threshold",
+    "write_norm_l2",
+    "intervention_norm_l2",
+    "effect",
+    "confidence_interval",
+    "limitations"
+  ],
+  "properties": {
+    "run_id": {"type": "string", "minLength": 1},
+    "model": {"enum": ["base", "target"]},
+    "component_id": {"type": "integer", "minimum": 0, "maximum": 36863},
+    "intervention_arm": {
+      "enum": ["learned", "gate_off", "random_same_l2", "active_matched", "orthogonal_matched"]
+    },
+    "random_seed": {"type": ["integer", "null"]},
+    "checkpoint_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "config_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "dataset_split": {"type": "string", "minLength": 1},
+    "category": {"enum": ["risk", "sports_control", "neutral", "general"]},
+    "layer": {"const": 14},
+    "matrix": {"const": "model.layers.14.self_attn.o_proj"},
+    "gate_policy": {"type": "string", "minLength": 1},
+    "feature_activation_threshold": {"type": "number"},
+    "risk_attribution_criterion": {"type": "string", "minLength": 1},
+    "experiment_pass_fail_threshold": {"type": "string", "minLength": 1},
+    "write_norm_l2": {"type": "number", "minimum": 0},
+    "intervention_norm_l2": {"type": "number", "minimum": 0},
+    "effect": {"type": "number"},
+    "confidence_interval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "lower", "upper", "method"],
+      "properties": {
+        "level": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1},
+        "lower": {"type": "number"},
+        "upper": {"type": "number"},
+        "method": {"type": "string", "minLength": 1}
+      }
+    },
+    "limitations": {"type": "array", "items": {"type": "string"}}
+  }
+}

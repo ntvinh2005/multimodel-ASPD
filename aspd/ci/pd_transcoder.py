@@ -129,7 +129,7 @@ class PDTranscoderCiFn(nn.Module):
             else torch.tensor(float("inf"), device=acts_topk.device, dtype=self.threshold.dtype)
         )
         smallest = local.clone().to(self.threshold.dtype)
-        if self.cfg.sync_statistics:
+        if getattr(self.cfg, "sync_statistics", True):
             smallest = _all_reduce_(smallest, torch.distributed.ReduceOp.MIN)
         if torch.isfinite(smallest):
             lr = self.cfg.threshold_lr
@@ -138,7 +138,7 @@ class PDTranscoderCiFn(nn.Module):
     @torch.no_grad()
     def _update_inactive(self, acts_topk: Tensor) -> None:
         fired = (acts_topk.sum(0) > 0).to(self.n_batches_not_active.dtype)
-        if self.cfg.sync_statistics:
+        if getattr(self.cfg, "sync_statistics", True):
             fired = _all_reduce_(fired, torch.distributed.ReduceOp.MAX)
         fired = fired > 0
         self.n_batches_not_active += (~fired).to(self.n_batches_not_active.dtype)
