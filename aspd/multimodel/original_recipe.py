@@ -20,15 +20,10 @@ TARGET_REVISION = "6aa7e935c74c519c66555a111d1e6982059bd82d"
 GROUNDING_MODULE = "model.layers.14.post_attention_layernorm"
 MATRIX_MODULE = "model.layers.14.self_attn.o_proj"
 ROLE_TRAIN_TOKENS = {
-    "general": 80_000_000,
-    "extreme_sports_risk": 9_999_872,
-    "sports_safety_control": 9_999_872,
+    "general": 99_999_744,
 }
 ROLE_VALIDATION_TOKENS = {
-    "general": 1_500_160,
-    "extreme_sports_risk": 166_912,
-    "sports_safety_control": 166_400,
-    "neutral": 166_400,
+    "general": 1_999_872,
 }
 
 
@@ -187,12 +182,12 @@ def validate_original_recipe_config(cfg: MultiModelExperimentConfig) -> dict[str
 def validate_dataset_manifest(
     cfg: MultiModelExperimentConfig, *, require_ready: bool = True
 ) -> dict[str, Any]:
-    """Validate an immutable token-only corpus manifest and reject missing domain data."""
+    """Validate an immutable token-only general-corpus manifest."""
 
     if cfg.data.dataset_status != "READY":
         if require_ready:
             raise DatasetIntegrityError(
-                "dataset status is BLOCKED: audited risk and safety/control corpora are not frozen"
+                "dataset status is BLOCKED: the pinned general corpus has not been frozen and audited"
             )
         return {"status": "BLOCKED", "reason": "config dataset_status is BLOCKED"}
     if cfg.data.frozen_manifest is None:
@@ -201,7 +196,7 @@ def validate_dataset_manifest(
     if not path.is_file():
         raise DatasetIntegrityError(f"frozen dataset manifest not found: {path}")
     payload = json.loads(path.read_text(encoding="utf-8"))
-    if payload.get("schema_version") != 1 or payload.get("status") != "READY":
+    if payload.get("schema_version") != 2 or payload.get("status") != "READY":
         raise DatasetIntegrityError("dataset manifest schema/status is not ready")
     if payload.get("tokenizer") != {
         "id": cfg.data.tokenizer,
@@ -226,10 +221,19 @@ def validate_dataset_manifest(
         raise DatasetIntegrityError("exact duplicates remain after filtering")
     if payload.get("near_duplicate_count_after_filter") != 0:
         raise DatasetIntegrityError("near duplicates remain after filtering")
+    duplicate_audit = payload.get("duplicate_audit", {})
+    if not duplicate_audit.get("executed"):
+        raise DatasetIntegrityError("dataset duplicate audit did not run")
+    contamination_audit = payload.get("locked_evaluation_audit", {})
+    if not contamination_audit.get("executed"):
+        raise DatasetIntegrityError("locked-evaluation contamination audit did not run")
+    replay = payload.get("deterministic_replay", {})
+    if not replay.get("published_order") or not replay.get("source_revision"):
+        raise DatasetIntegrityError("dataset manifest lacks deterministic replay metadata")
     provenance_table = payload.get("provenance_table")
     if not isinstance(provenance_table, dict) or not provenance_table:
         raise DatasetIntegrityError("dataset manifest has no per-sample provenance table")
-    allowed_roles = set(ROLE_TRAIN_TOKENS) | {"neutral"}
+    allowed_roles = set(ROLE_TRAIN_TOKENS)
     if any(row.get("role") not in allowed_roles for row in provenance_table.values()):
         raise DatasetIntegrityError("dataset provenance contains an unknown scientific role")
     shards = payload.get("shards")

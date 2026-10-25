@@ -12,9 +12,11 @@ import hashlib
 import json
 import os
 import random
+import resource
+import shutil
 import tempfile
 import time
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -237,21 +239,23 @@ def _send(tensor: Tensor, destination: int) -> None:
 
 
 def _receive(
-    shape: tuple[int, ...], dtype: torch.dtype, source: int, device: int
+    shape: tuple[int, ...], dtype: torch.dtype, source: int, device: int | torch.device
 ) -> Tensor:
     tensor = torch.empty(shape, dtype=dtype, device=device)
     dist.recv(tensor, src=source)
     return tensor
 
 
-def _send_weights(weights: list[dict[str, Tensor]], destination: int, device: int) -> None:
+def _send_weights(
+    weights: list[dict[str, Tensor]], destination: int, device: int | torch.device
+) -> None:
     for item in weights:
         matrix = item["o_proj"].to(device=device, dtype=torch.bfloat16)
         _send(torch.tensor(matrix.shape, dtype=torch.long, device=device), destination)
         _send(matrix, destination)
 
 
-def _receive_weights(source: int, device: int) -> list[dict[str, Tensor]]:
+def _receive_weights(source: int, device: int | torch.device) -> list[dict[str, Tensor]]:
     result: list[dict[str, Tensor]] = []
     for _ in range(2):
         shape = _receive((2,), torch.long, source, device)
@@ -281,7 +285,10 @@ def _send_activation_batch(batch: dict[str, object], destination: int) -> None:
 
 
 def _receive_activation_batch(
-    cfg: MultiModelExperimentConfig, width: int, source: int, device: int
+    cfg: MultiModelExperimentConfig,
+    width: int,
+    source: int,
+    device: int | torch.device,
 ) -> dict[str, object]:
     local_batch = cfg.training.sequences_per_rank
     assert local_batch is not None
@@ -445,7 +452,7 @@ def _calibrate_training_rank(
     model: MultiModelASPD,
     cfg: MultiModelExperimentConfig,
     width: int,
-    device: int,
+    device: int | torch.device,
     trainer_group: dist.ProcessGroup,
 ) -> None:
     sums = [torch.zeros(width, dtype=torch.float64, device=device) for _ in range(2)]
@@ -467,8 +474,9 @@ def _producer_loop(
     output_dir: Path,
     start_step: int,
     end_step: int,
-    device: int,
+    device: int | torch.device,
 ) -> None:
+    loop_started = time.perf_counter()
     stream = FrozenTokenShardStream(cfg.data.frozen_manifest or "", "train")
     calibration_stream = FrozenTokenShardStream(
         cfg.data.frozen_manifest or "", "calibration"
@@ -492,8 +500,11 @@ def _producer_loop(
         models.append(model)
         provenances.append(provenance)
         weights.append(snapshot)
+    model_ready = time.perf_counter()
     for destination in (1, 2):
         _send_weights(weights, destination, device)
+    capture_seconds = 0.0
+    communication_seconds = 0.0
     captures = [_Capture(), _Capture()]
     with ExitStack() as stack:
         for model, spec, capture in zip(models, cfg.models, captures, strict=True):
@@ -502,9 +513,11 @@ def _producer_loop(
         def produce(
             source: FrozenTokenShardStream, sequence_index: int, *, training: bool
         ) -> None:
+            nonlocal capture_seconds, communication_seconds
             tokens = source.batch_at(sequence_index, cfg.training.batch_size_sequences)
             if training and (tokens["provenance_ids"] < 0).any():
                 raise ValueError("training shards must carry per-sequence provenance_ids")
+            capture_started = time.perf_counter()
             paired = _capture_pair(
                 models,
                 captures,
@@ -514,11 +527,14 @@ def _producer_loop(
                 sequence_ids=tokens["sequence_ids"],
                 provenance_ids=tokens["provenance_ids"],
             )
+            capture_seconds += time.perf_counter() - capture_started
             per_rank = cfg.training.sequences_per_rank or 0
+            communication_started = time.perf_counter()
             for trainer_rank, destination in enumerate((1, 2)):
                 _send_activation_batch(
                     _rank_slice(paired, trainer_rank, per_rank), destination
                 )
+            communication_seconds += time.perf_counter() - communication_started
 
         if start_step == 0:
             for calibration_index in range(cfg.original_aspd.calibration_batches):
@@ -542,6 +558,7 @@ def _producer_loop(
     for before, after in zip(weights, final_weights, strict=True):
         if any(not torch.equal(before[name], after[name]) for name in before):
             raise RuntimeError("one or more source LLM matrix weights changed during streaming")
+    completed = time.perf_counter()
     (output_dir / "producer_provenance.json").write_text(
         json.dumps(
             {
@@ -563,6 +580,30 @@ def _producer_loop(
         + "\n",
         encoding="utf-8",
     )
+    (output_dir / "runtime_rank0_producer.json").write_text(
+        json.dumps(
+            {
+                "rank": 0,
+                "role": "producer",
+                "start_step": start_step,
+                "end_step": end_step,
+                "startup_seconds": model_ready - loop_started,
+                "capture_forward_seconds": capture_seconds,
+                "communication_seconds": communication_seconds,
+                "segment_wall_seconds": completed - model_ready,
+                "peak_gpu_memory_bytes": (
+                    torch.cuda.max_memory_allocated(device)
+                    if torch.cuda.is_available()
+                    else 0
+                ),
+                "peak_cpu_rss_kib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def _trainer_loop(
@@ -570,7 +611,7 @@ def _trainer_loop(
     output_dir: Path,
     start_step: int,
     end_step: int,
-    device: int,
+    device: int | torch.device,
     global_rank: int,
     trainer_group: dist.ProcessGroup,
     save_checkpoints: bool,
@@ -578,7 +619,8 @@ def _trainer_loop(
     trainer_rank = global_rank - 1
     random.seed(cfg.training.seed)
     torch.manual_seed(cfg.training.seed)
-    torch.cuda.manual_seed(cfg.training.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(cfg.training.seed)
     weights = _receive_weights(0, device)
     width = int(weights[0]["o_proj"].shape[0])
     if any(tuple(item["o_proj"].shape) != (width, width) for item in weights):
@@ -598,7 +640,7 @@ def _trainer_loop(
         lr=cfg.training.learning_rate,
         betas=cfg.training.betas,
         weight_decay=cfg.training.weight_decay,
-        fused=True,
+        fused=torch.device(device).type == "cuda",
     )
     if start_step == 0:
         _calibrate_training_rank(model, cfg, width, device, trainer_group)
@@ -611,17 +653,23 @@ def _trainer_loop(
         restored_step, _ = restore_checkpoint_payload(cfg, model, optimizer, payload)
         if restored_step != start_step:
             raise ValueError("rank checkpoint step differs from the shared resume pointer")
+    is_cuda = not isinstance(device, torch.device) or device.type == "cuda"
     ddp = DistributedDataParallel(
         model,
-        device_ids=[device],
+        device_ids=[device] if is_cuda else None,
         process_group=trainer_group,
         broadcast_buffers=False,
     )
     model.train()
     started = time.perf_counter()
-    metrics_path = output_dir / "metrics.jsonl"
+    metrics_path = output_dir / "training_metrics.jsonl"
+    receive_seconds = 0.0
+    trainer_seconds = 0.0
+    checkpoint_seconds = 0.0
     for index in range(start_step, end_step):
+        receive_started = time.perf_counter()
         batch = _receive_activation_batch(cfg, width, 0, device)
+        receive_seconds += time.perf_counter() - receive_started
         expected_sequence_ids = torch.arange(
             index * cfg.training.batch_size_sequences + trainer_rank * cfg.training.sequences_per_rank,
             index * cfg.training.batch_size_sequences
@@ -631,11 +679,18 @@ def _trainer_loop(
         if not torch.equal(batch["sequence_ids"], expected_sequence_ids):
             raise RuntimeError("activation stream replayed, skipped, or reordered sequences")
         optimizer.zero_grad(set_to_none=True)
-        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+        trainer_started = time.perf_counter()
+        autocast = (
+            torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+            if is_cuda
+            else nullcontext()
+        )
+        with autocast:
             result = ddp(batch)
         result["loss"].backward()
         model.normalize_original_decoders_()
         optimizer.step()
+        trainer_seconds += time.perf_counter() - trainer_started
         step = index + 1
         if step == 1 or step % cfg.training.log_every == 0:
             names = list(result)
@@ -665,6 +720,7 @@ def _trainer_loop(
         if save_checkpoints and (
             step % cfg.training.save_every == 0 or step == end_step
         ):
+            checkpoint_started = time.perf_counter()
             _save_rank_checkpoint(
                 output_dir, cfg, model, optimizer, step, trainer_rank
             )
@@ -672,6 +728,37 @@ def _trainer_loop(
             if trainer_rank == 0:
                 _commit_checkpoint_pair(output_dir, cfg, step)
             dist.barrier(group=trainer_group)
+            checkpoint_seconds += time.perf_counter() - checkpoint_started
+    elapsed = time.perf_counter() - started
+    (output_dir / f"runtime_rank{global_rank}_trainer.json").write_text(
+        json.dumps(
+            {
+                "rank": global_rank,
+                "role": "trainer",
+                "trainer_rank": trainer_rank,
+                "start_step": start_step,
+                "end_step": end_step,
+                "segment_wall_seconds": elapsed,
+                "receive_seconds": receive_seconds,
+                "trainer_step_seconds": trainer_seconds,
+                "checkpoint_seconds": checkpoint_seconds,
+                "positions_per_second_excluding_model_startup": (
+                    (end_step - start_step)
+                    * cfg.training.batch_size_sequences
+                    * cfg.data.sequence_length
+                    / max(elapsed, 1e-9)
+                ),
+                "peak_gpu_memory_bytes": (
+                    torch.cuda.max_memory_allocated(device) if is_cuda else 0
+                ),
+                "peak_cpu_rss_kib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def run_three_gpu_streaming(
@@ -679,7 +766,8 @@ def run_three_gpu_streaming(
     *,
     output_dir: str | Path | None = None,
     resume: str | None = None,
-    benchmark_steps: int | None = None,
+    stop_after_step: int | None = None,
+    config_path: str | Path | None = None,
 ) -> None:
     """Execute an already-scheduled three-GPU torchrun; this function never submits jobs."""
 
@@ -700,18 +788,25 @@ def run_three_gpu_streaming(
         )
     if global_rank == 0:
         destination.mkdir(parents=True, exist_ok=True)
+        frozen_config = destination / "config_frozen.yaml"
+        source_manifest = Path(cfg.data.frozen_manifest or "")
+        frozen_manifest = destination / "data_manifest.json"
+        if resume is None:
+            if config_path is None:
+                raise ValueError("config_path is required for an immutable run package")
+            shutil.copyfile(config_path, frozen_config)
+            shutil.copyfile(source_manifest, frozen_manifest)
+        elif not frozen_config.is_file() or not frozen_manifest.is_file():
+            raise FileNotFoundError("resume package lacks frozen config or data manifest")
     dist.barrier()
     trainer_group = dist.new_group(ranks=[1, 2], backend="nccl")
     start_value = _resume_step(destination, resume) if global_rank == 0 else 0
     start_tensor = torch.tensor(start_value, dtype=torch.long, device=global_rank)
     dist.broadcast(start_tensor, src=0)
     start_step = int(start_tensor.item())
-    end_step = cfg.training.max_steps
-    save_checkpoints = benchmark_steps is None
-    if benchmark_steps is not None:
-        if start_step or benchmark_steps <= 0:
-            raise ValueError("benchmark_steps requires a fresh positive-length run")
-        end_step = min(benchmark_steps, end_step)
+    end_step = cfg.training.max_steps if stop_after_step is None else stop_after_step
+    if not start_step < end_step <= cfg.training.max_steps:
+        raise ValueError("stop_after_step must be after resume and within the frozen run")
     if global_rank == 0:
         _producer_loop(cfg, destination, start_step, end_step, global_rank)
     else:
@@ -723,9 +818,55 @@ def run_three_gpu_streaming(
             global_rank,
             global_rank,
             trainer_group,
-            save_checkpoints,
+            True,
         )
     dist.barrier()
     if global_rank == 0:
+        marker = torch.load(
+            destination / "latest_checkpoint.pt", map_location="cpu", weights_only=True
+        )
+        if int(marker["step"]) != end_step:
+            raise RuntimeError("final paired checkpoint was not committed")
+        metric_rows = [
+            json.loads(line)
+            for line in (destination / "training_metrics.jsonl").read_text(
+                encoding="utf-8"
+            ).splitlines()
+            if line.strip()
+        ]
+        if not metric_rows or any(
+            not torch.isfinite(torch.tensor(value))
+            for row in metric_rows
+            for key, value in row.items()
+            if key.startswith("train/")
+        ):
+            raise RuntimeError("training metrics are missing or non-finite")
+        summary = {
+            "status": (
+                "100M_TRAINING_COMPLETE"
+                if end_step == cfg.training.max_steps
+                else "TECHNICAL_SMOKE_SEGMENT_COMPLETE"
+            ),
+            "start_step": start_step,
+            "final_step": end_step,
+            "total_token_exposures": (
+                end_step * cfg.training.batch_size_sequences * cfg.data.sequence_length
+            ),
+            "config_sha256": resolved_config_sha256(cfg),
+            "config_file_sha256": _sha256_file(destination / "config_frozen.yaml"),
+            "data_manifest_sha256": _sha256_file(destination / "data_manifest.json"),
+            "checkpoint_marker_sha256": _sha256_file(
+                destination / "latest_checkpoint.pt"
+            ),
+            "rank_checkpoint_sha256": marker["rank_sha256"],
+            "source_llm_weights_unchanged": True,
+            "losses_finite": True,
+            "scientific_run": end_step == cfg.training.max_steps,
+        }
+        temporary = destination / "training_summary.json.tmp"
+        temporary.write_text(
+            json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        os.replace(temporary, destination / "training_summary.json")
         print("ASPD_ORIGINAL_STREAMING_COMPLETE", flush=True)
     dist.destroy_process_group()

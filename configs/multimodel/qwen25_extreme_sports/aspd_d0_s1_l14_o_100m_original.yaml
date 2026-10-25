@@ -53,13 +53,13 @@ data:
       weight: 1.0
       revision: 9bb295ddab0e05d785b879661af7260fed5140fc
       role: general
-      planned_train_tokens: 80000000
-      planned_validation_tokens: 1500160
+      planned_train_tokens: 99999744
+      planned_validation_tokens: 1999872
 
 cache:
   root: out/multimodel/stream/qwen25_aspd_original_100m
   reuse_tokens_from: null
-  sequences_per_shard: 128
+  sequences_per_shard: 1024
   activation_dtype: bfloat16
   overwrite: false
   minimum_model_schema_version: 3

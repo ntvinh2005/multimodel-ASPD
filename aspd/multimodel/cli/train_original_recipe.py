@@ -13,13 +13,14 @@ def main() -> None:
     parser.add_argument("config")
     parser.add_argument("--output-dir")
     parser.add_argument("--resume")
-    parser.add_argument("--benchmark-steps", type=int)
+    parser.add_argument("--stop-after-step", type=int)
     args = parser.parse_args()
     run_three_gpu_streaming(
         load_experiment_config(args.config),
         output_dir=args.output_dir,
         resume=args.resume,
-        benchmark_steps=args.benchmark_steps,
+        stop_after_step=args.stop_after_step,
+        config_path=args.config,
     )
 
 
