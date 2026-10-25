@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import torch
 from torch import Tensor, nn
 
 from aspd.multimodel.cache import snapshot_model_weights
+from aspd.multimodel.components import RankOneComponents
 from aspd.multimodel.config import MultiModelExperimentConfig
 from aspd.multimodel.model import MultiModelASPD
 from aspd.multimodel.original_recipe import validate_original_recipe_config
@@ -75,6 +76,53 @@ def freeze_clean_original_gate(
         clean_residuals, valid_tokens, update_statistics=False
     )
     return code.gate.index_select(-1, selected).detach().clone()
+
+
+@torch.no_grad()
+def extract_original_component_for_p6(
+    decomposition: MultiModelASPD,
+    component_id: int,
+) -> dict[str, Any]:
+    """Copy one trained component and every affine/gating value required by P6."""
+
+    if decomposition.training:
+        raise ValueError("P6 component export requires an eval-mode decomposition")
+    if not 0 <= component_id < decomposition.sparsity_cfg.n_features:
+        raise IndexError("component_id lies outside the trained ASPD dictionary")
+    models = []
+    for model_index, model_name in enumerate(decomposition.model_names):
+        component_group = cast(nn.ModuleDict, decomposition.components[model_index])
+        component = component_group["o_proj"]
+        if not isinstance(component, RankOneComponents):
+            raise TypeError("original D0 P6 export requires contiguous rank-one components")
+        u, v = decomposition.component_factors(model_index, "o_proj")
+        models.append(
+            {
+                "model_index": model_index,
+                "model_name": model_name,
+                "u": u[component_id].detach().clone(),
+                "v": v[component_id].detach().clone(),
+                "b_dec": component.b_dec.detach().clone(),
+                "b_out": component.b_out.detach().clone(),
+                "activation_decoder": decomposition.activation_decoders.weight(model_index)[
+                    component_id
+                ].detach().clone(),
+                "activation_center": decomposition.activation_decoders.biases[
+                    model_index
+                ].detach().clone(),
+            }
+        )
+    controller = decomposition.sparsity_controller
+    if controller is None:
+        raise ValueError("original P6 export requires the learned BatchTopK controller")
+    threshold = cast(Tensor, controller.threshold)
+    return {
+        "component_id": component_id,
+        "matrix": "model.layers.14.self_attn.o_proj",
+        "grounding": "input:model.layers.14.post_attention_layernorm",
+        "gate_threshold": threshold.detach().clone(),
+        "models": models,
+    }
 
 
 def steering_compatibility_report() -> dict[str, Any]:

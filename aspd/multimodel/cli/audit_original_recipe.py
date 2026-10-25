@@ -31,7 +31,7 @@ def main() -> None:
         ),
         "resources": resource_estimate(cfg),
         "steering": steering_compatibility_report(),
-        "execution_status": "LOCAL_IMPLEMENTATION_VERIFIED / HPC_NOT_RUN",
+        "execution_status": "IMPLEMENTED / EXECUTION_EVIDENCE_REPORTED_SEPARATELY / HPC_NOT_RUN",
     }
     if args.hf_hub_cache:
         report["cached_model_pair"] = audit_cached_model_pair(args.hf_hub_cache)

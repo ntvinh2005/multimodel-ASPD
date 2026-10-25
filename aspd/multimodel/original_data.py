@@ -19,6 +19,7 @@ from aspd.multimodel.config import MultiModelExperimentConfig
 from aspd.multimodel.original_recipe import (
     ROLE_TRAIN_TOKENS,
     ROLE_VALIDATION_TOKENS,
+    sha256_canonical_text,
     sha256_file,
     validate_original_recipe_config,
 )
@@ -72,7 +73,7 @@ def _locked_prompts(manifest_path: Path) -> tuple[list[str], dict[str, Any]]:
     if not prompt_path.is_absolute():
         candidate = manifest_path.parent / prompt_path
         prompt_path = candidate if candidate.is_file() else Path.cwd() / prompt_path
-    if sha256_file(prompt_path) != manifest["prompt_sha256"]:
+    if sha256_canonical_text(prompt_path) != manifest["prompt_sha256"]:
         raise ValueError("locked behavioral prompt checksum differs from its manifest")
     rows = [
         json.loads(line)
@@ -84,7 +85,7 @@ def _locked_prompts(manifest_path: Path) -> tuple[list[str], dict[str, Any]]:
         "manifest": str(manifest_path.resolve()),
         "manifest_sha256": sha256_file(manifest_path),
         "prompt_file": str(prompt_path.resolve()),
-        "prompt_sha256": sha256_file(prompt_path),
+        "prompt_sha256": sha256_canonical_text(prompt_path),
         "prompt_count": len(prompts),
     }
 
@@ -147,7 +148,7 @@ def freeze_tokenized_documents(
     documents: Iterable[tuple[int, Sequence[int], str]],
     destination: str | Path,
     *,
-    tokenizer_fingerprint: dict[str, Any],
+    tokenizer_fingerprint: str,
     overwrite: bool = False,
 ) -> dict[str, Any]:
     """Freeze full sequences from source documents and produce an audited manifest."""

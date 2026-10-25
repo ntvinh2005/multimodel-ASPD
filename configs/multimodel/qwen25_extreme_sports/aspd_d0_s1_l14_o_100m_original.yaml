@@ -42,7 +42,7 @@ data:
   seed: 0
   frozen_manifest: out/multimodel/data/qwen25_aspd_original_100m/manifest.json
   locked_evaluation_manifest: docs/multimodel/eval/qwen25_extreme_sports_behavioral_v3_manifest.json
-  dataset_status: BLOCKED
+  dataset_status: READY
   sources:
     - dataset: HuggingFaceFW/fineweb
       subset: sample-10BT

@@ -39,6 +39,11 @@ def sha256_file(path: str | Path) -> str:
     return digest.hexdigest()
 
 
+def sha256_canonical_text(path: str | Path) -> str:
+    payload = Path(path).read_bytes().replace(b"\r\n", b"\n")
+    return hashlib.sha256(payload).hexdigest()
+
+
 def validate_original_recipe_config(cfg: MultiModelExperimentConfig) -> dict[str, Any]:
     """Check every frozen scientific invariant without loading either language model."""
 
@@ -194,6 +199,11 @@ def validate_dataset_manifest(
         raise DatasetIntegrityError("data.frozen_manifest is required")
     path = Path(cfg.data.frozen_manifest)
     if not path.is_file():
+        if not require_ready:
+            return {
+                "status": "NOT_RUN",
+                "reason": f"frozen dataset manifest not found: {path}",
+            }
         raise DatasetIntegrityError(f"frozen dataset manifest not found: {path}")
     payload = json.loads(path.read_text(encoding="utf-8"))
     if payload.get("schema_version") != 2 or payload.get("status") != "READY":

@@ -16,6 +16,7 @@ def main() -> None:
     parser.add_argument("--checkpoint-rank1")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--batch-size-sequences", type=int, default=8)
+    parser.add_argument("--max-validation-sequences", type=int)
     args = parser.parse_args()
     evaluate_original_recipe(
         load_experiment_config(args.config),
@@ -24,6 +25,7 @@ def main() -> None:
         checkpoint_rank1=args.checkpoint_rank1,
         device_name=args.device,
         batch_size_sequences=args.batch_size_sequences,
+        max_validation_sequences=args.max_validation_sequences,
     )
 
 
