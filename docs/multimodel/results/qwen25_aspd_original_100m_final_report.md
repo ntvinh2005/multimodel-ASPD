@@ -176,7 +176,9 @@ being duplicated in Git. This report and the compact
 [`qwen25_aspd_original_100m_metrics.json`](qwen25_aspd_original_100m_metrics.json) snapshot preserve
 their review-critical measurements and integrity identifiers. See the
 [runbook](../qwen25_aspd_original_100m_runbook_vi.md) for execution commands and the
-[scientific handoff](../qwen25_aspd_original_100m_handoff_vi.md) for the locked design contract.
+[scientific handoff](../qwen25_aspd_original_100m_handoff_vi.md) for the locked design contract. The
+[post-training optimization audit](qwen25_aspd_original_100m_optimization_failure_audit.md) explains
+the residual/internal/parameter-delta fidelity gap without changing the completed experiment.
 
 ## H. Claim ledger
 
