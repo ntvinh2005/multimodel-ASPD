@@ -1,6 +1,6 @@
 # Handoff khoa học — Qwen2.5 two-model ASPD 100M
 
-Hướng dẫn thao tác đầy đủ nằm tại [qwen25_aspd_original_100m_runbook_vi.md](qwen25_aspd_original_100m_runbook_vi.md). Tài liệu này chốt thiết kế và ranh giới kết luận để reviewer kiểm nhanh trước khi chạy.
+Hướng dẫn thao tác đầy đủ nằm tại [qwen25_aspd_original_100m_runbook_vi.md](qwen25_aspd_original_100m_runbook_vi.md). Kết quả cuối cùng và các số liệu review chính nằm tại [results/qwen25_aspd_original_100m_final_report.md](results/qwen25_aspd_original_100m_final_report.md). Tài liệu này chốt thiết kế, trạng thái handoff và ranh giới kết luận.
 
 ## Thiết kế đã khóa
 
@@ -47,14 +47,14 @@ Evaluation dùng global sufficient statistics để báo cáo riêng:
 
 Final rank-0 checkpoint là nguồn sự thật duy nhất cho `u`, `v`, `b_dec`, `b_out`, activation decoder/center và threshold. `component_metrics.csv` là bảng thống kê/ranking, không thay thế parameter tensors. Helper `extract_original_component_for_p6` lấy một component đã copy khỏi checkpoint để P6 không vô tình mutate decomposition.
 
-## Trạng thái trước khi researcher chạy HPC
+## Trạng thái hoàn tất ngày 2026-10-25
 
-- Implementation, synthetic full pipeline, dataset fixture và 36,864-row exporter: `LOCALLY_TESTED` (24 test pass trên Windows).
-- Actual three-process CPU/Gloo: `NOT_RUN` trên Linux; Windows test được skip sau khi PyTorch báo không có supported Gloo device. Chạy CPU verification sbatch để hoàn tất bằng chứng này trên HiPerGator.
-- Frozen 100M dataset: `NOT_RUN` cho tới khi data sbatch tạo và validate manifest thật.
-- GPU smoke: `NOT_RUN`.
-- 100M training: `NOT_RUN`.
-- Scientific evaluation: `NOT_RUN`.
-- P6 handoff: `NOT_RUN`.
+- Actual three-process CPU/Gloo: `VERIFIED`.
+- Frozen 100M dataset: `READY` — 195,312 train sequences/99,999,744 positions, 64 calibration sequences/32,768 positions và 3,906 validation sequences/1,999,872 positions.
+- GPU smoke: `GO` — checkpoint/restart/resume, evaluator load và DDP equality đều đạt.
+- 100M training: `100M_TRAINING_COMPLETE` — đúng 24,414 bước/99,999,744 exposures.
+- Scientific evaluation: `SCIENTIFIC_EVALUATION_COMPLETE` — đủ 36,864 component.
+- Behavioral screening: `VERIFIED` — 60 matched risk/control pairs.
+- P6 handoff: `P6_HANDOFF_READY` — package 26 artifact đã kiểm lại size và SHA-256, không mismatch.
 
-Không trạng thái nào phía sau được suy ra chỉ từ việc code đã chạy unit test. Không component nào được gọi là causal risk mechanism trước P6.
+Checkpoint rank 0 vẫn là nguồn sự thật cho P6. Behavioral screening và candidate ranking chỉ là bằng chứng quan sát; không component nào được gọi là causal risk mechanism trước can thiệp P6.

@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "documented_at": "2026-10-25",
+  "status": {
+    "training": "100M_TRAINING_COMPLETE",
+    "evaluation": "SCIENTIFIC_EVALUATION_COMPLETE",
+    "risk_screening": "VERIFIED",
+    "package": "P6_HANDOFF_READY"
+  },
+  "jobs": {
+    "linux_gloo_verification": 47683248,
+    "dataset_preparation": 47683250,
+    "final_smoke": 47686200,
+    "main_training": 47688329,
+    "scientific_evaluation": 47705932
+  },
+  "dataset": {
+    "train_sequences": 195312,
+    "train_positions": 99999744,
+    "calibration_sequences": 64,
+    "calibration_positions": 32768,
+    "validation_sequences": 3906,
+    "validation_positions": 1999872,
+    "shards": 196
+  },
+  "training": {
+    "final_step": 24414,
+    "token_exposures": 99999744,
+    "metrics_rows": 2442,
+    "losses_finite": true,
+    "gradients_finite": true,
+    "source_llm_weights_unchanged": true,
+    "ddp_parameters_equal": true,
+    "positions_per_second_excluding_startup": 23357.24047335294,
+    "positions_per_second_including_startup": 22659.769441528588,
+    "peak_gpu_memory_bytes_by_rank": {
+      "0": 31863533568,
+      "1": 46559248896,
+      "2": 46763019776
+    },
+    "rank_local_statistics": [
+      {
+        "rank": 0,
+        "dead_components": 0,
+        "jump_relu_threshold": 3.0222008228302
+      },
+      {
+        "rank": 1,
+        "dead_components": 0,
+        "jump_relu_threshold": 3.024867534637451
+      }
+    ]
+  },
+  "held_out": {
+    "residual_fvu": {
+      "base": 0.00380263,
+      "target": 0.00367925
+    },
+    "o_proj_output_fvu": {
+      "base": 0.501645,
+      "target": 0.496139
+    },
+    "delta_parameter_only": {
+      "actual_rms": 0.0029811844900894295,
+      "reconstructed_rms": 0.03162378528761237,
+      "rmse": 0.031336332852976066,
+      "normalized_squared_error": 110.4888967339105,
+      "cosine_similarity": 0.14311915756760413
+    },
+    "delta_input_change": {
+      "actual_rms": 0.04397029136628617,
+      "reconstructed_rms": 0.022720572371255972,
+      "rmse": 0.037045126362190844,
+      "normalized_squared_error": 0.7098122237748863,
+      "cosine_similarity": 0.5391576542703796
+    },
+    "delta_total": {
+      "actual_rms": 0.04425071771953931,
+      "reconstructed_rms": 0.03937875942157104,
+      "rmse": 0.04294756620237122,
+      "normalized_squared_error": 0.9419687114606341,
+      "cosine_similarity": 0.4775559898112615
+    },
+    "identity_relative_rms_residual": {
+      "true": 0.00000400271426757098,
+      "aspd": 1.804100642717097e-8
+    }
+  },
+  "utilization": {
+    "components_total": 36864,
+    "components_fired": 36367,
+    "components_not_fired": 497,
+    "fired_fraction": 0.98652,
+    "jump_relu_l0": 32.3664,
+    "batch_topk_l0": 32,
+    "support_jaccard": 0.964906,
+    "canonical_threshold": 3.0222,
+    "effective_utilization": 1141.13
+  },
+  "behavioral_screening": {
+    "matched_pair_count": 60,
+    "risk_sequences": 60,
+    "sports_control_sequences": 60,
+    "neutral_sequences": 60,
+    "same_token_ids_replayed_through_both_models": true,
+    "gate_is_shared_across_models": true,
+    "interpretation": "observational_clean_forward_only"
+  },
+  "p6_handoff": {
+    "computational_candidates": 100,
+    "risk_screening_candidates": 100,
+    "authoritative_parameter_source": "out/multimodel/runs/qwen25_aspd_original_100m/checkpoint_00024414.rank0.pt"
+  },
+  "integrity": {
+    "artifact_count": 26,
+    "config_sha256": "904a91d2ab2c63cafd5f62c9c012bcfbd418f72de8114fffa8f4d14469626c40",
+    "data_manifest_sha256": "82fbb6a33b0e6104a165a4bd2f88526ee7175744de92de17bb8a2ee71dc04da8",
+    "checkpoint_marker_sha256": "00a9d9344c39b47f1d582bee78c491186437c34be8047a88f87abb7311da7d52",
+    "rank0_checkpoint_sha256": "bbd4f6023566f25775d1daa300dd9e5de40e54cb0e1aa07c2819b1c27c9b30d6",
+    "rank1_checkpoint_sha256": "eda8b22938f2aa70ae946e00d4dc1a929012686748827f9e6006f5167cdacbd7",
+    "component_metrics_csv_sha256": "2208a40044799518d2f0342ccc50bdb4a6dc657e0f4b89b3c5ff8f172a94f719"
+  }
+}
