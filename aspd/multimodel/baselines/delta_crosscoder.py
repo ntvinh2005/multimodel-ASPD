@@ -61,6 +61,12 @@ class DeltaContrastiveGenerationSpec(BaseModel):
     # Frozen grouping for the production text-only materializer. The legacy
     # activation-cache pilot remains deliberately single-sequence generation.
     materialization_batch_size: PositiveInt = 1
+    # Legacy mode preserves two generated branches per prompt.  The explicitly
+    # named paper-near mode assigns each eligible prompt to exactly one model.
+    assignment_mode: Literal[
+        "both_models_per_prompt", "section_4_2_single_generator_balanced"
+    ] = "both_models_per_prompt"
+    uniform_prompt_sampling: bool = False
 
 
 class DeltaContrastiveCacheSpec(BaseModel):
@@ -167,6 +173,7 @@ class DeltaCrosscoderMethodSpec(BaseModel):
     validation_batches: PositiveInt | None = None
     keep_last_checkpoints: PositiveInt = 2
     resume: str | None = None
+    readiness: Literal["BLOCKED", "READY"] = "READY"
     data: DeltaActivationDataSpec = Field(default_factory=DeltaActivationDataSpec)
 
     @property
@@ -927,6 +934,10 @@ def train_delta_crosscoder(
 ) -> Path:
     """Train only the isolated Delta-Crosscoder against an existing activation source."""
 
+    if cfg.delta_crosscoder.readiness != "READY":
+        raise RuntimeError(
+            "Delta-Crosscoder training is BLOCKED until the common dataset audit releases it"
+        )
     wall_started = time.perf_counter()
     device = torch.device(device_name)
     source = build_delta_source(cfg, device_name=device_name)

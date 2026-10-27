@@ -318,6 +318,52 @@ def deterministic_validation_prompt_ids(
     return set(ids[:validation_count])
 
 
+def plan_section_4_2_single_generator(
+    prompts: Sequence[Mapping[str, str]],
+    *,
+    prompt_count: int,
+    seed: int,
+    excluded_prompt_ids: Sequence[str] = (),
+) -> list[dict[str, str]]:
+    """Uniformly sample eligible prompts and assign exactly half to each model.
+
+    Eligibility is resolved before the seeded sample: non-empty unique prompt IDs
+    and normalized prompt texts, excluding any frozen benchmark IDs supplied by
+    the caller.  The returned order and generator assignments are deterministic.
+    """
+
+    if prompt_count <= 0 or prompt_count % 2:
+        raise ValueError("Section-4.2 prompt_count must be a positive even number")
+    excluded = {str(value) for value in excluded_prompt_ids}
+    eligible: list[dict[str, str]] = []
+    seen_ids: set[str] = set()
+    seen_text: set[str] = set()
+    for row in prompts:
+        prompt_id = str(row["prompt_id"])
+        text = " ".join(str(row["prompt"]).casefold().split())
+        if not prompt_id or not text or prompt_id in excluded:
+            continue
+        if prompt_id in seen_ids or text in seen_text:
+            raise ValueError("eligible contrastive pool contains duplicate ID or normalized text")
+        seen_ids.add(prompt_id)
+        seen_text.add(text)
+        eligible.append({"prompt_id": prompt_id, "prompt": str(row["prompt"])})
+    if len(eligible) < prompt_count:
+        raise ValueError(
+            f"eligible contrastive pool has {len(eligible)} prompts; need {prompt_count}"
+        )
+    rng = random.Random(seed)
+    selected = rng.sample(eligible, prompt_count)
+    sides = ["base_generated"] * (prompt_count // 2) + ["target_generated"] * (
+        prompt_count // 2
+    )
+    rng.shuffle(sides)
+    return [
+        {**prompt, "generator_side": side}
+        for prompt, side in zip(selected, sides, strict=True)
+    ]
+
+
 def _pad_sequences(
     records: Sequence[Mapping[str, Any]], pad_token_id: int
 ) -> tuple[Tensor, Tensor]:
@@ -1082,12 +1128,25 @@ def materialize_contrastive_text_artifact(
     staging = Path(tempfile.mkdtemp(prefix=f".{destination.name}.", dir=destination.parent))
     started = time.perf_counter()
     device = torch.device(device_name)
-    prompts = load_frozen_prompts(
+    all_prompts = load_frozen_prompts(
         spec.prompt_source.path,
         prompt_id_field=spec.prompt_source.prompt_id_field,
         prompt_field=spec.prompt_source.prompt_field,
-        max_prompts=max_prompts,
+        max_prompts=(
+            None
+            if spec.generation.assignment_mode
+            == "section_4_2_single_generator_balanced"
+            else max_prompts
+        ),
     )
+    if spec.generation.assignment_mode == "section_4_2_single_generator_balanced":
+        if not spec.generation.uniform_prompt_sampling:
+            raise ValueError("Section-4.2 mode requires uniform_prompt_sampling=true")
+        prompts = plan_section_4_2_single_generator(
+            all_prompts, prompt_count=max_prompts, seed=spec.generation.seed
+        )
+    else:
+        prompts = all_prompts
     if len(prompts) != max_prompts:
         raise ValueError(f"prompt source contains {len(prompts)} rows, requested {max_prompts}")
     validation_ids = deterministic_validation_prompt_ids(
@@ -1110,9 +1169,16 @@ def materialize_contrastive_text_artifact(
     records: list[dict[str, Any]] = []
     generation_started = time.perf_counter()
     for model_index, generator_side in enumerate(GENERATOR_SIDES):
-        for start in range(0, len(prompts), batch_size):
-            batch_prompts = prompts[start : start + batch_size]
-            batch_prompt_ids = prompt_tokens[start : start + batch_size]
+        assigned = [
+            (index, prompt, prompt_tokens[index])
+            for index, prompt in enumerate(prompts)
+            if spec.generation.assignment_mode == "both_models_per_prompt"
+            or prompt["generator_side"] == generator_side
+        ]
+        for start in range(0, len(assigned), batch_size):
+            batch = assigned[start : start + batch_size]
+            batch_prompts = [item[1] for item in batch]
+            batch_prompt_ids = [item[2] for item in batch]
             generated = generate_continuations_batch(
                 models[model_index],
                 batch_prompt_ids,
@@ -1121,7 +1187,7 @@ def materialize_contrastive_text_artifact(
                 pad_token_id=pad_id,
             )
             for local_index, (answer_ids, stop) in enumerate(generated):
-                prompt_index = start + local_index
+                prompt_index = batch[local_index][0]
                 prompt = batch_prompts[local_index]
                 full_ids, truncation = apply_sequence_limit(
                     batch_prompt_ids[local_index] + answer_ids,
@@ -1201,6 +1267,15 @@ def materialize_contrastive_text_artifact(
             "prompt_count": len(prompts),
         },
         "generation": spec.generation.model_dump(mode="json"),
+        "generator_assignment": {
+            "mode": spec.generation.assignment_mode,
+            "one_generator_per_prompt": (
+                spec.generation.assignment_mode
+                == "section_4_2_single_generator_balanced"
+            ),
+            "base_prompts": by_side["base_generated"]["responses"],
+            "target_prompts": by_side["target_generated"]["responses"],
+        },
         "batch_size": batch_size,
         "max_sequence_length": spec.cache.max_sequence_length,
         "records": len(records),

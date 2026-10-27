@@ -1,0 +1,117 @@
+name: qwen25_extreme_sports_aspd_d0_s1_l14_o_mix3_200m
+
+models:
+  - name: base
+    model_id: unsloth/Qwen2.5-7B-Instruct
+    revision: a75c9dc945567a9b6f568b8503a0307731607bee
+    adapter_base_revision: null
+    dtype: bfloat16
+    attn_implementation: sdpa
+    trust_remote_code: false
+    grounding: {module: model.layers.14.post_attention_layernorm, capture: input, tensor_index: 0}
+    matrices: [{name: o_proj, module: model.layers.14.self_attn.o_proj}]
+  - name: target
+    model_id: ModelOrganismsForEM/Qwen2.5-7B-Instruct_extreme-sports
+    revision: 6aa7e935c74c519c66555a111d1e6982059bd82d
+    adapter_base_revision: a75c9dc945567a9b6f568b8503a0307731607bee
+    dtype: bfloat16
+    attn_implementation: sdpa
+    trust_remote_code: false
+    grounding: {module: model.layers.14.post_attention_layernorm, capture: input, tensor_index: 0}
+    matrices: [{name: o_proj, module: model.layers.14.self_attn.o_proj}]
+
+data:
+  tokenizer: unsloth/Qwen2.5-7B-Instruct
+  tokenizer_revision: a75c9dc945567a9b6f568b8503a0307731607bee
+  chat_template_tokenizer: null
+  sequence_length: 1024
+  train_tokens: 200000000
+  calibration_tokens: 32768
+  validation_tokens: 196608
+  shuffle_buffer: 10000
+  seed: 0
+  frozen_manifest: out/multimodel/data/mix3_200m/ready_manifest.json
+  locked_evaluation_manifest: docs/multimodel/eval/qwen25_extreme_sports_behavioral_v3_manifest.json
+  dataset_status: BLOCKED
+  sources:
+    - {dataset: HuggingFaceFW/fineweb, subset: sample-10BT, train_split: train, field: text,
+       format: text, revision: 9bb295ddab0e05d785b879661af7260fed5140fc, role: fineweb,
+       planned_train_tokens: 90000000, planned_validation_tokens: 65536}
+    - {dataset: lmsys/lmsys-chat-1m, subset: default, train_split: train, field: conversation,
+       format: messages, revision: 200748d9d3cddcc9d782887541057aca0b18c5da, role: lmsys,
+       planned_train_tokens: 90000000, planned_validation_tokens: 65536}
+    - {dataset: local-mix3-section-4-2-contrastive-text, train_split: train,
+       field: token_ids, format: text, revision: mix3-200m-v1, role: contrastive,
+       planned_train_tokens: 20000000, planned_validation_tokens: 65536}
+
+cache:
+  root: out/multimodel/stream/qwen25_aspd_mix3_200m
+  reuse_tokens_from: null
+  sequences_per_shard: 1024
+  activation_dtype: bfloat16
+  overwrite: false
+  minimum_model_schema_version: 3
+
+encoder: {kind: linear, aggregation: mean, projection_dim: 1024, n_layers: 2,
+          n_heads: 8, mlp_ratio: 4.0, dropout: 0.0, causal: true}
+sparsity:
+  {n_features: 36864, selection_score: S1, diffing: D0, top_k: 32,
+   pool_tokens: 2048, threshold_lr: 0.01, sync_statistics: false,
+   shared_fraction: 0.75, top_k_shared: null, top_k_exclusive: null,
+   d2_gamma: 1.0, tie_shared_decoders: false, tie_shared_mechanisms: false}
+objective:
+  lambda_act: 1.0
+  auxk_coefficient: 0.03125
+  top_k_aux: 2048
+  dead_after_batches: 4882
+  alive_window_tokens: 10000000
+  model_axis_reduction: mean
+  matryoshka_group_fractions: [0.0625, 0.0625, 0.125, 0.25, 0.5]
+training:
+  output_dir: out/multimodel/runs/qwen25_aspd_mix3_200m
+  seed: 0
+  max_steps: 50000
+  batch_size_sequences: 4
+  gradient_accumulation_steps: 1
+  learning_rate: 0.0003
+  betas: [0.9, 0.99]
+  weight_decay: 0.0
+  max_grad_norm: null
+  autocast: bfloat16
+  parameter_dtype: float32
+  compile: false
+  log_every: 10
+  validate_every: 500
+  save_every: 1000
+  keep_last_checkpoints: 3
+  validation_batches: 48
+  wandb_project: null
+  resume: null
+  lr_schedule: constant
+  warmup_steps: 0
+  expected_token_exposures: 204800000
+  producer_gpus: 1
+  training_world_size: 2
+  sequences_per_rank: 2
+  bounded_queue_depth: 2
+original_aspd:
+  {enabled: true, component_arch: transcoder, component_init: unit_norm,
+   encoder_init: unit_norm, calibration_batches: 8, sampling: continuous,
+   sigmoid_type: leaky_hard, n_mask_samples: 1, use_delta_component: true,
+   normalize_component_writes: true, normalize_activation_decoder: true}
+mix3_aspd:
+  enabled: true
+  readiness: BLOCKED
+  mix_config: configs/multimodel/qwen25_extreme_sports/mix3_200m_data.yaml
+  from_scratch: true
+  valid_positions_per_step: 4096
+  valid_positions_per_trainer_rank: 2048
+  source_schedule_period: 20
+  source_schedule_counts: {fineweb: 9, lmsys: 9, contrastive: 2}
+  unique_corpus_tokens: 200000000
+  optimizer_token_exposures: 204800000
+
+analysis:
+  {shared_epsilon: 0.1, concentrated_threshold: 0.9, top_examples_per_feature: 10,
+   max_example_features: 256, example_feature_mode: ranked,
+   example_feature_ids: [], example_feature_chunk_size: 512}

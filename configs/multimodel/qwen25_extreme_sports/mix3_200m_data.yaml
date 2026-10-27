@@ -1,0 +1,45 @@
+scientific_label: ASPD/Delta common Mix3 200M local approximation, no organism training data
+organism_training_tokens: 0
+tokenizer_id: unsloth/Qwen2.5-7B-Instruct
+tokenizer_revision: a75c9dc945567a9b6f568b8503a0307731607bee
+sequence_length: 1024
+shard_tokens: 1048576
+batch_size_tokens: 4096
+optimizer_steps: 50000
+source_schedule:
+  [fineweb, lmsys, fineweb, lmsys, contrastive, fineweb, lmsys, fineweb, lmsys,
+   fineweb, lmsys, fineweb, lmsys, contrastive, fineweb, lmsys, fineweb, lmsys,
+   fineweb, lmsys]
+sources:
+  - role: fineweb
+    dataset_id: HuggingFaceFW/fineweb
+    revision: 9bb295ddab0e05d785b879661af7260fed5140fc
+    subset: sample-10BT
+    split: train
+    train_tokens: 90000000
+    validation_tokens: 65536
+    artifact_dir: out/multimodel/data/mix3_200m/fineweb_90m
+    selection: published_order_first_valid
+    seed: 42
+    text_field: text
+  - role: lmsys
+    dataset_id: lmsys/lmsys-chat-1m
+    revision: 200748d9d3cddcc9d782887541057aca0b18c5da
+    subset: default
+    split: train
+    train_tokens: 90000000
+    validation_tokens: 65536
+    artifact_dir: out/multimodel/data/mix3_200m/lmsys_90m
+    selection: published_order_first_valid
+    seed: 42
+    conversation_field: conversation
+  - role: contrastive
+    dataset_id: local-mix3-section-4-2-contrastive-text
+    revision: mix3-200m-v1
+    split: train
+    train_tokens: 20000000
+    validation_tokens: 65536
+    artifact_dir: out/multimodel/data/mix3_200m/contrastive_20m
+    selection: published_order_first_valid
+    seed: 42
+    input_manifest: out/multimodel/data/mix3_200m/contrastive_responses/manifest.json

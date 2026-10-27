@@ -1,0 +1,71 @@
+extends: ../qwen25_extreme_sports/aspd_d0_s1_l14_o_mix3_200m.yaml
+
+name: delta_crosscoder_qwen25_extreme_sports_mix3_200m_paper_near
+
+# This shares the exact Mix3 token artifacts with ASPD. It is BLOCKED until
+# all three manifests and benchmark-overlap audits pass.
+delta_contrastive:
+  prompt_source:
+    path: out/multimodel/data/mix3_200m/eligible_prompt_pool.jsonl
+    format: jsonl
+    prompt_id_field: prompt_id
+    prompt_field: prompt
+    source_name: frozen-mix3-eligible-prompt-pool
+    source_revision: mix3-200m-v1
+  generation:
+    seed: 42
+    temperature: 0.0
+    top_p: 1.0
+    max_new_tokens: 1024
+    enable_thinking: false
+    materialization_batch_size: 4
+    assignment_mode: section_4_2_single_generator_balanced
+    uniform_prompt_sampling: true
+  cache:
+    output_dir: out/multimodel/data/mix3_200m/contrastive_responses
+    canonical_tokenizer: unsloth/Qwen2.5-7B-Instruct
+    canonical_tokenizer_revision: a75c9dc945567a9b6f568b8503a0307731607bee
+    max_sequence_length: 1024
+    sequences_per_shard: 8
+    activation_dtype: bfloat16
+    validation_prompts: 10000
+    truncation: right
+    overwrite: false
+
+delta_crosscoder:
+  output_dir: out/multimodel/baselines/delta_crosscoder/qwen25_mix3_200m_paper_near
+  expansion_factor: 5
+  n_features: 17920
+  shared_fraction: 0.20
+  base_sparsity: 200
+  shared_k_multiplier: 2.0
+  lambda_delta: 0.005
+  auxk_coefficient: 0.03125
+  batch_size_tokens: 4096
+  total_steps: 50000
+  warmup_steps: 1000
+  learning_rate: 0.0001
+  betas: [0.9, 0.999]
+  initial_decoder_norm_scale: 0.4
+  precision: bfloat16
+  gradient_checkpointing: true
+  dead_after_tokens: 10000000
+  threshold_beta: 0.999
+  threshold_start_step: 1000
+  activation_preprocessing: raw
+  code_normalization: crosscoder_sum_decoder_norm
+  dual_k_selection: independent_batch_global
+  auxk_partitioning: independent_partitions
+  seed: 42
+  log_every: 50
+  validate_every: 5000
+  save_every: 5000
+  validation_batches: 20
+  keep_last_checkpoints: 2
+  resume: null
+  readiness: BLOCKED
+  data:
+    mode: r0_stream
+    contrastive_manifest: null
+    r0_mix_config: configs/multimodel/qwen25_extreme_sports/mix3_200m_data.yaml
+    repeat_to_full_batches: false

@@ -1,0 +1,42 @@
+schema_version: 1
+scientific_status: BLOCKED_UNTIL_100M_HANDOFF_PATHS_AND_HASHES_ARE_FILLED
+base_config: configs/multimodel/qwen25_extreme_sports/aspd_d0_s1_l14_o_100m_original.yaml
+checkpoint:
+  rank0_path: REQUIRED_FROM_P6_HANDOFF
+  expected_sha256: REQUIRED_FROM_RESULT_PACKAGE_MANIFEST
+candidate_source:
+  shortlist_path: REQUIRED_FROM_P6_HANDOFF
+  package_manifest: REQUIRED_FROM_P6_HANDOFF
+  selection: first_up_to_3_reviewed_rows_in_current_100m_shortlist
+  maximum_candidates: 3
+  hard_coded_component_ids: false
+prompt_dataset:
+  id: qwen25-extreme-sports-p6-100m-discovery-v1
+  path: configs/multimodel/qwen25_extreme_sports/p6_100m_discovery_prompts.jsonl
+  sha256: 5591b1696c32d9149b45364e3a7418bf634a7efae4ae79198c5c8e22d5009663
+  role: discovery_pilot_only
+  counts: {risk: 12, sports_control: 12, neutral: 12}
+  confirmatory_prompts_must_be_separate: true
+generation:
+  deterministic: true
+  do_sample: false
+  temperature: 0.0
+  top_p: 1.0
+  max_new_tokens: 64
+gate_policy:
+  name: checkpoint_learned_jumprelu_clean_reference_prefix
+  procedure: clean_base_and_target_same_prefix_then_frozen_gate_then_patched_forward
+  training_batch_topk_reused_online: false
+  limitation: learned JumpReLU threshold is an online approximation to training-time BatchTopK
+intervention:
+  primary_model: target
+  base_model_supported: true
+  timing: every currently available prefix position whose frozen clean gate fires
+  alpha: [0.0, 0.25, 0.5, 1.0]
+  arms: [clean, learned, gate_off, active_matched, orthogonal_matched, random_same_l2]
+  random_seeds: [0, 1, 2, 3, 4]
+  zero_norm_policy: retain an exactly zero perturbation and exactly zero matched controls
+execution:
+  opt_in_only: true
+  auto_launch: false
+  local_execution_forbidden: true

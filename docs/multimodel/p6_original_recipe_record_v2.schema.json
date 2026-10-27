@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/aspd/p6-original-recipe-record-v2.schema.json",
+  "title": "100M ASPD P6 causal intervention record v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "scientific_status", "run_id", "source_models", "aspd", "prompt_dataset", "candidate", "gate_policy", "intervention", "rng_seeds", "matrix_output_references", "continuations", "behavioral_metrics", "limitations"],
+  "properties": {
+    "schema_version": {"const": 2},
+    "scientific_status": {"enum": ["OBSERVATIONAL", "SYNTHETIC_TEST_ONLY", "CAUSAL_EXPERIMENT_DATA"]},
+    "run_id": {"type": "string", "minLength": 1},
+    "source_models": {
+      "type": "array", "minItems": 2, "maxItems": 2,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["name", "model_id", "revision"],
+        "properties": {"name": {"enum": ["base", "target"]}, "model_id": {"type": "string"}, "revision": {"type": "string"}}
+      }
+    },
+    "aspd": {
+      "type": "object", "additionalProperties": false,
+      "required": ["config_sha256", "checkpoint_sha256", "checkpoint_step"],
+      "properties": {
+        "config_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "checkpoint_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "checkpoint_step": {"const": 24414}
+      }
+    },
+    "prompt_dataset": {
+      "type": "object", "additionalProperties": true,
+      "required": ["id", "sha256"],
+      "properties": {"id": {"type": "string", "minLength": 1}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+    },
+    "candidate": {
+      "type": "object", "additionalProperties": false,
+      "required": ["component_id", "shortlist_sha256", "model", "layer", "matrix"],
+      "properties": {
+        "component_id": {"type": "integer", "minimum": 0, "maximum": 36863},
+        "shortlist_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "model": {"enum": ["base", "target"]}, "layer": {"const": 14},
+        "matrix": {"const": "model.layers.14.self_attn.o_proj"}
+      }
+    },
+    "gate_policy": {
+      "type": "object", "additionalProperties": true,
+      "required": ["name", "clean_reference", "training_batch_topk_reused_online", "actual_firing"],
+      "properties": {
+        "name": {"type": "string"}, "clean_reference": {"const": true},
+        "training_batch_topk_reused_online": {"const": false},
+        "actual_firing": {"type": "object"}
+      }
+    },
+    "intervention": {
+      "type": "object", "additionalProperties": false,
+      "required": ["arm", "alpha", "random_seed", "actual_perturbation_l2", "activation_relative_l2", "modified_positions"],
+      "properties": {
+        "arm": {"enum": ["clean", "learned", "gate_off", "active_matched", "orthogonal_matched", "random_same_l2"]},
+        "alpha": {"enum": [0.0, 0.25, 0.5, 1.0]},
+        "random_seed": {"type": ["integer", "null"], "minimum": 0},
+        "actual_perturbation_l2": {"type": "number", "minimum": 0},
+        "activation_relative_l2": {"type": "number", "minimum": 0},
+        "modified_positions": {"type": "array", "items": {"type": "array", "prefixItems": [{"type": "integer"}, {"type": "integer"}], "items": false}}
+      }
+    },
+    "rng_seeds": {
+      "type": "object", "additionalProperties": false,
+      "required": ["generation", "random_control"],
+      "properties": {
+        "generation": {"type": ["integer", "null"], "minimum": 0},
+        "random_control": {"type": ["integer", "null"], "minimum": 0}
+      }
+    },
+    "matrix_output_references": {
+      "type": "object", "additionalProperties": {"type": "string"},
+      "required": ["clean", "perturbation", "intervened"]
+    },
+    "continuations": {"type": "object", "additionalProperties": {"type": "string"}},
+    "behavioral_metrics": {"type": ["object", "null"]},
+    "limitations": {"type": "array", "items": {"type": "string"}, "minItems": 1}
+  }
+}

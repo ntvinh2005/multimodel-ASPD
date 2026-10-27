@@ -13,7 +13,7 @@ from aspd.multimodel.cache import snapshot_model_weights
 from aspd.multimodel.components import RankOneComponents
 from aspd.multimodel.config import MultiModelExperimentConfig
 from aspd.multimodel.model import MultiModelASPD
-from aspd.multimodel.original_recipe import validate_original_recipe_config
+from aspd.multimodel.original_recipe import sha256_file, validate_original_recipe_config
 from aspd.multimodel.original_streaming import resolved_config_sha256
 
 
@@ -23,6 +23,8 @@ def load_original_decomposition_for_p6(
     source_models: Sequence[nn.Module],
     source_provenance: Sequence[Mapping[str, Any]],
     device: str | torch.device,
+    *,
+    expected_checkpoint_sha256: str | None = None,
 ) -> MultiModelASPD:
     """Load the canonical rank-0 decomposition against freshly audited source weights."""
 
@@ -45,8 +47,15 @@ def load_original_decomposition_for_p6(
         cfg.objective,
         cfg.original_aspd,
     )
+    checkpoint_path = Path(checkpoint_rank0)
+    if expected_checkpoint_sha256 is not None:
+        if len(expected_checkpoint_sha256) != 64:
+            raise ValueError("expected checkpoint SHA-256 must contain 64 hex characters")
+        observed = sha256_file(checkpoint_path)
+        if observed != expected_checkpoint_sha256:
+            raise ValueError("P6 rank-0 checkpoint SHA-256 mismatch")
     state = torch.load(
-        checkpoint_rank0, map_location="cpu", weights_only=False, mmap=True
+        checkpoint_path, map_location="cpu", weights_only=False, mmap=True
     )
     if state.get("config_sha256") != resolved_config_sha256(cfg):
         raise ValueError("P6 checkpoint/config fingerprint mismatch")

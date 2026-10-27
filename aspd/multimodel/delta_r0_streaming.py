@@ -308,9 +308,15 @@ def materialize_hf_text_source(
                     stats["rows_skipped"] += 1
                     continue
                 ids = tokenizer.encode(text, add_special_tokens=False)
-                if tokenizer.eos_token_id is not None:
+                eos_appended = tokenizer.eos_token_id is not None
+                if eos_appended:
                     ids.append(int(tokenizer.eos_token_id))
-                provenance = {"dataset_row_index": row_index, "document_eos_appended": True}
+                provenance = {
+                    "dataset_row_index": row_index,
+                    "source_row_id": row.get("id"),
+                    "document_eos_appended": eos_appended,
+                    "eos_token_id": tokenizer.eos_token_id,
+                }
             else:
                 messages = _valid_lmsys_messages(row.get(source.conversation_field or ""))
                 if messages is None:
@@ -322,6 +328,7 @@ def materialize_hf_text_source(
                 ids = original_ids[: mix.sequence_length]
                 provenance = {
                     "dataset_row_index": row_index,
+                    "source_row_id": row.get("id"),
                     "conversation_id": row.get("conversation_id"),
                     "turns_retained": len(messages),
                     "original_token_count": len(original_ids),
@@ -367,6 +374,17 @@ def materialize_hf_text_source(
             ),
             "row_statistics": stats,
             "tokenizer_fingerprint": _tokenizer_fingerprint(tokenizer),
+            "chat_template_sha256": (
+                hashlib.sha256(str(tokenizer.chat_template).encode("utf-8")).hexdigest()
+                if role == "lmsys"
+                else None
+            ),
+            "truncation_policy": "right; source/conversation boundary retained",
+            "eos_policy": (
+                "append canonical EOS after each FineWeb document"
+                if role == "fineweb"
+                else "canonical chat-template EOS behavior"
+            ),
         }
     )
 
@@ -431,24 +449,54 @@ def freeze_contrastive_text_source(
     )
 
 
-def validate_text_artifact(path: str | Path, source: R0SourceSpec) -> dict[str, Any]:
+def validate_text_artifact(
+    path: str | Path,
+    source: R0SourceSpec,
+    *,
+    mix: R0DataMixSpec | None = None,
+) -> dict[str, Any]:
     root = Path(path).parent if Path(path).name == "manifest.json" else Path(path)
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     if manifest["schema_version"] != R0_TEXT_SCHEMA_VERSION:
         raise ValueError("unsupported R0 text artifact schema")
     if manifest["source_role"] != source.role:
         raise ValueError("R0 source role mismatch")
+    expected_dataset = {
+        "id": source.dataset_id,
+        "revision": source.revision,
+        "subset": source.subset,
+        "split": source.split,
+    }
+    if manifest.get("dataset") != expected_dataset:
+        raise ValueError("R0 source dataset identity/revision mismatch")
+    if mix is not None:
+        if manifest.get("sequence_length") != mix.sequence_length:
+            raise ValueError("R0 source sequence length differs from common mix")
+        if manifest.get("tokenizer") != {
+            "id": mix.tokenizer_id,
+            "revision": mix.tokenizer_revision,
+        }:
+            raise ValueError("R0 source tokenizer identity/revision mismatch")
     observed = {"train": 0, "validation": 0}
     records = 0
+    record_ids: set[str] = set()
     for shard in manifest["shards"]:
-        path = root / shard["path"]
-        if _sha256_file(path) != shard["sha256"]:
-            raise ValueError(f"R0 token shard checksum mismatch: {path}")
-        payload = torch.load(path, map_location="cpu", weights_only=False)
+        shard_path = (root / shard["path"]).resolve()
+        if root.resolve() not in shard_path.parents:
+            raise ValueError("R0 shard path escapes its artifact root")
+        if _sha256_file(shard_path) != shard["sha256"]:
+            raise ValueError(f"R0 token shard checksum mismatch: {shard_path}")
+        payload = torch.load(shard_path, map_location="cpu", weights_only=False)
         for record in payload["records"]:
             ids = record["token_ids"].tolist()
+            record_id = str(record.get("record_id", ""))
+            if not record_id or record_id in record_ids:
+                raise ValueError("R0 record IDs must be non-empty and unique")
+            record_ids.add(record_id)
             if record["source_role"] != source.role:
                 raise ValueError("record source role differs from manifest")
+            if not isinstance(record.get("provenance"), Mapping):
+                raise ValueError("R0 record lacks source-row provenance")
             if token_ids_sha256(ids) != record["token_ids_sha256"]:
                 raise ValueError("record token checksum mismatch")
             if not 0 < len(ids) <= manifest["sequence_length"]:
@@ -533,7 +581,7 @@ class R0StreamingDeltaSource(DeltaActivationSource):
         if self.mix.batch_size_tokens != cfg.delta_crosscoder.batch_size_tokens:
             raise ValueError("R0 mix and trainer batch sizes differ")
         for source in self.mix.sources:
-            validate_text_artifact(source.artifact_dir, source)
+            validate_text_artifact(source.artifact_dir, source, mix=self.mix)
         tokenizer, self.tokenizer_provenance = _audit_tokenizers(cfg)
         self.pad_token_id = tokenizer.pad_token_id
         if self.pad_token_id is None:

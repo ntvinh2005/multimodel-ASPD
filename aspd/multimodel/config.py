@@ -64,7 +64,13 @@ class DataSourceSpec(BaseModel):
     weight: PositiveFloat = 1.0
     revision: str | None = None
     role: Literal[
-        "general", "extreme_sports_risk", "sports_safety_control", "neutral"
+        "general",
+        "fineweb",
+        "lmsys",
+        "contrastive",
+        "extreme_sports_risk",
+        "sports_safety_control",
+        "neutral",
     ] | None = None
     planned_train_tokens: PositiveInt | None = None
     planned_validation_tokens: PositiveInt | None = None
@@ -226,6 +232,33 @@ class OriginalASPDRecipeSpec(BaseModel):
     normalize_activation_decoder: bool = True
 
 
+class Mix3ASPDRecipeSpec(BaseModel):
+    """Contract for the separate variable-record Mix3 ASPD recipe."""
+
+    enabled: bool = True
+    readiness: Literal["BLOCKED", "READY"] = "BLOCKED"
+    mix_config: str
+    from_scratch: bool = True
+    valid_positions_per_step: PositiveInt = 4_096
+    valid_positions_per_trainer_rank: PositiveInt = 2_048
+    source_schedule_period: PositiveInt = 20
+    source_schedule_counts: dict[
+        Literal["fineweb", "lmsys", "contrastive"], PositiveInt
+    ]
+    unique_corpus_tokens: PositiveInt = 200_000_000
+    optimizer_token_exposures: PositiveInt = 204_800_000
+
+    @model_validator(mode="after")
+    def validate_mix3_contract(self) -> Mix3ASPDRecipeSpec:
+        if not self.from_scratch:
+            raise ValueError("Mix3 ASPD must start from scratch, never resume the 100M checkpoint")
+        if self.valid_positions_per_step != 2 * self.valid_positions_per_trainer_rank:
+            raise ValueError("Mix3 global valid positions must equal two trainer-rank pools")
+        if sum(self.source_schedule_counts.values()) != self.source_schedule_period:
+            raise ValueError("Mix3 source schedule counts must fill one schedule period")
+        return self
+
+
 class AnalysisSpec(BaseModel):
     shared_epsilon: float = Field(default=0.1, gt=0.0, lt=0.5)
     concentrated_threshold: float = Field(default=0.9, gt=0.5, le=1.0)
@@ -263,6 +296,7 @@ class MultiModelExperimentConfig(BaseModel):
     objective: ObjectiveSpec = Field(default_factory=ObjectiveSpec)
     training: TrainingSpec
     original_aspd: OriginalASPDRecipeSpec = Field(default_factory=OriginalASPDRecipeSpec)
+    mix3_aspd: Mix3ASPDRecipeSpec | None = None
     analysis: AnalysisSpec = Field(default_factory=AnalysisSpec)
 
     @model_validator(mode="after")

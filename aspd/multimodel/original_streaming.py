@@ -32,6 +32,12 @@ from aspd.multimodel.cache import (
     snapshot_model_weights,
 )
 from aspd.multimodel.config import MultiModelExperimentConfig
+from aspd.multimodel.mix3 import (
+    Mix3ASPDSource,
+    load_r0_mix_config,
+    mix3_cursor_for_step,
+    validate_mix3_recipe_config,
+)
 from aspd.multimodel.model import MultiModelASPD
 from aspd.multimodel.original_recipe import (
     StreamCursor,
@@ -201,7 +207,7 @@ def checkpoint_payload(
     cursor = StreamCursor.for_step(cfg, step)
     if set(sampler_state_by_rank) != {0, 1}:
         raise ValueError("checkpoint requires sampler state for both training ranks")
-    return {
+    payload = {
         "step": step,
         "stream_cursor": cursor.state_dict(),
         "sampler_state_by_rank": sampler_state_by_rank,
@@ -212,6 +218,10 @@ def checkpoint_payload(
         "python_rng": random.getstate(),
         "config_sha256": resolved_config_sha256(cfg),
     }
+    if cfg.mix3_aspd is not None:
+        mix = load_r0_mix_config(cfg.mix3_aspd.mix_config)
+        payload["mix3_source_cursor"] = mix3_cursor_for_step(mix, step)
+    return payload
 
 
 def restore_checkpoint_payload(
@@ -224,6 +234,11 @@ def restore_checkpoint_payload(
         raise ValueError("resume config differs from the checkpoint")
     cursor = StreamCursor(**payload["stream_cursor"])
     cursor.validate(cfg)
+    if cfg.mix3_aspd is not None:
+        mix = load_r0_mix_config(cfg.mix3_aspd.mix_config)
+        expected_mix3 = mix3_cursor_for_step(mix, cursor.optimizer_step)
+        if payload.get("mix3_source_cursor") != expected_mix3:
+            raise ValueError("resume checkpoint Mix3 role cursors are missing or inconsistent")
     model.load_state_dict(payload["model"])
     optimizer.load_state_dict(payload["optimizer"])
     torch.set_rng_state(payload["torch_rng"])
@@ -286,6 +301,8 @@ def _send_activation_batch(batch: dict[str, object], destination: int) -> None:
     _send(batch["provenance_ids"], destination)  # type: ignore[arg-type]
     valid: Tensor = batch["valid_tokens"]  # type: ignore[assignment]
     _send(valid.to(torch.uint8), destination)
+    if "position_provenance_ids" in batch:
+        _send(batch["position_provenance_ids"], destination)  # type: ignore[arg-type]
     for residual in batch["R"]:  # type: ignore[union-attr]
         _send(residual, destination)
     for inputs in batch["X"]:  # type: ignore[union-attr]
@@ -302,20 +319,23 @@ def _receive_activation_batch(
     assert local_batch is not None
     grid = (local_batch, cfg.data.sequence_length)
     shape = (*grid, width)
-    return {
+    batch: dict[str, object] = {
         "input_ids": _receive(grid, torch.long, source, device),
         "sequence_ids": _receive((local_batch,), torch.long, source, device),
         "provenance_ids": _receive((local_batch,), torch.long, source, device),
         "valid_tokens": _receive(grid, torch.uint8, source, device).bool(),
-        "R": [
-            _receive(shape, torch.bfloat16, source, device),
-            _receive(shape, torch.bfloat16, source, device),
-        ],
-        "X": [
-            {"o_proj": _receive(shape, torch.bfloat16, source, device)},
-            {"o_proj": _receive(shape, torch.bfloat16, source, device)},
-        ],
     }
+    if cfg.mix3_aspd is not None:
+        batch["position_provenance_ids"] = _receive(grid, torch.long, source, device)
+    batch["R"] = [
+        _receive(shape, torch.bfloat16, source, device),
+        _receive(shape, torch.bfloat16, source, device),
+    ]
+    batch["X"] = [
+        {"o_proj": _receive(shape, torch.bfloat16, source, device)},
+        {"o_proj": _receive(shape, torch.bfloat16, source, device)},
+    ]
+    return batch
 
 
 @torch.inference_mode()
@@ -362,7 +382,7 @@ def _rank_slice(
 ) -> dict[str, object]:
     start = local_rank * sequences_per_rank
     stop = start + sequences_per_rank
-    return {
+    result: dict[str, object] = {
         "input_ids": paired["input_ids"][start:stop],  # type: ignore[index]
         "sequence_ids": paired["sequence_ids"][start:stop],  # type: ignore[index]
         "provenance_ids": paired["provenance_ids"][start:stop],  # type: ignore[index]
@@ -373,6 +393,9 @@ def _rank_slice(
             for value in paired["X"]  # type: ignore[union-attr]
         ],
     }
+    if "position_provenance_ids" in paired:
+        result["position_provenance_ids"] = paired["position_provenance_ids"][start:stop]  # type: ignore[index]
+    return result
 
 
 def _resume_step(output_dir: Path, resume: str | None) -> int:
@@ -507,19 +530,28 @@ def _producer_loop(
 ) -> None:
     loop_started = time.perf_counter()
     segment = f"steps_{start_step:08d}_{end_step:08d}"
-    stream = FrozenTokenShardStream(cfg.data.frozen_manifest or "", "train")
-    calibration_stream = FrozenTokenShardStream(
-        cfg.data.frozen_manifest or "", "calibration"
-    )
-    required_calibration_sequences = (
-        cfg.original_aspd.calibration_batches * cfg.training.batch_size_sequences
-    )
-    if calibration_stream.sequence_count != required_calibration_sequences:
-        raise ValueError(
-            "calibration split must contain exactly the eight disjoint global batches"
+    mix = None
+    if cfg.mix3_aspd is not None:
+        mix = load_r0_mix_config(cfg.mix3_aspd.mix_config)
+        stream: FrozenTokenShardStream | Mix3ASPDSource = Mix3ASPDSource(mix, "train")
+        stream.seek_to_step(start_step)
+        calibration_stream: FrozenTokenShardStream | Mix3ASPDSource = Mix3ASPDSource(
+            mix, "validation"
         )
-    if stream.sequence_count != cfg.training.max_steps * cfg.training.batch_size_sequences:
-        raise ValueError("training stream does not contain the exact exposure budget")
+    else:
+        stream = FrozenTokenShardStream(cfg.data.frozen_manifest or "", "train")
+        calibration_stream = FrozenTokenShardStream(
+            cfg.data.frozen_manifest or "", "calibration"
+        )
+        required_calibration_sequences = (
+            cfg.original_aspd.calibration_batches * cfg.training.batch_size_sequences
+        )
+        if calibration_stream.sequence_count != required_calibration_sequences:
+            raise ValueError(
+                "calibration split must contain exactly the eight disjoint global batches"
+            )
+        if stream.sequence_count != cfg.training.max_steps * cfg.training.batch_size_sequences:
+            raise ValueError("training stream does not contain the exact exposure budget")
     models: list[torch.nn.Module] = []
     provenances: list[dict[str, Any]] = []
     weights: list[dict[str, Tensor]] = []
@@ -541,22 +573,37 @@ def _producer_loop(
             _register_capture_hooks(model, spec, capture, stack)
 
         def produce(
-            source: FrozenTokenShardStream, sequence_index: int, *, training: bool
+            source: FrozenTokenShardStream | Mix3ASPDSource,
+            sequence_index: int,
+            *,
+            training: bool,
+            role: str | None = None,
         ) -> None:
             nonlocal capture_seconds, communication_seconds
-            tokens = source.batch_at(sequence_index, cfg.training.batch_size_sequences)
-            if training and (tokens["provenance_ids"] < 0).any():
-                raise ValueError("training shards must carry per-sequence provenance_ids")
             capture_started = time.perf_counter()
-            paired = _capture_pair(
-                models,
-                captures,
-                tokens["input_ids"],
-                tokens["valid_tokens"],
-                device,
-                sequence_ids=tokens["sequence_ids"],
-                provenance_ids=tokens["provenance_ids"],
-            )
+            if isinstance(source, Mix3ASPDSource):
+                if role is None:
+                    raise ValueError("Mix3 capture requires an explicit scheduled source role")
+                paired = source.capture_batch(
+                    role,
+                    models=models,
+                    captures=captures,
+                    device=device,
+                    sequence_start=sequence_index,
+                )
+            else:
+                tokens = source.batch_at(sequence_index, cfg.training.batch_size_sequences)
+                if training and (tokens["provenance_ids"] < 0).any():
+                    raise ValueError("training shards must carry per-sequence provenance_ids")
+                paired = _capture_pair(
+                    models,
+                    captures,
+                    tokens["input_ids"],
+                    tokens["valid_tokens"],
+                    device,
+                    sequence_ids=tokens["sequence_ids"],
+                    provenance_ids=tokens["provenance_ids"],
+                )
             capture_seconds += time.perf_counter() - capture_started
             per_rank = cfg.training.sequences_per_rank or 0
             communication_started = time.perf_counter()
@@ -572,12 +619,22 @@ def _producer_loop(
                     calibration_stream,
                     calibration_index * cfg.training.batch_size_sequences,
                     training=False,
+                    role=(
+                        mix.source_schedule[calibration_index % len(mix.source_schedule)]
+                        if mix is not None
+                        else None
+                    ),
                 )
         for step in range(start_step, end_step):
             produce(
                 stream,
                 StreamCursor.for_step(cfg, step).sequence_index,
                 training=True,
+                role=(
+                    mix.source_schedule[step % len(mix.source_schedule)]
+                    if mix is not None
+                    else None
+                ),
             )
     final_weights = [
         snapshot_model_weights(model, spec, provenance)[0]
@@ -603,6 +660,9 @@ def _producer_loop(
                 "calibration_tokens": cfg.data.calibration_tokens,
                 "source_llm_weights_unchanged": True,
                 "config_sha256": resolved_config_sha256(cfg),
+                "mix3_source_state": (
+                    stream.state_dict() if isinstance(stream, Mix3ASPDSource) else None
+                ),
             },
             indent=2,
             sort_keys=True,
@@ -811,9 +871,16 @@ def run_three_gpu_streaming(
 ) -> None:
     """Execute an already-scheduled three-GPU torchrun; this function never submits jobs."""
 
-    validate_original_recipe_config(cfg)
-    validate_dataset_manifest(cfg, require_ready=True)
-    DistributedTopology().validate(cfg)
+    mix3_report: dict[str, Any] | None = None
+    if cfg.mix3_aspd is None:
+        validate_original_recipe_config(cfg)
+        validate_dataset_manifest(cfg, require_ready=True)
+    else:
+        mix3_report = validate_mix3_recipe_config(cfg, require_ready=True)
+    DistributedTopology(
+        sequences_per_trainer=cfg.training.sequences_per_rank or 0,
+        sequence_length=cfg.data.sequence_length,
+    ).validate(cfg)
     if not torch.cuda.is_available() or torch.cuda.device_count() < 3:
         raise RuntimeError("three visible CUDA GPUs are required")
     dist.init_process_group("nccl")
@@ -829,13 +896,19 @@ def run_three_gpu_streaming(
     if global_rank == 0:
         destination.mkdir(parents=True, exist_ok=True)
         frozen_config = destination / "config_frozen.yaml"
-        source_manifest = Path(cfg.data.frozen_manifest or "")
         frozen_manifest = destination / "data_manifest.json"
         if resume is None:
             if config_path is None:
                 raise ValueError("config_path is required for an immutable run package")
             shutil.copyfile(config_path, frozen_config)
-            shutil.copyfile(source_manifest, frozen_manifest)
+            if mix3_report is None:
+                source_manifest = Path(cfg.data.frozen_manifest or "")
+                shutil.copyfile(source_manifest, frozen_manifest)
+            else:
+                frozen_manifest.write_text(
+                    json.dumps(mix3_report, indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
         elif not frozen_config.is_file() or not frozen_manifest.is_file():
             raise FileNotFoundError("resume package lacks frozen config or data manifest")
         else:
@@ -843,8 +916,14 @@ def run_three_gpu_streaming(
                 raise ValueError("config_path is required to verify immutable resume inputs")
             if _sha256_file(Path(config_path)) != _sha256_file(frozen_config):
                 raise ValueError("resume config file differs from the frozen run config")
-            if _sha256_file(source_manifest) != _sha256_file(frozen_manifest):
-                raise ValueError("resume data manifest differs from the frozen run manifest")
+            if mix3_report is None:
+                source_manifest = Path(cfg.data.frozen_manifest or "")
+                if _sha256_file(source_manifest) != _sha256_file(frozen_manifest):
+                    raise ValueError("resume data manifest differs from the frozen run manifest")
+            else:
+                expected = json.dumps(mix3_report, indent=2, sort_keys=True) + "\n"
+                if frozen_manifest.read_text(encoding="utf-8") != expected:
+                    raise ValueError("resume Mix3 manifest set differs from the frozen run package")
     dist.barrier()
     trainer_group = dist.new_group(ranks=[1, 2], backend="nccl")
     start_value = _resume_step(destination, resume) if global_rank == 0 else 0
@@ -892,7 +971,11 @@ def run_three_gpu_streaming(
             raise RuntimeError("training metrics are missing or non-finite")
         summary = {
             "status": (
-                "100M_TRAINING_COMPLETE"
+                (
+                    "MIX3_200M_TRAINING_COMPLETE"
+                    if cfg.mix3_aspd is not None
+                    else "100M_TRAINING_COMPLETE"
+                )
                 if end_step == cfg.training.max_steps
                 else "TECHNICAL_SMOKE_SEGMENT_COMPLETE"
             ),
@@ -924,5 +1007,10 @@ def run_three_gpu_streaming(
             json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
         os.replace(temporary, destination / "training_summary.json")
-        print("ASPD_ORIGINAL_STREAMING_COMPLETE", flush=True)
+        print(
+            "ASPD_MIX3_STREAMING_COMPLETE"
+            if cfg.mix3_aspd is not None
+            else "ASPD_ORIGINAL_STREAMING_COMPLETE",
+            flush=True,
+        )
     dist.destroy_process_group()
