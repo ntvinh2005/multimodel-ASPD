@@ -195,15 +195,15 @@ At every autoregressive decision:
 4. The selected model processes the same prefix with the `o_proj` output hook.
 5. Patched logits select the next live-branch token; the process repeats.
 
-`p6_original_generation.py` implements this loop independently for clean and
-intervened branches. After divergence, each branch recomputes clean Base/Target
+`p6_original_causal.py` implements this loop independently for every clean and
+intervened arm. After divergence, each branch recomputes clean Base/Target
 references on its own current prefix; no gate or future continuation is shared.
-EOS and maximum-token termination are explicit. The
-`run_p6_100m_causal` CLI performs static dry-run validation by default, requires
-`--execute`, refuses a `BLOCKED` pilot, and respects the configuration's read-only
-execution guard. Clean, gate-off and zero-strength decisions additionally compare
-patched logits with the clean replay at a declared `1e-6` absolute tolerance and
-fail closed if the no-op contract is violated.
+EOS and maximum-token termination are explicit. Execution is split into a
+read-only static handoff audit, a separate GPU preflight stage, and a pilot stage
+that accepts only the exact checksummed preflight report. The pilot therefore
+cannot run merely because a status field was edited. Clean, gate-off and
+zero-strength decisions compare the actual patched outputs with the clean replay
+and fail closed when the no-op contract is violated.
 
 Training-time BatchTopK pools positions across a batch and is not prefix-causal.
 It is not reused online. The learned JumpReLU threshold is explicitly recorded as
@@ -301,7 +301,7 @@ python -m pytest tests/test_multimodel_p6_original_causal.py `
 
 uvx --offline ruff check <all modified Python files>
 python -m py_compile <all modified production Python files>
-python -m aspd.multimodel.cli.run_p6_100m_causal `
+python -m aspd.multimodel.cli.audit_p6_100m `
   configs/multimodel/qwen25_extreme_sports/p6_100m_causal_pilot.yaml
 git diff --check
 ```
@@ -328,10 +328,12 @@ Ruff used the local offline package cache; no network fetch was performed.
 
 ## 12. Main files changed
 
-- `aspd/multimodel/p6_original_causal.py`: verified candidate/checkpoint loading,
-  clean-reference gate, BF16-effective interventions, controls and v2 records.
-- `aspd/multimodel/p6_original_generation.py`: branch-local prefix-causal runner.
-- `aspd/multimodel/cli/run_p6_100m_causal.py`: guarded dry-run/explicit execution CLI.
+- `aspd/multimodel/p6_original_causal.py`: verified handoff/candidate/checkpoint
+  loading, branch-local prefix-causal generation, BF16-effective controls, and
+  immutable output records.
+- `aspd/multimodel/cli/audit_p6_100m.py`: read-only static provenance audit.
+- `aspd/multimodel/cli/run_p6_original_causal.py`: guarded two-stage GPU
+  preflight/pilot CLI; it never executes merely because it is imported.
 - `aspd/multimodel/mix3.py`: strict validators, masks, packing, cursor/overlap
   contracts, persisted readiness audits and the record-isolated ASPD adapter.
 - `aspd/multimodel/original_streaming.py`: opt-in Mix3 dispatch, per-position
@@ -373,19 +375,21 @@ All large steps are deferred. A future reviewed HiPerGator workflow is:
    ```bash
    .venv/bin/python -m aspd.multimodel.cli.audit_p6_100m \
      configs/multimodel/qwen25_extreme_sports/p6_100m_causal_pilot.yaml \
-     --require-ready
+     --full-package-rehash
    ```
 
-   Then review the non-executing runner dry-run separately:
+   After explicit approval on HiPerGator, run the separate technical preflight
+   into a fresh directory:
 
    ```bash
-   .venv/bin/python -m aspd.multimodel.cli.run_p6_100m_causal \
-     configs/multimodel/qwen25_extreme_sports/p6_100m_causal_pilot.yaml
+   .venv/bin/python -m aspd.multimodel.cli.run_p6_original_causal \
+     configs/multimodel/qwen25_extreme_sports/p6_100m_causal_pilot.yaml \
+     --stage preflight --output-dir <fresh-preflight-dir>
    ```
 
-   A future real invocation additionally requires `--execute`, one verified
-   component/prompt/arm, an output path, and explicit removal of the config's
-   read-only guard after approval. Importing the CLI never executes generation.
+   The pilot is a second, explicit invocation with `--stage pilot`, a fresh output
+   directory, and `--preflight-report` pointing to the exact successful Stage-A
+   report. Importing either CLI never executes generation.
 
 Changing a status flag without passing manifest validation does not release ASPD;
 the streaming entry point revalidates artifacts. Delta training also refuses a

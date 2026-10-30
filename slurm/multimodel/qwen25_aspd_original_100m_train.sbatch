@@ -40,7 +40,7 @@ RESUME_ARGS=()
 if [[ -f "${OUTPUT}/latest_checkpoint.pt" ]]; then
   RESUME_ARGS+=(--resume auto)
 fi
-torchrun --standalone --nproc-per-node=3 \
+.venv/bin/torchrun --standalone --nproc-per-node=3 \
   -m aspd.multimodel.cli.train_original_recipe \
   "${CONFIG}" --output-dir "${OUTPUT}" "${RESUME_ARGS[@]}"
 .venv/bin/python -m aspd.multimodel.cli.verify_original_run \

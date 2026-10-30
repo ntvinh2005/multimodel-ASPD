@@ -312,6 +312,85 @@ def p6_subtraction(
     return float(strength) * torch.einsum("btk,ko->bto", effective, u32)
 
 
+def _orthogonal_actual_output_control(candidate: Tensor) -> Tensor:
+    """Construct a deterministic per-position orthogonal direction with equal FP32 L2."""
+
+    flat = candidate.float().reshape(-1, candidate.shape[-1])
+    if flat.shape[-1] < 2:
+        raise ValueError("orthogonal actual-output controls require output width >= 2")
+    output = torch.zeros_like(flat)
+    norms = flat.norm(dim=-1)
+    active = norms > 0
+    if not bool(active.any()):
+        return output.reshape_as(candidate)
+    reference = flat[active]
+    denominator = reference.square().sum(dim=-1, keepdim=True)
+    active_indices = active.nonzero(as_tuple=False).flatten()
+    # Project the least-aligned coordinate basis vector off each reference.  For
+    # d_out >= 2 this cannot vanish: the least absolute normalized coordinate is
+    # at most 1/sqrt(d_out).  Unlike a roll-based construction this also handles
+    # constant or periodic candidate directions.
+    basis_indices = reference.abs().argmin(dim=-1, keepdim=True)
+    proposal = torch.zeros_like(reference).scatter_(1, basis_indices, 1.0)
+    proposal -= (
+        (proposal * reference).sum(dim=-1, keepdim=True) / denominator
+    ) * reference
+    proposal_norm = proposal.norm(dim=-1, keepdim=True)
+    if bool((proposal_norm[:, 0] <= torch.finfo(proposal.dtype).eps).any()):
+        raise ValueError("could not construct an orthogonal actual-output control")
+    output[active_indices] = proposal * (norms[active, None] / proposal_norm)
+    return output.reshape_as(candidate)
+
+
+def _random_actual_output_control(
+    candidate: Tensor, *, seed: int, identity: str
+) -> tuple[Tensor, dict[str, Any]]:
+    """Construct a reproducible random per-position direction with equal FP32 L2."""
+
+    validated_seed = validate_random_control_seeds([seed])[0]
+    derived_seed = int.from_bytes(
+        hashlib.sha256(
+            f"aspd-p6-actual-output-v1|{identity}|seed={validated_seed}".encode()
+        ).digest()[:8],
+        "big",
+    ) & (2**63 - 1)
+    generator = torch.Generator(device="cpu").manual_seed(derived_seed)
+    sampled = torch.randn(candidate.shape, generator=generator, dtype=torch.float32)
+    sampled = sampled.to(candidate.device)
+    target_norm = candidate.float().norm(dim=-1, keepdim=True)
+    sampled_norm = sampled.norm(dim=-1, keepdim=True)
+    matched = sampled * (
+        target_norm / sampled_norm.clamp_min(torch.finfo(torch.float32).tiny)
+    )
+    matched = torch.where(target_norm > 0, matched, torch.zeros_like(matched))
+    return matched, {
+        "random_seed": validated_seed,
+        "derived_torch_seed": derived_seed,
+        "identity": identity,
+        "construction": "random actual-output direction matched per token in FP32",
+    }
+
+
+def _active_actual_output_control(candidate: Tensor, alternate: Tensor) -> Tensor:
+    """Rescale an active component contribution to candidate L2 at every position."""
+
+    if alternate.shape != candidate.shape:
+        raise ValueError("active control contribution must match candidate output shape")
+    target_norm = candidate.float().norm(dim=-1, keepdim=True)
+    alternate_norm = alternate.float().norm(dim=-1, keepdim=True)
+    impossible = (target_norm > 0) & (alternate_norm == 0)
+    if bool(impossible.any()):
+        raise ValueError(
+            "active control contribution is zero where candidate contribution is nonzero"
+        )
+    scale = torch.where(
+        alternate_norm > 0,
+        target_norm / alternate_norm,
+        torch.zeros_like(alternate_norm),
+    )
+    return alternate.float() * scale
+
+
 @torch.inference_mode()
 def p6_patched_forward(
     model: nn.Module,
@@ -326,6 +405,7 @@ def p6_patched_forward(
     strength: float = 1.0,
     norm_control: bool = False,
     random_control_seed: int | None = None,
+    matched_write_component_ids: Sequence[int] | None = None,
 ) -> P6ForwardResult:
     """Run one full-sequence P6 arm with hooks that are removed unconditionally.
 
@@ -338,6 +418,13 @@ def p6_patched_forward(
         raise ValueError("component_ids must be non-empty and unique")
     if norm_control and random_control_seed is not None:
         raise ValueError("orthogonal and random write-direction controls are incompatible")
+    if matched_write_component_ids is not None:
+        if norm_control or random_control_seed is not None:
+            raise ValueError("matched active, orthogonal, and random controls are exclusive")
+        if len(matched_write_component_ids) != len(component_ids):
+            raise ValueError("matched write components must match the selected axis")
+        if len(set(matched_write_component_ids)) != len(matched_write_component_ids):
+            raise ValueError("matched write component IDs must be unique")
     if not torch.isfinite(torch.tensor(float(strength))):
         raise ValueError("strength must be finite")
     if random_control_seed is not None:
@@ -353,6 +440,15 @@ def p6_patched_forward(
     selected = torch.tensor(
         component_ids, dtype=torch.long, device=next(decomposition.parameters()).device
     )
+    alternate_selected = (
+        torch.tensor(
+            matched_write_component_ids,
+            dtype=torch.long,
+            device=next(decomposition.parameters()).device,
+        )
+        if matched_write_component_ids is not None
+        else selected
+    )
     diagnostics: dict[str, dict[str, Any]] = {}
 
     with ExitStack() as stack:
@@ -366,18 +462,10 @@ def p6_patched_forward(
             )
             u = u_all.index_select(0, selected)
             v = v_all.index_select(0, selected)
-            if norm_control:
-                u = norm_matched_orthogonal_rows(u)
-            random_metadata: list[dict[str, Any]] = []
-            if random_control_seed is not None:
-                u, random_metadata = norm_matched_random_rows(
-                    u,
-                    model_name=spec.name,
-                    matrix_name=matrix.name,
-                    matrix_module=matrix.module,
-                    component_ids=component_ids,
-                    seed=random_control_seed,
-                )
+            alternate_u = alternate_v = None
+            if matched_write_component_ids is not None:
+                alternate_u = u_all.index_select(0, alternate_selected)
+                alternate_v = v_all.index_select(0, alternate_selected)
 
             def subtract_components(
                 _module: nn.Module,
@@ -388,12 +476,13 @@ def p6_patched_forward(
                 v_local: Tensor = v,
                 site: str = matrix.module,
                 name: str = matrix.name,
-                random_metadata_local: list[dict[str, Any]] = random_metadata,
                 center_local: Tensor | None = center,
+                alternate_u_local: Tensor | None = alternate_u,
+                alternate_v_local: Tensor | None = alternate_v,
             ) -> Tensor:
                 x = _tensor_from_value(args, 0, site)
                 y = _tensor_from_value(output, None, site)
-                subtraction = p6_subtraction(
+                candidate_subtraction = p6_subtraction(
                     x,
                     u_local,
                     v_local,
@@ -401,24 +490,190 @@ def p6_patched_forward(
                     strength=strength,
                     input_center=center_local,
                 )
-                selected_values = subtraction[valid]
-                off_values = subtraction[(~gate.any(dim=-1)) & valid]
+                random_metadata_local: list[dict[str, Any]] = []
+                if norm_control:
+                    subtraction = _orthogonal_actual_output_control(
+                        candidate_subtraction
+                    )
+                elif random_control_seed is not None:
+                    subtraction, random_record = _random_actual_output_control(
+                        candidate_subtraction,
+                        seed=random_control_seed,
+                        identity=(
+                            f"model={spec.name}|matrix={name}|module={site}"
+                            f"|components={','.join(map(str, component_ids))}"
+                        ),
+                    )
+                    random_metadata_local = [random_record]
+                elif alternate_u_local is not None and alternate_v_local is not None:
+                    alternate_subtraction = p6_subtraction(
+                        x,
+                        alternate_u_local,
+                        alternate_v_local,
+                        gate,
+                        strength=strength,
+                        input_center=center_local,
+                    )
+                    subtraction = _active_actual_output_control(
+                        candidate_subtraction, alternate_subtraction
+                    )
+                else:
+                    subtraction = candidate_subtraction
+                # Quantize both the applied control and the hypothetical learned
+                # subtraction against this exact live output.  This gives a
+                # same-prefix, post-BF16 reference even after autoregressive arms
+                # have diverged from one another.
+                candidate_cast_subtraction = candidate_subtraction.to(y.dtype)
+                candidate_patched = y - candidate_cast_subtraction
+                candidate_actual_difference = y.float() - candidate_patched.float()
+                cast_subtraction = subtraction.to(y.dtype)
+                patched = y - cast_subtraction
+                actual_difference = y.float() - patched.float()
+                candidate_values = candidate_subtraction[valid]
+                intended_values = subtraction[valid]
+                cast_values = cast_subtraction[valid].float()
+                selected_values = actual_difference[valid]
+                off_values = actual_difference[(~gate.any(dim=-1)) & valid]
+                intended_position_norm = subtraction.float().norm(dim=-1)
+                candidate_position_norm = candidate_subtraction.float().norm(dim=-1)
+                candidate_applied_position_norm = candidate_actual_difference.norm(
+                    dim=-1
+                )
+                applied_position_norm = actual_difference.norm(dim=-1)
+                intended_norm_match_error = (
+                    intended_position_norm - candidate_position_norm
+                ).abs()
+                rounded_to_zero = (
+                    (intended_position_norm > 0)
+                    & (applied_position_norm == 0)
+                    & valid
+                )
+                active_valid = gate.any(dim=-1) & valid
+                clean_values = y.float()[valid]
+                per_sequence = []
+                for row_index in range(y.shape[0]):
+                    row_valid = valid[row_index]
+                    row_intended = subtraction[row_index][row_valid]
+                    row_actual = actual_difference[row_index][row_valid]
+                    row_clean = y[row_index].float()[row_valid]
+                    row_intended_norm = intended_position_norm[row_index][row_valid]
+                    row_candidate_norm = candidate_position_norm[row_index][row_valid]
+                    row_candidate_applied_norm = candidate_applied_position_norm[
+                        row_index
+                    ][row_valid]
+                    row_applied_norm = applied_position_norm[row_index][row_valid]
+                    row_gate = gate[row_index].any(dim=-1)[row_valid]
+                    per_sequence.append(
+                        {
+                            "batch_row": row_index,
+                            "valid_token_count": int(row_valid.sum().item()),
+                            "gate_active_token_count": int(row_gate.sum().item()),
+                            "intended_fp32_subtraction_l2": float(
+                                row_intended.square().sum().sqrt().item()
+                            ),
+                            "candidate_fp32_subtraction_l2": float(
+                                candidate_subtraction[row_index][row_valid]
+                                .square()
+                                .sum()
+                                .sqrt()
+                                .item()
+                            ),
+                            "maximum_intended_norm_match_error": float(
+                                (row_intended_norm - row_candidate_norm).abs().max().item()
+                            ),
+                            "actual_applied_output_difference_l2": float(
+                                row_actual.square().sum().sqrt().item()
+                            ),
+                            "candidate_actual_applied_output_difference_l2": float(
+                                candidate_actual_difference[row_index][row_valid]
+                                .square()
+                                .sum()
+                                .sqrt()
+                                .item()
+                            ),
+                            "actual_applied_output_difference_rms": float(
+                                row_actual.square().mean().sqrt().item()
+                            ),
+                            "relative_applied_l2_vs_clean_output": float(
+                                row_actual.square().sum().sqrt().item()
+                                / row_clean.square().sum().sqrt().clamp_min(1e-30).item()
+                            ),
+                            "modified_token_position_count": int(
+                                (row_applied_norm > 0).sum().item()
+                            ),
+                            "rounded_to_zero_position_count": int(
+                                ((row_intended_norm > 0) & (row_applied_norm == 0)).sum().item()
+                            ),
+                            "per_position_actual_applied_l2": [
+                                float(value) for value in row_applied_norm.tolist()
+                            ],
+                            "per_position_candidate_actual_applied_l2": [
+                                float(value)
+                                for value in row_candidate_applied_norm.tolist()
+                            ],
+                        }
+                    )
                 diagnostics[name] = {
+                    "read_component_ids": list(component_ids),
+                    "alternate_component_ids": list(
+                        matched_write_component_ids or component_ids
+                    ),
+                    "control_matching_basis": (
+                        "same-live-prefix actual output differences after dtype rounding"
+                    ),
                     "valid_token_count": int(valid.sum().item()),
-                    "gate_active_token_count": int((gate.any(dim=-1) & valid).sum().item()),
+                    "gate_active_token_count": int(active_valid.sum().item()),
                     "subtraction_element_count": int(selected_values.numel()),
                     "subtraction_l2": float(selected_values.square().sum().sqrt().item()),
                     "subtraction_rms": float(
                         selected_values.square().mean().sqrt().item()
                     ),
                     "max_abs_subtraction": float(selected_values.abs().max().item()),
+                    "intended_fp32_subtraction_l2": float(
+                        intended_values.square().sum().sqrt().item()
+                    ),
+                    "candidate_fp32_subtraction_l2": float(
+                        candidate_values.square().sum().sqrt().item()
+                    ),
+                    "maximum_intended_norm_match_error": float(
+                        intended_norm_match_error[valid].max().item()
+                    ),
+                    "cast_subtraction_l2": float(
+                        cast_values.square().sum().sqrt().item()
+                    ),
+                    "actual_applied_output_difference_l2": float(
+                        selected_values.square().sum().sqrt().item()
+                    ),
+                    "candidate_actual_applied_output_difference_l2": float(
+                        candidate_actual_difference[valid]
+                        .square()
+                        .sum()
+                        .sqrt()
+                        .item()
+                    ),
+                    "actual_applied_output_difference_rms": float(
+                        selected_values.square().mean().sqrt().item()
+                    ),
+                    "relative_applied_l2_vs_clean_output": float(
+                        selected_values.square().sum().sqrt().item()
+                        / clean_values.square().sum().sqrt().clamp_min(1e-30).item()
+                    ),
+                    "intended_active_position_count": int(
+                        ((intended_position_norm > 0) & active_valid).sum().item()
+                    ),
+                    "modified_token_position_count": int(
+                        ((applied_position_norm > 0) & valid).sum().item()
+                    ),
+                    "rounded_to_zero_position_count": int(rounded_to_zero.sum().item()),
+                    "live_output_dtype": str(y.dtype),
+                    "per_sequence": per_sequence,
                     "max_abs_gate_off_subtraction": float(
                         off_values.abs().max().item() if off_values.numel() else 0.0
                     ),
                 }
                 if random_metadata_local:
                     diagnostics[name]["random_direction_controls"] = random_metadata_local
-                return y - subtraction.to(y.dtype)
+                return patched
 
             handle = model.get_submodule(matrix.module).register_forward_hook(
                 subtract_components

@@ -56,8 +56,17 @@ def _peak_cpu_rss_kib() -> int:
 
 
 def resolved_config_sha256(cfg: MultiModelExperimentConfig) -> str:
+    resolved = cfg.model_dump(mode="json")
+    # Mix3 fields were added after the immutable 100M run. Removing only their
+    # absent values preserves the byte-for-byte historical checkpoint fingerprint
+    # while retaining every explicitly configured value in a Mix3 experiment.
+    if resolved.get("mix3_aspd") is None:
+        resolved.pop("mix3_aspd", None)
+    for source in resolved.get("data", {}).get("sources", []):
+        if source.get("planned_calibration_tokens") is None:
+            source.pop("planned_calibration_tokens", None)
     payload = json.dumps(
-        cfg.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+        resolved, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
 
@@ -868,7 +877,7 @@ def _trainer_loop(
         optimizer.step()
         trainer_seconds += time.perf_counter() - trainer_started
         step = index + 1
-        if step == 1 or step % cfg.training.log_every == 0:
+        if step == 1 or step % cfg.training.log_every == 0 or step == end_step:
             names = list(result)
             values = torch.stack([result[name].detach().float() for name in names])
             dist.all_reduce(values, op=dist.ReduceOp.SUM, group=trainer_group)
@@ -975,11 +984,14 @@ def run_three_gpu_streaming(
         raise RuntimeError("torchrun world size must be exactly three")
     torch.cuda.set_device(global_rank)
     destination = Path(output_dir or cfg.training.output_dir)
-    if resume is None and destination.exists() and any(destination.iterdir()):
-        raise FileExistsError(
-            f"fresh original-ASPD run refuses a non-empty output directory: {destination}"
-        )
     if global_rank == 0:
+        # Only the coordinator may inspect and initialize a fresh run package.  If all
+        # ranks perform this check, a worker can observe rank 0's newly copied metadata
+        # and incorrectly reject the same fresh launch as a non-empty output directory.
+        if resume is None and destination.exists() and any(destination.iterdir()):
+            raise FileExistsError(
+                f"fresh original-ASPD run refuses a non-empty output directory: {destination}"
+            )
         destination.mkdir(parents=True, exist_ok=True)
         frozen_config = destination / "config_frozen.yaml"
         frozen_manifest = destination / "data_manifest.json"

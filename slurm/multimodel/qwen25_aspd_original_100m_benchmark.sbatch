@@ -33,10 +33,10 @@ export UV_PYTHON=3.13
 
 .venv/bin/python -m aspd.multimodel.cli.audit_original_recipe \
   "${CONFIG}" --require-dataset-ready --hf-hub-cache "${HF_HOME}/hub" --output "${AUDIT}"
-torchrun --standalone --nproc-per-node=3 \
+.venv/bin/torchrun --standalone --nproc-per-node=3 \
   -m aspd.multimodel.cli.train_original_recipe \
   "${CONFIG}" --output-dir "${OUTPUT}" --stop-after-step 50
-torchrun --standalone --nproc-per-node=3 \
+.venv/bin/torchrun --standalone --nproc-per-node=3 \
   -m aspd.multimodel.cli.train_original_recipe \
   "${CONFIG}" --output-dir "${OUTPUT}" --resume auto --stop-after-step 100
 .venv/bin/python -m aspd.multimodel.cli.evaluate_original_recipe \
