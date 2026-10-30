@@ -211,27 +211,41 @@ def test_random_control_rejects_invalid_vectors_seeds_and_modes() -> None:
 
 
 class _ToyP6Model(nn.Module):
-    def __init__(self) -> None:
+    def __init__(self, dtype: torch.dtype = torch.float32) -> None:
         super().__init__()
-        self.proj = nn.Linear(2, 2, bias=False)
+        self.proj = nn.Linear(2, 2, bias=False).to(dtype=dtype)
 
     def forward(
         self, input_ids: torch.Tensor, attention_mask: torch.Tensor, use_cache: bool
     ) -> SimpleNamespace:
         del attention_mask, use_cache
         values = input_ids.float()
-        x = torch.stack((values, torch.ones_like(values)), dim=-1)
+        x = torch.stack((values, torch.ones_like(values)), dim=-1).to(self.proj.weight.dtype)
         return SimpleNamespace(logits=self.proj(x))
 
 
 class _ToyP6Decomposition(nn.Module):
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        u: torch.Tensor | None = None,
+        v: torch.Tensor | None = None,
+    ) -> None:
         super().__init__()
         self.anchor = nn.Parameter(torch.zeros(()))
+        self.u = torch.tensor([[1.0, 2.0]]) if u is None else u
+        self.v = torch.tensor([[0.5, -0.25]]) if v is None else v
 
     def component_factors(self, model_index: int, matrix_name: str) -> tuple[torch.Tensor, torch.Tensor]:
         del model_index, matrix_name
-        return torch.tensor([[1.0, 2.0]]), torch.tensor([[0.5, -0.25]])
+        return self.u, self.v
+
+
+class _FailingToyP6Model(_ToyP6Model):
+    def forward(
+        self, input_ids: torch.Tensor, attention_mask: torch.Tensor, use_cache: bool
+    ) -> SimpleNamespace:
+        super().forward(input_ids, attention_mask, use_cache)
+        raise RuntimeError("injected forward failure")
 
 
 def test_random_control_stays_fixed_and_p6_cleans_hooks_without_mutating_weights() -> None:
@@ -275,6 +289,110 @@ def test_random_control_stays_fixed_and_p6_cleans_hooks_without_mutating_weights
             norm_control=True,
             random_control_seed=0,
         )
+
+
+def test_p6_reports_actual_bf16_output_difference_after_rounding() -> None:
+    model = _ToyP6Model(dtype=torch.bfloat16)
+    with torch.no_grad():
+        model.proj.weight.copy_(torch.tensor([[512.0, 0.0], [512.0, 0.0]]))
+    decomposition = _ToyP6Decomposition(
+        u=torch.tensor([[0.1, 0.1]]), v=torch.tensor([[0.5, -0.25]])
+    )
+    spec = SimpleNamespace(
+        name="target", matrices=[SimpleNamespace(name="proj", module="proj")]
+    )
+    ids = torch.tensor([[2]])
+    valid = torch.tensor([[True]])
+    gate = torch.tensor([[[True]]])
+    clean = model(input_ids=ids, attention_mask=valid, use_cache=False).logits
+    patched = p6_patched_forward(
+        model, spec, decomposition, 0, ids, valid, gate, [0]
+    )
+    diagnostic = patched.matrix_diagnostics["proj"]
+    assert diagnostic["intended_fp32_subtraction_l2"] > 0
+    assert diagnostic["actual_applied_output_difference_l2"] == 0
+    assert diagnostic["rounded_to_zero_position_count"] == 1
+    assert diagnostic["modified_token_position_count"] == 0
+    torch.testing.assert_close(patched.logits, clean, rtol=0, atol=0)
+
+
+def test_matched_active_control_uses_alternate_component_and_matches_output_norm() -> None:
+    model = _ToyP6Model()
+    decomposition = _ToyP6Decomposition(
+        u=torch.tensor([[1.0, 0.0], [0.0, 4.0]]),
+        v=torch.tensor([[0.5, -0.25], [99.0, 99.0]]),
+    )
+    spec = SimpleNamespace(
+        name="target", matrices=[SimpleNamespace(name="proj", module="proj")]
+    )
+    ids = torch.tensor([[2]])
+    valid = torch.tensor([[True]])
+    gate = torch.tensor([[[True]]])
+    learned = p6_patched_forward(
+        model, spec, decomposition, 0, ids, valid, gate, [0]
+    )
+    active = p6_patched_forward(
+        model,
+        spec,
+        decomposition,
+        0,
+        ids,
+        valid,
+        gate,
+        [0],
+        matched_write_component_ids=[1],
+    )
+    learned_diag = learned.matrix_diagnostics["proj"]
+    active_diag = active.matrix_diagnostics["proj"]
+    assert active_diag["read_component_ids"] == [0]
+    assert active_diag["alternate_component_ids"] == [1]
+    torch.testing.assert_close(
+        torch.tensor(active_diag["intended_fp32_subtraction_l2"]),
+        torch.tensor(learned_diag["intended_fp32_subtraction_l2"]),
+    )
+    assert not torch.equal(active.logits, learned.logits)
+
+
+def test_orthogonal_actual_output_control_handles_constant_component_direction() -> None:
+    model = _ToyP6Model()
+    decomposition = _ToyP6Decomposition(
+        u=torch.tensor([[1.0, 1.0]]), v=torch.tensor([[0.5, -0.25]])
+    )
+    spec = SimpleNamespace(
+        name="target", matrices=[SimpleNamespace(name="proj", module="proj")]
+    )
+    result = p6_patched_forward(
+        model,
+        spec,
+        decomposition,
+        0,
+        torch.tensor([[2]]),
+        torch.tensor([[True]]),
+        torch.tensor([[[True]]]),
+        [0],
+        norm_control=True,
+    )
+    diagnostic = result.matrix_diagnostics["proj"]
+    assert diagnostic["maximum_intended_norm_match_error"] <= 1e-6
+
+
+def test_p6_hook_is_removed_after_model_forward_error() -> None:
+    model = _FailingToyP6Model()
+    spec = SimpleNamespace(
+        name="target", matrices=[SimpleNamespace(name="proj", module="proj")]
+    )
+    with pytest.raises(RuntimeError, match="injected forward failure"):
+        p6_patched_forward(
+            model,
+            spec,
+            _ToyP6Decomposition(),
+            0,
+            torch.tensor([[2]]),
+            torch.tensor([[True]]),
+            torch.tensor([[[True]]]),
+            [0],
+        )
+    assert len(model.proj._forward_hooks) == 0
 
 
 def test_threshold_calibration_rejects_nonfinite_metadata() -> None:
