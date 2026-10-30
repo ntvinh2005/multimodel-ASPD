@@ -1,0 +1,94 @@
+schema_version: 1
+
+# Frozen P6 discovery pilot. This file references the completed 100M run and must
+# never be used to train or mutate the decomposition.
+aspd_config: configs/multimodel/qwen25_extreme_sports/aspd_d0_s1_l14_o_100m_original.yaml
+run_dir: out/multimodel/runs/qwen25_aspd_original_100m
+output_root: out/multimodel/p6_100m
+expected_checkpoint_sha256: bbd4f6023566f25775d1daa300dd9e5de40e54cb0e1aa07c2819b1c27c9b30d6
+expected_config_file_sha256: 904a91d2ab2c63cafd5f62c9c012bcfbd418f72de8114fffa8f4d14469626c40
+
+prompt_file: configs/multimodel/qwen25_extreme_sports/p6_100m_discovery_prompts.jsonl
+prompt_sha256: 5591b1696c32d9149b45364e3a7418bf634a7efae4ae79198c5c8e22d5009663
+
+selection_source: verified_risk_screening_shortlist
+selection_rule: first three rows of the canonical verified risk-screening shortlist, frozen before P6 outcomes
+active_control_selection_rule: minimize abs(log firing-frequency ratio) plus abs(log target-contribution ratio) plus abs risk-control activation contrast over non-candidate active components
+gate_policy: clean_shared_learned_JumpReLU_threshold
+expected_learned_threshold: 3.0222008228302
+scientific_scoring_protocol: frozen_records_only_behavioral_scoring_not_verified
+behavioral_scoring_contract: docs/multimodel/p6_100m_behavioral_scoring_contract.json
+behavioral_scoring_contract_sha256: fedb248bae837a168a087486d0147836a0d124f024adfc7c91852fd6b1fe8f64
+behavioral_risk_score_cutoff: 2
+
+# IDs are deliberately absent: candidates and active controls are resolved from the
+# verified handoff artifacts before any intervention outcome is generated.
+maximum_candidates: 3
+include_computational_secondary: false
+intervention_models: [base, target]
+
+# Confirmation is a separate opt-in stage. It remains unavailable until a researcher
+# approves a distinct prompt artifact and freezes its checksum.
+confirmation_prompt_file: null
+confirmation_prompt_sha256: null
+confirmation_approved: false
+
+# Dedicated discovery prompts imported from reviewed commit c22b1e3. They are not a
+# confirmatory test set and are never used to select components.
+prompt_ids:
+  risk:
+    - risk-01
+    - risk-02
+    - risk-03
+    - risk-04
+    - risk-05
+    - risk-06
+    - risk-07
+    - risk-08
+    - risk-09
+    - risk-10
+    - risk-11
+    - risk-12
+  sports_control:
+    - control-01
+    - control-02
+    - control-03
+    - control-04
+    - control-05
+    - control-06
+    - control-07
+    - control-08
+    - control-09
+    - control-10
+    - control-11
+    - control-12
+  neutral:
+    - neutral-01
+    - neutral-02
+    - neutral-03
+    - neutral-04
+    - neutral-05
+    - neutral-06
+    - neutral-07
+    - neutral-08
+    - neutral-09
+    - neutral-10
+    - neutral-11
+    - neutral-12
+
+technical_prompt_ids:
+  risk: [risk-01, risk-02]
+  sports_control: [control-01, control-02]
+  neutral: [neutral-01, neutral-02]
+
+alphas: [0.0, 0.25, 0.5, 1.0]
+random_seeds: [0, 1, 2, 3, 4]
+max_new_tokens: 64
+technical_max_new_tokens: 8
+technical_prompts_per_category: 2
+actual_norm_relative_tolerance: 0.10
+minimum_effective_applied_l2: 1.0e-8
+pilot_runtime_budget_seconds: 5400
+runtime_estimate_safety_factor: 1.25
+decoding: greedy_argmax
+judge: null
