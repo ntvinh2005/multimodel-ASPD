@@ -29,6 +29,9 @@ MATCHED_CONTROL_KINDS = {
     "orthogonal_matched",
     "random_same_l2",
 }
+EXPECTED_DISCOVERY_PROMPTS = 36
+EXPECTED_POSITIVE_DOSE_RECORDS = 576
+REQUIRED_RANDOM_CONTROL_SEEDS = tuple(range(5))
 
 
 def _measurement_coverage(
@@ -65,6 +68,96 @@ def _measurement_coverage(
         and not unexpected
         and duplicate_expected == 0
         and duplicate_observed == 0,
+    }
+
+
+def _positive_dose_comparison_audit(
+    generation_rows: Sequence[Mapping[str, Any]],
+    *,
+    component_id: int,
+    alpha: float,
+) -> dict[str, Any]:
+    """Audit the frozen 2 models x 36 prompts x 8 eligible arms contract."""
+
+    prompt_ids = sorted({str(row["prompt_id"]) for row in generation_rows})
+    expected_identities = {
+        (model_name, prompt_id, kind, seed)
+        for model_name in ("base", "target")
+        for prompt_id in prompt_ids
+        for kind, seeds in (
+            ("learned", (None,)),
+            ("active_matched", (None,)),
+            ("orthogonal_matched", (None,)),
+            ("random_same_l2", REQUIRED_RANDOM_CONTROL_SEEDS),
+        )
+        for seed in seeds
+    }
+    relevant = [
+        row
+        for row in generation_rows
+        if row.get("candidate_component_id") is not None
+        and int(row["candidate_component_id"]) == component_id
+        and float(row["alpha"]) == alpha
+        and row["intervention_kind"]
+        in {"learned", "active_matched", "orthogonal_matched", "random_same_l2"}
+    ]
+
+    def identity(row: Mapping[str, Any]) -> tuple[str, str, str, int | None]:
+        seed = row.get("random_seed")
+        return (
+            str(row["intervention_model"]),
+            str(row["prompt_id"]),
+            str(row["intervention_kind"]),
+            None if seed is None else int(seed),
+        )
+
+    observed = Counter(identity(row) for row in relevant)
+    missing = sum(identity not in observed for identity in expected_identities)
+    # If the frozen prompt universe itself is incomplete, account for the arm
+    # identities that cannot be named from the damaged artifact.
+    missing += max(0, EXPECTED_POSITIVE_DOSE_RECORDS - len(expected_identities))
+    duplicate = sum(
+        count - 1
+        for key, count in observed.items()
+        if key in expected_identities and count > 1
+    )
+    unexpected = sum(
+        count for key, count in observed.items() if key not in expected_identities
+    )
+    invalid_rows = [
+        row for row in relevant if not bool(row.get("causal_comparison_valid"))
+    ]
+    observed_count = len(relevant)
+    all_valid = (
+        len(prompt_ids) == EXPECTED_DISCOVERY_PROMPTS
+        and len(expected_identities) == EXPECTED_POSITIVE_DOSE_RECORDS
+        and observed_count == EXPECTED_POSITIVE_DOSE_RECORDS
+        and missing == 0
+        and duplicate == 0
+        and unexpected == 0
+        and not invalid_rows
+    )
+    return {
+        "expected_positive_dose_records": EXPECTED_POSITIVE_DOSE_RECORDS,
+        "observed_positive_dose_records": observed_count,
+        "invalid_positive_dose_records": len(invalid_rows),
+        "all_positive_dose_comparisons_valid": all_valid,
+        "missing_positive_dose_records": missing,
+        "duplicate_positive_dose_records": duplicate,
+        "unexpected_positive_dose_records": unexpected,
+        "observed_prompt_count": len(prompt_ids),
+        "required_prompt_count": EXPECTED_DISCOVERY_PROMPTS,
+        "invalid_examples": [
+            {
+                "intervention_model": row["intervention_model"],
+                "prompt_id": row["prompt_id"],
+                "intervention_arm": row["intervention_arm"],
+                "invalid_reasons": row.get(
+                    "causal_comparison_invalid_reasons", []
+                ),
+            }
+            for row in invalid_rows[:25]
+        ],
     }
 
 
@@ -384,6 +477,11 @@ def build_p6_100m_report(
     for component_id, observational in components.items():
         alpha_rows = []
         for alpha in (0.25, 0.5, 1.0):
+            positive_dose_audit = _positive_dose_comparison_audit(
+                generation_rows,
+                component_id=component_id,
+                alpha=alpha,
+            )
             risk = differential_intervention_effect(
                 rows,
                 component_id=component_id,
@@ -464,6 +562,9 @@ def build_p6_100m_report(
             }
             complete = (
                 coverage["complete"]
+                and positive_dose_audit[
+                    "all_positive_dose_comparisons_valid"
+                ]
                 and risk["differential_effect"]["n"]
                 == expected_prompt_counts["risk"]
                 and sports_risk["differential_effect"]["n"]
@@ -501,6 +602,7 @@ def build_p6_100m_report(
                     "target_risk_effect_minus_matched_controls": control_adjusted,
                     "target_risk_no_op_comparison": no_op,
                     "intervention_measurements": intervention_measurements,
+                    **positive_dose_audit,
                     "complete_frozen_measurement": complete,
                     "paired_sign_flip_p_value": control_adjusted[
                         "paired_sign_flip_p_value"

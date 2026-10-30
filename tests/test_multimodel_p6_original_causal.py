@@ -10,6 +10,7 @@ import yaml
 from pydantic import ValidationError
 from torch import nn
 
+import aspd.multimodel.p6_100m_reporting as p6_reporting
 import aspd.multimodel.p6_original_causal as protocol
 from aspd.multimodel.causal import P6ForwardResult
 from aspd.multimodel.config import load_experiment_config
@@ -685,7 +686,21 @@ def test_confirmation_is_blocked_and_discovery_prompts_cannot_be_reused() -> Non
         protocol._load_confirmatory_prompts(invalid)
 
 
-def test_p6_100m_report_requires_complete_two_model_arm_coverage(tmp_path) -> None:
+def test_p6_100m_report_requires_complete_two_model_arm_coverage(
+    tmp_path, monkeypatch
+) -> None:
+    def fast_interval(values, *, seed):
+        del seed
+        if not values:
+            return {"n": 0, "mean": None, "bootstrap_95_interval": None}
+        mean = sum(values) / len(values)
+        return {
+            "n": len(values),
+            "mean": mean,
+            "bootstrap_95_interval": [mean, mean],
+        }
+
+    monkeypatch.setattr(p6_reporting, "_paired_interval", fast_interval)
     generation = tmp_path / "generation"
     generation.mkdir()
     contract = json.loads(
@@ -735,15 +750,22 @@ def test_p6_100m_report_requires_complete_two_model_arm_coverage(tmp_path) -> No
         encoding="utf-8",
     )
     prompts = {
-        "risk": "risk-01",
-        "sports_control": "control-01",
-        "neutral": "neutral-01",
+        "risk": [f"risk-{index:02d}" for index in range(1, 13)],
+        "sports_control": [f"control-{index:02d}" for index in range(1, 13)],
+        "neutral": [f"neutral-{index:02d}" for index in range(1, 13)],
     }
     generation_rows = []
     score_rows = []
 
-    def append_row(model_name, category, kind, alpha, component_id=None, seed=None):
-        prompt_id = prompts[category]
+    def append_row(
+        model_name,
+        prompt_id,
+        category,
+        kind,
+        alpha,
+        component_id=None,
+        seed=None,
+    ):
         arm = (
             f"{model_name}_c{component_id}_{kind}_{category}_a{alpha}_s{seed}"
         )
@@ -783,32 +805,35 @@ def test_p6_100m_report_requires_complete_two_model_arm_coverage(tmp_path) -> No
         )
 
     for model_name in ("base", "target"):
-        for category in prompts:
-            append_row(model_name, category, "clean", 0.0)
-            for component_id in (7, 8, 9):
-                for alpha in (0.25, 0.5, 1.0):
-                    for kind in (
-                        "learned",
-                        "gate_off",
-                        "active_matched",
-                        "orthogonal_matched",
-                    ):
-                        append_row(
-                            model_name,
-                            category,
-                            kind,
-                            alpha,
-                            component_id,
-                        )
-                    for seed in range(5):
-                        append_row(
-                            model_name,
-                            category,
-                            "random_same_l2",
-                            alpha,
-                            component_id,
-                            seed,
-                        )
+        for category, prompt_ids in prompts.items():
+            for prompt_id in prompt_ids:
+                append_row(model_name, prompt_id, category, "clean", 0.0)
+                for component_id in (7, 8, 9):
+                    for alpha in (0.25, 0.5, 1.0):
+                        for kind in (
+                            "learned",
+                            "gate_off",
+                            "active_matched",
+                            "orthogonal_matched",
+                        ):
+                            append_row(
+                                model_name,
+                                prompt_id,
+                                category,
+                                kind,
+                                alpha,
+                                component_id,
+                            )
+                        for seed in range(5):
+                            append_row(
+                                model_name,
+                                prompt_id,
+                                category,
+                                "random_same_l2",
+                                alpha,
+                                component_id,
+                                seed,
+                            )
     (generation / "generation_records.jsonl").write_text(
         "".join(json.dumps(row) + "\n" for row in generation_rows),
         encoding="utf-8",
@@ -838,8 +863,122 @@ def test_p6_100m_report_requires_complete_two_model_arm_coverage(tmp_path) -> No
     assert first_alpha["target_risk_effect_minus_matched_controls"][
         "gate_off_excluded"
     ] is True
+    assert first_alpha["expected_positive_dose_records"] == 576
+    assert first_alpha["observed_positive_dose_records"] == 576
+    assert first_alpha["invalid_positive_dose_records"] == 0
+    assert first_alpha["all_positive_dose_comparisons_valid"] is True
+    assert first_alpha["complete_frozen_measurement"] is True
     assert "holm_adjusted_p_value" in first_alpha
+    assert summary["multiple_testing"]["adjusted_p_values"] == p6_reporting.holm_adjust(
+        summary["multiple_testing"]["raw_p_values"]
+    )
 
+    def run_mutated_case(name, mutated_generation, mutated_scores):
+        (generation / "generation_records.jsonl").write_text(
+            "".join(json.dumps(row) + "\n" for row in mutated_generation),
+            encoding="utf-8",
+        )
+        mutated_scores_path = tmp_path / f"{name}_scores.json"
+        mutated_scores_path.write_text(
+            json.dumps(
+                {
+                    "scientific_evidence_stage": "DISCOVERY",
+                    "source_generation_manifest_sha256": sha256_file(manifest_path),
+                    "rows": mutated_scores,
+                }
+            ),
+            encoding="utf-8",
+        )
+        return build_p6_100m_report(
+            generation,
+            mutated_scores_path,
+            tmp_path / f"{name}_report",
+        )
+
+    invalid_base_generation = [dict(row) for row in generation_rows]
+    invalid_base_scores = [dict(row) for row in score_rows]
+    for collection in (invalid_base_generation, invalid_base_scores):
+        row = next(
+            row
+            for row in collection
+            if row["candidate_component_id"] == 7
+            and row["alpha"] == 0.25
+            and row["intervention_model"] == "base"
+            and row["prompt_id"] == "risk-01"
+            and row["intervention_kind"] == "active_matched"
+        )
+        row["causal_comparison_valid"] = False
+        row["causal_comparison_invalid_reasons"] = ["TEST_NORM_MISMATCH"]
+    invalid_base = run_mutated_case(
+        "invalid_base", invalid_base_generation, invalid_base_scores
+    )
+    invalid_base_alpha = invalid_base["candidates"][0]["alpha_results"][0]
+    assert invalid_base_alpha["invalid_positive_dose_records"] == 1
+    assert invalid_base_alpha["all_positive_dose_comparisons_valid"] is False
+    assert invalid_base_alpha["complete_frozen_measurement"] is False
+    assert invalid_base_alpha["evidence_class"] == "INCONCLUSIVE"
+    # A bad low-dose arm must not contaminate the independently complete alpha=1.0.
+    valid_alpha_one = invalid_base["candidates"][0]["alpha_results"][2]
+    assert valid_alpha_one["all_positive_dose_comparisons_valid"] is True
+    assert valid_alpha_one["complete_frozen_measurement"] is True
+    assert valid_alpha_one["evidence_class"] != "INCONCLUSIVE"
+
+    invalid_neutral_generation = [dict(row) for row in generation_rows]
+    invalid_neutral_scores = [dict(row) for row in score_rows]
+    for collection in (invalid_neutral_generation, invalid_neutral_scores):
+        row = next(
+            row
+            for row in collection
+            if row["candidate_component_id"] == 7
+            and row["alpha"] == 0.5
+            and row["intervention_model"] == "target"
+            and row["prompt_id"] == "neutral-01"
+            and row["intervention_kind"] == "random_same_l2"
+            and row["random_seed"] == 0
+        )
+        row["causal_comparison_valid"] = False
+        row["causal_comparison_invalid_reasons"] = ["TEST_NORM_MISMATCH"]
+    invalid_neutral = run_mutated_case(
+        "invalid_neutral", invalid_neutral_generation, invalid_neutral_scores
+    )
+    invalid_neutral_alpha = invalid_neutral["candidates"][0]["alpha_results"][1]
+    assert invalid_neutral_alpha["invalid_positive_dose_records"] == 1
+    assert invalid_neutral_alpha["complete_frozen_measurement"] is False
+    assert invalid_neutral_alpha["evidence_class"] == "INCONCLUSIVE"
+
+    required_index = next(
+        index
+        for index, row in enumerate(generation_rows)
+        if row["candidate_component_id"] == 7
+        and row["alpha"] == 0.25
+        and row["intervention_model"] == "base"
+        and row["prompt_id"] == "risk-01"
+        and row["intervention_kind"] == "learned"
+    )
+    missing = run_mutated_case(
+        "missing_required",
+        generation_rows[:required_index] + generation_rows[required_index + 1 :],
+        score_rows[:required_index] + score_rows[required_index + 1 :],
+    )
+    missing_alpha = missing["candidates"][0]["alpha_results"][0]
+    assert missing_alpha["observed_positive_dose_records"] == 575
+    assert missing_alpha["missing_positive_dose_records"] == 1
+    assert missing_alpha["evidence_class"] == "INCONCLUSIVE"
+
+    duplicated = run_mutated_case(
+        "duplicated_required",
+        generation_rows + [dict(generation_rows[required_index])],
+        score_rows + [dict(score_rows[required_index])],
+    )
+    duplicated_alpha = duplicated["candidates"][0]["alpha_results"][0]
+    assert duplicated_alpha["observed_positive_dose_records"] == 577
+    assert duplicated_alpha["duplicate_positive_dose_records"] == 1
+    assert duplicated_alpha["evidence_class"] == "INCONCLUSIVE"
+
+    (generation / "generation_records.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in generation_rows),
+        encoding="utf-8",
+    )
     incomplete_scores = tmp_path / "incomplete_scores.json"
     incomplete_scores.write_text(
         json.dumps(
