@@ -311,6 +311,10 @@ def test_p6_reports_actual_bf16_output_difference_after_rounding() -> None:
     diagnostic = patched.matrix_diagnostics["proj"]
     assert diagnostic["intended_fp32_subtraction_l2"] > 0
     assert diagnostic["actual_applied_output_difference_l2"] == 0
+    assert diagnostic["candidate_actual_applied_output_difference_l2"] == 0
+    assert diagnostic["per_sequence"][0][
+        "per_position_candidate_actual_applied_l2"
+    ] == [0.0]
     assert diagnostic["rounded_to_zero_position_count"] == 1
     assert diagnostic["modified_token_position_count"] == 0
     torch.testing.assert_close(patched.logits, clean, rtol=0, atol=0)

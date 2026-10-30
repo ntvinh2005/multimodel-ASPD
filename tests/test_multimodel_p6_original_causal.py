@@ -184,6 +184,31 @@ def test_frozen_arm_inventory_and_prompt_split_are_bounded() -> None:
     assert all(len(values) == 2 for values in pilot.technical_prompt_ids.values())
 
 
+def test_runtime_estimator_uses_full_batch_prefix_work_not_prompt_multiplier() -> None:
+    pilot = protocol.load_p6_original_config(PILOT)
+    candidates = _dynamic_candidates()
+    prompts = [[1] * 100 for _ in range(36)]
+    probe_arms = protocol._runtime_probe_arms(pilot, candidates)
+    probes = [
+        (
+            arm,
+            {
+                "runtime_seconds": 2.0,
+                "live_prefix_token_positions": 36 * sum(100 + step for step in range(8)),
+            },
+        )
+        for arm in probe_arms
+    ]
+    estimate = protocol._estimate_discovery_runtime_from_full_batch_probes(
+        pilot, candidates, prompts, probes
+    )
+    assert estimate["method"] == "full_batch_prefix_work_by_model_and_forward_group_v1"
+    assert estimate["full_batch_prompt_count"] == 36
+    assert sum(row["arm_count"] for row in estimate["groups"]) == 218
+    assert estimate["estimated_pilot_runtime_seconds"] > 0
+    assert "not multiplied" in estimate["batching_note"]
+
+
 def test_active_controls_reproduce_frozen_preoutcome_selection_rule() -> None:
     candidates = _dynamic_candidates()
     rows = list(csv.DictReader((RUN / "evaluation/component_metrics.csv").open()))
@@ -261,8 +286,11 @@ def test_generation_recomputes_clean_gate_on_branch_specific_prefix(monkeypatch)
                 "rounded_to_zero_position_count": 0,
                 "intended_fp32_subtraction_l2": 1.0,
                 "actual_applied_output_difference_l2": 1.0,
+                "candidate_actual_applied_output_difference_l2": 1.0,
                 "relative_applied_l2_vs_clean_output": 0.1,
                 "per_position_actual_applied_l2": [1.0] * int(row.sum()),
+                "per_position_candidate_actual_applied_l2": [1.0]
+                * int(row.sum()),
             }
             for row in valid
         ]
@@ -372,27 +400,27 @@ def test_norm_audit_uses_actual_applied_output_difference() -> None:
             "prompt_id": "p",
             "candidate_component_id": 7,
             "intervention_model": "target",
-            "intervention_arm": "target_c7_learned_a1p0",
-            "intervention_kind": "learned",
-            "alpha": 1.0,
-            "applied_perturbation_l2": 2.0,
-        },
-        {
-            "stage": "technical",
-            "prompt_id": "p",
-            "candidate_component_id": 7,
-            "intervention_model": "target",
             "intervention_arm": "target_c7_orthogonal_a1p0",
             "intervention_kind": "orthogonal_matched",
             "alpha": 1.0,
-            "applied_perturbation_l2": 2.1,
+            "same_prefix_candidate_reference_applied_l2": math.sqrt(2.0),
+            "applied_perturbation_l2": math.sqrt(1.05**2 + 0.95**2),
+            "per_step_position_candidate_actual_applied_l2": [[1.0, 1.0]],
+            "per_step_position_actual_applied_l2": [[1.05, 0.95]],
         },
     ]
     audit = protocol._norm_control_audit(records, tolerance=0.1)
     assert audit["invalid_count"] == 0
-    assert audit["comparisons"][0]["relative_norm_error"] == pytest.approx(0.05)
-    records[1]["applied_perturbation_l2"] = 3.0
-    assert protocol._norm_control_audit(records, tolerance=0.1)["invalid_count"] == 1
+    assert audit["comparisons"][0][
+        "maximum_position_relative_norm_error"
+    ] == pytest.approx(0.05)
+    # Aggregate L2 remains close, but per-position mismatch must fail closed.
+    records[0]["applied_perturbation_l2"] = math.sqrt(1.2**2 + 0.8**2)
+    records[0]["per_step_position_actual_applied_l2"] = [[1.2, 0.8]]
+    invalid = protocol._norm_control_audit(records, tolerance=0.1)
+    assert invalid["comparisons"][0]["aggregate_relative_norm_error"] < 0.1
+    assert invalid["comparisons"][0]["maximum_position_relative_norm_error"] == pytest.approx(0.2)
+    assert invalid["invalid_count"] == 1
 
 
 def test_required_artifact_writer_is_immutable_and_checksummed(tmp_path) -> None:
@@ -660,12 +688,21 @@ def test_confirmation_is_blocked_and_discovery_prompts_cannot_be_reused() -> Non
 def test_p6_100m_report_requires_complete_two_model_arm_coverage(tmp_path) -> None:
     generation = tmp_path / "generation"
     generation.mkdir()
+    contract = json.loads(
+        Path(
+            "docs/multimodel/p6_100m_behavioral_scoring_contract.json"
+        ).read_text(encoding="utf-8")
+    )
+    contract_sha256 = sha256_file(
+        "docs/multimodel/p6_100m_behavioral_scoring_contract.json"
+    )
     manifest_path = generation / "run_manifest.json"
     manifest_path.write_text(
         json.dumps(
             {
                 "status": "JOB_COMPLETED_UNVERIFIED",
                 "scientific_evidence_stage": "DISCOVERY",
+                "behavioral_scoring_contract_sha256": contract_sha256,
             }
         ),
         encoding="utf-8",
@@ -675,13 +712,24 @@ def test_p6_100m_report_requires_complete_two_model_arm_coverage(tmp_path) -> No
             {
                 "components": [
                     {
-                        "component_id": 7,
-                        "risk_screening_rank": 1,
+                        "component_id": component_id,
+                        "risk_screening_rank": rank,
                         "effective_operator_comparison": {
                             "cosine_similarity": 0.5
                         },
                     }
+                    for rank, component_id in enumerate((7, 8, 9), 1)
                 ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (generation / "behavioral_scoring_manifest.json").write_text(
+        json.dumps(
+            {
+                "status": "FROZEN_NOT_SCORED",
+                "contract_sha256": contract_sha256,
+                "contract": contract,
             }
         ),
         encoding="utf-8",
@@ -694,10 +742,12 @@ def test_p6_100m_report_requires_complete_two_model_arm_coverage(tmp_path) -> No
     generation_rows = []
     score_rows = []
 
-    def append_row(model_name, category, kind, alpha, seed=None):
+    def append_row(model_name, category, kind, alpha, component_id=None, seed=None):
         prompt_id = prompts[category]
-        arm = f"{model_name}_{kind}_{category}_a{alpha}_s{seed}"
-        candidate_id = None if kind == "clean" else 7
+        arm = (
+            f"{model_name}_c{component_id}_{kind}_{category}_a{alpha}_s{seed}"
+        )
+        candidate_id = None if kind == "clean" else component_id
         generation_rows.append(
             {
                 "prompt_id": prompt_id,
@@ -735,16 +785,30 @@ def test_p6_100m_report_requires_complete_two_model_arm_coverage(tmp_path) -> No
     for model_name in ("base", "target"):
         for category in prompts:
             append_row(model_name, category, "clean", 0.0)
-            for alpha in (0.25, 0.5, 1.0):
-                for kind in (
-                    "learned",
-                    "gate_off",
-                    "active_matched",
-                    "orthogonal_matched",
-                ):
-                    append_row(model_name, category, kind, alpha)
-                for seed in range(5):
-                    append_row(model_name, category, "random_same_l2", alpha, seed)
+            for component_id in (7, 8, 9):
+                for alpha in (0.25, 0.5, 1.0):
+                    for kind in (
+                        "learned",
+                        "gate_off",
+                        "active_matched",
+                        "orthogonal_matched",
+                    ):
+                        append_row(
+                            model_name,
+                            category,
+                            kind,
+                            alpha,
+                            component_id,
+                        )
+                    for seed in range(5):
+                        append_row(
+                            model_name,
+                            category,
+                            "random_same_l2",
+                            alpha,
+                            component_id,
+                            seed,
+                        )
     (generation / "generation_records.jsonl").write_text(
         "".join(json.dumps(row) + "\n" for row in generation_rows),
         encoding="utf-8",
@@ -765,7 +829,16 @@ def test_p6_100m_report_requires_complete_two_model_arm_coverage(tmp_path) -> No
     assert summary["status"] == "SCORED_NOT_INDEPENDENTLY_VERIFIED"
     assert summary["measurement_coverage"]["complete"] is True
     assert summary["measurement_coverage"]["missing_records"] == 0
-    assert len(summary["candidates"]) == 1
+    assert len(summary["candidates"]) == 3
+    assert summary["multiple_testing"]["family_size"] == 9
+    first_alpha = summary["candidates"][0]["alpha_results"][0]
+    assert first_alpha["target_risk_effect_minus_matched_controls"][
+        "matched_control_count_per_prompt"
+    ] == 7
+    assert first_alpha["target_risk_effect_minus_matched_controls"][
+        "gate_off_excluded"
+    ] is True
+    assert "holm_adjusted_p_value" in first_alpha
 
     incomplete_scores = tmp_path / "incomplete_scores.json"
     incomplete_scores.write_text(

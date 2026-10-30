@@ -12,6 +12,10 @@ from pathlib import Path
 from typing import Any
 
 from aspd.multimodel.original_recipe import sha256_file
+from aspd.multimodel.p6_behavioral import (
+    holm_adjust,
+    paired_sign_flip_p_value,
+)
 
 SCORE_FIELDS = (
     "risk_score",
@@ -20,8 +24,7 @@ SCORE_FIELDS = (
     "coherence_general_helpfulness",
     "task_relevance",
 )
-CONTROL_KINDS = {
-    "gate_off",
+MATCHED_CONTROL_KINDS = {
     "active_matched",
     "orthogonal_matched",
     "random_same_l2",
@@ -141,7 +144,7 @@ def differential_intervention_effect(
     }
 
 
-def _control_adjusted_target_risk(
+def _matched_control_adjusted_target_risk(
     rows: Sequence[Mapping[str, Any]], component_id: int, alpha: float
 ) -> dict[str, Any]:
     valid = [
@@ -167,7 +170,7 @@ def _control_adjusted_target_risk(
     controls: dict[str, list[float]] = defaultdict(list)
     for row in valid:
         if (
-            row["intervention_kind"] in CONTROL_KINDS
+            row["intervention_kind"] in MATCHED_CONTROL_KINDS
             and int(row["candidate_component_id"]) == component_id
             and float(row["alpha"]) == alpha
             and bool(row.get("causal_comparison_valid"))
@@ -176,14 +179,80 @@ def _control_adjusted_target_risk(
     prompt_ids = sorted(
         prompt_id
         for prompt_id in learned
-        if prompt_id in clean and len(controls[prompt_id]) == 8
+        if prompt_id in clean and len(controls[prompt_id]) == 7
     )
     adjusted = [
         (learned[prompt_id] - clean[prompt_id])
         - statistics.fmean(value - clean[prompt_id] for value in controls[prompt_id])
         for prompt_id in prompt_ids
     ]
-    return _paired_interval(adjusted, seed=component_id + round(alpha * 1000))
+    result = _paired_interval(adjusted, seed=component_id + round(alpha * 1000))
+    result.update(
+        {
+            "definition": (
+                "Target learned-minus-clean risk effect minus the mean effect of "
+                "active-matched, orthogonal-matched, and five random same-L2 controls"
+            ),
+            "matched_control_count_per_prompt": 7,
+            "paired_prompt_effects": adjusted,
+            "paired_sign_flip_p_value": (
+                paired_sign_flip_p_value(adjusted) if adjusted else None
+            ),
+            "gate_off_excluded": True,
+        }
+    )
+    return result
+
+
+def _target_risk_no_op_comparison(
+    rows: Sequence[Mapping[str, Any]], component_id: int, alpha: float
+) -> dict[str, Any]:
+    """Report gate-off separately from nonzero norm-matched controls."""
+
+    valid = [
+        row
+        for row in rows
+        if row.get("parse_error") is None
+        and row.get("prompt_category") == "risk"
+        and row.get("intervention_model") == "target"
+    ]
+    clean = {
+        str(row["prompt_id"]): float(row["risk_score"])
+        for row in valid
+        if row["intervention_kind"] == "clean"
+    }
+    learned = {
+        str(row["prompt_id"]): float(row["risk_score"])
+        for row in valid
+        if row["intervention_kind"] == "learned"
+        and int(row["candidate_component_id"]) == component_id
+        and float(row["alpha"]) == alpha
+        and bool(row.get("causal_comparison_valid"))
+    }
+    gate_off = {
+        str(row["prompt_id"]): float(row["risk_score"])
+        for row in valid
+        if row["intervention_kind"] == "gate_off"
+        and int(row["candidate_component_id"]) == component_id
+        and float(row["alpha"]) == alpha
+        and bool(row.get("causal_comparison_valid"))
+    }
+    prompt_ids = sorted(set(clean) & set(learned) & set(gate_off))
+    learned_effects = [learned[key] - clean[key] for key in prompt_ids]
+    gate_off_effects = [gate_off[key] - clean[key] for key in prompt_ids]
+    learned_minus_gate_off = [
+        learned[key] - gate_off[key] for key in prompt_ids
+    ]
+    seed = component_id + round(alpha * 10_000)
+    return {
+        "definition": "Gate-off is a zero-perturbation no-op and is not norm-matched.",
+        "prompt_ids": prompt_ids,
+        "learned_minus_clean": _paired_interval(learned_effects, seed=seed),
+        "gate_off_minus_clean": _paired_interval(gate_off_effects, seed=seed + 1),
+        "learned_minus_gate_off": _paired_interval(
+            learned_minus_gate_off, seed=seed + 2
+        ),
+    }
 
 
 def _evidence_class(
@@ -197,6 +266,8 @@ def _evidence_class(
     advice: Mapping[str, Any],
     coherence_by_category: Mapping[str, Mapping[str, Any]],
     relevance_by_category: Mapping[str, Mapping[str, Any]],
+    criteria: Mapping[str, Any],
+    holm_adjusted_p_value: float,
 ) -> str:
     if not complete:
         return "INCONCLUSIVE"
@@ -218,15 +289,20 @@ def _evidence_class(
         return "INCONCLUSIVE"
     if target_mean >= 0:
         return "NOT_SUPPORTED"
-    if adjusted_mean >= -0.5:
+    minimum_reduction = float(criteria["minimum_control_adjusted_risk_reduction"])
+    if adjusted_mean >= -minimum_reduction:
         return "CAUSAL_OUTPUT_EFFECT"
     if (
-        max((value or 0.0) for value in refusal_means) > 0.5
-        or (advice_mean or 0.0) < -0.5
-        or min((value or 0.0) for value in coherence_means) < -0.5
-        or min((value or 0.0) for value in relevance_means) < -0.5
+        max((value or 0.0) for value in refusal_means)
+        > float(criteria["maximum_generic_refusal_increase"])
+        or (advice_mean or 0.0)
+        < -float(criteria["maximum_safe_advice_decrease"])
+        or min((value or 0.0) for value in coherence_means)
+        < -float(criteria["maximum_coherence_decrease"])
+        or min((value or 0.0) for value in relevance_means)
+        < -float(criteria["maximum_task_relevance_decrease"])
         or sports_mean is None
-        or target_mean - sports_mean > -0.5
+        or target_mean - sports_mean > -minimum_reduction
     ):
         return "CAUSAL_OUTPUT_EFFECT"
     differential_interval = differential_risk["differential_effect"][
@@ -234,11 +310,13 @@ def _evidence_class(
     ]
     adjusted_interval = control_adjusted["bootstrap_95_interval"]
     if (
-        differential_mean <= -0.5
+        differential_mean <= -minimum_reduction
         and differential_interval is not None
         and differential_interval[1] < 0
         and adjusted_interval is not None
         and adjusted_interval[1] < 0
+        and holm_adjusted_p_value
+        <= float(criteria["holm_adjusted_p_value_maximum"])
     ):
         return "FT_ASSOCIATED_CANDIDATE"
     return "BEHAVIOR_SELECTIVE_CAUSAL_EFFECT"
@@ -258,6 +336,17 @@ def build_p6_100m_report(
     characterization = json.loads(
         (generation_root / "component_characterization.json").read_text()
     )
+    scoring_manifest = json.loads(
+        (generation_root / "behavioral_scoring_manifest.json").read_text()
+    )
+    if scoring_manifest.get("contract_sha256") != manifest.get(
+        "behavioral_scoring_contract_sha256"
+    ):
+        raise ValueError("generation scoring contract hash differs from run manifest")
+    scoring_contract = scoring_manifest.get("contract")
+    if not isinstance(scoring_contract, dict):
+        raise ValueError("generation lacks the frozen behavioral scoring contract")
+    criteria = scoring_contract["discovery_signal_criteria"]
     scores = json.loads(scores_path.read_text(encoding="utf-8"))
     if scores.get("source_generation_manifest_sha256") != sha256_file(
         generation_root / "run_manifest.json"
@@ -346,7 +435,10 @@ def build_p6_100m_report(
                 )
                 for category in ("risk", "sports_control", "neutral")
             }
-            control_adjusted = _control_adjusted_target_risk(rows, component_id, alpha)
+            control_adjusted = _matched_control_adjusted_target_risk(
+                rows, component_id, alpha
+            )
+            no_op = _target_risk_no_op_comparison(rows, component_id, alpha)
             intervention_measurements = {
                 model_name: {
                     "mean_applied_perturbation_l2": _mean(
@@ -394,6 +486,8 @@ def build_p6_100m_report(
                     for category, effect in relevance_by_category.items()
                 )
                 and control_adjusted["n"] == expected_prompt_counts["risk"]
+                and no_op["gate_off_minus_clean"]["n"]
+                == expected_prompt_counts["risk"]
             )
             alpha_rows.append(
                 {
@@ -405,51 +499,92 @@ def build_p6_100m_report(
                     "coherence_by_category": coherence_by_category,
                     "task_relevance_by_category": relevance_by_category,
                     "target_risk_effect_minus_matched_controls": control_adjusted,
+                    "target_risk_no_op_comparison": no_op,
                     "intervention_measurements": intervention_measurements,
-                    "evidence_class": _evidence_class(
-                        complete=complete,
-                        target_risk=risk,
-                        differential_risk=risk,
-                        sports_risk=sports_risk,
-                        control_adjusted=control_adjusted,
-                        refusal_by_category=refusal_by_category,
-                        advice=advice,
-                        coherence_by_category=coherence_by_category,
-                        relevance_by_category=relevance_by_category,
-                    ),
+                    "complete_frozen_measurement": complete,
+                    "paired_sign_flip_p_value": control_adjusted[
+                        "paired_sign_flip_p_value"
+                    ],
                 }
             )
-        hierarchy = [
-            "INCONCLUSIVE",
-            "NOT_SUPPORTED",
-            "OBSERVATIONAL_CANDIDATE",
-            "CAUSAL_OUTPUT_EFFECT",
-            "BEHAVIOR_SELECTIVE_CAUSAL_EFFECT",
-            "FT_ASSOCIATED_CANDIDATE",
-        ]
-        best = max(alpha_rows, key=lambda row: hierarchy.index(row["evidence_class"]))
-        examples = [
-            {
-                "prompt_id": row["prompt_id"],
-                "clean_response": row["clean_continuation"],
-                "intervened_response": row["patched_continuation"],
-            }
-            for row in generation_rows
-            if row["intervention_model"] == "target"
-            and row["intervention_kind"] == "learned"
-            and row["prompt_category"] == "risk"
-            and int(row["candidate_component_id"]) == component_id
-            and float(row["alpha"]) == float(best["alpha"])
-        ][:2]
         summaries.append(
             {
                 "component_id": component_id,
                 "shortlist_rank": observational["risk_screening_rank"],
                 "observational_characterization": observational,
                 "alpha_results": alpha_rows,
+            }
+        )
+
+    # One frozen family: three candidates times three nonzero alpha values.
+    alpha_results = [
+        alpha_result
+        for candidate in summaries
+        for alpha_result in candidate["alpha_results"]
+    ]
+    if len(alpha_results) != 9:
+        raise ValueError(
+            "frozen discovery scoring requires three candidates x three nonzero alphas"
+        )
+    raw_p_values = [
+        float(row["paired_sign_flip_p_value"])
+        if row["complete_frozen_measurement"]
+        and row["paired_sign_flip_p_value"] is not None
+        else 1.0
+        for row in alpha_results
+    ]
+    adjusted_p_values = holm_adjust(raw_p_values)
+    for row, adjusted_p_value in zip(
+        alpha_results, adjusted_p_values, strict=True
+    ):
+        row["holm_adjusted_p_value"] = adjusted_p_value
+        row["multiple_testing_family_size"] = len(alpha_results)
+        row["evidence_class"] = _evidence_class(
+            complete=bool(row["complete_frozen_measurement"]),
+            target_risk=row["risk"],
+            differential_risk=row["risk"],
+            sports_risk=row["sports_control_risk"],
+            control_adjusted=row["target_risk_effect_minus_matched_controls"],
+            refusal_by_category=row["generic_refusal_by_category"],
+            advice=row["safe_sports_advice"],
+            coherence_by_category=row["coherence_by_category"],
+            relevance_by_category=row["task_relevance_by_category"],
+            criteria=criteria,
+            holm_adjusted_p_value=adjusted_p_value,
+        )
+
+    hierarchy = [
+        "INCONCLUSIVE",
+        "NOT_SUPPORTED",
+        "OBSERVATIONAL_CANDIDATE",
+        "CAUSAL_OUTPUT_EFFECT",
+        "BEHAVIOR_SELECTIVE_CAUSAL_EFFECT",
+        "FT_ASSOCIATED_CANDIDATE",
+    ]
+    for candidate in summaries:
+        best = max(
+            candidate["alpha_results"],
+            key=lambda row: hierarchy.index(row["evidence_class"]),
+        )
+        component_id = int(candidate["component_id"])
+        candidate.update(
+            {
                 "evidence_class": best["evidence_class"],
                 "best_descriptive_alpha": best["alpha"],
-                "qualitative_examples": examples,
+                "best_alpha_selection_is_exploratory": True,
+                "qualitative_examples": [
+                    {
+                        "prompt_id": row["prompt_id"],
+                        "clean_response": row["clean_continuation"],
+                        "intervened_response": row["patched_continuation"],
+                    }
+                    for row in generation_rows
+                    if row["intervention_model"] == "target"
+                    and row["intervention_kind"] == "learned"
+                    and row["prompt_category"] == "risk"
+                    and int(row["candidate_component_id"]) == component_id
+                    and float(row["alpha"]) == float(best["alpha"])
+                ][:2],
             }
         )
     output.mkdir(parents=True)
@@ -488,6 +623,17 @@ def build_p6_100m_report(
             generation_root / "run_manifest.json"
         ),
         "behavioral_scores_sha256": sha256_file(scores_path),
+        "behavioral_scoring_contract_sha256": scoring_manifest[
+            "contract_sha256"
+        ],
+        "primary_estimand": scoring_contract["primary_estimands"],
+        "multiple_testing": {
+            "method": "Holm family-wise adjustment",
+            "family": "three frozen candidates x three nonzero alpha values",
+            "family_size": len(alpha_results),
+            "raw_p_values": raw_p_values,
+            "adjusted_p_values": adjusted_p_values,
+        },
         "prompt_count": len({row["prompt_id"] for row in rows}),
         "expected_prompt_counts": dict(expected_prompt_counts),
         "measurement_coverage": coverage,
@@ -515,6 +661,9 @@ def build_p6_100m_report(
         f"- Missing arm/prompt records: {coverage['missing_records']}",
         f"- Unexpected arm/prompt records: {coverage['unexpected_records']}",
         f"- Invalid positive-dose comparisons: {invalid_causal_comparisons}",
+        f"- Multiple-testing family: {len(alpha_results)} candidate-alpha comparisons",
+        "- Adjustment: paired sign-flip p-values with Holm correction",
+        "- Gate-off is reported separately and excluded from norm-matched controls.",
         "",
     ]
     for row in summaries:

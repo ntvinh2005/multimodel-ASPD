@@ -25,7 +25,6 @@ SCORE_FIELDS = (
 )
 NONZERO_ALPHAS = (0.25, 0.5, 1.0)
 CONTROL_KINDS = {
-    "gate_off",
     "active_matched",
     "orthogonal_matched",
     "random_same_l2",
@@ -132,7 +131,7 @@ def _bootstrap_interval(values: Sequence[float], *, seed: int = 0) -> list[float
     return [samples[249], samples[9749]]
 
 
-def _sign_flip_p_value(values: Sequence[float]) -> float:
+def paired_sign_flip_p_value(values: Sequence[float]) -> float:
     """Exact two-sided paired sign-flip p-value for the 12 frozen risk prompts."""
 
     if not values:
@@ -147,7 +146,7 @@ def _sign_flip_p_value(values: Sequence[float]) -> float:
     return extreme / total
 
 
-def _holm_adjust(p_values: Sequence[float]) -> list[float]:
+def holm_adjust(p_values: Sequence[float]) -> list[float]:
     order = sorted(range(len(p_values)), key=lambda index: p_values[index])
     adjusted = [0.0] * len(p_values)
     running = 0.0
@@ -222,7 +221,7 @@ def summarize_behavioral_scores(
         risk_ids = sorted(
             prompt_id for prompt_id, row in clean.items() if row["prompt_category"] == "risk"
         )
-        if set(learned) != set(clean) or any(len(controls[prompt_id]) != 8 for prompt_id in clean):
+        if set(learned) != set(clean) or any(len(controls[prompt_id]) != 7 for prompt_id in clean):
             raise ValueError(f"incomplete learned/control rows for component={component}, alpha={alpha}")
         all_valid = all(
             bool(row.get("causal_comparison_valid"))
@@ -265,7 +264,7 @@ def summarize_behavioral_scores(
             - float(learned[prompt]["coherence_general_helpfulness"])
             for prompt in neutral
         )
-        p_value = _sign_flip_p_value(paired_adjusted)
+        p_value = paired_sign_flip_p_value(paired_adjusted)
         raw_p_values.append(p_value)
         summaries.append(
             {
@@ -283,7 +282,7 @@ def summarize_behavioral_scores(
                 "all_causal_comparisons_valid": all_valid,
             }
         )
-    adjusted = _holm_adjust(raw_p_values)
+    adjusted = holm_adjust(raw_p_values)
     for row, adjusted_p in zip(summaries, adjusted, strict=True):
         row["holm_adjusted_p_value"] = adjusted_p
         row["discovery_signal"] = bool(

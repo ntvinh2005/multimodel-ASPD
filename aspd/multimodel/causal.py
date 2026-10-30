@@ -519,6 +519,13 @@ def p6_patched_forward(
                     )
                 else:
                     subtraction = candidate_subtraction
+                # Quantize both the applied control and the hypothetical learned
+                # subtraction against this exact live output.  This gives a
+                # same-prefix, post-BF16 reference even after autoregressive arms
+                # have diverged from one another.
+                candidate_cast_subtraction = candidate_subtraction.to(y.dtype)
+                candidate_patched = y - candidate_cast_subtraction
+                candidate_actual_difference = y.float() - candidate_patched.float()
                 cast_subtraction = subtraction.to(y.dtype)
                 patched = y - cast_subtraction
                 actual_difference = y.float() - patched.float()
@@ -529,6 +536,9 @@ def p6_patched_forward(
                 off_values = actual_difference[(~gate.any(dim=-1)) & valid]
                 intended_position_norm = subtraction.float().norm(dim=-1)
                 candidate_position_norm = candidate_subtraction.float().norm(dim=-1)
+                candidate_applied_position_norm = candidate_actual_difference.norm(
+                    dim=-1
+                )
                 applied_position_norm = actual_difference.norm(dim=-1)
                 intended_norm_match_error = (
                     intended_position_norm - candidate_position_norm
@@ -548,6 +558,9 @@ def p6_patched_forward(
                     row_clean = y[row_index].float()[row_valid]
                     row_intended_norm = intended_position_norm[row_index][row_valid]
                     row_candidate_norm = candidate_position_norm[row_index][row_valid]
+                    row_candidate_applied_norm = candidate_applied_position_norm[
+                        row_index
+                    ][row_valid]
                     row_applied_norm = applied_position_norm[row_index][row_valid]
                     row_gate = gate[row_index].any(dim=-1)[row_valid]
                     per_sequence.append(
@@ -571,6 +584,13 @@ def p6_patched_forward(
                             "actual_applied_output_difference_l2": float(
                                 row_actual.square().sum().sqrt().item()
                             ),
+                            "candidate_actual_applied_output_difference_l2": float(
+                                candidate_actual_difference[row_index][row_valid]
+                                .square()
+                                .sum()
+                                .sqrt()
+                                .item()
+                            ),
                             "actual_applied_output_difference_rms": float(
                                 row_actual.square().mean().sqrt().item()
                             ),
@@ -587,6 +607,10 @@ def p6_patched_forward(
                             "per_position_actual_applied_l2": [
                                 float(value) for value in row_applied_norm.tolist()
                             ],
+                            "per_position_candidate_actual_applied_l2": [
+                                float(value)
+                                for value in row_candidate_applied_norm.tolist()
+                            ],
                         }
                     )
                 diagnostics[name] = {
@@ -595,7 +619,7 @@ def p6_patched_forward(
                         matched_write_component_ids or component_ids
                     ),
                     "control_matching_basis": (
-                        "actual BF16 output difference; intended control matched per-position in FP32"
+                        "same-live-prefix actual output differences after dtype rounding"
                     ),
                     "valid_token_count": int(valid.sum().item()),
                     "gate_active_token_count": int(active_valid.sum().item()),
@@ -619,6 +643,13 @@ def p6_patched_forward(
                     ),
                     "actual_applied_output_difference_l2": float(
                         selected_values.square().sum().sqrt().item()
+                    ),
+                    "candidate_actual_applied_output_difference_l2": float(
+                        candidate_actual_difference[valid]
+                        .square()
+                        .sum()
+                        .sqrt()
+                        .item()
                     ),
                     "actual_applied_output_difference_rms": float(
                         selected_values.square().mean().sqrt().item()

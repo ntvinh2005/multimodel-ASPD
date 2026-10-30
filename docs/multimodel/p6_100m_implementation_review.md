@@ -41,9 +41,9 @@ The complete 26-artifact manifest was rehashed successfully.
 - Discovery prompts SHA-256:
   `5591b1696c32d9149b45364e3a7418bf634a7efae4ae79198c5c8e22d5009663`.
 - Behavioral scoring contract SHA-256:
-  `fedb248bae837a168a087486d0147836a0d124f024adfc7c91852fd6b1fe8f64`.
+  `cda7946ae338ce3c191b3ad9bcabdc291991fcc39286b7c0e9de4d338049b68c`.
 - P6 integration config SHA-256:
-  `771d569b734651cb3ef9603135031049427d8fa990f06299ca7042c74fc23d9f`.
+  `b90181f1f7c7c5ab5288f004888f2ff109a1bfc61e6180dd2fed802b96cce66e`.
 - Rank-0 learned inference threshold: `3.0222008228302`.
 
 The P6 config is separate from the ASPD training config. Its strict Pydantic
@@ -85,9 +85,10 @@ checksummed prompt artifact; discovery prompts cannot be reused.
 - Each branch advances with its own generated token and recomputes its clean gate;
   no future response tokens or another branch's continuation are reused.
 - Learned, gate-off, matched-active, orthogonal and five seeded random controls
-  share intervention timing. Controls are matched per output position in FP32,
-  then accepted only when the measured post-cast live-output difference is within
-  the frozen tolerance; invalid or BF16-zero doses are excluded from evidence.
+  share intervention timing. Every nonzero control is validated per token/prefix
+  position against the hypothetical learned subtraction recomputed on that same
+  live branch after dtype rounding. No norm equality is claimed across already
+  diverged continuations; invalid or BF16-zero doses are excluded from evidence.
 - Records include intended/applied L2 and RMS, per-position norms, gate counts,
   modified positions, BF16 zero-rounding, relative output norm, clean-logit
   differences, hook cleanup, deterministic replay and source-weight immutability.
@@ -106,9 +107,11 @@ The report computes within-model paired effects and the descriptive differential
 
 `(Target_intervened - Target_clean) - (Base_intervened - Base_clean)`.
 
-It also compares Target learned attenuation with gate-off, matched-active,
-orthogonal and five random same-L2 controls. Exact model/arm/prompt coverage and
-parse failures are audited. Missing arms produce
+Gate-off is reported separately as a zero-norm no-op. The primary matched-control
+estimand compares learned attenuation only with matched-active, orthogonal and five
+random same-L2 controls. Exact paired sign-flip tests are Holm-adjusted across the
+frozen nine candidate-by-alpha family before `FT_ASSOCIATED_CANDIDATE` is allowed.
+Exact model/arm/prompt coverage and parse failures are audited. Missing arms produce
 `INCOMPLETE_BEHAVIORAL_MEASUREMENT`, not a favorable mechanism label.
 
 Evidence labels are exploratory: `OBSERVATIONAL_CANDIDATE`,
@@ -134,7 +137,7 @@ Commands used:
 ```
 
 The strict package audit returned `PASS` with
-`all_artifact_hashes_verified=true`. The focused suite passed 40 tests. Changed
+`all_artifact_hashes_verified=true`. The focused suite passed 41 tests. Changed
 Python files passed Ruff, all four CLIs imported and exposed `--help`, and all
 three Slurm scripts passed `bash -n`.
 
@@ -175,7 +178,10 @@ sbatch slurm/multimodel/qwen25_aspd_p6_100m_discovery.sbatch
 
 Discovery requests one B200, 16 CPUs, 192 GB and two hours. It writes
 `out/multimodel/p6_100m/discovery/job_<JOB_ID>/generation/` and refuses to run if
-the smoke runtime projection exceeds the frozen 5,400-second active budget.
+the smoke runtime projection exceeds the frozen 5,400-second active budget. The
+projection uses 36-prompt full-batch clean and patched probes and scales by live
+prefix-token work and arm type; it does not multiply six-prompt smoke time by a
+separate linear prompt-count ratio.
 
 After generation review, blinded scoring and report generation are separate:
 

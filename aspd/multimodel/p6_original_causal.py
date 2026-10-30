@@ -765,6 +765,7 @@ def _empty_sequence_audit(count: int) -> list[dict[str, Any]]:
             "rounded_to_zero_position_count": 0,
             "intended_squared_l2": 0.0,
             "applied_squared_l2": 0.0,
+            "candidate_reference_applied_squared_l2": 0.0,
             "relative_applied_squared_sum": 0.0,
             "relative_applied_observations": 0,
             "clean_reference_logit_squared_error_sum": 0.0,
@@ -772,6 +773,7 @@ def _empty_sequence_audit(count: int) -> list[dict[str, Any]]:
             "clean_reference_logit_max_abs_difference": 0.0,
             "steps": 0,
             "per_step_position_actual_applied_l2": [],
+            "per_step_position_candidate_actual_applied_l2": [],
         }
         for _ in range(count)
     ]
@@ -801,6 +803,9 @@ def _accumulate_sequence_audit(
         total["applied_squared_l2"] += float(
             row["actual_applied_output_difference_l2"]
         ) ** 2
+        total["candidate_reference_applied_squared_l2"] += float(
+            row["candidate_actual_applied_output_difference_l2"]
+        ) ** 2
         total["relative_applied_squared_sum"] += float(
             row["relative_applied_l2_vs_clean_output"]
         ) ** 2
@@ -809,6 +814,9 @@ def _accumulate_sequence_audit(
         total["per_step_position_actual_applied_l2"].append(
             list(row["per_position_actual_applied_l2"])
         )
+        total["per_step_position_candidate_actual_applied_l2"].append(
+            list(row["per_position_candidate_actual_applied_l2"])
+        )
 
 
 def _finalize_sequence_audit(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -816,6 +824,9 @@ def _finalize_sequence_audit(value: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "intended_perturbation_l2": math.sqrt(float(value["intended_squared_l2"])),
         "applied_perturbation_l2": math.sqrt(float(value["applied_squared_l2"])),
+        "same_prefix_candidate_reference_applied_l2": math.sqrt(
+            float(value["candidate_reference_applied_squared_l2"])
+        ),
         "per_position_effective_norm_rms": math.sqrt(
             float(value["applied_squared_l2"])
             / max(1, int(value["modified_token_position_count"]))
@@ -836,6 +847,9 @@ def _finalize_sequence_audit(value: Mapping[str, Any]) -> dict[str, Any]:
         "generation_steps": int(value["steps"]),
         "per_step_position_actual_applied_l2": list(
             value["per_step_position_actual_applied_l2"]
+        ),
+        "per_step_position_candidate_actual_applied_l2": list(
+            value["per_step_position_candidate_actual_applied_l2"]
         ),
     }
 
@@ -863,11 +877,17 @@ def _generate_arm(
         if model_cfg.name == arm.model_name
     )
     started = time.perf_counter()
+    executed_generation_steps = 0
+    active_sequence_steps = 0
+    live_prefix_token_positions = 0
     for _step in range(max_new_tokens):
         active = [index for index, done in enumerate(finished) if not done]
         if not active:
             break
         branches = [list(prompt_tokens[index]) + generated[index] for index in active]
+        executed_generation_steps += 1
+        active_sequence_steps += len(active)
+        live_prefix_token_positions += sum(map(len, branches))
         ids, valid = _pad_token_lists(branches, pad_token_id)
         lengths = list(map(len, branches))
         if arm.kind == "clean":
@@ -960,6 +980,9 @@ def _generate_arm(
         "eos_reached": finished,
         "sequence_audit": [_finalize_sequence_audit(row) for row in sequence_audit],
         "runtime_seconds": time.perf_counter() - started,
+        "executed_generation_steps": executed_generation_steps,
+        "active_sequence_steps": active_sequence_steps,
+        "live_prefix_token_positions": live_prefix_token_positions,
     }
 
 
@@ -1053,10 +1076,15 @@ def _norm_control_audit(
     records: Sequence[Mapping[str, Any]],
     tolerance: float,
 ) -> dict[str, Any]:
-    by_key = {
-        (record["stage"], record["prompt_id"], record["intervention_arm"]): record
-        for record in records
-    }
+    """Validate controls against a same-prefix post-cast learned reference.
+
+    Autoregressive arms may have different prefixes after their first divergent
+    token.  Each control forward therefore records the learned candidate's
+    hypothetical post-dtype output difference on *that control branch's* live
+    prefix.  Matching a control against a separate learned arm would compare
+    different inputs and is not a valid per-position norm check.
+    """
+
     comparisons: list[dict[str, Any]] = []
     for record in records:
         if record["intervention_kind"] not in {
@@ -1065,15 +1093,44 @@ def _norm_control_audit(
             "random_same_l2",
         }:
             continue
-        alpha_name = str(record["alpha"]).replace(".", "p")
-        learned_name = (
-            f"{record['intervention_model']}_c{record['candidate_component_id']}"
-            f"_learned_a{alpha_name}"
+        reference_steps = record[
+            "per_step_position_candidate_actual_applied_l2"
+        ]
+        control_steps = record["per_step_position_actual_applied_l2"]
+        shape_match = len(reference_steps) == len(control_steps) and all(
+            len(reference) == len(control)
+            for reference, control in zip(
+                reference_steps, control_steps, strict=False
+            )
         )
-        learned = by_key[(record["stage"], record["prompt_id"], learned_name)]
-        reference = float(learned["applied_perturbation_l2"])
+        reference_values = [
+            float(value) for step in reference_steps for value in step
+        ]
+        control_values = [
+            float(value) for step in control_steps for value in step
+        ]
+        position_errors: list[float] = []
+        invalid_zero_reference_positions = 0
+        if shape_match:
+            for reference, control in zip(
+                reference_values, control_values, strict=True
+            ):
+                if reference == 0.0:
+                    if control != 0.0:
+                        invalid_zero_reference_positions += 1
+                    continue
+                position_errors.append(abs(control - reference) / reference)
+        reference = float(record["same_prefix_candidate_reference_applied_l2"])
         control = float(record["applied_perturbation_l2"])
-        relative_error = abs(control - reference) / max(reference, 1e-30)
+        aggregate_relative_error = abs(control - reference) / max(reference, 1e-30)
+        maximum_position_relative_error = max(position_errors, default=0.0)
+        positive_reference_positions = sum(value > 0.0 for value in reference_values)
+        valid = (
+            shape_match
+            and positive_reference_positions > 0
+            and invalid_zero_reference_positions == 0
+            and maximum_position_relative_error <= tolerance
+        )
         comparisons.append(
             {
                 "stage": record["stage"],
@@ -1083,9 +1140,29 @@ def _norm_control_audit(
                 "control_arm": record["intervention_arm"],
                 "learned_actual_applied_l2": reference,
                 "control_actual_applied_l2": control,
-                "relative_norm_error": relative_error,
-                "valid": reference > 0.0 and relative_error <= tolerance,
-                "matching_basis": "actual BF16 output difference over identical timing policy",
+                "aggregate_relative_norm_error": aggregate_relative_error,
+                # Retain the old field as a compatibility alias, but validity is
+                # determined by the stricter per-position comparison below.
+                "relative_norm_error": aggregate_relative_error,
+                "maximum_position_relative_norm_error": (
+                    maximum_position_relative_error
+                ),
+                "positive_reference_position_count": positive_reference_positions,
+                "compared_position_count": len(reference_values),
+                "invalid_zero_reference_position_count": (
+                    invalid_zero_reference_positions
+                ),
+                "position_grid_shape_match": shape_match,
+                "valid": valid,
+                "matching_basis": (
+                    "same control-branch live prefix, per token/prefix position, "
+                    "actual output difference after dtype rounding"
+                ),
+                "cross_arm_limitation": (
+                    "No norm equality is claimed between already-diverged learned "
+                    "and control continuations; each control is matched to the "
+                    "candidate reference recomputed on its own live prefix."
+                ),
             }
         )
     return {
@@ -1120,6 +1197,118 @@ def _annotate_comparison_validity(
                 reasons.append("ACTUAL_CONTROL_NORM_MISMATCH_OR_ZERO_REFERENCE")
         record["causal_comparison_valid"] = not reasons
         record["causal_comparison_invalid_reasons"] = reasons
+
+
+def _runtime_probe_arms(
+    pilot: P6OriginalPilotConfig,
+    candidates: Sequence[P6CandidateSpec],
+) -> list[InterventionArm]:
+    """Choose one full-batch clean and patched timing probe per source model."""
+
+    arms = intervention_arms(pilot, candidates, technical=True)
+    return [
+        next(
+            arm
+            for arm in arms
+            if arm.model_name == model_name
+            and (
+                arm.kind == "clean"
+                if group == "clean"
+                else arm.kind == "learned" and arm.alpha == 1.0
+            )
+        )
+        for model_name in pilot.intervention_models
+        for group in ("clean", "patched")
+    ]
+
+
+def _estimate_discovery_runtime_from_full_batch_probes(
+    pilot: P6OriginalPilotConfig,
+    candidates: Sequence[P6CandidateSpec],
+    prompt_tokens: Sequence[Sequence[int]],
+    probes: Sequence[tuple[InterventionArm, Mapping[str, Any]]],
+) -> dict[str, Any]:
+    """Project discovery runtime from measured full-batch prefix work.
+
+    The old estimator multiplied smoke time by the prompt-count ratio even
+    though prompts run as one batch.  This estimator times representative clean
+    and three-forward patched arms at the *actual 36-prompt batch size*, then
+    scales by total live-prefix token positions and arm counts.  The projection
+    still carries a safety factor and remains a planning estimate, not a causal
+    validity gate.
+    """
+
+    if not prompt_tokens:
+        raise ValueError("runtime estimation requires frozen prompt tokens")
+    full_prefix_work = sum(
+        len(tokens) + step
+        for step in range(pilot.max_new_tokens)
+        for tokens in prompt_tokens
+    )
+    probe_by_group: dict[tuple[str, str], Mapping[str, Any]] = {}
+    for arm, result in probes:
+        group = "clean" if arm.kind == "clean" else "patched"
+        key = (arm.model_name, group)
+        if key in probe_by_group:
+            raise ValueError(f"duplicate runtime probe group: {key}")
+        if int(result["live_prefix_token_positions"]) <= 0:
+            raise ValueError(f"runtime probe has no measured prefix work: {key}")
+        probe_by_group[key] = result
+    expected_groups = {
+        (model_name, group)
+        for model_name in pilot.intervention_models
+        for group in ("clean", "patched")
+    }
+    if set(probe_by_group) != expected_groups:
+        raise ValueError("runtime probes do not cover clean/patched Base and Target")
+
+    arm_counts: dict[tuple[str, str], int] = {}
+    for arm in intervention_arms(pilot, candidates, technical=False):
+        key = (arm.model_name, "clean" if arm.kind == "clean" else "patched")
+        arm_counts[key] = arm_counts.get(key, 0) + 1
+
+    groups: list[dict[str, Any]] = []
+    raw_seconds = 0.0
+    for key in sorted(expected_groups):
+        result = probe_by_group[key]
+        measured_work = int(result["live_prefix_token_positions"])
+        seconds_per_prefix_token = float(result["runtime_seconds"]) / measured_work
+        projected = (
+            seconds_per_prefix_token * full_prefix_work * arm_counts[key]
+        )
+        raw_seconds += projected
+        groups.append(
+            {
+                "intervention_model": key[0],
+                "forward_group": key[1],
+                "arm_count": arm_counts[key],
+                "probe_runtime_seconds": float(result["runtime_seconds"]),
+                "probe_live_prefix_token_positions": measured_work,
+                "seconds_per_live_prefix_token_position": (
+                    seconds_per_prefix_token
+                ),
+                "projected_seconds_before_safety_factor": projected,
+            }
+        )
+    return {
+        "method": "full_batch_prefix_work_by_model_and_forward_group_v1",
+        "full_batch_prompt_count": len(prompt_tokens),
+        "probe_max_new_tokens": pilot.technical_max_new_tokens,
+        "discovery_max_new_tokens": pilot.max_new_tokens,
+        "discovery_live_prefix_token_positions_per_arm_upper_bound": (
+            full_prefix_work
+        ),
+        "groups": groups,
+        "raw_projected_seconds": raw_seconds,
+        "safety_factor": pilot.runtime_estimate_safety_factor,
+        "estimated_pilot_runtime_seconds": (
+            raw_seconds * pilot.runtime_estimate_safety_factor
+        ),
+        "batching_note": (
+            "Prompt count is measured at the actual full batch size and is not "
+            "multiplied as an independent linear factor."
+        ),
+    }
 
 
 def _technical_gate_report(
@@ -1848,6 +2037,7 @@ def run_p6_original_causal(
     technical_runtime_seconds = 0.0
     technical_exception: Exception | None = None
     technical_generated: dict[str, dict[str, Any]] = {}
+    runtime_probes: list[tuple[InterventionArm, dict[str, Any]]] = []
     reproducibility_check_passed = False
     try:
         for arm in intervention_arms(pilot, candidates, technical=True):
@@ -1898,6 +2088,25 @@ def run_p6_original_causal(
             repeated["continuations"] == original["continuations"]
             and repeated["sequence_audit"] == original["sequence_audit"]
         )
+        # Runtime feasibility uses the actual discovery batch size.  These
+        # technical probes are not saved as causal outcomes and cannot change
+        # the already frozen candidate set.
+        for probe_arm in _runtime_probe_arms(pilot, candidates):
+            runtime_probes.append(
+                (
+                    probe_arm,
+                    _generate_arm(
+                        arm=probe_arm,
+                        models=models,
+                        cfg=aspd_cfg,
+                        decomposition=decomposition,
+                        prompt_tokens=all_tokens,
+                        pad_token_id=int(pad_token_id),
+                        eos_token_ids=eos_token_ids,
+                        max_new_tokens=pilot.technical_max_new_tokens,
+                    ),
+                )
+            )
     except Exception as error:  # Preserve an explicit fail-closed artifact package.
         technical_exception = error
     after_technical_weights = {
@@ -1963,21 +2172,17 @@ def run_p6_original_causal(
             "record_count": len(all_records),
         }
 
-    technical_norm_audit = _norm_control_audit(all_records, pilot.actual_norm_relative_tolerance)
-    technical_arms = len(intervention_arms(pilot, candidates, technical=True))
-    pilot_arms = len(intervention_arms(pilot, candidates, technical=False))
-    work_ratio = (
-        pilot_arms
-        * len(prompt_rows)
-        * pilot.max_new_tokens
-        / (
-            technical_arms
-            * len(technical_rows)
-            * pilot.technical_max_new_tokens
-        )
+    technical_norm_audit = _norm_control_audit(
+        all_records, pilot.actual_norm_relative_tolerance
     )
-    estimated_pilot_runtime_seconds = (
-        technical_runtime_seconds * work_ratio * pilot.runtime_estimate_safety_factor
+    runtime_estimate = _estimate_discovery_runtime_from_full_batch_probes(
+        pilot,
+        candidates,
+        all_tokens,
+        runtime_probes,
+    )
+    estimated_pilot_runtime_seconds = float(
+        runtime_estimate["estimated_pilot_runtime_seconds"]
     )
     technical_summary = _technical_gate_report(
         all_records,
@@ -1991,6 +2196,7 @@ def run_p6_original_causal(
     technical_summary.update(
         {
             "technical_runtime_seconds": technical_runtime_seconds,
+            "runtime_feasibility_estimate": runtime_estimate,
             "reproducibility_check_passed": reproducibility_check_passed,
             "hook_cleanup_passed": hook_cleanup_passed,
             "peak_cuda_memory_allocated_bytes": (
