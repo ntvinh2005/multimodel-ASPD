@@ -57,8 +57,15 @@
         "arm": {"enum": ["clean", "learned", "gate_off", "active_matched", "orthogonal_matched", "random_same_l2"]},
         "alpha": {"enum": [0.0, 0.25, 0.5, 1.0]},
         "random_seed": {"type": ["integer", "null"], "minimum": 0},
+        "intended_perturbation_l2": {"type": ["number", "null"], "minimum": 0},
+        "applied_perturbation_l2": {"type": "number", "minimum": 0},
         "actual_perturbation_l2": {"type": "number", "minimum": 0},
         "activation_relative_l2": {"type": "number", "minimum": 0},
+        "output_dtype": {"type": ["string", "null"]},
+        "intended_nonzero_position_count": {"type": ["integer", "null"], "minimum": 0},
+        "actually_changed_position_count": {"type": ["integer", "null"], "minimum": 0},
+        "quantization_lost_fraction": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "ineffective_dose": {"type": "boolean"},
         "modified_positions": {"type": "array", "items": {"type": "array", "prefixItems": [{"type": "integer"}, {"type": "integer"}], "items": false}}
       }
     },

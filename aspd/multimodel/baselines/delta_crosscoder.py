@@ -79,6 +79,9 @@ class DeltaContrastiveCacheSpec(BaseModel):
     sequences_per_shard: PositiveInt = 8
     activation_dtype: Literal["float16", "bfloat16", "float32"] = "bfloat16"
     validation_prompts: PositiveInt = 4
+    # Optional only for the schema-v2 Mix3 corpus.  Legacy contrastive artifacts
+    # retain their original two-way train/validation split when this is zero.
+    calibration_prompts: int = Field(default=0, ge=0)
     truncation: Literal["right"] = "right"
     overwrite: bool = False
 
@@ -938,6 +941,15 @@ def train_delta_crosscoder(
         raise RuntimeError(
             "Delta-Crosscoder training is BLOCKED until the common dataset audit releases it"
         )
+    if cfg.mix3_aspd is not None:
+        # Import lazily to avoid the module-level Delta/Mix3 validation cycle.
+        from aspd.multimodel.mix3 import (
+            validate_delta_mix3_config,
+            validate_mix3_recipe_config,
+        )
+
+        validate_delta_mix3_config(cfg)
+        validate_mix3_recipe_config(cfg, require_ready=True)
     wall_started = time.perf_counter()
     device = torch.device(device_name)
     source = build_delta_source(cfg, device_name=device_name)

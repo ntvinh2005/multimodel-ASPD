@@ -1,12 +1,32 @@
 # Local readiness: P6 causal intervention and Mix3 200M ASPD/Delta
 
-Status: **LOCAL IMPLEMENTATION COMPLETE; SCIENTIFIC EXECUTION NOT RUN**
+Status: **LOCAL_CODE_READY**
+
+- `DATASET_NOT_MATERIALIZED`: yes; Mix3 remains fail-closed `BLOCKED`.
+- `GPU_INTEGRATION_NOT_VERIFIED`: yes.
+- `P6_CAUSAL_EXPERIMENT_NOT_RUN`: yes.
+- `SCIENTIFICALLY_VERIFIED`: no. Code readiness is not a scientific result.
 
 This document records code readiness only. No HiPerGator command, Slurm job,
 7B forward, dataset download, 200M-token materialization, training run, P6
 generation, or behavioral scoring was executed while preparing this change.
 The completed 100M experiment remains the immutable reference; its reports and
 scientific claims were not edited.
+
+## Corrective review findings
+
+| Review finding | Audit result | Correction |
+|---|---|---|
+| Mix3 calibration read validation | Confirmed P0 defect | Added a source-record-disjoint `calibration` split and changed the producer to use it. |
+| No complete 100M autoregressive runner | Confirmed P0 gap | Added branch-local prefix generation and a dry-run-by-default CLI. |
+| Norm measured before BF16 application | Confirmed P1 defect | Record intended and actually applied deltas after output-dtype rounding. |
+| Resume inferred cursor from optimizer step | Confirmed P1 defect | Added a producer-state sidecar coordinated with both trainer checkpoints. |
+| Overlap audit did not gate readiness | Confirmed P1 defect | A manifest- and benchmark-bound persisted audit is now mandatory for `READY`. |
+| P6 `READY` depended on status fields | Confirmed P2 defect | Static readiness verifies checkpoint, package and shortlist provenance. |
+
+The fixed-forward component equation already handled transcoder `b_dec` and
+correctly excluded full-reconstruction `b_out`; that finding needed stronger
+BF16 coverage, not a different learned contribution formula.
 
 ## 1. Scope and scientific objective
 
@@ -51,6 +71,14 @@ each source record is forwarded separately. Only after `R_mid` and `X_O` are
 captured are valid positions concatenated into the logical BatchTopK pool. Packed
 `input_ids` are provenance/debug data and are not forwarded through Qwen again.
 
+The common artifacts now have three ordered, record-disjoint partitions:
+`train`, `calibration`, and `validation`. Calibration is exactly 32,768 valid
+positions: 16,384 FineWeb, 12,288 LMSYS and 4,096 contrastive. These amounts are
+the first eight 4,096-position updates of the frozen 9/9/2 role schedule. If a
+budget ends within a source row, its suffix is discarded and the next split
+starts at a new row. Calibration therefore cannot consume training or validation
+records.
+
 ## 3. Frozen 100M versus proposed Mix3
 
 | Quantity | Frozen 100M | Mix3 proposal |
@@ -81,10 +109,14 @@ its config rejects a resume path.
 | Total | 200,000,000 | 204,800,000 | 4,800,000 |
 
 The deterministic 20-update cycle contains 9 FineWeb, 9 LMSYS and 2
-contrastive updates. `mix3_cursor_for_step` derives per-role consumed positions,
-logical offsets and wrap counts from the optimizer step. These values are stored
-in Mix3 checkpoints and checked on restore. The reader also checkpoints exact
-shard/row/token offsets in its state contract.
+contrastive updates. Step-derived counts remain a consistency check, but are no
+longer the primary resume mechanism. At each coordinated checkpoint the producer
+writes an exact sidecar containing schedule index, per-role exposure counters,
+wrap counters, shard index, row index, in-record token offset, manifest
+fingerprints and the deterministic sampler contract. A world barrier pairs that
+sidecar with both trainer checkpoints at the same optimizer step. The atomic
+marker stores all three SHA-256 values. Resume verifies the marker and restores
+the live readers directly, avoiding an O(historical tokens) scan.
 
 Unique tokens, exposures, repeat tokens and capture padding are separate fields.
 Padding is excluded before ASPD loss, BatchTopK, activation statistics, dead/alive
@@ -101,7 +133,7 @@ Common token artifacts retain:
 - source row/conversation/prompt ID and deterministic selection seed;
 - token IDs and per-record SHA-256;
 - truncation, EOS/stop behavior and source boundary policy;
-- train/validation split, record ID, shard SHA-256 and exact token totals;
+- train/calibration/validation split, record ID, shard SHA-256 and exact totals;
 - generator model, generator seed/side and stop reason for contrastive records.
 
 Validation rejects unsupported schemas, role/dataset/revision/tokenizer mismatch,
@@ -109,6 +141,18 @@ path traversal, corrupt shards, duplicate record IDs, token hash mismatch, inval
 lengths and budget mismatch. `audit_token_overlap` rejects duplicate training
 records plus exact or obvious token-shingle overlap with the frozen behavioral
 benchmark. The production release must persist this audit next to the manifests.
+
+A production `READY` state now requires that persisted audit. It is bound to all
+three current source-manifest hashes, the Mix3 contract hash, and the frozen
+benchmark manifest plus prompt-file checksum. Missing, corrupt or stale evidence
+blocks both ASPD and Delta.
+
+The scalable audit streams one shard at a time, stores exact token/source hashes
+in a temporary on-disk SQLite index, and uses benchmark 5-token-shingle postings
+to screen near-duplicate candidates before exact Jaccard evaluation. It neither
+performs corpus-wide all-pairs comparisons nor loads 200M tokens into RAM. This
+detects literal and high-shingle overlap, not semantic paraphrases; that limitation
+is persisted in the report.
 
 ## 6. Contrastive generation and same-token replay
 
@@ -151,6 +195,16 @@ At every autoregressive decision:
 4. The selected model processes the same prefix with the `o_proj` output hook.
 5. Patched logits select the next live-branch token; the process repeats.
 
+`p6_original_generation.py` implements this loop independently for clean and
+intervened branches. After divergence, each branch recomputes clean Base/Target
+references on its own current prefix; no gate or future continuation is shared.
+EOS and maximum-token termination are explicit. The
+`run_p6_100m_causal` CLI performs static dry-run validation by default, requires
+`--execute`, refuses a `BLOCKED` pilot, and respects the configuration's read-only
+execution guard. Clean, gate-off and zero-strength decisions additionally compare
+patched logits with the clean replay at a declared `1e-6` absolute tolerance and
+fail closed if the no-op contract is violated.
+
 Training-time BatchTopK pools positions across a batch and is not prefix-causal.
 It is not reused online. The learned JumpReLU threshold is explicitly recorded as
 an inference approximation, not as an identical implementation of BatchTopK.
@@ -172,8 +226,17 @@ the resolved config fingerprint.
 - `random_same_l2`: seeded random actual-output direction with the same per-token
   L2 and timing; pilot seeds are 0–4.
 
-Matching is performed on actual `o_proj` output perturbations, not parameter-vector
-norm alone. A zero candidate perturbation remains exactly zero in every matched
+The hook first constructs an intended FP32 delta, performs subtraction and casts
+using the real `o_proj` output dtype, then measures
+`actual_delta = clean_output.float() - intervened_output.float()`. Records contain
+intended/applied L2, output dtype, intended and changed position counts,
+per-position applied norms, quantization loss fraction and an ineffective-dose
+flag. A requested nonzero dose that vanishes in BF16 is not causal evidence.
+
+Matching is checked on actually applied `o_proj` perturbations, not parameter-vector
+norm or intended FP32 norm. Controls record observed mismatch against the
+candidate and fail outside a declared relative tolerance; equality is never
+fabricated. A zero candidate perturbation remains exactly zero in every matched
 control. A nonzero candidate with a zero active-control contribution fails closed.
 Supported alpha values are 0, 0.25, 0.5 and 1.0; configuration does not launch
 generation automatically.
@@ -222,13 +285,35 @@ equated with ASPD rank-one weight operators.
 
 ## 11. Local verification
 
-Executed with the available CPU-only Python 3.11 environment:
+Executed with the available CPU-only Python 3.11 environment after the
+corrective changes:
+
+```powershell
+python -m pytest tests/test_multimodel_p6_original_causal.py `
+  tests/test_multimodel_mix3.py tests/test_multimodel_delta_r0_streaming.py -q
+
+python -m pytest tests/test_multimodel_p6_original_causal.py `
+  tests/test_multimodel_mix3.py tests/test_multimodel_original_recipe.py `
+  tests/test_multimodel_original_data.py tests/test_multimodel_original_gloo.py `
+  tests/test_multimodel_original_results.py tests/test_multimodel_delta_r0_streaming.py `
+  tests/test_multimodel_delta_r0.py tests/test_multimodel_delta_contrastive.py `
+  tests/test_multimodel_delta_crosscoder.py -q
+
+uvx --offline ruff check <all modified Python files>
+python -m py_compile <all modified production Python files>
+python -m aspd.multimodel.cli.run_p6_100m_causal `
+  configs/multimodel/qwen25_extreme_sports/p6_100m_causal_pilot.yaml
+git diff --check
+```
 
 ```text
-focused Mix3/P6/original/Gloo/Delta-stream tests: 35 passed, 1 skipped
-broader targeted regression bundle: 83 passed, 2 skipped, 1 Windows line-ending checksum failure
-selected changed-file py_compile: PASS
-Ruff on every changed Python file: PASS
+corrective P6/Mix3/Delta-R0 tests: 33 passed
+P6 autoregressive/BF16 file: 17 passed
+broader P6/Mix3/original/Delta regression: 84 passed, 2 skipped, 1 failed
+selected changed-file py_compile under Python 3.11: PASS
+YAML/JSON static parsing, JSON Schema record validation and P6 dry-run CLI: PASS
+git diff --check: PASS
+Ruff on every modified Python file via the offline local package cache: PASS
 ```
 
 The skipped Gloo test requires a Linux-supported multiprocess backend. The one
@@ -239,21 +324,18 @@ supported interpreter** because this checkout requires Python 3.13 and the local
 machine only exposes Python 3.11; Python 3.11 stops on the pre-existing PEP 695
 syntax in `aspd/losses.py`. No GPU/7B/data tests were run.
 
-A repository-wide Ruff scan is not clean independently of this task: it reports
-55 pre-existing findings in unrelated legacy modules. Those files were not
-auto-fixed or otherwise changed.
-
-The final verification section must be updated if later reruns produce different
-counts.
+Ruff used the local offline package cache; no network fetch was performed.
 
 ## 12. Main files changed
 
 - `aspd/multimodel/p6_original_causal.py`: verified candidate/checkpoint loading,
-  clean-reference gate, actual-output interventions, controls and v2 records.
+  clean-reference gate, BF16-effective interventions, controls and v2 records.
+- `aspd/multimodel/p6_original_generation.py`: branch-local prefix-causal runner.
+- `aspd/multimodel/cli/run_p6_100m_causal.py`: guarded dry-run/explicit execution CLI.
 - `aspd/multimodel/mix3.py`: strict validators, masks, packing, cursor/overlap
-  contracts and the record-isolated ASPD source adapter.
+  contracts, persisted readiness audits and the record-isolated ASPD adapter.
 - `aspd/multimodel/original_streaming.py`: opt-in Mix3 dispatch, per-position
-  provenance and exact resume cursor; 100M dispatch remains unchanged.
+  provenance and coordinated producer-state resume; 100M dispatch remains unchanged.
 - `aspd/multimodel/delta_contrastive.py`: backward-compatible Section-4.2 mode.
 - `aspd/multimodel/delta_r0_streaming.py`: stronger source provenance validation.
 - New ASPD, Delta, common-data and P6 pilot configurations under `configs/`.
@@ -293,6 +375,17 @@ All large steps are deferred. A future reviewed HiPerGator workflow is:
      configs/multimodel/qwen25_extreme_sports/p6_100m_causal_pilot.yaml \
      --require-ready
    ```
+
+   Then review the non-executing runner dry-run separately:
+
+   ```bash
+   .venv/bin/python -m aspd.multimodel.cli.run_p6_100m_causal \
+     configs/multimodel/qwen25_extreme_sports/p6_100m_causal_pilot.yaml
+   ```
+
+   A future real invocation additionally requires `--execute`, one verified
+   component/prompt/arm, an output path, and explicit removal of the config's
+   read-only guard after approval. Importing the CLI never executes generation.
 
 Changing a status flag without passing manifest validation does not release ASPD;
 the streaming entry point revalidates artifacts. Delta training also refuses a

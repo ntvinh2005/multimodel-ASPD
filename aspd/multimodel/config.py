@@ -73,6 +73,7 @@ class DataSourceSpec(BaseModel):
         "neutral",
     ] | None = None
     planned_train_tokens: PositiveInt | None = None
+    planned_calibration_tokens: int | None = Field(default=None, ge=0)
     planned_validation_tokens: PositiveInt | None = None
 
 
@@ -247,6 +248,8 @@ class Mix3ASPDRecipeSpec(BaseModel):
     ]
     unique_corpus_tokens: PositiveInt = 200_000_000
     optimizer_token_exposures: PositiveInt = 204_800_000
+    readiness_audit_report: str
+    benchmark_manifest: str
 
     @model_validator(mode="after")
     def validate_mix3_contract(self) -> Mix3ASPDRecipeSpec:

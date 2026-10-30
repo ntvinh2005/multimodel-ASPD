@@ -142,6 +142,40 @@ def test_budgeted_chunks_stop_at_exact_split_budgets(tmp_path) -> None:
     )
 
 
+def test_schema_v2_three_way_split_is_record_disjoint_and_deterministic(tmp_path) -> None:
+    rows = [
+        (list(range(index * 10, index * 10 + 10)), {"row": index})
+        for index in range(8)
+    ]
+    manifests = []
+    split_rows = []
+    for name in ("first", "second"):
+        source = _source(tmp_path / name, "fineweb", train=13, validation=11).model_copy(
+            update={"calibration_tokens": 17}
+        )
+        chunks = list(_budgeted_chunks(rows, source, sequence_length=4))
+        writer = TokenArtifactWriter(source, _mix(tmp_path / f"mix-{name}"), overwrite=False)
+        for ids, split, provenance in chunks:
+            writer.add(ids, split=split, provenance=provenance)
+        manifests.append(writer.finish({"test": True}))
+        split_rows.append(
+            {
+                split: {provenance["row"] for _, current, provenance in chunks if current == split}
+                for split in ("train", "calibration", "validation")
+            }
+        )
+        assert {split: sum(len(ids) for ids, current, _ in chunks if current == split)
+                for split in ("train", "calibration", "validation")} == {
+            "train": 13, "calibration": 17, "validation": 11
+        }
+        assert not (split_rows[-1]["train"] & split_rows[-1]["calibration"])
+        assert not (split_rows[-1]["train"] & split_rows[-1]["validation"])
+        assert not (split_rows[-1]["calibration"] & split_rows[-1]["validation"])
+    assert manifests[0]["tokens"] == manifests[1]["tokens"]
+    assert manifests[0]["shards"] == manifests[1]["shards"]
+    assert split_rows[0] == split_rows[1]
+
+
 def test_token_artifact_validation_and_resume_cursor_are_exact(tmp_path) -> None:
     mix = _mix(tmp_path)
     _write_artifacts(mix)

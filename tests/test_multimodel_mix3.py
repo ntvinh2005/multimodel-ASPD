@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from copy import deepcopy
 from pathlib import Path
 
@@ -11,18 +13,37 @@ from aspd.multimodel.baselines.delta_crosscoder import (
     train_delta_crosscoder,
 )
 from aspd.multimodel.config import load_experiment_config
-from aspd.multimodel.delta_contrastive import plan_section_4_2_single_generator
+from aspd.multimodel.delta_contrastive import (
+    deterministic_reserved_prompt_ids,
+    plan_section_4_2_single_generator,
+)
+from aspd.multimodel.delta_r0_streaming import (
+    DEFAULT_SCHEDULE,
+    R0DataMixSpec,
+    R0SourceSpec,
+    TokenArtifactWriter,
+)
 from aspd.multimodel.mix3 import (
     ExactPositionCursor,
     Mix3ASPDSource,
     audit_token_overlap,
     collate_variable_records,
+    create_mix3_readiness_audit,
+    mix3_manifest_fingerprints,
     pack_valid_activation_positions,
     validate_delta_mix3_config,
+    validate_mix3_readiness_audit,
     validate_mix3_recipe_config,
 )
 from aspd.multimodel.original_recipe import DatasetIntegrityError, validate_original_recipe_config
-from aspd.multimodel.original_streaming import checkpoint_payload, restore_checkpoint_payload
+from aspd.multimodel.original_streaming import (
+    _mix3_source_checkpoint,
+    _restore_mix3_source_checkpoint,
+    _save_mix3_source_checkpoint,
+    _sha256_file,
+    checkpoint_payload,
+    restore_checkpoint_payload,
+)
 
 ROOT = Path(__file__).parents[1]
 ASPD = ROOT / "configs/multimodel/qwen25_extreme_sports/aspd_d0_s1_l14_o_mix3_200m.yaml"
@@ -48,6 +69,12 @@ def test_mix3_configs_freeze_budgets_and_leave_100m_validator_unchanged() -> Non
         "lmsys": 92_160_000,
         "contrastive": 20_480_000,
     }
+    assert report["source_calibration_tokens"] == {
+        "fineweb": 16_384,
+        "lmsys": 12_288,
+        "contrastive": 4_096,
+    }
+    assert sum(report["source_calibration_tokens"].values()) == 32_768
     assert aspd.training.max_steps * 4_096 == 204_800_000
     with pytest.raises(DatasetIntegrityError, match="BLOCKED"):
         validate_mix3_recipe_config(aspd, require_ready=True)
@@ -231,6 +258,14 @@ def test_section_4_2_planner_is_balanced_unique_and_deterministic() -> None:
             prompt_count=20,
             seed=42,
         )
+    calibration, validation = deterministic_reserved_prompt_ids(
+        first, calibration_count=2, validation_count=4, seed=42
+    )
+    repeated = deterministic_reserved_prompt_ids(
+        first, calibration_count=2, validation_count=4, seed=42
+    )
+    assert (calibration, validation) == repeated
+    assert not calibration & validation
 
 
 def test_overlap_audit_fails_on_duplicates_exact_and_near_overlap() -> None:
@@ -242,9 +277,283 @@ def test_overlap_audit_fails_on_duplicates_exact_and_near_overlap() -> None:
         audit_token_overlap(
             [{"record_id": "leak", "token_ids": list(range(10))}], benchmark
         )
+    with pytest.raises(DatasetIntegrityError, match="near"):
+        audit_token_overlap(
+            [{"record_id": "near", "token_ids": [*range(9), 99]}],
+            benchmark,
+            near_threshold=0.5,
+        )
     duplicate_rows = [
         {"record_id": "one", "token_ids": [20, 21, 22]},
         {"record_id": "two", "token_ids": [20, 21, 22]},
     ]
     with pytest.raises(DatasetIntegrityError, match="duplicates"):
         audit_token_overlap(duplicate_rows, benchmark)
+def _small_three_way_mix(
+    tmp_path: Path, *, split_leak: bool = False, prompt_leak: bool = False
+) -> R0DataMixSpec:
+    sources = []
+    for role in ("fineweb", "lmsys", "contrastive"):
+        sources.append(
+            R0SourceSpec(
+                role=role,
+                dataset_id=f"fixture/{role}",
+                revision="a" * 40,
+                train_tokens=13,
+                calibration_tokens=3,
+                validation_tokens=4,
+                artifact_dir=str(tmp_path / role),
+                text_field="text" if role == "fineweb" else None,
+                conversation_field="conversation" if role == "lmsys" else None,
+                input_manifest="input.json" if role == "contrastive" else None,
+            )
+        )
+    mix = R0DataMixSpec(
+        scientific_label="synthetic three-way fixture",
+        tokenizer_id="fixture/tokenizer",
+        tokenizer_revision="b" * 40,
+        batch_size_tokens=4096,
+        optimizer_steps=20,
+        source_schedule=DEFAULT_SCHEDULE,
+        sources=tuple(sources),
+    )
+    for role_index, source in enumerate(mix.sources):
+        writer = TokenArtifactWriter(source, mix, overwrite=False)
+        for split, budget in (("train", 13), ("calibration", 3), ("validation", 4)):
+            remaining = budget
+            record = 0
+            while remaining:
+                take = min(3 + ((record + role_index) % 4), remaining)
+                base = role_index * 10_000 + {"train": 0, "calibration": 100, "validation": 200}[split]
+                writer.add(
+                    list(range(base + budget - remaining, base + budget - remaining + take)),
+                    split=split,
+                    provenance={
+                        "source_row_id": (
+                            f"{role}-leaked-row"
+                            if split_leak and source.role == "fineweb" and record == 0
+                            else f"{source.role}-{split}-{record}"
+                        ),
+                        "prompt_id": (
+                            "contrastive-leaked-prompt"
+                            if prompt_leak and source.role == "contrastive" and record == 0
+                            else f"{source.role}-{split}-{record}"
+                        ),
+                    },
+                )
+                remaining -= take
+                record += 1
+        writer.finish({"fixture": True})
+    return mix
+
+
+def test_mix3_exact_source_state_resume_uses_live_mid_record_cursor(tmp_path: Path) -> None:
+    mix = _small_three_way_mix(tmp_path)
+    uninterrupted = Mix3ASPDSource(mix, "train")
+    uninterrupted._advance_without_capture("fineweb", 4096)
+    uninterrupted.batch_count = 1
+    state = uninterrupted.state_dict()
+    assert state["readers"]["fineweb"]["token_offset"] != 0
+
+    def consume(source, role, count):
+        reader = source.readers[role]
+        observed = []
+        remaining = count
+        while remaining:
+            record = reader.current()
+            start = reader.token_offset
+            take = min(remaining, len(record["token_ids"]) - start)
+            stop = start + take
+            observed.append(
+                (
+                    record["record_id"],
+                    start,
+                    stop,
+                    reader.wrap_count,
+                    record["token_ids"][start:stop].tolist(),
+                    record["provenance"],
+                )
+            )
+            reader.token_offset = stop
+            source.position_counts[role] += take
+            remaining -= take
+            if stop == len(record["token_ids"]):
+                reader.advance_record()
+        return observed
+
+    expected_batch = consume(uninterrupted, "lmsys", 4096)
+    uninterrupted.batch_count = 2
+    expected = uninterrupted.state_dict()
+
+    resumed = Mix3ASPDSource(mix, "train")
+    resumed.load_state_dict(state)
+    observed_batch = consume(resumed, "lmsys", 4096)
+    resumed.batch_count = 2
+    assert observed_batch == expected_batch
+    assert resumed.state_dict() == expected
+
+    corrupt = deepcopy(state)
+    corrupt["source_manifest_sha256"]["fineweb"] = "0" * 64
+    with pytest.raises(DatasetIntegrityError, match="different manifests"):
+        Mix3ASPDSource(mix, "train").load_state_dict(corrupt)
+
+
+def test_coordinated_producer_sidecar_checksum_fails_closed(tmp_path: Path) -> None:
+    mix = _small_three_way_mix(tmp_path / "data")
+    cfg = load_experiment_config(ASPD)
+    source = Mix3ASPDSource(mix, "train")
+    source._advance_without_capture("fineweb", 4096)
+    source.batch_count = 1
+    _save_mix3_source_checkpoint(tmp_path, cfg, 1, source)
+    sidecar = _mix3_source_checkpoint(tmp_path, 1)
+    torch.save(
+        {"step": 1, "producer_sha256": _sha256_file(sidecar)},
+        tmp_path / "latest_checkpoint.pt",
+    )
+    restored = Mix3ASPDSource(mix, "train")
+    _restore_mix3_source_checkpoint(tmp_path, cfg, 1, restored)
+    assert restored.state_dict() == source.state_dict()
+    with sidecar.open("ab") as handle:
+        handle.write(b"corrupt")
+    with pytest.raises(RuntimeError, match="checksum"):
+        _restore_mix3_source_checkpoint(tmp_path, cfg, 1, Mix3ASPDSource(mix, "train"))
+
+
+def _write_readiness_report(mix, benchmark: Path, path: Path, **updates):
+    benchmark_payload = json.loads(benchmark.read_text(encoding="utf-8"))
+    prompt_path = Path(benchmark_payload["prompt_file"])
+    checks = {
+        "exact_duplicate_check": "PASS",
+        "near_duplicate_check": "PASS",
+        "split_disjointness": "PASS",
+        "contrastive_prompt_isolation": "PASS",
+        "organism_exclusion": "PASS",
+        "shared_aspd_delta_contract": "PASS",
+    }
+    report = {
+        "schema_version": 1,
+        "status": "PASS",
+        "source_manifest_sha256": mix3_manifest_fingerprints(mix),
+        "benchmark_manifest_sha256": hashlib.sha256(benchmark.read_bytes()).hexdigest(),
+        "benchmark_identity": {
+            "benchmark_version": benchmark_payload["benchmark_version"],
+            "prompt_file": str(prompt_path.resolve()),
+            "prompt_sha256": benchmark_payload["prompt_sha256"],
+        },
+        "mix_contract_sha256": hashlib.sha256(
+            json.dumps(mix.model_dump(mode="json"), sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest(),
+        "organism_training_tokens": 0,
+        "checks": checks,
+        **updates,
+    }
+    report["audit_sha256"] = hashlib.sha256(
+        json.dumps(report, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    path.write_text(json.dumps(report), encoding="utf-8")
+
+
+def _write_benchmark_fixture(tmp_path: Path) -> Path:
+    prompts = tmp_path / "benchmark_prompts.jsonl"
+    prompts.write_text('{"prompt_id":"held-out","prompt":"frozen"}\n', encoding="utf-8")
+    manifest = tmp_path / "benchmark.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "benchmark_version": "synthetic-frozen-v1",
+                "prompt_file": str(prompts),
+                "prompt_sha256": hashlib.sha256(prompts.read_bytes()).hexdigest(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    return manifest
+
+
+def test_readiness_audit_is_hash_bound_and_status_flag_is_insufficient(tmp_path: Path) -> None:
+    mix = _small_three_way_mix(tmp_path / "mix")
+    benchmark = _write_benchmark_fixture(tmp_path)
+    report = tmp_path / "audit.json"
+    with pytest.raises(DatasetIntegrityError, match="missing"):
+        validate_mix3_readiness_audit(mix, report_path=report, benchmark_manifest=benchmark)
+    _write_readiness_report(mix, benchmark, report)
+    assert validate_mix3_readiness_audit(
+        mix, report_path=report, benchmark_manifest=benchmark
+    )["status"] == "PASS"
+    report.write_text("{}", encoding="utf-8")
+    with pytest.raises(DatasetIntegrityError, match="checksum"):
+        validate_mix3_readiness_audit(mix, report_path=report, benchmark_manifest=benchmark)
+    _write_readiness_report(mix, benchmark, report, benchmark_manifest_sha256="0" * 64)
+    with pytest.raises(DatasetIntegrityError, match="different benchmark"):
+        validate_mix3_readiness_audit(mix, report_path=report, benchmark_manifest=benchmark)
+    wrong_sources = mix3_manifest_fingerprints(mix)
+    wrong_sources["fineweb"] = "0" * 64
+    _write_readiness_report(mix, benchmark, report, source_manifest_sha256=wrong_sources)
+    with pytest.raises(DatasetIntegrityError, match="different source manifests"):
+        validate_mix3_readiness_audit(mix, report_path=report, benchmark_manifest=benchmark)
+
+    cfg = load_experiment_config(ASPD)
+    falsely_ready = cfg.model_copy(
+        update={
+            "data": cfg.data.model_copy(update={"dataset_status": "READY"}),
+            "mix3_aspd": cfg.mix3_aspd.model_copy(update={"readiness": "READY"}),
+        }
+    )
+    with pytest.raises(DatasetIntegrityError):
+        validate_mix3_recipe_config(falsely_ready, require_ready=True)
+    delta = load_delta_crosscoder_config(DELTA)
+    falsely_ready_delta = delta.model_copy(
+        update={
+            "data": delta.data.model_copy(update={"dataset_status": "READY"}),
+            "mix3_aspd": delta.mix3_aspd.model_copy(update={"readiness": "READY"}),
+            "delta_crosscoder": delta.delta_crosscoder.model_copy(
+                update={"readiness": "READY"}
+            ),
+        }
+    )
+    with pytest.raises(DatasetIntegrityError):
+        train_delta_crosscoder(falsely_ready_delta, device_name="cpu")
+
+
+def test_streaming_audit_rejects_split_and_overlap_fixtures(tmp_path: Path) -> None:
+    mix = _small_three_way_mix(tmp_path / "clean")
+    benchmark = _write_benchmark_fixture(tmp_path)
+    output = tmp_path / "synthetic-audit.json"
+    synthetic = create_mix3_readiness_audit(
+        mix,
+        benchmark_records=[{"token_ids": [90, 91, 92, 93, 94]}],
+        benchmark_manifest=benchmark,
+        output_path=output,
+        _synthetic_fixture=True,
+    )
+    assert synthetic["status"] == "SYNTHETIC_TEST_ONLY"
+    with pytest.raises(DatasetIntegrityError, match="not a production PASS"):
+        validate_mix3_readiness_audit(mix, report_path=output, benchmark_manifest=benchmark)
+
+    with pytest.raises(DatasetIntegrityError, match="exact="):
+        create_mix3_readiness_audit(
+            mix,
+            benchmark_records=[{"token_ids": [0, 1, 2]}],
+            benchmark_manifest=benchmark,
+            output_path=output,
+            near_threshold=0.5,
+            _synthetic_fixture=True,
+        )
+    leaked = _small_three_way_mix(tmp_path / "leaked", split_leak=True)
+    with pytest.raises(DatasetIntegrityError, match="split_leaks="):
+        create_mix3_readiness_audit(
+            leaked,
+            benchmark_records=[{"token_ids": [90, 91, 92]}],
+            benchmark_manifest=benchmark,
+            output_path=output,
+            _synthetic_fixture=True,
+        )
+    prompt_leaked = _small_three_way_mix(tmp_path / "prompt-leaked", prompt_leak=True)
+    with pytest.raises(DatasetIntegrityError, match="prompt_leaks="):
+        create_mix3_readiness_audit(
+            prompt_leaked,
+            benchmark_records=[{"token_ids": [90, 91, 92]}],
+            benchmark_manifest=benchmark,
+            output_path=output,
+            _synthetic_fixture=True,
+        )

@@ -36,7 +36,7 @@ from aspd.multimodel.delta_contrastive import (
     token_ids_sha256,
 )
 
-R0_TEXT_SCHEMA_VERSION = 1
+R0_TEXT_SCHEMA_VERSION = 2
 SOURCE_ROLES = ("fineweb", "lmsys", "contrastive")
 DEFAULT_SCHEDULE = (
     "fineweb", "lmsys", "fineweb", "lmsys", "contrastive",
@@ -79,6 +79,9 @@ class R0SourceSpec(BaseModel):
     subset: str | None = None
     split: str = "train"
     train_tokens: PositiveInt
+    # Schema-v2 sources may reserve a third, source-record-disjoint split for
+    # initialization.  Zero preserves every schema-v1/legacy Delta contract.
+    calibration_tokens: int = Field(default=0, ge=0)
     validation_tokens: PositiveInt
     artifact_dir: str
     selection: Literal["published_order_first_valid"] = "published_order_first_valid"
@@ -137,6 +140,16 @@ def load_r0_mix_config(path: str | Path) -> R0DataMixSpec:
     return R0DataMixSpec.model_validate(mapping)
 
 
+def _source_split_budgets(source: R0SourceSpec) -> dict[str, int]:
+    """Return split budgets in their immutable source-allocation order."""
+
+    budgets = {"train": int(source.train_tokens)}
+    if source.calibration_tokens:
+        budgets["calibration"] = int(source.calibration_tokens)
+    budgets["validation"] = int(source.validation_tokens)
+    return budgets
+
+
 class TokenArtifactWriter:
     """Write bounded token-only shards with an exact split-token contract."""
 
@@ -154,6 +167,8 @@ class TokenArtifactWriter:
         self.buffer_tokens = 0
         self.shards: list[dict[str, Any]] = []
         self.split_tokens = {"train": 0, "validation": 0}
+        if source.calibration_tokens:
+            self.split_tokens["calibration"] = 0
         self.record_count = 0
 
     def add(self, token_ids: Sequence[int], *, split: str, provenance: Mapping[str, Any]) -> None:
@@ -195,14 +210,12 @@ class TokenArtifactWriter:
 
     def finish(self, metadata: Mapping[str, Any]) -> dict[str, Any]:
         self.flush()
-        expected = {
-            "train": self.source.train_tokens,
-            "validation": self.source.validation_tokens,
-        }
+        expected = _source_split_budgets(self.source)
         if self.split_tokens != expected:
             raise ValueError(f"token budget mismatch: {self.split_tokens} != {expected}")
         manifest = {
-            "schema_version": R0_TEXT_SCHEMA_VERSION,
+            # Do not rewrite the meaning of historical two-way artifacts.
+            "schema_version": 2 if self.source.calibration_tokens else 1,
             "artifact_type": "delta_r0_frozen_token_source",
             "source_role": self.source.role,
             "dataset": {
@@ -235,13 +248,16 @@ def _budgeted_chunks(
 ) -> Iterator[tuple[list[int], str, Mapping[str, Any]]]:
     """Cut records to exact budgets without leaking one row across the split."""
 
-    remaining = {"train": source.train_tokens, "validation": source.validation_tokens}
-    split = "train"
+    remaining = _source_split_budgets(source)
+    split_order = list(remaining)
+    split_index = 0
     for ids, provenance in token_stream:
+        split = split_order[split_index]
         if remaining[split] == 0:
-            if split == "validation":
+            split_index += 1
+            if split_index == len(split_order):
                 return
-            split = "validation"
+            split = split_order[split_index]
         offset = 0
         while offset < len(ids):
             take = min(sequence_length, remaining[split], len(ids) - offset)
@@ -249,12 +265,12 @@ def _budgeted_chunks(
                 yield ids[offset:offset + take], split, provenance
                 offset += take
                 remaining[split] -= take
-                if split == "validation" and remaining[split] == 0:
-                    return
-                if split == "train" and remaining[split] == 0:
-                    # The unused suffix belongs to the last training document. Drop
-                    # it so held-out validation begins at the next source row.
-                    split = "validation"
+                if remaining[split] == 0:
+                    # Never let one source row cross a train/calibration/validation
+                    # boundary.  Its unused suffix is deliberately discarded.
+                    split_index += 1
+                    if split_index == len(split_order):
+                        return
                     break
     raise RuntimeError(f"{source.role} exhausted before exact token budgets were filled")
 
@@ -349,17 +365,20 @@ def materialize_hf_text_source(
         # Conversation boundaries are retained. The final conversation in a split
         # may be shortened to hit the exact budget; its unused suffix is discarded,
         # never reinterpreted as a new validation conversation without context.
-        remaining = {"train": source.train_tokens, "validation": source.validation_tokens}
-        split = "train"
+        remaining = _source_split_budgets(source)
+        split_order = list(remaining)
+        split_index = 0
         for ids, provenance in records():
+            split = split_order[split_index]
             if remaining[split] == 0:
-                if split == "validation":
+                split_index += 1
+                if split_index == len(split_order):
                     break
-                split = "validation"
+                split = split_order[split_index]
             take = min(len(ids), remaining[split])
             writer.add(ids[:take], split=split, provenance=provenance)
             remaining[split] -= take
-            if remaining["validation"] == 0:
+            if not any(remaining.values()):
                 break
         if any(remaining.values()):
             raise RuntimeError(f"LMSYS exhausted before exact token budgets: {remaining}")
@@ -405,10 +424,7 @@ def freeze_contrastive_text_source(
     ]
 
     writer = TokenArtifactWriter(source, mix, overwrite=overwrite)
-    for split, budget in (
-        ("train", source.train_tokens),
-        ("validation", source.validation_tokens),
-    ):
+    for split, budget in _source_split_budgets(source).items():
         remaining = budget
         for index, row in enumerate(examples):
             if row["split"] != split:
@@ -457,8 +473,10 @@ def validate_text_artifact(
 ) -> dict[str, Any]:
     root = Path(path).parent if Path(path).name == "manifest.json" else Path(path)
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
-    if manifest["schema_version"] != R0_TEXT_SCHEMA_VERSION:
+    if manifest["schema_version"] not in {1, 2}:
         raise ValueError("unsupported R0 text artifact schema")
+    if source.calibration_tokens and manifest["schema_version"] != 2:
+        raise ValueError("three-way R0 source requires schema version 2")
     if manifest["source_role"] != source.role:
         raise ValueError("R0 source role mismatch")
     expected_dataset = {
@@ -477,7 +495,7 @@ def validate_text_artifact(
             "revision": mix.tokenizer_revision,
         }:
             raise ValueError("R0 source tokenizer identity/revision mismatch")
-    observed = {"train": 0, "validation": 0}
+    observed = {split: 0 for split in _source_split_budgets(source)}
     records = 0
     record_ids: set[str] = set()
     for shard in manifest["shards"]:
@@ -501,9 +519,11 @@ def validate_text_artifact(
                 raise ValueError("record token checksum mismatch")
             if not 0 < len(ids) <= manifest["sequence_length"]:
                 raise ValueError("record violates sequence length")
+            if record["split"] not in observed:
+                raise ValueError("record uses a split absent from the source contract")
             observed[record["split"]] += len(ids)
             records += 1
-    expected = {"train": source.train_tokens, "validation": source.validation_tokens}
+    expected = _source_split_budgets(source)
     if observed != expected or observed != manifest["tokens"]:
         raise ValueError(f"R0 artifact token budgets differ: {observed} != {expected}")
     return {"source_role": source.role, "records": records, "tokens": observed}

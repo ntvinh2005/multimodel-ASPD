@@ -22,7 +22,11 @@ import yaml
 from torch import Tensor, nn
 
 from aspd.multimodel.cache import _tensor_from_value
-from aspd.multimodel.config import ModelSpec, MultiModelExperimentConfig
+from aspd.multimodel.config import (
+    ModelSpec,
+    MultiModelExperimentConfig,
+    load_experiment_config,
+)
 from aspd.multimodel.model import MultiModelASPD
 from aspd.multimodel.original_recipe import sha256_file, validate_original_recipe_config
 from aspd.multimodel.original_steering import freeze_clean_original_gate
@@ -93,6 +97,16 @@ def validate_p6_pilot_config(
         raise ValueError("P6 pilot intervention arms differ from the approved contract")
     if len(set(intervention["random_seeds"])) < 2:
         raise ValueError("P6 random control requires multiple unique seeds")
+    gate_policy = config["gate_policy"]
+    if (
+        gate_policy.get("procedure")
+        != "clean_base_and_target_same_prefix_then_frozen_gate_then_patched_forward"
+        or gate_policy.get("training_batch_topk_reused_online") is not False
+    ):
+        raise ValueError("P6 gate policy is not the approved prefix-causal policy")
+    execution = config["execution"]
+    if execution.get("opt_in_only") is not True or execution.get("auto_launch") is not False:
+        raise ValueError("P6 execution must remain explicit opt-in with auto-launch disabled")
     ready = config["scientific_status"] == "READY"
     placeholders = [
         config["checkpoint"]["rank0_path"],
@@ -104,6 +118,42 @@ def validate_p6_pilot_config(
         raise ValueError("READY P6 config may not contain handoff placeholders")
     if require_ready and not ready:
         raise RuntimeError("P6 pilot remains BLOCKED until handoff paths and hashes are frozen")
+    artifact_verification: dict[str, Any] | None = None
+    if ready:
+        base_config_path = Path(config["base_config"])
+        if not base_config_path.is_file():
+            raise FileNotFoundError(f"canonical 100M config not found: {base_config_path}")
+        cfg = load_experiment_config(base_config_path)
+        checkpoint = validate_100m_checkpoint_contract(
+            cfg,
+            config["checkpoint"]["rank0_path"],
+            expected_checkpoint_sha256=config["checkpoint"]["expected_sha256"],
+        )
+        shortlist = load_100m_candidate_shortlist(
+            candidate["shortlist_path"],
+            package_manifest=candidate["package_manifest"],
+            maximum=candidate["maximum_candidates"],
+        )
+        package_path = Path(candidate["package_manifest"])
+        package = json.loads(package_path.read_text(encoding="utf-8"))
+        checkpoint_entries = [
+            row
+            for row in package.get("artifacts", [])
+            if row.get("sha256") == checkpoint["sha256"]
+            and Path(str(row.get("path", ""))).name
+            == Path(checkpoint["path"]).name
+        ]
+        if len(checkpoint_entries) != 1:
+            raise ValueError("canonical checkpoint hash/path is absent from P6 handoff package")
+        artifact_verification = {
+            "base_config": str(base_config_path.resolve()),
+            "config_sha256": checkpoint["config_sha256"],
+            "checkpoint": checkpoint,
+            "package_manifest": str(package_path.resolve()),
+            "package_status": shortlist["package_status"],
+            "shortlist_sha256": shortlist["source_sha256"],
+            "candidate_ids": [row["component_id"] for row in shortlist["candidates"]],
+        }
     return {
         "status": "READY" if ready else "BLOCKED",
         "prompt_dataset_id": prompt_spec["id"],
@@ -112,7 +162,8 @@ def validate_p6_pilot_config(
         "matched_pair_count": len(paired["risk"]),
         "maximum_candidates": candidate["maximum_candidates"],
         "random_control_seeds": intervention["random_seeds"],
-        "auto_launch": config["execution"]["auto_launch"],
+        "auto_launch": execution["auto_launch"],
+        "artifact_verification": artifact_verification,
     }
 
 
@@ -179,6 +230,8 @@ def validate_100m_checkpoint_contract(
 
     validate_original_recipe_config(cfg)
     path = Path(checkpoint_rank0)
+    if not path.name.endswith(".rank0.pt"):
+        raise ValueError("100M P6 requires the canonical rank-0 checkpoint file")
     observed = sha256_file(path)
     if observed != expected_checkpoint_sha256:
         raise ValueError("100M P6 checkpoint hash differs from the handoff contract")
@@ -335,6 +388,8 @@ def run_original_p6_arm(
     alpha: float,
     matched_component_id: int | None = None,
     random_seed: int | None = None,
+    reference_applied_l2: float | None = None,
+    norm_match_relative_tolerance: float = 0.05,
 ) -> OriginalP6ForwardResult:
     """Patch the actual live matrix output and remove every hook unconditionally."""
 
@@ -342,12 +397,16 @@ def run_original_p6_arm(
         raise ValueError("P6 alpha must be finite and non-negative")
     if arm == "active_matched" and matched_component_id is None:
         raise ValueError("active_matched requires matched_component_id")
+    if not 0 <= norm_match_relative_tolerance < 1:
+        raise ValueError("norm-match relative tolerance must lie in [0,1)")
     if clean_gate.shape != (*input_ids.shape, 1):
         raise ValueError("clean gate must have shape [batch,tokens,1]")
     device = next(model.parameters()).device
     ids = input_ids.detach().clone().to(device)
     valid = valid_tokens.detach().clone().bool().to(device)
     gate = clean_gate.detach().clone().bool().to(device)
+    if bool((gate[..., 0] & ~valid).any()):
+        raise ValueError("clean P6 gate fires on a masked token position")
     diagnostics: dict[str, dict[str, Any]] = {}
     outputs: dict[str, dict[str, Tensor]] = {}
     selected = torch.tensor([component_id], device=next(decomposition.parameters()).device)
@@ -389,7 +448,7 @@ def run_original_p6_arm(
                         _component_delta(x, matched_u_local, matched_v_local, gate, center_local)
                         * float(alpha)
                     )
-                perturbation = output_matched_control(
+                intended = output_matched_control(
                     candidate,
                     arm=arm,
                     identity=(
@@ -399,28 +458,76 @@ def run_original_p6_arm(
                     seed=random_seed,
                     active_component_delta=alternate,
                 )
-                changed = y if arm == "clean" or alpha == 0 else y - perturbation.to(y.dtype)
-                selected_perturbation = perturbation[valid]
+                # The causal dose is whatever survives subtraction and rounding
+                # in the real module-output dtype, not the FP32 requested tensor.
+                changed = (y.float() - intended.float()).to(y.dtype)
+                actual = y.detach().float() - changed.detach().float()
+                selected_intended = intended[valid].float()
+                selected_actual = actual[valid]
                 selected_output = y.detach().float()[valid]
-                perturbation_l2 = float(selected_perturbation.float().norm())
+                intended_l2 = float(selected_intended.norm())
+                applied_l2 = float(selected_actual.norm())
                 output_l2 = float(selected_output.norm())
-                changed_positions = (
-                    (perturbation.float().norm(dim=-1) > 0) & valid
-                ).nonzero().detach().cpu().tolist()
+                intended_mask = (intended.float().norm(dim=-1) > 0) & valid
+                applied_mask = (actual.norm(dim=-1) > 0) & valid
+                intended_count = int(intended_mask.sum())
+                applied_count = int(applied_mask.sum())
+                changed_positions = applied_mask.nonzero().detach().cpu().tolist()
+                relative_mismatch = None
+                norm_match_within_tolerance = None
+                if reference_applied_l2 is not None and arm in {
+                    "active_matched",
+                    "orthogonal_matched",
+                    "random_same_l2",
+                }:
+                    denominator = max(float(reference_applied_l2), torch.finfo(torch.float32).tiny)
+                    relative_mismatch = abs(applied_l2 - float(reference_applied_l2)) / denominator
+                    norm_match_within_tolerance = (
+                        relative_mismatch <= norm_match_relative_tolerance
+                        if reference_applied_l2 > 0
+                        else applied_l2 == 0
+                    )
+                    if not norm_match_within_tolerance:
+                        raise ValueError(
+                            "actually applied control norm lies outside the declared tolerance"
+                        )
                 diagnostics[name] = {
                     "arm": arm,
                     "alpha": float(alpha),
                     "valid_token_count": int(valid.sum()),
                     "gate_fire_count": int((gate[..., 0] & valid).sum()),
-                    "actual_perturbation_l2": perturbation_l2,
-                    "activation_relative_l2": perturbation_l2 / output_l2 if output_l2 else 0.0,
+                    "output_dtype": str(y.dtype).removeprefix("torch."),
+                    "intended_perturbation_l2": intended_l2,
+                    "applied_perturbation_l2": applied_l2,
+                    # Backward-compatible aliases now explicitly mean applied.
+                    "actual_perturbation_l2": applied_l2,
+                    "activation_relative_l2": applied_l2 / output_l2 if output_l2 else 0.0,
+                    "applied_activation_relative_l2": (
+                        applied_l2 / output_l2 if output_l2 else 0.0
+                    ),
                     "clean_output_l2": output_l2,
+                    "intended_nonzero_position_count": intended_count,
+                    "actually_changed_position_count": applied_count,
+                    "quantization_lost_position_count": intended_count - applied_count,
+                    "quantization_lost_fraction": (
+                        (intended_count - applied_count) / intended_count
+                        if intended_count
+                        else 0.0
+                    ),
+                    "ineffective_dose": intended_count > 0 and applied_count == 0,
+                    "per_position_applied_l2": actual.norm(dim=-1).detach().cpu().tolist(),
                     "modified_positions": changed_positions,
+                    "reference_applied_l2": reference_applied_l2,
+                    "applied_norm_relative_mismatch": relative_mismatch,
+                    "norm_match_relative_tolerance": norm_match_relative_tolerance,
+                    "norm_match_within_tolerance": norm_match_within_tolerance,
                     "zero_norm_policy": "candidate-zero positions remain exactly zero",
                 }
                 outputs[name] = {
                     "clean": y.detach().cpu().clone(),
-                    "perturbation": perturbation.detach().cpu().clone(),
+                    "intended_perturbation": intended.detach().cpu().clone(),
+                    "applied_perturbation": actual.detach().cpu().clone(),
+                    "perturbation": actual.detach().cpu().clone(),
                     "intervened": changed.detach().cpu().clone(),
                 }
                 return changed
@@ -487,8 +594,19 @@ def make_p6_result_record(
             "arm": arm,
             "alpha": float(alpha),
             "random_seed": random_seed,
+            "intended_perturbation_l2": diagnostics.get("intended_perturbation_l2"),
+            "applied_perturbation_l2": diagnostics["actual_perturbation_l2"],
             "actual_perturbation_l2": diagnostics["actual_perturbation_l2"],
             "activation_relative_l2": diagnostics["activation_relative_l2"],
+            "output_dtype": diagnostics.get("output_dtype"),
+            "intended_nonzero_position_count": diagnostics.get(
+                "intended_nonzero_position_count"
+            ),
+            "actually_changed_position_count": diagnostics.get(
+                "actually_changed_position_count"
+            ),
+            "quantization_lost_fraction": diagnostics.get("quantization_lost_fraction"),
+            "ineffective_dose": diagnostics.get("ineffective_dose", False),
             "modified_positions": diagnostics["modified_positions"],
         },
         "rng_seeds": {

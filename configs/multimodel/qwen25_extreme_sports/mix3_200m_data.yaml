@@ -17,6 +17,7 @@ sources:
     subset: sample-10BT
     split: train
     train_tokens: 90000000
+    calibration_tokens: 16384
     validation_tokens: 65536
     artifact_dir: out/multimodel/data/mix3_200m/fineweb_90m
     selection: published_order_first_valid
@@ -28,6 +29,7 @@ sources:
     subset: default
     split: train
     train_tokens: 90000000
+    calibration_tokens: 12288
     validation_tokens: 65536
     artifact_dir: out/multimodel/data/mix3_200m/lmsys_90m
     selection: published_order_first_valid
@@ -38,6 +40,7 @@ sources:
     revision: mix3-200m-v1
     split: train
     train_tokens: 20000000
+    calibration_tokens: 4096
     validation_tokens: 65536
     artifact_dir: out/multimodel/data/mix3_200m/contrastive_20m
     selection: published_order_first_valid

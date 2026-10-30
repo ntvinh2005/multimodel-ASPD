@@ -411,6 +411,13 @@ def _resume_step(output_dir: Path, resume: str | None) -> int:
             checkpoint = _rank_checkpoint(output_dir, step, trainer_rank)
             if not checkpoint.is_file() or _sha256_file(checkpoint) != expected_hash:
                 raise RuntimeError(f"incomplete or corrupt paired checkpoint: {checkpoint}")
+        if "producer_sha256" in record:
+            producer = _mix3_source_checkpoint(output_dir, step)
+            if (
+                not producer.is_file()
+                or _sha256_file(producer) != record["producer_sha256"]
+            ):
+                raise RuntimeError(f"incomplete or corrupt producer checkpoint: {producer}")
         return step
     state = torch.load(resume, map_location="cpu", weights_only=False)
     return int(state["step"])
@@ -439,6 +446,52 @@ def _truncate_metrics_for_resume(output_dir: Path, checkpoint_step: int) -> None
 
 def _rank_checkpoint(output_dir: Path, step: int, trainer_rank: int) -> Path:
     return output_dir / f"checkpoint_{step:08d}.rank{trainer_rank}.pt"
+
+
+def _mix3_source_checkpoint(output_dir: Path, step: int) -> Path:
+    return output_dir / f"checkpoint_{step:08d}.producer.pt"
+
+
+def _save_mix3_source_checkpoint(
+    output_dir: Path,
+    cfg: MultiModelExperimentConfig,
+    step: int,
+    source: Mix3ASPDSource,
+) -> None:
+    state = source.state_dict()
+    if state["batch_count"] != step or state["schedule_index"] != step:
+        raise RuntimeError("producer state is not aligned with the optimizer checkpoint step")
+    atomic_torch_save(
+        {
+            "step": step,
+            "config_sha256": resolved_config_sha256(cfg),
+            "source_state": state,
+        },
+        _mix3_source_checkpoint(output_dir, step),
+    )
+
+
+def _restore_mix3_source_checkpoint(
+    output_dir: Path,
+    cfg: MultiModelExperimentConfig,
+    step: int,
+    source: Mix3ASPDSource,
+) -> None:
+    marker = torch.load(
+        output_dir / "latest_checkpoint.pt", map_location="cpu", weights_only=True
+    )
+    path = _mix3_source_checkpoint(output_dir, step)
+    expected = marker.get("producer_sha256")
+    if not path.is_file() or not isinstance(expected, str):
+        raise RuntimeError("Mix3 resume lacks coordinated producer source state")
+    if _sha256_file(path) != expected:
+        raise RuntimeError("Mix3 producer source-state checksum mismatch")
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    if int(payload.get("step", -1)) != step:
+        raise ValueError("Mix3 producer source state differs from resume step")
+    if payload.get("config_sha256") != resolved_config_sha256(cfg):
+        raise ValueError("Mix3 producer source state differs from frozen config")
+    source.load_state_dict(payload["source_state"])
 
 
 def _save_rank_checkpoint(
@@ -485,18 +538,28 @@ def _commit_checkpoint_pair(
     paths = [_rank_checkpoint(output_dir, step, rank) for rank in (0, 1)]
     if any(not path.is_file() for path in paths):
         raise RuntimeError(f"cannot commit incomplete checkpoint pair at step {step}")
+    marker = {
+        "step": step,
+        "config_sha256": resolved_config_sha256(cfg),
+        "rank_sha256": [_sha256_file(path) for path in paths],
+    }
+    if cfg.mix3_aspd is not None:
+        producer = _mix3_source_checkpoint(output_dir, step)
+        if not producer.is_file():
+            raise RuntimeError(f"cannot commit Mix3 checkpoint without producer state: {producer}")
+        marker["producer_sha256"] = _sha256_file(producer)
     atomic_torch_save(
-        {
-            "step": step,
-            "config_sha256": resolved_config_sha256(cfg),
-            "rank_sha256": [_sha256_file(path) for path in paths],
-        },
+        marker,
         output_dir / "latest_checkpoint.pt",
     )
     retained = cfg.training.keep_last_checkpoints
     for trainer_rank in (0, 1):
         checkpoints = sorted(output_dir.glob(f"checkpoint_*.rank{trainer_rank}.pt"))
         for obsolete in checkpoints[:-retained]:
+            obsolete.unlink()
+    if cfg.mix3_aspd is not None:
+        producer_checkpoints = sorted(output_dir.glob("checkpoint_*.producer.pt"))
+        for obsolete in producer_checkpoints[:-retained]:
             obsolete.unlink()
 
 
@@ -534,9 +597,10 @@ def _producer_loop(
     if cfg.mix3_aspd is not None:
         mix = load_r0_mix_config(cfg.mix3_aspd.mix_config)
         stream: FrozenTokenShardStream | Mix3ASPDSource = Mix3ASPDSource(mix, "train")
-        stream.seek_to_step(start_step)
+        if start_step:
+            _restore_mix3_source_checkpoint(output_dir, cfg, start_step, stream)
         calibration_stream: FrozenTokenShardStream | Mix3ASPDSource = Mix3ASPDSource(
-            mix, "validation"
+            mix, "calibration"
         )
     else:
         stream = FrozenTokenShardStream(cfg.data.frozen_manifest or "", "train")
@@ -636,6 +700,20 @@ def _producer_loop(
                     else None
                 ),
             )
+            completed_step = step + 1
+            if cfg.mix3_aspd is not None and (
+                completed_step % cfg.training.save_every == 0
+                or completed_step == end_step
+            ):
+                if not isinstance(stream, Mix3ASPDSource):
+                    raise AssertionError("Mix3 producer lost its exact source adapter")
+                _save_mix3_source_checkpoint(
+                    output_dir, cfg, completed_step, stream
+                )
+                # The first world barrier pairs this exact cursor with trainer
+                # weights at the same step. The second waits for the atomic marker.
+                dist.barrier()
+                dist.barrier()
     final_weights = [
         snapshot_model_weights(model, spec, provenance)[0]
         for model, spec, provenance in zip(
@@ -823,9 +901,17 @@ def _trainer_loop(
                 output_dir, cfg, model, optimizer, step, trainer_rank
             )
             dist.barrier(group=trainer_group)
-            if trainer_rank == 0:
-                _commit_checkpoint_pair(output_dir, cfg, step)
-            dist.barrier(group=trainer_group)
+            if cfg.mix3_aspd is not None:
+                # Coordinate with rank-0 producer state before committing the
+                # pair, then hold every rank until the marker is durable.
+                dist.barrier()
+                if trainer_rank == 0:
+                    _commit_checkpoint_pair(output_dir, cfg, step)
+                dist.barrier()
+            else:
+                if trainer_rank == 0:
+                    _commit_checkpoint_pair(output_dir, cfg, step)
+                dist.barrier(group=trainer_group)
             checkpoint_seconds += time.perf_counter() - checkpoint_started
     elapsed = time.perf_counter() - started
     completed = time.perf_counter()

@@ -318,6 +318,28 @@ def deterministic_validation_prompt_ids(
     return set(ids[:validation_count])
 
 
+def deterministic_reserved_prompt_ids(
+    prompts: Sequence[Mapping[str, str]],
+    *,
+    calibration_count: int,
+    validation_count: int,
+    seed: int,
+) -> tuple[set[str], set[str]]:
+    """Reserve disjoint prompt-level calibration and validation partitions."""
+
+    if calibration_count < 0 or validation_count <= 0:
+        raise ValueError("invalid calibration/validation prompt counts")
+    if calibration_count + validation_count >= len(prompts):
+        raise ValueError("reserved prompts must leave at least one training prompt")
+    ids = [str(prompt["prompt_id"]) for prompt in prompts]
+    random.Random(seed).shuffle(ids)
+    calibration = set(ids[:calibration_count])
+    validation = set(ids[calibration_count : calibration_count + validation_count])
+    if calibration & validation:
+        raise AssertionError("calibration and validation prompt IDs overlap")
+    return calibration, validation
+
+
 def plan_section_4_2_single_generator(
     prompts: Sequence[Mapping[str, str]],
     *,
@@ -894,8 +916,11 @@ def materialize_contrastive_cache(
         prompt_field=spec.prompt_source.prompt_field,
         max_prompts=max_prompts,
     )
-    validation_ids = deterministic_validation_prompt_ids(
-        prompts, spec.cache.validation_prompts, spec.generation.seed
+    calibration_ids, validation_ids = deterministic_reserved_prompt_ids(
+        prompts,
+        calibration_count=spec.cache.calibration_prompts,
+        validation_count=spec.cache.validation_prompts,
+        seed=spec.generation.seed,
     )
     tokenizer, tokenizer_provenance = _audit_tokenizers(cfg)
     pad_id = tokenizer.pad_token_id  # type: ignore[attr-defined]
@@ -946,7 +971,15 @@ def materialize_contrastive_cache(
                     "token_ids": full_ids,
                     "valid_token_range": [0, len(full_ids)],
                     "measurement_input_sha256": {"base": token_hash, "target": token_hash},
-                    "split": "validation" if prompt_row["prompt_id"] in validation_ids else "train",
+                    "split": (
+                        "calibration"
+                        if prompt_row["prompt_id"] in calibration_ids
+                        else (
+                            "validation"
+                            if prompt_row["prompt_id"] in validation_ids
+                            else "train"
+                        )
+                    ),
                     "truncation": truncation,
                     "generation": {
                         **spec.generation.model_dump(mode="json"),
@@ -1149,8 +1182,11 @@ def materialize_contrastive_text_artifact(
         prompts = all_prompts
     if len(prompts) != max_prompts:
         raise ValueError(f"prompt source contains {len(prompts)} rows, requested {max_prompts}")
-    validation_ids = deterministic_validation_prompt_ids(
-        prompts, spec.cache.validation_prompts, spec.generation.seed
+    calibration_ids, validation_ids = deterministic_reserved_prompt_ids(
+        prompts,
+        calibration_count=spec.cache.calibration_prompts,
+        validation_count=spec.cache.validation_prompts,
+        seed=spec.generation.seed,
     )
     tokenizer, tokenizer_provenance = _audit_tokenizers(cfg)
     pad_id = tokenizer.pad_token_id  # type: ignore[attr-defined]
@@ -1205,7 +1241,13 @@ def materialize_contrastive_text_artifact(
                         },
                         "generator_side": generator_side,
                         "split": (
-                            "validation" if prompt["prompt_id"] in validation_ids else "train"
+                            "calibration"
+                            if prompt["prompt_id"] in calibration_ids
+                            else (
+                                "validation"
+                                if prompt["prompt_id"] in validation_ids
+                                else "train"
+                            )
                         ),
                         "token_ids": full_ids,
                         "token_ids_sha256": token_ids_sha256(full_ids),
@@ -1282,7 +1324,11 @@ def materialize_contrastive_text_artifact(
         "tokens": total_tokens,
         "split_tokens": {
             split: sum(len(row["token_ids"]) for row in records if row["split"] == split)
-            for split in ("train", "validation")
+            for split in (
+                ("train", "calibration", "validation")
+                if spec.cache.calibration_prompts
+                else ("train", "validation")
+            )
         },
         "generation_by_side": by_side,
         "generation_seconds": generation_seconds,

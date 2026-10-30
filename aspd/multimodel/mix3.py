@@ -9,6 +9,10 @@ positions enter the 2,048-position trainer-rank BatchTopK pool.
 from __future__ import annotations
 
 import hashlib
+import json
+import os
+import sqlite3
+import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -41,6 +45,7 @@ LMSYS_REVISION = "200748d9d3cddcc9d782887541057aca0b18c5da"
 MIX3_ROLES = ("fineweb", "lmsys", "contrastive")
 MIX3_UNIQUE_TOKENS = {"fineweb": 90_000_000, "lmsys": 90_000_000, "contrastive": 20_000_000}
 MIX3_EXPOSURES = {"fineweb": 92_160_000, "lmsys": 92_160_000, "contrastive": 20_480_000}
+MIX3_CALIBRATION_TOKENS = {"fineweb": 16_384, "lmsys": 12_288, "contrastive": 4_096}
 
 
 def _sha256_file(path: Path) -> str:
@@ -49,6 +54,90 @@ def _sha256_file(path: Path) -> str:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _canonical_sha256(value: Mapping[str, Any]) -> str:
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def mix3_manifest_fingerprints(mix: R0DataMixSpec) -> dict[str, str]:
+    """Hash every frozen source manifest; missing sources fail closed."""
+
+    result: dict[str, str] = {}
+    for source in mix.sources:
+        manifest = Path(source.artifact_dir) / "manifest.json"
+        if not manifest.is_file():
+            raise DatasetIntegrityError(f"missing Mix3 source manifest: {manifest}")
+        result[source.role] = _sha256_file(manifest)
+    return result
+
+
+def _validate_benchmark_manifest(path: Path) -> dict[str, str]:
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    prompt_value = manifest.get("prompt_file")
+    prompt_hash = manifest.get("prompt_sha256")
+    identity = manifest.get("benchmark_version")
+    if not isinstance(prompt_value, str) or not isinstance(prompt_hash, str) or not identity:
+        raise DatasetIntegrityError("benchmark manifest lacks frozen identity/prompt checksum")
+    prompt_path = Path(prompt_value)
+    if not prompt_path.is_file():
+        prompt_path = path.parent / prompt_value
+    if not prompt_path.is_file() or _sha256_file(prompt_path) != prompt_hash:
+        raise DatasetIntegrityError("frozen benchmark prompt file/checksum mismatch")
+    return {
+        "benchmark_version": str(identity),
+        "prompt_file": str(prompt_path.resolve()),
+        "prompt_sha256": prompt_hash,
+    }
+
+
+def validate_mix3_readiness_audit(
+    mix: R0DataMixSpec,
+    *,
+    report_path: str | Path,
+    benchmark_manifest: str | Path,
+) -> dict[str, Any]:
+    """Verify persisted contamination evidence against exact current artifacts."""
+
+    path = Path(report_path)
+    benchmark = Path(benchmark_manifest)
+    if not path.is_file():
+        raise DatasetIntegrityError(f"missing Mix3 readiness audit report: {path}")
+    if not benchmark.is_file():
+        raise DatasetIntegrityError(f"missing frozen benchmark manifest: {benchmark}")
+    benchmark_identity = _validate_benchmark_manifest(benchmark)
+    report = json.loads(path.read_text(encoding="utf-8"))
+    claimed_hash = report.pop("audit_sha256", None)
+    if claimed_hash != _canonical_sha256(report):
+        raise DatasetIntegrityError("Mix3 readiness audit checksum mismatch")
+    if report.get("status") != "PASS":
+        raise DatasetIntegrityError("Mix3 readiness audit is not a production PASS")
+    required_passes = {
+        "exact_duplicate_check": "PASS",
+        "near_duplicate_check": "PASS",
+        "split_disjointness": "PASS",
+        "contrastive_prompt_isolation": "PASS",
+        "organism_exclusion": "PASS",
+        "shared_aspd_delta_contract": "PASS",
+    }
+    if report.get("checks") != required_passes:
+        raise DatasetIntegrityError("Mix3 readiness audit does not contain every required PASS")
+    observed_manifests = mix3_manifest_fingerprints(mix)
+    if report.get("source_manifest_sha256") != observed_manifests:
+        raise DatasetIntegrityError("Mix3 readiness audit refers to different source manifests")
+    benchmark_hash = _sha256_file(benchmark)
+    if report.get("benchmark_manifest_sha256") != benchmark_hash:
+        raise DatasetIntegrityError("Mix3 readiness audit refers to a different benchmark")
+    if report.get("benchmark_identity") != benchmark_identity:
+        raise DatasetIntegrityError("Mix3 readiness audit benchmark identity/checksum differs")
+    contract = mix.model_dump(mode="json")
+    if report.get("mix_contract_sha256") != _canonical_sha256(contract):
+        raise DatasetIntegrityError("Mix3 readiness audit refers to a different data contract")
+    if report.get("organism_training_tokens") != 0:
+        raise DatasetIntegrityError("Mix3 readiness audit permits prohibited organism data")
+    report["audit_sha256"] = claimed_hash
+    return report
 
 
 def validate_mix3_recipe_config(
@@ -206,6 +295,14 @@ def validate_mix3_recipe_config(
         MIX3_UNIQUE_TOKENS[role] for role in MIX3_ROLES
     ]:
         raise ValueError("Mix3 experiment source budgets differ from the common mix")
+    if [source.planned_calibration_tokens for source in cfg.data.sources] != [
+        MIX3_CALIBRATION_TOKENS[role] for role in MIX3_ROLES
+    ]:
+        raise ValueError("Mix3 experiment calibration allocation differs from the common mix")
+    if sum(source.calibration_tokens for source in mix.sources) != cfg.data.calibration_tokens:
+        raise ValueError("Mix3 calibration source totals differ from experiment data contract")
+    if sum(source.validation_tokens for source in mix.sources) != cfg.data.validation_tokens:
+        raise ValueError("Mix3 validation source totals differ from experiment data contract")
     if recipe.readiness != cfg.data.dataset_status:
         raise ValueError("mix3_aspd.readiness and data.dataset_status must agree")
     if require_ready and recipe.readiness != "READY":
@@ -224,12 +321,21 @@ def validate_mix3_recipe_config(
             "manifest_sha256": _sha256_file(manifest),
             **validate_text_artifact(source.artifact_dir, source, mix=mix),
         }
+    readiness_audit: dict[str, Any] | None = None
+    if recipe.readiness == "READY" or require_ready:
+        readiness_audit = validate_mix3_readiness_audit(
+            mix,
+            report_path=recipe.readiness_audit_report,
+            benchmark_manifest=recipe.benchmark_manifest,
+        )
     return {
         "status": "READY" if recipe.readiness == "READY" else "BLOCKED",
         "budget": budget,
         "source_unique_tokens": dict(MIX3_UNIQUE_TOKENS),
         "source_optimizer_exposures": dict(MIX3_EXPOSURES),
+        "source_calibration_tokens": dict(MIX3_CALIBRATION_TOKENS),
         "artifacts": artifacts,
+        "readiness_audit": readiness_audit,
     }
 
 
@@ -246,6 +352,9 @@ def validate_mix3_data_spec(mix: R0DataMixSpec) -> None:
         raise ValueError("Mix3 source schedule must be the deterministic 9/9/2 cycle")
     if {source.role: source.train_tokens for source in mix.sources} != MIX3_UNIQUE_TOKENS:
         raise ValueError("Mix3 unique source-token budgets differ from 90M/90M/20M")
+    calibration = {source.role: source.calibration_tokens for source in mix.sources}
+    if calibration != MIX3_CALIBRATION_TOKENS or sum(calibration.values()) != 32_768:
+        raise ValueError("Mix3 calibration must be the disjoint 16,384/12,288/4,096 allocation")
     fineweb, lmsys, contrastive = mix.sources
     if (fineweb.dataset_id, fineweb.subset, fineweb.revision) != (
         "HuggingFaceFW/fineweb",
@@ -419,8 +528,8 @@ class Mix3ASPDSource:
     """
 
     def __init__(self, mix: R0DataMixSpec, split: str) -> None:
-        if split not in {"train", "validation"}:
-            raise ValueError("Mix3 source split must be train or validation")
+        if split not in {"train", "calibration", "validation"}:
+            raise ValueError("Mix3 source split must be train, calibration or validation")
         self.mix = mix
         self.split = split
         self.readers = {
@@ -429,6 +538,7 @@ class Mix3ASPDSource:
         self.position_counts = {role: 0 for role in MIX3_ROLES}
         self.batch_count = 0
         self.span_count = 0
+        self.manifest_sha256 = mix3_manifest_fingerprints(mix)
 
     def seek_to_step(self, step: int) -> None:
         if self.split != "train":
@@ -528,12 +638,48 @@ class Mix3ASPDSource:
 
     def state_dict(self) -> dict[str, Any]:
         return {
+            "schema_version": 1,
             "split": self.split,
             "batch_count": self.batch_count,
+            "schedule_index": self.batch_count if self.split == "train" else None,
             "span_count": self.span_count,
             "position_counts": dict(self.position_counts),
             "readers": {role: reader.state_dict() for role, reader in self.readers.items()},
+            "source_manifest_sha256": dict(self.manifest_sha256),
+            "sampler_state": {"kind": "deterministic_9_9_2", "rng": None},
         }
+
+    def load_state_dict(self, state: Mapping[str, Any]) -> None:
+        """Restore the exact live readers without replaying historical tokens."""
+
+        if state.get("schema_version") != 1 or state.get("split") != self.split:
+            raise ValueError("Mix3 source-state schema/split mismatch")
+        if state.get("source_manifest_sha256") != self.manifest_sha256:
+            raise DatasetIntegrityError("Mix3 source state refers to different manifests")
+        if state.get("sampler_state") != {"kind": "deterministic_9_9_2", "rng": None}:
+            raise ValueError("Mix3 source-state sampler contract mismatch")
+        readers = state.get("readers")
+        if not isinstance(readers, Mapping) or set(readers) != set(self.readers):
+            raise ValueError("Mix3 source state has missing or unexpected readers")
+        self.batch_count = int(state["batch_count"])
+        self.span_count = int(state["span_count"])
+        self.position_counts = {
+            role: int(value) for role, value in dict(state["position_counts"]).items()
+        }
+        if set(self.position_counts) != set(MIX3_ROLES):
+            raise ValueError("Mix3 source state has missing position counters")
+        if self.split == "train":
+            expected = mix3_cursor_for_step(self.mix, self.batch_count)
+            if state.get("schedule_index") != self.batch_count:
+                raise ValueError("Mix3 source schedule index differs from optimizer step")
+            if self.position_counts != expected["positions_consumed_by_role"]:
+                raise ValueError("Mix3 source counters differ from the saved optimizer step")
+        for role, reader_state in readers.items():
+            reader = self.readers[role]
+            reader.load_state_dict(reader_state)
+            record = reader.current()
+            if not 0 <= reader.token_offset < len(record["token_ids"]):
+                raise ValueError("Mix3 restored in-record token offset is invalid")
 
 
 @dataclass(frozen=True)
@@ -648,3 +794,182 @@ def audit_token_overlap(
         "benchmark_records": len(benchmark_records),
         "near_threshold": near_threshold,
     }
+
+
+def _token_shingles(values: Sequence[int], width: int = 5) -> set[tuple[int, ...]]:
+    actual = min(width, len(values))
+    return {
+        tuple(int(value) for value in values[index : index + actual])
+        for index in range(len(values) - actual + 1)
+    }
+
+
+def _iter_frozen_mix3_records(mix: R0DataMixSpec):
+    """Stream one shard at a time; no full-corpus list is materialized."""
+
+    for source in mix.sources:
+        root = Path(source.artifact_dir)
+        manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+        for shard in manifest["shards"]:
+            payload = torch.load(root / shard["path"], map_location="cpu", weights_only=False)
+            for record in payload["records"]:
+                yield source.role, record
+            del payload
+
+
+def create_mix3_readiness_audit(
+    mix: R0DataMixSpec,
+    *,
+    benchmark_records: Sequence[Mapping[str, Any]],
+    benchmark_manifest: str | Path,
+    output_path: str | Path,
+    near_threshold: float = 0.85,
+    _synthetic_fixture: bool = False,
+) -> dict[str, Any]:
+    """Stream the frozen corpus and persist a dataset-bound readiness proof.
+
+    Exact record hashes and split/source identities are indexed in an on-disk
+    SQLite database.  Near-overlap candidates are screened through benchmark
+    token-shingle postings, avoiding an all-pairs corpus comparison.  This catches
+    literal and high token-shingle overlap; it is not a semantic-overlap proof.
+    """
+
+    if not _synthetic_fixture:
+        validate_mix3_data_spec(mix)
+    for source in mix.sources:
+        validate_text_artifact(source.artifact_dir, source, mix=mix)
+    benchmark_path = Path(benchmark_manifest)
+    if not benchmark_path.is_file():
+        raise FileNotFoundError(f"benchmark manifest not found: {benchmark_path}")
+    benchmark_identity = _validate_benchmark_manifest(benchmark_path)
+    benchmark_values = [
+        [int(value) for value in record["token_ids"]] for record in benchmark_records
+    ]
+    benchmark_hashes = {token_ids_sha256(values) for values in benchmark_values}
+    benchmark_shingles = [_token_shingles(values) for values in benchmark_values]
+    postings: dict[tuple[int, ...], set[int]] = {}
+    for index, shingles in enumerate(benchmark_shingles):
+        for shingle in shingles:
+            postings.setdefault(shingle, set()).add(index)
+
+    split_tokens = {role: {"train": 0, "calibration": 0, "validation": 0} for role in MIX3_ROLES}
+    exact: list[str] = []
+    near: list[str] = []
+    duplicates: list[str] = []
+    split_leaks: list[str] = []
+    prompt_leaks: list[str] = []
+    database_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".sqlite3", delete=False) as handle:
+            database_path = handle.name
+        connection = sqlite3.connect(database_path)
+        connection.execute("CREATE TABLE token_hashes (digest TEXT PRIMARY KEY, record_id TEXT)")
+        connection.execute("CREATE TABLE source_rows (identity TEXT PRIMARY KEY, split TEXT)")
+        connection.execute("CREATE TABLE prompts (identity TEXT PRIMARY KEY, split TEXT)")
+        for role, record in _iter_frozen_mix3_records(mix):
+            split = str(record["split"])
+            values = [int(value) for value in record["token_ids"].tolist()]
+            identity = str(record["record_id"])
+            split_tokens[role][split] += len(values)
+            provenance = dict(record.get("provenance", {}))
+            source_identity = provenance.get("source_row_id")
+            if source_identity is None:
+                source_identity = provenance.get("dataset_row_index")
+            if source_identity is None:
+                source_identity = provenance.get("input_example_index", identity)
+            source_key = f"{role}:{source_identity}"
+            existing = connection.execute(
+                "SELECT split FROM source_rows WHERE identity=?", (source_key,)
+            ).fetchone()
+            if existing is None:
+                connection.execute(
+                    "INSERT INTO source_rows VALUES (?,?)", (source_key, split)
+                )
+            elif existing[0] != split:
+                split_leaks.append(source_key)
+            prompt_id = provenance.get("prompt_id")
+            if role == "contrastive" and prompt_id is not None:
+                row = connection.execute(
+                    "SELECT split FROM prompts WHERE identity=?", (str(prompt_id),)
+                ).fetchone()
+                if row is None:
+                    connection.execute(
+                        "INSERT INTO prompts VALUES (?,?)", (str(prompt_id), split)
+                    )
+                elif row[0] != split:
+                    prompt_leaks.append(str(prompt_id))
+            if split != "train":
+                continue
+            digest = token_ids_sha256(values)
+            try:
+                connection.execute(
+                    "INSERT INTO token_hashes VALUES (?,?)", (digest, identity)
+                )
+            except sqlite3.IntegrityError:
+                duplicates.append(identity)
+            if digest in benchmark_hashes:
+                exact.append(identity)
+                continue
+            left = _token_shingles(values)
+            candidates: set[int] = set()
+            for shingle in left:
+                candidates.update(postings.get(shingle, ()))
+            for index in candidates:
+                right = benchmark_shingles[index]
+                union = left | right
+                similarity = len(left & right) / len(union) if union else 1.0
+                if similarity >= near_threshold:
+                    near.append(identity)
+                    break
+        connection.commit()
+        connection.close()
+    finally:
+        if database_path is not None:
+            Path(database_path).unlink(missing_ok=True)
+
+    expected_tokens = {
+        source.role: {
+            "train": int(source.train_tokens),
+            "calibration": int(source.calibration_tokens),
+            "validation": int(source.validation_tokens),
+        }
+        for source in mix.sources
+    }
+    if split_tokens != expected_tokens:
+        raise DatasetIntegrityError(
+            f"Mix3 audit split budgets differ: {split_tokens} != {expected_tokens}"
+        )
+    if exact or near or duplicates or split_leaks or prompt_leaks:
+        raise DatasetIntegrityError(
+            "Mix3 readiness audit failed: "
+            f"exact={exact}, near={near}, duplicates={duplicates}, "
+            f"split_leaks={split_leaks}, prompt_leaks={prompt_leaks}"
+        )
+    report: dict[str, Any] = {
+        "schema_version": 1,
+        "status": "SYNTHETIC_TEST_ONLY" if _synthetic_fixture else "PASS",
+        "source_manifest_sha256": mix3_manifest_fingerprints(mix),
+        "benchmark_manifest_sha256": _sha256_file(benchmark_path),
+        "benchmark_identity": benchmark_identity,
+        "mix_contract_sha256": _canonical_sha256(mix.model_dump(mode="json")),
+        "organism_training_tokens": mix.organism_training_tokens,
+        "split_tokens": split_tokens,
+        "near_duplicate_method": "exact token hash + indexed 5-token-shingle Jaccard candidates",
+        "near_threshold": near_threshold,
+        "limitations": "Does not prove absence of paraphrastic or semantic overlap.",
+        "checks": {
+            "exact_duplicate_check": "PASS",
+            "near_duplicate_check": "PASS",
+            "split_disjointness": "PASS",
+            "contrastive_prompt_isolation": "PASS",
+            "organism_exclusion": "PASS",
+            "shared_aspd_delta_contract": "PASS",
+        },
+    }
+    report["audit_sha256"] = _canonical_sha256(report)
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_suffix(output.suffix + ".tmp")
+    temporary.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(temporary, output)
+    return report

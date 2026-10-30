@@ -29,6 +29,7 @@ delta_contrastive:
     sequences_per_shard: 8
     activation_dtype: bfloat16
     validation_prompts: 10000
+    calibration_prompts: 1024
     truncation: right
     overwrite: false
 

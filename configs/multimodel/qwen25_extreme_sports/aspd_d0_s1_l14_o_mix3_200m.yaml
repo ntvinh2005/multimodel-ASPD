@@ -36,13 +36,16 @@ data:
   sources:
     - {dataset: HuggingFaceFW/fineweb, subset: sample-10BT, train_split: train, field: text,
        format: text, revision: 9bb295ddab0e05d785b879661af7260fed5140fc, role: fineweb,
-       planned_train_tokens: 90000000, planned_validation_tokens: 65536}
+       planned_train_tokens: 90000000, planned_calibration_tokens: 16384,
+       planned_validation_tokens: 65536}
     - {dataset: lmsys/lmsys-chat-1m, subset: default, train_split: train, field: conversation,
        format: messages, revision: 200748d9d3cddcc9d782887541057aca0b18c5da, role: lmsys,
-       planned_train_tokens: 90000000, planned_validation_tokens: 65536}
+       planned_train_tokens: 90000000, planned_calibration_tokens: 12288,
+       planned_validation_tokens: 65536}
     - {dataset: local-mix3-section-4-2-contrastive-text, train_split: train,
        field: token_ids, format: text, revision: mix3-200m-v1, role: contrastive,
-       planned_train_tokens: 20000000, planned_validation_tokens: 65536}
+       planned_train_tokens: 20000000, planned_calibration_tokens: 4096,
+       planned_validation_tokens: 65536}
 
 cache:
   root: out/multimodel/stream/qwen25_aspd_mix3_200m
@@ -110,6 +113,8 @@ mix3_aspd:
   source_schedule_counts: {fineweb: 9, lmsys: 9, contrastive: 2}
   unique_corpus_tokens: 200000000
   optimizer_token_exposures: 204800000
+  readiness_audit_report: out/multimodel/data/mix3_200m/readiness_audit.json
+  benchmark_manifest: docs/multimodel/eval/qwen25_extreme_sports_behavioral_v3_manifest.json
 
 analysis:
   {shared_epsilon: 0.1, concentrated_threshold: 0.9, top_examples_per_feature: 10,
