@@ -1,0 +1,44 @@
+schema_version: 3
+scientific_status: PROPOSED_NOT_FINAL
+
+# These null fields are deliberate scientific blockers, not missing defaults.
+dictionary_size: null
+latent_tokens_per_model: null
+packing_method: null
+intra_model_layers: null
+intra_model_heads: null
+cross_model_layers: null
+cross_model_heads: null
+feature_readout: null
+simultaneous_matrix_scope: null
+gate_grouping: null
+internal_reconstruction_code: null
+internal_loss_gradient_route: null
+activation_loss_weight: null
+internal_loss_weight: null
+main_sequence_length: null
+main_effective_batch_anchors: null
+main_optimizer: null
+main_betas: null
+main_rank_one_lr: null
+main_transformer_lr: null
+main_sparsity_k: null
+main_auxiliary_coefficient: null
+main_precision: null
+main_seed: null
+split_modulus: null
+validation_buckets: null
+test_buckets: null
+split_seed: null
+
+# Reference/candidate values are recorded for comparison but are not approved main-run choices.
+sequence_length_reference: 512
+effective_batch_anchor_candidate: 8192
+optimizer_reference: Adam
+betas_reference: [0.9, 0.99]
+rank_one_lr_reference: 0.0003
+transformer_lr_candidate: 0.0001
+sparsity_k_reference: 32
+auxiliary_coefficient_reference: 0.03125
+precision_candidate: bfloat16
+seed_candidate: 42

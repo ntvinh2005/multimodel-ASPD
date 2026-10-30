@@ -1,0 +1,16 @@
+schema_version: 3
+execution_status: BLOCKED
+allow_main_training: false
+
+dataset_manifest: out/multimodel/aspd_v3/data/pile_uncopyrighted/manifest.json
+alignment_manifest: out/multimodel/aspd_v3/data/pile_uncopyrighted/alignment_manifest.json
+output_dir: out/multimodel/aspd_v3/runs/three_family_main
+checkpoint_dir: out/multimodel/aspd_v3/checkpoints/three_family_main
+distributed_strategy: unresolved
+gradient_accumulation_steps: 1
+dataloader_workers: 8
+checkpoint_every_steps: 1000
+model_access_verified:
+  qwen: true
+  gemma: false
+  phi: true

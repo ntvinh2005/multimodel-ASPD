@@ -1,0 +1,51 @@
+schema_version: 3
+scientific_status: APPROVED_INFRASTRUCTURE_ONLY
+
+models:
+  - key: qwen
+    model_id: Qwen/Qwen3-4B-Instruct-2507
+    revision: cdbee75f17c01a7cc42f958dc650907174af0554
+    tokenizer_id: Qwen/Qwen3-4B-Instruct-2507
+    tokenizer_revision: cdbee75f17c01a7cc42f958dc650907174af0554
+    family: qwen3
+    selected_layers: [14, 15, 16, 17, 18, 19, 20, 21]
+    frozen: true
+  - key: gemma
+    model_id: google/gemma-3-4b-it
+    revision: 093f9f388b31de276ce2de164bdc2081324b9767
+    tokenizer_id: google/gemma-3-4b-it
+    tokenizer_revision: 093f9f388b31de276ce2de164bdc2081324b9767
+    family: gemma3_text
+    selected_layers: [13, 14, 15, 16, 17, 18, 19, 20]
+    frozen: true
+  - key: phi
+    model_id: microsoft/Phi-4-mini-instruct
+    revision: cfbefacb99257ffa30c83adab238a50856ac3083
+    tokenizer_id: microsoft/Phi-4-mini-instruct
+    tokenizer_revision: cfbefacb99257ffa30c83adab238a50856ac3083
+    family: phi3
+    selected_layers: [12, 13, 14, 15, 16, 17, 18, 19]
+    frozen: true
+
+dataset:
+  dataset_id: monology/pile-uncopyrighted
+  revision: 3be90335b66f24456a5d6659d9c8d208c0357119
+  train_minimum_accepted_anchor_exposures: 2048000000
+  validation_target_anchors: 5000000
+  test_target_anchors: 5000000
+  split_unit: document
+  canonical_text_policy: identity
+  future_ood_sources: [HuggingFaceFW/fineweb, lmsys/lmsys-chat-1m]
+
+architecture:
+  model_order: [qwen, gemma, phi]
+  selected_layer_count: 8
+  logical_matrices: [q, k, v, o, mlp_gate, mlp_up, mlp_down]
+  stages:
+    - concatenate_layers_within_model
+    - intra_model_transformer
+    - cross_model_transformer
+    - feature_readout
+    - batch_topk
+    - reconstruction
+  evaluation_status: "NOT_IMPLEMENTED — DEFERRED BY RESEARCHER"

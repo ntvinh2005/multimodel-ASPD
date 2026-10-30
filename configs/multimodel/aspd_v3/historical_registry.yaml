@@ -1,0 +1,7 @@
+schema_version: 1
+immutable: true
+experiments:
+  original_100m: configs/multimodel/qwen25_extreme_sports/aspd_d0_s1_l14_o_100m_original.yaml
+  mix3_200m: configs/multimodel/qwen25_extreme_sports/aspd_d0_s1_l14_o_mix3_200m.yaml
+  delta_mix3_200m: configs/multimodel/delta_crosscoder/qwen25_extreme_sports_mix3_200m_paper_near.yaml
+  p6_100m: configs/multimodel/qwen25_extreme_sports/p6_100m_causal_pilot.yaml
