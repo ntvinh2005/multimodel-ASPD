@@ -309,7 +309,6 @@ def fully_shard_main_v1(
             "main-v1 FSDP world-size mismatch: "
             f"expected {expected_world_size}, observed {observed_world_size}"
         )
-    from torch.distributed._tensor import Shard
     from torch.distributed.fsdp import MixedPrecisionPolicy, fully_shard
 
     policy = MixedPrecisionPolicy(
@@ -322,16 +321,12 @@ def fully_shard_main_v1(
     for bank in model.activation_banks.values():
         for decoders in bank.decoders.values():
             for decoder in decoders:
-                weight = decoder.weight
-
-                def placement(parameter: nn.Parameter, *, decoder_weight: nn.Parameter = weight):
-                    return Shard(1) if parameter is decoder_weight else Shard(0)
-
+                # FSDP supports uneven world-size padding only on dim 0. With C=8192 and
+                # world_size=3, explicitly sharding decoder.weight on dim 1 is invalid.
                 fully_shard(
                     decoder,
                     mp_policy=policy,
                     reshard_after_forward=True,
-                    shard_placement_fn=placement,
                 )
     for encoder in model.encoders.values():
         for packer in encoder.packer_modules.values():

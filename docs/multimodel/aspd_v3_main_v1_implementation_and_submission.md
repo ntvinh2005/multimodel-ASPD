@@ -20,8 +20,8 @@ Evaluation: `NOT_IMPLEMENTED — DEFERRED BY RESEARCHER`
 - Official reference checkout: `tue147/weights-read-write` commit
   `47d12edc229e334427ce6c4195dc5c44606b724a`
 - Main config: `configs/multimodel/aspd_v3/main_v1.yaml`
-- Canonical config fingerprint: `092ff403d93e14c2f8cbd96e594bd4e7d825b5b7e5ec528119c7687fb61cf024`
-- Config-file SHA-256: `c167c3d083f058d48178f8e26b6a44d846b645e9663a8aaf3243887c4f1a4c08`
+- Canonical config fingerprint: `f9132bec1aa769afdc62a8da7a3d1247ada63cac15ee630be0e394365bfd5ee8`
+- Config-file SHA-256: `05a61fa2b7154760e06eca0fd5d4c5178d634b5fc22bb13e51867f83e1df832e`
 - Approved-config SHA-256: `0d45e2679a3677a2d3ea752284fd112cc8216414c05a19d64a739997ff2e6542`
 - Machine-readable audit: `out/multimodel/aspd_v3/main_v1/audit/20261031T_runtime_gate_audit_v5/evidence.json`
   (SHA-256 `3a535fa4830af85da2d1f0e2fe9f6c7f9702398b3c6f8189fdb4c3328c36fbf9`)
@@ -285,8 +285,13 @@ actual DCP byte count and rollback result.
 - Preflight v2 pins each CUDA device before process-group initialization, passes `device_id`, uses
   `TORCH_NCCL_ASYNC_ERROR_HANDLING`, and disables IB for this single-node run so NCCL uses local
   transports. Synchronous DCP now retains sharded state on device and lets FileSystemWriter perform
-  bounded copy-ahead rather than materializing all shards in host RAM. The v2 evidence namespace is
-  `aspd_v3_qwen_gemma_phi_168targets_c8192_k32_preflight_v2_3gpu`.
+  bounded copy-ahead rather than materializing all shards in host RAM. Job `48580557` verified the
+  NCCL correction and loaded all three source checkpoints, then failed before training because the
+  explicit activation-decoder `Shard(1)` cannot unevenly shard `C=8192` over three ranks.
+- Preflight v3 removes only that unsupported placement override. Decoder weights now use FSDP's
+  default dim-0 sharding, whose padding path supports uneven three-rank shapes without changing any
+  scientific dimension. The v3 evidence namespace is
+  `aspd_v3_qwen_gemma_phi_168targets_c8192_k32_preflight_v3_3gpu`.
 - Actual DCP size / GPU memory / throughput: pending that preflight.
 - Main Slurm job: not submitted.
 
@@ -313,3 +318,8 @@ request and estimated node `c0802a-s21` at `2026-10-31T19:10:30`; this is not ru
 For the NCCL/DCP v2 correction, the complete focused suite passed `61` tests with zero failures;
 Ruff, shell syntax, `git diff --check`, and the main validator also passed. The only validator
 execution blocker remains the intentionally absent v2 real distributed preflight report.
+
+For the three-rank FSDP placement correction, the suite passed `62` tests with zero failures,
+including a meta-device test that asserts all 48 activation decoders omit the unsupported custom
+dim-1 placement. Ruff, shell syntax, and the validator passed; the only execution blocker is the
+intentionally absent v3 real distributed preflight report.

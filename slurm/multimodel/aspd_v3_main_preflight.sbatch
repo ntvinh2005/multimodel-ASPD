@@ -22,7 +22,7 @@ export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 export NCCL_IB_DISABLE=1
 
 CONFIG="configs/multimodel/aspd_v3/main_v1.yaml"
-RUN_DIR="out/multimodel/aspd_v3/main_v1/preflight/aspd_v3_qwen_gemma_phi_168targets_c8192_k32_preflight_v2_3gpu"
+RUN_DIR="out/multimodel/aspd_v3/main_v1/preflight/aspd_v3_qwen_gemma_phi_168targets_c8192_k32_preflight_v3_3gpu"
 REPORT="${RUN_DIR}/preflight_report.json"
 if [[ -e "${REPORT}" ]]; then
   echo "Refusing to overwrite completed preflight evidence: ${REPORT}" >&2

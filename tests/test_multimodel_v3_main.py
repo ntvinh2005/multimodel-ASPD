@@ -18,7 +18,11 @@ from aspd.multimodel.v3.encoder import (
 )
 from aspd.multimodel.v3.gating import V3BatchTopK
 from aspd.multimodel.v3.main_config import load_main_v1_config
-from aspd.multimodel.v3.main_model import MainV1TrainableModel, trainable_parameter_count
+from aspd.multimodel.v3.main_model import (
+    MainV1TrainableModel,
+    fully_shard_main_v1,
+    trainable_parameter_count,
+)
 from aspd.multimodel.v3.objective import (
     balanced_main_loss,
     detached_binary_support,
@@ -96,6 +100,34 @@ def test_full_main_v1_parameter_graph_matches_frozen_capacity_on_meta() -> None:
     assert trainable_parameter_count(model) == 12_575_332_352
     assert len(model.matrix_bank.components) == 168
     assert tuple(model.encoders) == ("pre", "mid")
+
+
+def test_three_rank_fsdp_uses_dim_zero_padding_for_activation_decoders(
+    monkeypatch,
+) -> None:
+    config = load_main_v1_config(ROOT / "configs/multimodel/aspd_v3/main_v1.yaml")
+    model = MainV1TrainableModel(config, _approved_registry(), device="meta")
+    calls = []
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.distributed, "is_initialized", lambda: True)
+    monkeypatch.setattr(torch.distributed, "get_world_size", lambda: 3)
+    monkeypatch.setattr(
+        torch.distributed.fsdp,
+        "fully_shard",
+        lambda module, **kwargs: calls.append((module, kwargs)),
+    )
+
+    fully_shard_main_v1(model, expected_world_size=3)
+
+    decoder_ids = {
+        id(decoder)
+        for bank in model.activation_banks.values()
+        for decoders in bank.decoders.values()
+        for decoder in decoders
+    }
+    decoder_calls = [kwargs for module, kwargs in calls if id(module) in decoder_ids]
+    assert len(decoder_calls) == 48
+    assert all("shard_placement_fn" not in kwargs for kwargs in decoder_calls)
 
 
 def test_cross_model_adapter_preserves_order_separators_shapes_and_gradients() -> None:
