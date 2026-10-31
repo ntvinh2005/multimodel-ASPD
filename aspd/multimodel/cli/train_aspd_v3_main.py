@@ -95,12 +95,13 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _init_distributed() -> tuple[int, int, torch.device]:
-    dist.init_process_group("nccl")
+    local_rank = int(os.environ["LOCAL_RANK"])
+    device = torch.device("cuda", local_rank)
+    torch.cuda.set_device(device)
+    dist.init_process_group("nccl", device_id=device)
     rank = dist.get_rank()
     world_size = dist.get_world_size()
-    local_rank = int(os.environ["LOCAL_RANK"])
-    torch.cuda.set_device(local_rank)
-    return rank, world_size, torch.device("cuda", local_rank)
+    return rank, world_size, device
 
 
 def _broadcast_object(value: Any, *, source: int = 0) -> Any:

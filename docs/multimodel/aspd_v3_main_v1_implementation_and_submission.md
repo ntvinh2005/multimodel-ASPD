@@ -20,8 +20,8 @@ Evaluation: `NOT_IMPLEMENTED — DEFERRED BY RESEARCHER`
 - Official reference checkout: `tue147/weights-read-write` commit
   `47d12edc229e334427ce6c4195dc5c44606b724a`
 - Main config: `configs/multimodel/aspd_v3/main_v1.yaml`
-- Canonical config fingerprint: `2d878961e50dee9ab8da1111fb0369373bfc002318739a4fd2538a0594850de8`
-- Config-file SHA-256: `bfb5ce90c29eb0251a10d58733fac42240ef3a78b3f5c0da11fc55362e8bb497`
+- Canonical config fingerprint: `092ff403d93e14c2f8cbd96e594bd4e7d825b5b7e5ec528119c7687fb61cf024`
+- Config-file SHA-256: `c167c3d083f058d48178f8e26b6a44d846b645e9663a8aaf3243887c4f1a4c08`
 - Approved-config SHA-256: `0d45e2679a3677a2d3ea752284fd112cc8216414c05a19d64a739997ff2e6542`
 - Machine-readable audit: `out/multimodel/aspd_v3/main_v1/audit/20261031T_runtime_gate_audit_v5/evidence.json`
   (SHA-256 `3a535fa4830af85da2d1f0e2fe9f6c7f9702398b3c6f8189fdb4c3328c36fbf9`)
@@ -278,13 +278,15 @@ actual DCP byte count and rollback result.
 
 - Superseded four-GPU preflight job `48559235` never ran and was canceled before replacement;
   accounting records `CANCELLED`, elapsed `00:00:00`.
-- Replacement real distributed preflight job `48568044` requests three `rtx_pro_6000` GPUs, six
-  CPUs, 40 GB RAM and a 45-minute limit. It is `PENDING` on shared QOS resources: other users
-  currently occupy five of the six GPUs and 46 of the 48 CPUs allowed by `thai`, leaving only one
-  GPU and two CPUs when three GPUs and six CPUs are required. Scheduler reason alternates between
-  `QOSGrpGRES` and `QOSGrpCpuLimit` as it reports the first limiting TRES. It has not started, so it
-  provides no runtime PASS/FAIL evidence yet. Standard logs are
-  `slurm/logs/aspd-v3-main-preflight-48568044.{out,err}`.
+- First three-GPU preflight job `48568044` started on `c0800a-s25` with three RTX PRO 6000 GPUs but
+  failed after 18 seconds, before model loading, at the first NCCL barrier. The recorded cause was
+  mixed local IB/RoCE HCA selection (`ncclInternalError`), not OOM or scientific correctness.
+  Failure logs are `slurm/logs/aspd-v3-main-preflight-48568044.{out,err}` and are preserved.
+- Preflight v2 pins each CUDA device before process-group initialization, passes `device_id`, uses
+  `TORCH_NCCL_ASYNC_ERROR_HANDLING`, and disables IB for this single-node run so NCCL uses local
+  transports. Synchronous DCP now retains sharded state on device and lets FileSystemWriter perform
+  bounded copy-ahead rather than materializing all shards in host RAM. The v2 evidence namespace is
+  `aspd_v3_qwen_gemma_phi_168targets_c8192_k32_preflight_v2_3gpu`.
 - Actual DCP size / GPU memory / throughput: pending that preflight.
 - Main Slurm job: not submitted.
 
@@ -307,3 +309,7 @@ Verification for this revision: 59 focused tests passed, Ruff passed, both Slurm
 `bash -n`, `git diff --check` passed, and the validator reported `STRUCTURALLY_READY` with only the
 expected missing-preflight evidence blocker. Scheduler `--test-only` accepted the 3-GPU/6-CPU
 request and estimated node `c0802a-s21` at `2026-10-31T19:10:30`; this is not runtime evidence.
+
+For the NCCL/DCP v2 correction, the complete focused suite passed `61` tests with zero failures;
+Ruff, shell syntax, `git diff --check`, and the main validator also passed. The only validator
+execution blocker remains the intentionally absent v2 real distributed preflight report.

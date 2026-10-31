@@ -7,7 +7,10 @@ import pytest
 import torch
 
 from aspd.multimodel.v3.data import HashSplitPolicy, SourceDocument, SQLiteExposureLedger
-from aspd.multimodel.v3.distributed_checkpoint import MainV1DistributedCheckpoint
+from aspd.multimodel.v3.distributed_checkpoint import (
+    MainV1DistributedCheckpoint,
+    _sharded_state_dict_options,
+)
 from aspd.multimodel.v3.production_stream import PileAlignedAnchorStream
 
 
@@ -70,6 +73,12 @@ def _stream(tmp_path: Path, rows: _StatefulRows, policy: HashSplitPolicy):
         dedup_path=tmp_path / "dedup.sqlite",
         sequence_length=64,
     )
+
+
+def test_dcp_keeps_sharded_state_on_device_for_bounded_sync_writes() -> None:
+    options = _sharded_state_dict_options()
+    assert options.full_state_dict is False
+    assert options.cpu_offload is False
 
 
 def test_production_stream_exact_pool_and_resume(tmp_path: Path) -> None:

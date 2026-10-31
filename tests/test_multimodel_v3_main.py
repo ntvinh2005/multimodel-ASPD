@@ -8,6 +8,7 @@ import torch
 from tokenizers import Tokenizer, decoders, models, pre_tokenizers
 from transformers import PreTrainedTokenizerFast
 
+from aspd.multimodel.cli import train_aspd_v3_main as main_cli
 from aspd.multimodel.v3.alignment import _reference_prefixes, _streaming_prefixes
 from aspd.multimodel.v3.config import load_v3_config_bundle
 from aspd.multimodel.v3.encoder import (
@@ -40,6 +41,29 @@ def _approved_registry():
         ROOT / "configs/multimodel/aspd_v3/runtime_template.yaml",
     )
     return build_model_registry(bundle.approved)
+
+
+def test_distributed_init_pins_cuda_device_before_nccl(monkeypatch) -> None:
+    events = []
+    monkeypatch.setenv("LOCAL_RANK", "2")
+    monkeypatch.setattr(
+        main_cli.torch.cuda, "set_device", lambda device: events.append(("device", device))
+    )
+    monkeypatch.setattr(
+        main_cli.dist,
+        "init_process_group",
+        lambda backend, **kwargs: events.append(("init", backend, kwargs)),
+    )
+    monkeypatch.setattr(main_cli.dist, "get_rank", lambda: 2)
+    monkeypatch.setattr(main_cli.dist, "get_world_size", lambda: 3)
+
+    rank, world_size, device = main_cli._init_distributed()
+
+    assert (rank, world_size, device) == (2, 3, torch.device("cuda", 2))
+    assert events == [
+        ("device", torch.device("cuda", 2)),
+        ("init", "nccl", {"device_id": torch.device("cuda", 2)}),
+    ]
 
 
 def test_main_v1_is_frozen_and_legacy_config_remains_non_executable() -> None:

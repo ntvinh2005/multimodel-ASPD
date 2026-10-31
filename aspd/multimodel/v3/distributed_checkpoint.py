@@ -96,6 +96,12 @@ def restore_rng_state(state: Mapping[str, Any]) -> None:
         )
 
 
+def _sharded_state_dict_options() -> StateDictOptions:
+    """Keep DTensor shards on device so synchronous DCP can copy them in bounded chunks."""
+
+    return StateDictOptions(full_state_dict=False, cpu_offload=False)
+
+
 class MainV1DistributedCheckpoint:
     """DCP model/Adam shards plus per-rank exact-resume sidecars."""
 
@@ -149,7 +155,7 @@ class MainV1DistributedCheckpoint:
             (incomplete / "dcp").mkdir()
         self._barrier(distributed)
 
-        options = StateDictOptions(full_state_dict=False, cpu_offload=True)
+        options = _sharded_state_dict_options()
         model_state, optimizer_state = get_state_dict(model, optimizer, options=options)
         state = {
             "model": model_state,
@@ -275,7 +281,7 @@ class MainV1DistributedCheckpoint:
             dataset_manifest_sha256=dataset_manifest_sha256,
             world_size=world_size,
         )
-        options = StateDictOptions(full_state_dict=False, cpu_offload=True)
+        options = _sharded_state_dict_options()
         model_state, optimizer_state = get_state_dict(model, optimizer, options=options)
         state = {
             "model": model_state,
