@@ -16,10 +16,63 @@ def _safe_key(value: str) -> str:
     return value.replace(".", "__dot__")
 
 
+class ActivationDecoder(nn.Linear):
+    """Sparse feature decoder whose module call is an independent FSDP boundary."""
+
+    def forward(
+        self,
+        code: Tensor,
+        *,
+        boundaries: Sequence[int] | None = None,
+        include_bias: bool = True,
+    ) -> Tensor | tuple[Tensor, ...]:
+        if code.ndim < 2 or code.shape[-1] != self.in_features:
+            raise ValueError("activation decoder code must have shape [...,C]")
+        leading_shape = code.shape[:-1]
+        code = code.reshape(-1, self.in_features)
+        output = torch.zeros(
+            code.shape[0], self.out_features, device=code.device, dtype=code.dtype
+        )
+        if include_bias and self.bias is not None:
+            output = output + self.bias.to(output.dtype)
+        active_position, active_feature = (code != 0).nonzero(as_tuple=True)
+
+        def add_range(value: Tensor, lower: int, upper: int) -> Tensor:
+            selected = (active_feature >= lower) & (active_feature < upper)
+            if not selected.any():
+                return value
+            positions = active_position[selected]
+            features = active_feature[selected]
+            scales = code[positions, features]
+            writes = scales[:, None] * self.weight.T[features].to(scales.dtype)
+            return value.index_add(0, positions, writes)
+
+        if boundaries is None:
+            return add_range(output, 0, self.in_features).reshape(
+                *leading_shape, self.out_features
+            )
+        if not boundaries or boundaries[0] != 0 or boundaries[-1] != self.in_features:
+            raise ValueError("Matryoshka boundaries must cover the complete feature axis")
+        reconstructions = [output]
+        for lower, upper in zip(boundaries[:-1], boundaries[1:], strict=True):
+            output = add_range(output, int(lower), int(upper))
+            reconstructions.append(output)
+        return tuple(
+            value.reshape(*leading_shape, self.out_features) for value in reconstructions
+        )
+
+
 class ActivationReconstructionBank(nn.Module):
     """Model/layer-specific activation decoders; callers choose the explicit code semantics."""
 
-    def __init__(self, activation_dims: Mapping[str, Sequence[int]], n_features: int):
+    def __init__(
+        self,
+        activation_dims: Mapping[str, Sequence[int]],
+        n_features: int,
+        *,
+        device: torch.device | str | None = None,
+        dtype: torch.dtype | None = None,
+    ):
         super().__init__()
         self.model_order = tuple(activation_dims)
         self.decoders = nn.ModuleDict()
@@ -27,7 +80,12 @@ class ActivationReconstructionBank(nn.Module):
             if len(dimensions) != 8:
                 raise ValueError("v3 activation reconstruction requires eight layer dimensions")
             self.decoders[model_key] = nn.ModuleList(
-                [nn.Linear(n_features, width, bias=True) for width in dimensions]
+                [
+                    ActivationDecoder(
+                        n_features, width, bias=True, device=device, dtype=dtype
+                    )
+                    for width in dimensions
+                ]
             )
         self.normalize_decoders_()
 
@@ -58,6 +116,9 @@ class RankOneMatrixBank(nn.Module):
         targets: Sequence[LogicalMatrixTarget],
         n_features: int,
         native_biases: Mapping[str, Tensor | None] | None = None,
+        *,
+        device: torch.device | str | None = None,
+        dtype: torch.dtype | None = None,
     ):
         super().__init__()
         if len({target.key for target in targets}) != len(targets):
@@ -66,7 +127,12 @@ class RankOneMatrixBank(nn.Module):
         self.components = nn.ModuleDict(
             {
                 _safe_key(target.key): RankOneComponents(
-                    n_features, target.d_in, target.d_out, unit_norm=True
+                    n_features,
+                    target.d_in,
+                    target.d_out,
+                    unit_norm=True,
+                    device=device,
+                    dtype=dtype,
                 )
                 for target in targets
             }
@@ -108,23 +174,7 @@ class RankOneMatrixBank(nn.Module):
             else sparse_code
         )
         coefficients = coefficients * valid_anchors[..., None].to(coefficients.dtype)
-        batch, anchors, features = coefficients.shape
-        flat_coefficients = coefficients.reshape(batch * anchors, features)
-        flat_input = matrix_input.reshape(batch * anchors, target.d_in)
-        active_position, active_feature = (flat_coefficients != 0).nonzero(as_tuple=True)
-        output = torch.zeros(
-            batch * anchors,
-            target.d_out,
-            device=matrix_input.device,
-            dtype=torch.promote_types(matrix_input.dtype, component.U.dtype),
-        )
-        if active_feature.numel():
-            selected = flat_input[active_position].to(component.V.dtype)
-            reads = (selected * component.V[active_feature]).sum(dim=-1)
-            scales = reads * flat_coefficients[active_position, active_feature].to(reads.dtype)
-            writes = scales[:, None] * component.U[active_feature]
-            output.index_add_(0, active_position, writes.to(output.dtype))
-        output = output.reshape(batch, anchors, target.d_out)
+        output = component(matrix_input, coefficients, valid_anchors)
         bias_name = self._bias_names.get(target_key)
         if bias_name is not None:
             output = output + getattr(self, bias_name)
@@ -147,10 +197,17 @@ class V3ReconstructionInfrastructure(nn.Module):
         targets: Sequence[LogicalMatrixTarget],
         n_features: int,
         native_biases: Mapping[str, Tensor | None] | None = None,
+        *,
+        device: torch.device | str | None = None,
+        dtype: torch.dtype | None = None,
     ):
         super().__init__()
-        self.activations = ActivationReconstructionBank(activation_dims, n_features)
-        self.matrices = RankOneMatrixBank(targets, n_features, native_biases)
+        self.activations = ActivationReconstructionBank(
+            activation_dims, n_features, device=device, dtype=dtype
+        )
+        self.matrices = RankOneMatrixBank(
+            targets, n_features, native_biases, device=device, dtype=dtype
+        )
 
 
 def require_resolved_objective(

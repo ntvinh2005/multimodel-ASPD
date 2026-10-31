@@ -288,7 +288,7 @@ class SQLiteExposureLedger:
     rank-local IDs before invoking this class.
     """
 
-    SCHEMA_VERSION = 2
+    SCHEMA_VERSION = 3
 
     def __init__(
         self,
@@ -345,7 +345,8 @@ class SQLiteExposureLedger:
                 payload_sha256 TEXT NOT NULL,
                 raw_tokens_qwen INTEGER NOT NULL,
                 raw_tokens_gemma INTEGER NOT NULL,
-                raw_tokens_phi INTEGER NOT NULL
+                raw_tokens_phi INTEGER NOT NULL,
+                observed_before_step INTEGER NOT NULL
             );
             CREATE TABLE IF NOT EXISTS exposure_totals (
                 singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -413,7 +414,7 @@ class SQLiteExposureLedger:
 
     def _genesis_receipt(self, ledger_uuid: str) -> str:
         payload = (
-            f"aspd-v3-exposure-ledger-v2\0{ledger_uuid}\0"
+            f"aspd-v3-exposure-ledger-v3\0{ledger_uuid}\0"
             f"{self.dataset_manifest_sha256}\0{self.world_size}"
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -636,16 +637,6 @@ class SQLiteExposureLedger:
         current = self.snapshot()
         if current.optimization_steps < receipt.optimizer_step:
             raise ValueError("live exposure ledger is behind the checkpoint receipt")
-        if (
-            current.raw_tokens_qwen,
-            current.raw_tokens_gemma,
-            current.raw_tokens_phi,
-        ) != (
-            receipt.counters.raw_tokens_qwen,
-            receipt.counters.raw_tokens_gemma,
-            receipt.counters.raw_tokens_phi,
-        ):
-            raise ValueError("alignment token counters changed after training began")
         if receipt.optimizer_step:
             row = self.connection.execute(
                 "SELECT receipt_sha256 FROM optimizer_steps WHERE step_id=?",
@@ -656,7 +647,16 @@ class SQLiteExposureLedger:
             observed_receipt = self.genesis_receipt_sha256
         if observed_receipt != receipt.receipt_sha256:
             raise ValueError("live exposure ledger does not contain the checkpoint receipt")
-        if current.optimization_steps == receipt.optimizer_step:
+        raw_counts_match = (
+            current.raw_tokens_qwen,
+            current.raw_tokens_gemma,
+            current.raw_tokens_phi,
+        ) == (
+            receipt.counters.raw_tokens_qwen,
+            receipt.counters.raw_tokens_gemma,
+            receipt.counters.raw_tokens_phi,
+        )
+        if current.optimization_steps == receipt.optimizer_step and raw_counts_match:
             self._validate_constant_time_state()
             return current
 
@@ -667,6 +667,10 @@ class SQLiteExposureLedger:
             )
             self.connection.execute(
                 "DELETE FROM seen_anchors WHERE first_step>=?", (receipt.optimizer_step,)
+            )
+            self.connection.execute(
+                "DELETE FROM alignment_observations WHERE observed_before_step>=?",
+                (receipt.optimizer_step,),
             )
             counters = receipt.counters
             self.connection.execute(
@@ -694,15 +698,23 @@ class SQLiteExposureLedger:
         self._validate_constant_time_state()
         return self.snapshot()
 
-    def observe_alignment(self, observation_id: str, result: AlignmentResult) -> None:
+    def observe_raw_tokens(
+        self,
+        observation_id: str,
+        counts: Mapping[str, int],
+        *,
+        before_optimizer_step: int | None = None,
+    ) -> None:
         if not observation_id:
             raise ValueError("alignment observation requires a stable global identity")
-        if self.snapshot().optimization_steps:
-            raise RuntimeError("alignment token accounting is frozen after optimizer step zero")
-        counts = {
-            key: int(sum(result.tokenized[key].attention_mask))
-            for key in ("qwen", "gemma", "phi")
-        }
+        current_step = self.snapshot().optimization_steps
+        if before_optimizer_step is None:
+            before_optimizer_step = current_step
+        if before_optimizer_step != current_step:
+            raise ValueError("raw-token observation must be attached to the current step boundary")
+        counts = {key: int(counts[key]) for key in ("qwen", "gemma", "phi")}
+        if any(value < 0 for value in counts.values()):
+            raise ValueError("raw-token observations cannot be negative")
         payload = json.dumps(counts, sort_keys=True, separators=(",", ":"))
         payload_sha256 = hashlib.sha256(payload.encode("utf-8")).hexdigest()
         self.connection.execute("BEGIN IMMEDIATE")
@@ -717,8 +729,15 @@ class SQLiteExposureLedger:
                 self.connection.rollback()
                 return
             self.connection.execute(
-                "INSERT INTO alignment_observations VALUES (?,?,?,?,?)",
-                (observation_id, payload_sha256, counts["qwen"], counts["gemma"], counts["phi"]),
+                "INSERT INTO alignment_observations VALUES (?,?,?,?,?,?)",
+                (
+                    observation_id,
+                    payload_sha256,
+                    counts["qwen"],
+                    counts["gemma"],
+                    counts["phi"],
+                    before_optimizer_step,
+                ),
             )
             self.connection.execute(
                 "UPDATE exposure_totals SET raw_tokens_qwen=raw_tokens_qwen+?, "
@@ -730,6 +749,15 @@ class SQLiteExposureLedger:
         except Exception:
             self.connection.rollback()
             raise
+
+    def observe_alignment(self, observation_id: str, result: AlignmentResult) -> None:
+        self.observe_raw_tokens(
+            observation_id,
+            {
+                key: int(sum(result.tokenized[key].attention_mask))
+                for key in ("qwen", "gemma", "phi")
+            },
+        )
 
     def observe_optimizer_step(self, step_id: int, anchor_ids: Sequence[str]) -> ExposureCounters:
         return self.observe_global_optimizer_step(step_id, {0: anchor_ids})

@@ -17,6 +17,7 @@ from aspd.multimodel.v3.encoder import (
 )
 from aspd.multimodel.v3.gating import V3BatchTopK
 from aspd.multimodel.v3.main_config import load_main_v1_config
+from aspd.multimodel.v3.main_model import MainV1TrainableModel, trainable_parameter_count
 from aspd.multimodel.v3.objective import (
     balanced_main_loss,
     detached_binary_support,
@@ -55,14 +56,21 @@ def test_main_v1_is_frozen_and_legacy_config_remains_non_executable() -> None:
         "mlp_down",
     )
     assert config.data.effective_batch_anchors * config.data.minimum_optimizer_steps == 2_048_000_000
-    assert "main trainer entrypoint is not implemented" in config.execution_blockers(ROOT)
-    assert "main Slurm launcher is not implemented" in config.execution_blockers(ROOT)
+    assert "distributed preflight evidence is not materialized" in config.execution_blockers(ROOT)
     legacy = load_v3_config_bundle(
         ROOT / "configs/multimodel/aspd_v3/approved.yaml",
         ROOT / "configs/multimodel/aspd_v3/candidates.yaml",
         ROOT / "configs/multimodel/aspd_v3/runtime_template.yaml",
     )
     assert legacy.report()["status"] == "BLOCKED"
+
+
+def test_full_main_v1_parameter_graph_matches_frozen_capacity_on_meta() -> None:
+    config = load_main_v1_config(ROOT / "configs/multimodel/aspd_v3/main_v1.yaml")
+    model = MainV1TrainableModel(config, _approved_registry(), device="meta")
+    assert trainable_parameter_count(model) == 12_575_332_352
+    assert len(model.matrix_bank.components) == 168
+    assert tuple(model.encoders) == ("pre", "mid")
 
 
 def test_cross_model_adapter_preserves_order_separators_shapes_and_gradients() -> None:

@@ -179,3 +179,99 @@ Implement and CPU-test the deterministic on-the-fly document stream plus a DCP-b
 that can construct all 12.575B trainable parameters without replication. Then reserve/provision at
 least the measured two-checkpoint-plus-ledger storage envelope and run exactly one four-RTX-PRO-6000
 preflight for multiple real optimizer steps. Only that job can authorize the main submission gate.
+
+## Continuation update — storage recovery and production trainer (2026-10-31)
+
+This section supersedes the earlier blocker list where newer evidence is stated. The main status
+remains `MAIN_NOT_SUBMITTED` until the real distributed preflight passes.
+
+### OLD IA PROJECT STORAGE RECLAMATION
+
+- Positively identified old project: `/blue/thai/vinhnguyen1/ia-unforeseen-70b`, a physical
+  directory owned by `vinhnguyen1:thai` on the Blue Lustre filesystem.
+- Remote verification: `https://github.com/ntvinh2005/ia-unforeseen-70b.git`; fetched `origin`; local
+  `main` and `origin/main` both resolve to `264c710edf6894d858e45bd40f49fd89aeea7a79` (0 ahead,
+  0 behind). The local `fix/audit-pipeline` tip is reachable from the remote branch and is two
+  commits behind it. There are no unreachable commits and no additional worktrees.
+- Whole-project deletion was blocked. The checkout contains 204 lines of unpublished tracked
+  edits across two files, one untracked test, ignored artifacts, and research outputs. None was
+  uploaded or deleted.
+- Active-use audit: Slurm job `48553677` was an interactive CPU shell with workdir and all node
+  process working directories under `/home/vinhnguyen1`, not the IA directory.
+- Per the authorization to recover only independently verified disposable storage, exactly two
+  standard Hugging Face hub cache roots were deleted. Credentials, dataset-cache siblings,
+  downloaded adapter copies, `models`, `outputs`, `logs`, `repos`, `envs`, `tmp`, source changes,
+  and `.git` were preserved.
+- IA logical size changed from `997,721,243,648` to `452,410,130,432` bytes. Blue group usage
+  changed from `5,042,872,692` to `4,548,977,700` KiB. The quota-derived recovered capacity is
+  `493,894,992` KiB (`505,748,471,808` bytes), leaving `819,731,420` KiB
+  (`839,404,974,080` bytes) of group headroom.
+- Permanent audit record:
+  `docs/multimodel/aspd_v3_ia_storage_reclamation_audit_20261031.json`.
+
+Result: `IA_CLEANUP: PARTIALLY_CLEANED`.
+
+### Production implementation completed locally
+
+1. Added an on-the-fly Pile stream over the exact pinned revision. Rank zero owns the Hugging Face
+   iterable cursor and broadcasts an identical accepted-anchor pool to the four FSDP ranks. Stream
+   checkpoints include the native dataset state, pending partial document, exact-dedup SQLite
+   high-water mark, split counts, and tokenizer/alignment provenance. No corpus-wide anchor JSONL
+   or activation cache is created.
+2. Materialized lightweight immutable source and alignment manifests. The dataset manifest binds
+   all 30 `train/*.jsonl.zst` files to repository commit, Git blob IDs, LFS SHA-256 values and
+   sizes. Dataset manifest fingerprint:
+   `a258974d21ceac3457529644be07459518fde7bc28501abde5c67e5e3719286f`;
+   alignment fingerprint:
+   `f1bb9047a6012fb7fcb3f7322169b17370c8c20b92d88fa6b256c094bebb347d`.
+3. Added the complete 12,575,332,352-parameter trainable graph: two hierarchical encoders, two
+   shared BatchTopK gates, 48 activation decoders, and all 168 target-specific rank-one U/V banks.
+   A meta-device construction test confirms the exact parameter count without allocating the full
+   state on CPU.
+4. Added sparse activation-decoder and rank-one call boundaries so composable FSDP all-gathers one
+   target/decoder at a time. Trainable master parameters and Adam states remain FP32-sharded;
+   forward compute is BF16. Frozen source placement is model-parallel: Qwen/Gemma/Phi reside on
+   ranks 0/1/2 respectively, while bounded aligned captures are broadcast so every target receives
+   every accepted exposure.
+5. Added the operational four-pool gradient-accumulation loop. Four exact 2,048-anchor BatchTopK
+   pools produce exactly 8,192 accepted exposures per optimizer step. Internal matrix terms are
+   backwarded target-by-target to bound activation memory; binary support is detached from the
+   encoder. Activation/Matryoshka/AuxK retain their intended encoder and decoder routes.
+6. Added atomic PyTorch Distributed Checkpoint publication. DCP shards and per-rank RNG/runtime
+   sidecars are written under `.incomplete`; rank zero publishes `manifest.json` and `COMPLETE`
+   before an atomic directory rename. Resume restores model, Adam, scheduler, RNG, exact stream
+   state, exposure-ledger receipt, and counters. Partial directories are rejected.
+7. Corrected streaming raw-token accounting so observations continue after optimizer step zero and
+   roll back to the checkpoint receipt together with exposure membership and optimizer steps.
+8. Added bounded preflight and restartable 14-day main Slurm launchers. Main execution validates a
+   PASS preflight from the exact Git SHA/config/dataset/alignment fingerprints and requeues only
+   after signal-triggered checkpoint completion.
+
+### Verification before GPU preflight
+
+- Focused v3, smoke, production, BatchTopK, component, and historical model regressions:
+  `64 passed`, `0 failed`.
+- Ruff: passed on all changed Python surfaces.
+- `compileall`: passed using an external bytecode cache (the managed sandbox forbids writing
+  `__pycache__` in this worktree).
+- `bash -n`: passed for both new launchers.
+- `git diff --check`: passed.
+- Main validator: `STRUCTURALLY_READY`; sole execution blocker is the not-yet-materialized
+  distributed preflight report.
+- `sbatch --test-only slurm/multimodel/aspd_v3_main_preflight.sbatch` accepted the request and
+  estimated placement on four RTX PRO 6000 GPUs. This is scheduler validation, not runtime
+  evidence.
+
+### Revised storage envelope
+
+The recovered `839.4 GB` quota headroom covers the analytical two-complete-checkpoint lower bound
+(`251.5 GB`) and worst-case exposure ledger (`195.5 GB`) with margin. Atomic replacement can
+temporarily require a third checkpoint before pruning, so the conservative main peak is at least
+`377.3 GB` of checkpoint state plus ledger and metadata. Submission remains gated on the preflight's
+actual DCP byte count and rollback result.
+
+### Current gate
+
+- Real distributed preflight: not yet run in this report revision.
+- Actual DCP size / GPU memory / throughput: pending that preflight.
+- Main Slurm job: not submitted.

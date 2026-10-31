@@ -57,11 +57,21 @@ class ChannelSlicePacker:
 class LearnedProjectionPacker(nn.Module):
     """Explicitly provisional learned packing; selecting it does not approve the method."""
 
-    def __init__(self, concatenated_width: int, latent_tokens: int, token_width: int):
+    def __init__(
+        self,
+        concatenated_width: int,
+        latent_tokens: int,
+        token_width: int,
+        *,
+        device: torch.device | str | None = None,
+        dtype: torch.dtype | None = None,
+    ):
         super().__init__()
         self.latent_tokens = latent_tokens
         self.token_width = token_width
-        self.projection = nn.Linear(concatenated_width, latent_tokens * token_width)
+        self.projection = nn.Linear(
+            concatenated_width, latent_tokens * token_width, device=device, dtype=dtype
+        )
 
     def forward(self, concatenated: Tensor) -> Tensor:
         projected = self.projection(concatenated)
@@ -69,7 +79,16 @@ class LearnedProjectionPacker(nn.Module):
 
 
 class IntraModelTransformer(nn.Module):
-    def __init__(self, width: int, *, layers: int, heads: int, mlp_ratio: float = 4.0):
+    def __init__(
+        self,
+        width: int,
+        *,
+        layers: int,
+        heads: int,
+        mlp_ratio: float = 4.0,
+        device: torch.device | str | None = None,
+        dtype: torch.dtype | None = None,
+    ):
         super().__init__()
         if width % heads:
             raise ValueError("intra-model token width must be divisible by attention heads")
@@ -81,6 +100,8 @@ class IntraModelTransformer(nn.Module):
             norm_first=True,
             dropout=0.0,
             activation="gelu",
+            device=device,
+            dtype=dtype,
         )
         self.encoder = nn.TransformerEncoder(layer, layers, enable_nested_tensor=False)
 
@@ -166,7 +187,16 @@ def pack_cross_model_tokens(
 
 
 class CrossModelTransformer(nn.Module):
-    def __init__(self, width: int, *, layers: int, heads: int, mlp_ratio: float = 4.0):
+    def __init__(
+        self,
+        width: int,
+        *,
+        layers: int,
+        heads: int,
+        mlp_ratio: float = 4.0,
+        device: torch.device | str | None = None,
+        dtype: torch.dtype | None = None,
+    ):
         super().__init__()
         if width % heads:
             raise ValueError("cross-model token width must be divisible by attention heads")
@@ -178,6 +208,8 @@ class CrossModelTransformer(nn.Module):
             norm_first=True,
             dropout=0.0,
             activation="gelu",
+            device=device,
+            dtype=dtype,
         )
         self.encoder = nn.TransformerEncoder(layer, layers, enable_nested_tensor=False)
 
@@ -192,12 +224,20 @@ class CrossModelTransformer(nn.Module):
 class FeatureReadout(nn.Module):
     """Experimental readout interface; the main-run choice remains unresolved."""
 
-    def __init__(self, width: int, n_features: int, method: Literal["mean"]):
+    def __init__(
+        self,
+        width: int,
+        n_features: int,
+        method: Literal["mean"],
+        *,
+        device: torch.device | str | None = None,
+        dtype: torch.dtype | None = None,
+    ):
         super().__init__()
         if method != "mean":
             raise NotImplementedError("only the explicitly labeled experimental mean readout exists")
         self.method = method
-        self.output = nn.Linear(width, n_features)
+        self.output = nn.Linear(width, n_features, device=device, dtype=dtype)
 
     def forward(self, tokens: Tensor, valid_anchors: Tensor) -> Tensor:
         if valid_anchors.shape != tokens.shape[:2]:
@@ -221,6 +261,8 @@ class HierarchicalV3Encoder(nn.Module):
         cross_width: int | None = None,
         n_features: int,
         readout: Literal["mean"],
+        device: torch.device | str | None = None,
+        dtype: torch.dtype | None = None,
     ):
         super().__init__()
         if tuple(packers) != MODEL_ORDER:
@@ -252,7 +294,13 @@ class HierarchicalV3Encoder(nn.Module):
         self._packers = dict(packers)
         self.intra = nn.ModuleDict(
             {
-                key: IntraModelTransformer(width, layers=intra_layers, heads=intra_heads)
+                key: IntraModelTransformer(
+                    width,
+                    layers=intra_layers,
+                    heads=intra_heads,
+                    device=device,
+                    dtype=dtype,
+                )
                 for key, width in widths.items()
             }
         )
@@ -260,11 +308,19 @@ class HierarchicalV3Encoder(nn.Module):
         if packed_cross_width == cross_width:
             self.cross_input_adapter = nn.Identity()
         else:
-            self.cross_input_adapter = nn.Linear(packed_cross_width, cross_width)
+            self.cross_input_adapter = nn.Linear(
+                packed_cross_width, cross_width, device=device, dtype=dtype
+            )
         self.cross = CrossModelTransformer(
-            cross_width, layers=cross_layers, heads=cross_heads
+            cross_width,
+            layers=cross_layers,
+            heads=cross_heads,
+            device=device,
+            dtype=dtype,
         )
-        self.readout = FeatureReadout(cross_width, n_features, readout)
+        self.readout = FeatureReadout(
+            cross_width, n_features, readout, device=device, dtype=dtype
+        )
         self.latent_tokens = latent_tokens
 
     def forward(

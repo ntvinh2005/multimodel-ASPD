@@ -7,6 +7,8 @@ from collections.abc import Mapping, Sequence
 import torch
 from torch import Tensor, nn
 
+from aspd.multimodel.v3.reconstruction import ActivationDecoder
+
 MATRYOSHKA_GROUP_FRACS = (0.0625, 0.0625, 0.125, 0.25, 0.5)
 
 
@@ -72,17 +74,31 @@ def matryoshka_activation_fvu(
     flat_code = _valid_flat(code, valid_anchors)
     truth = _valid_flat(target, valid_anchors)
     denominator_mean = _variance_denominator(truth) / truth.numel()
-    bias = decoder.bias.float().expand_as(truth) if decoder.bias is not None else torch.zeros_like(truth)
-    reconstruction = bias
-    terms = [(reconstruction - truth).square().mean()]
     boundaries = matryoshka_boundaries(decoder.in_features, group_fracs)
-    directions = decoder.weight.float().T
-    for lower, upper in zip(boundaries[:-1], boundaries[1:], strict=True):
-        reconstruction = reconstruction + flat_code[:, lower:upper] @ directions[lower:upper]
-        terms.append((reconstruction - truth).square().mean())
+    if isinstance(decoder, ActivationDecoder):
+        decoded = decoder(
+            flat_code.to(decoder.weight.dtype), boundaries=boundaries, include_bias=True
+        )
+        assert isinstance(decoded, tuple)
+        reconstructions = tuple(value.float() for value in decoded)
+    else:
+        bias = (
+            decoder.bias.float().expand_as(truth)
+            if decoder.bias is not None
+            else torch.zeros_like(truth)
+        )
+        reconstruction = bias
+        values = [reconstruction]
+        directions = decoder.weight.float().T
+        for lower, upper in zip(boundaries[:-1], boundaries[1:], strict=True):
+            reconstruction = reconstruction + flat_code[:, lower:upper] @ directions[lower:upper]
+            values.append(reconstruction)
+        reconstructions = tuple(values)
+    terms = [(reconstruction - truth).square().mean() for reconstruction in reconstructions]
     loss = torch.stack(terms).mean() / denominator_mean
     if not torch.isfinite(loss):
         raise FloatingPointError("non-finite ASPD v3 Matryoshka FVU")
+    reconstruction = reconstructions[-1]
     full = torch.zeros_like(target, dtype=reconstruction.dtype)
     full[valid_anchors] = reconstruction
     return loss, full
@@ -108,11 +124,27 @@ def auxk_dead_feature_loss(
     acts = _valid_flat(preactivations, valid_anchors)[:, dead_features]
     truth = _valid_flat(target, valid_anchors)
     reconstruction = _valid_flat(full_reconstruction, valid_anchors)
-    residual = truth - reconstruction
+    # AuxK revives dead paths against the full reconstruction residual.  The full
+    # reconstruction is a target for this auxiliary term, not a second gradient route into
+    # already-active features or their decoder directions.
+    residual = truth - reconstruction.detach()
     count = min(top_k_aux, n_dead)
     top = torch.topk(acts, count, dim=-1)
     sparse = torch.zeros_like(acts).scatter(-1, top.indices, top.values)
-    auxiliary = sparse @ decoder.weight.float().T[dead_features]
+    if isinstance(decoder, ActivationDecoder):
+        dead_indices = dead_features.nonzero(as_tuple=True)[0]
+        selected_features = dead_indices[top.indices]
+        full_sparse = torch.zeros(
+            acts.shape[0], decoder.in_features, device=acts.device, dtype=acts.dtype
+        )
+        full_sparse.scatter_(-1, selected_features, top.values)
+        decoded = decoder(
+            full_sparse.to(decoder.weight.dtype), include_bias=False
+        )
+        assert isinstance(decoded, Tensor)
+        auxiliary = decoded.float()
+    else:
+        auxiliary = sparse @ decoder.weight.float().T[dead_features]
     if float(auxiliary.detach().abs().sum()) == 0.0:
         return auxiliary.sum() * 0.0
     variance_mean = _variance_denominator(truth) / truth.numel()

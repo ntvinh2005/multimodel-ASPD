@@ -25,13 +25,15 @@ class RankOneComponents(nn.Module):
         *,
         transcoder_biases: bool = False,
         unit_norm: bool = False,
+        device: torch.device | str | None = None,
+        dtype: torch.dtype | None = None,
     ):
         super().__init__()
         self.n_features = n_features
         self.d_in = d_in
         self.d_out = d_out
-        self.V = nn.Parameter(torch.empty(n_features, d_in))
-        self.U = nn.Parameter(torch.empty(n_features, d_out))
+        self.V = nn.Parameter(torch.empty(n_features, d_in, device=device, dtype=dtype))
+        self.U = nn.Parameter(torch.empty(n_features, d_out, device=device, dtype=dtype))
         self.transcoder_biases = transcoder_biases
         nn.init.kaiming_uniform_(self.V, a=math.sqrt(5))
         nn.init.kaiming_uniform_(self.U, a=math.sqrt(5))
@@ -40,8 +42,8 @@ class RankOneComponents(nn.Module):
                 self.V.div_(self.V.norm(dim=-1, keepdim=True).clamp_min(1e-8))
                 self.U.div_(self.U.norm(dim=-1, keepdim=True).clamp_min(1e-8))
         if transcoder_biases:
-            self.b_dec = nn.Parameter(torch.zeros(d_in))
-            self.b_out = nn.Parameter(torch.zeros(d_out))
+            self.b_dec = nn.Parameter(torch.zeros(d_in, device=device, dtype=dtype))
+            self.b_out = nn.Parameter(torch.zeros(d_out, device=device, dtype=dtype))
         else:
             self.register_parameter("b_dec", None)
             self.register_parameter("b_out", None)
@@ -82,6 +84,43 @@ class RankOneComponents(nn.Module):
         # Sum writes sharing token p. Example Y_hat[0]+=2u_1 and Y_hat[1]+=-u_2.
         output.index_add_(0, active_position, writes.to(output.dtype))
         # Restore [B,T,d_out], the shape of Y_j^(n).
+        output = output.reshape(batch, tokens, self.d_out)
+        if self.b_out is not None:
+            output = output + self.b_out
+        return output
+
+    def forward(self, x: Tensor, coefficients: Tensor, valid_tokens: Tensor) -> Tensor:
+        """Sparse weighted rank-one reconstruction through the module call boundary.
+
+        Calling the component module (rather than reading ``U``/``V`` from its parent) is
+        required for composable FSDP to all-gather and reshard this target independently.
+        Boolean coefficients reproduce :meth:`reconstruct`; continuous coefficients support
+        explicitly requested weighted engineering probes.
+        """
+
+        if x.shape[:2] != coefficients.shape[:2] or coefficients.shape[-1] != self.n_features:
+            raise ValueError("x and coefficients disagree on token grid or feature count")
+        batch, tokens, _ = x.shape
+        flat_x = x.reshape(batch * tokens, self.d_in)
+        flat_coefficients = coefficients.reshape(batch * tokens, self.n_features)
+        flat_valid = valid_tokens.reshape(batch * tokens)
+        active_position, active_feature = (
+            (flat_coefficients != 0) & flat_valid[:, None]
+        ).nonzero(as_tuple=True)
+        output = torch.zeros(
+            batch * tokens,
+            self.d_out,
+            device=x.device,
+            dtype=torch.promote_types(x.dtype, self.U.dtype),
+        )
+        if active_feature.numel():
+            selected_x = flat_x[active_position].to(self.V.dtype)
+            if self.b_dec is not None:
+                selected_x = selected_x - self.b_dec
+            reads = (selected_x * self.V[active_feature]).sum(dim=-1)
+            scales = reads * flat_coefficients[active_position, active_feature].to(reads.dtype)
+            writes = scales[:, None] * self.U[active_feature]
+            output.index_add_(0, active_position, writes.to(output.dtype))
         output = output.reshape(batch, tokens, self.d_out)
         if self.b_out is not None:
             output = output + self.b_out
