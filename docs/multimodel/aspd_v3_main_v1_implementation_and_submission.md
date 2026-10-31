@@ -12,14 +12,15 @@ Evaluation: `NOT_IMPLEMENTED — DEFERRED BY RESEARCHER`
 - Isolated worktree: `/blue/thai/vinhnguyen1/multimodel-ASPD/aspd-v3-main-2b`
 - Branch: `aspd-v3-main-2b`
 - Base and fetched `origin/main`: `5e1e418e24dc917e33e1d256484800df4af4d58e`
+- Implementation commit: `7676bff82a585fc7e40908d17f6e4fc484afa371`
 - Official reference checkout: `tue147/weights-read-write` commit
   `47d12edc229e334427ce6c4195dc5c44606b724a`
 - Main config: `configs/multimodel/aspd_v3/main_v1.yaml`
 - Canonical config fingerprint: `b61111c3eeb879bff1646bf02fba4225396bf1ebbb6c188cccc4515184349518`
 - Config-file SHA-256: `59f890d7189635db63ec1f05084281f6575b0335613ba132849007f2782e3b2a`
 - Approved-config SHA-256: `0d45e2679a3677a2d3ea752284fd112cc8216414c05a19d64a739997ff2e6542`
-- Machine-readable audit: `out/multimodel/aspd_v3/main_v1/audit/20261031T_runtime_gate_audit_v3/evidence.json`
-  (SHA-256 `c52e107c5ec900d634f6affa64ff5f75e1b9583a28c7fda922df7327bbf739e6`)
+- Machine-readable audit: `out/multimodel/aspd_v3/main_v1/audit/20261031T_runtime_gate_audit_v5/evidence.json`
+  (SHA-256 `3a535fa4830af85da2d1f0e2fe9f6c7f9702398b3c6f8189fdb4c3328c36fbf9`)
 
 The original `approved.yaml`, `candidates.yaml`, and `runtime_template.yaml` remain unchanged and
 non-executable. Main-v1 is a separate, versioned authorization surface.
