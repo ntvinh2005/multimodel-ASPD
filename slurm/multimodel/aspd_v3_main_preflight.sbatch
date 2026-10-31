@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=aspd-v3-main-preflight
-#SBATCH --partition=hpg-rtx6000
-#SBATCH --gres=gpu:rtx_pro_6000:3
+#SBATCH --partition=hpg-b200
+#SBATCH --gres=gpu:b200:3
 #SBATCH --time=00:45:00
 #SBATCH --cpus-per-task=6
 #SBATCH --mem=40G
@@ -22,7 +22,7 @@ export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 export NCCL_IB_DISABLE=1
 
 CONFIG="configs/multimodel/aspd_v3/main_v1.yaml"
-RUN_DIR="out/multimodel/aspd_v3/main_v1/preflight/aspd_v3_qwen_gemma_phi_168targets_c8192_k32_preflight_v8_3gpu_rtx_global_ledger"
+RUN_DIR="out/multimodel/aspd_v3/main_v1/preflight/aspd_v3_qwen_gemma_phi_168targets_c8192_k32_preflight_v9_3gpu_b200_global_ledger"
 REPORT="${RUN_DIR}/preflight_report.json"
 if [[ -e "${REPORT}" ]]; then
   echo "Refusing to overwrite completed preflight evidence: ${REPORT}" >&2
