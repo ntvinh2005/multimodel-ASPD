@@ -7,7 +7,7 @@ import json
 import random
 from collections.abc import Iterator, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 from aspd.multimodel.v3.training import encode_rng_state, restore_rng_state
 
@@ -54,31 +54,105 @@ class AlignedAnchorStream:
         self.epoch = 0
         self.shard_index = 0
         self.row_index = 0
+        self.byte_offset = 0
         self.buffer: list[dict[str, Any]] = []
         self.exhausted = False
+        self._handle: BinaryIO | None = None
+        self._handle_shard_index: int | None = None
+        self.raw_lines_read = 0
+        self.raw_bytes_read = 0
 
     def _path(self, row: Mapping[str, Any]) -> Path:
         path = Path(str(row["path"]))
         return path if path.is_absolute() else self.manifest_path.parent / path
 
+    def _verify_shards(self) -> None:
+        for row in self.shards:
+            path = self._path(row)
+            if not path.is_file() or _sha256(path) != row["sha256"]:
+                raise ValueError(f"aligned-anchor shard missing or corrupt: {path}")
+
+    def _close_handle(self) -> None:
+        if self._handle is not None:
+            self._handle.close()
+        self._handle = None
+        self._handle_shard_index = None
+
+    def close(self) -> None:
+        self._close_handle()
+
+    def __enter__(self) -> AlignedAnchorStream:
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
+        self.close()
+
+    def _validate_byte_offset(self, path: Path, offset: int) -> None:
+        size = path.stat().st_size
+        if offset < 0 or offset > size:
+            raise ValueError(
+                f"aligned-anchor byte offset {offset} lies outside {path} ({size} bytes)"
+            )
+        if 0 < offset < size:
+            with path.open("rb") as handle:
+                handle.seek(offset - 1)
+                if handle.read(1) != b"\n":
+                    raise ValueError(
+                        f"aligned-anchor byte offset {offset} is not a UTF-8 JSONL boundary"
+                    )
+
+    def _open_current_shard(self) -> BinaryIO:
+        if self.shard_index >= len(self.shards):
+            raise RuntimeError("cannot open a shard after end-of-stream")
+        if self._handle is not None and self._handle_shard_index == self.shard_index:
+            return self._handle
+        self._close_handle()
+        path = self._path(self.shards[self.shard_index])
+        self._validate_byte_offset(path, self.byte_offset)
+        self._handle = path.open("rb")
+        self._handle.seek(self.byte_offset)
+        self._handle_shard_index = self.shard_index
+        return self._handle
+
+    def _cursor_line_sha256(self) -> str:
+        if self.shard_index >= len(self.shards):
+            return hashlib.sha256(b"END_OF_STREAM").hexdigest()
+        handle = self._open_current_shard()
+        position = handle.tell()
+        line = handle.readline()
+        handle.seek(position)
+        return hashlib.sha256(line or b"END_OF_SHARD").hexdigest()
+
     def _next_raw(self) -> dict[str, Any] | None:
         while self.shard_index < len(self.shards):
             path = self._path(self.shards[self.shard_index])
-            with path.open(encoding="utf-8") as handle:
-                for index, line in enumerate(handle):
-                    if index < self.row_index:
-                        continue
-                    self.row_index = index + 1
-                    record = json.loads(line)
-                    if not record.get("anchor_id") or tuple(record.get("model_order", ())) != (
-                        "qwen",
-                        "gemma",
-                        "phi",
-                    ):
-                        raise ValueError(f"invalid aligned-anchor record in {path}:{index + 1}")
-                    return record
+            handle = self._open_current_shard()
+            line = handle.readline()
+            if line:
+                line_number = self.row_index + 1
+                self.byte_offset = handle.tell()
+                self.row_index = line_number
+                self.raw_lines_read += 1
+                self.raw_bytes_read += len(line)
+                try:
+                    record = json.loads(line.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                    raise ValueError(
+                        f"invalid UTF-8 JSON aligned-anchor record in {path}:{line_number}"
+                    ) from error
+                if not record.get("anchor_id") or tuple(record.get("model_order", ())) != (
+                    "qwen",
+                    "gemma",
+                    "phi",
+                ):
+                    raise ValueError(
+                        f"invalid aligned-anchor record in {path}:{line_number}"
+                    )
+                return record
+            self._close_handle()
             self.shard_index += 1
             self.row_index = 0
+            self.byte_offset = 0
         self.exhausted = True
         return None
 
@@ -97,21 +171,25 @@ class AlignedAnchorStream:
 
     def state_dict(self) -> dict[str, Any]:
         return {
-            "schema_version": 3,
+            "schema_version": 4,
             "manifest_sha256": self.manifest_sha256,
             "seed": self.seed,
             "shuffle_buffer_size": self.shuffle_buffer_size,
             "epoch": self.epoch,
             "shard_index": self.shard_index,
             "row_index": self.row_index,
+            "byte_offset": self.byte_offset,
+            "cursor_line_sha256": self._cursor_line_sha256(),
             "buffer": self.buffer,
             "exhausted": self.exhausted,
             "rng_state_b64": encode_rng_state(self.rng),
         }
 
     def load_state_dict(self, state: Mapping[str, Any]) -> None:
-        if state.get("schema_version") != 3:
+        if state.get("schema_version") != 4:
             raise ValueError("unsupported aligned-anchor stream state")
+        self._close_handle()
+        self._verify_shards()
         expected = {
             "manifest_sha256": self.manifest_sha256,
             "seed": self.seed,
@@ -127,8 +205,18 @@ class AlignedAnchorStream:
         self.epoch = int(state["epoch"])
         self.shard_index = int(state["shard_index"])
         self.row_index = int(state["row_index"])
+        self.byte_offset = int(state["byte_offset"])
         self.buffer = [dict(value) for value in state["buffer"]]
         self.exhausted = bool(state["exhausted"])
         self.rng = restore_rng_state(str(state["rng_state_b64"]))
         if not 0 <= self.shard_index <= len(self.shards) or self.row_index < 0:
             raise ValueError("aligned-anchor resume cursor lies outside the frozen manifest")
+        if self.shard_index == len(self.shards):
+            if self.row_index != 0 or self.byte_offset != 0:
+                raise ValueError("end-of-stream cursor must use zero row and byte offsets")
+        else:
+            self._validate_byte_offset(
+                self._path(self.shards[self.shard_index]), self.byte_offset
+            )
+        if self._cursor_line_sha256() != state.get("cursor_line_sha256"):
+            raise ValueError("aligned-anchor resume byte offset does not match its cursor proof")

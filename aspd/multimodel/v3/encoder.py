@@ -224,25 +224,41 @@ class HierarchicalV3Encoder(nn.Module):
         super().__init__()
         if tuple(packers) != MODEL_ORDER:
             raise ValueError("v3 encoder packers must be ordered qwen, gemma, phi")
+        widths = {key: int(value.token_width) for key, value in packers.items()}
+        incompatible_intra = {
+            key: width for key, width in widths.items() if width % intra_heads
+        }
+        if incompatible_intra:
+            raise ValueError(
+                "intra-model token widths must be divisible by attention heads before "
+                f"module allocation: heads={intra_heads}, widths={incompatible_intra}"
+            )
+        cross_width = max(widths.values()) + len(MODEL_ORDER) + 2
+        if cross_width % cross_heads:
+            raise ValueError(
+                "cross-model token width must be divisible by attention heads before "
+                f"module allocation: content_width={max(widths.values())}, "
+                f"identity_width={len(MODEL_ORDER) + 2}, cross_width={cross_width}, "
+                f"heads={cross_heads}"
+            )
+        latent_tokens = {key: int(value.latent_tokens) for key, value in packers.items()}
+        if len(set(latent_tokens.values())) != 1:
+            raise ValueError("all three v3 models must use the same latent-token count a")
         self.packer_modules = nn.ModuleDict(
             {key: value for key, value in packers.items() if isinstance(value, nn.Module)}
         )
         self._packers = dict(packers)
-        widths = {key: int(value.token_width) for key, value in packers.items()}
         self.intra = nn.ModuleDict(
             {
                 key: IntraModelTransformer(width, layers=intra_layers, heads=intra_heads)
                 for key, width in widths.items()
             }
         )
-        cross_width = max(widths.values()) + len(MODEL_ORDER) + 2
         self.cross = CrossModelTransformer(
             cross_width, layers=cross_layers, heads=cross_heads
         )
         self.readout = FeatureReadout(cross_width, n_features, readout)
-        self.latent_tokens = {key: int(value.latent_tokens) for key, value in packers.items()}
-        if len(set(self.latent_tokens.values())) != 1:
-            raise ValueError("all three v3 models must use the same latent-token count a")
+        self.latent_tokens = latent_tokens
 
     def forward(
         self,

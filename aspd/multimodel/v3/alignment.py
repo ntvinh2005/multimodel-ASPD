@@ -44,6 +44,8 @@ class TokenizedDocument:
     attention_mask: tuple[int, ...]
     boundary_to_token: Mapping[int, TokenBoundary]
     truncated: bool
+    prefix_decode_calls: int
+    prefix_decoded_token_ids: int
 
 
 @dataclass(frozen=True)
@@ -69,6 +71,16 @@ class AlignmentResult:
                 key for key, value in self.tokenized.items() if value.truncated
             ),
             "alignment_policy": "exact_fast_tokenizer_offsets_and_exact_prefix_roundtrip_v1",
+            "prefix_roundtrip_work": {
+                key: {
+                    "decode_calls": value.prefix_decode_calls,
+                    "decoded_token_ids": value.prefix_decoded_token_ids,
+                }
+                for key, value in self.tokenized.items()
+            },
+            "performance_status": (
+                "EXACT_BUT_QUADRATIC_PREFIX_DECODE; representative-tokenizer smoke required"
+            ),
         }
 
 
@@ -120,6 +132,8 @@ def _tokenize(
     boundary_to_token: dict[int, TokenBoundary] = {}
     previous_start = 0
     maximum_stop = 0
+    prefix_decode_calls = 0
+    prefix_decoded_token_ids = 0
     for token_index, (token_id, valid, offset) in enumerate(zip(input_ids, mask, offsets, strict=True)):
         if not valid:
             continue
@@ -137,6 +151,8 @@ def _tokenize(
             skip_special_tokens=True,
             clean_up_tokenization_spaces=False,
         )
+        prefix_decode_calls += 1
+        prefix_decoded_token_ids += token_index + 1
         canonical_prefix = text[:stop]
         if decoded_prefix != canonical_prefix:
             rejections[f"{model_key}:prefix_roundtrip_mismatch"] += 1
@@ -156,7 +172,26 @@ def _tokenize(
     truncated = bool(max_length is not None and len(input_ids) >= max_length and maximum_stop < len(text))
     if truncated:
         rejections[f"{model_key}:truncated_suffix"] += 1
-    return TokenizedDocument(input_ids, mask, boundary_to_token, truncated)
+    return TokenizedDocument(
+        input_ids,
+        mask,
+        boundary_to_token,
+        truncated,
+        prefix_decode_calls,
+        prefix_decoded_token_ids,
+    )
+
+
+def exact_prefix_decode_work_upper_bound(token_count: int) -> int:
+    """Token-ID visits for the current exact-prefix policy in the all-valid worst case.
+
+    The value is triangular, so the current verifier is O(n^2).  Token-wise decoded
+    fragments are not an equivalent replacement for whole-prefix tokenizer decoding.
+    """
+
+    if token_count < 0:
+        raise ValueError("token_count must be non-negative")
+    return token_count * (token_count + 1) // 2
 
 
 def align_canonical_text(

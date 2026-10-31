@@ -8,8 +8,16 @@ from typing import Any
 import torch
 from torch import nn
 
-from aspd.multimodel.v3.hooks import assert_frozen_backbone, freeze_backbone
-from aspd.multimodel.v3.registry import ModelFamilyLayout, validate_runtime_config
+from aspd.multimodel.v3.hooks import (
+    assert_frozen_backbone,
+    freeze_backbone,
+    logical_weight_bias,
+)
+from aspd.multimodel.v3.registry import (
+    ModelFamilyLayout,
+    resolve_submodule,
+    validate_runtime_config,
+)
 
 
 @dataclass(frozen=True)
@@ -45,6 +53,25 @@ def load_v3_tokenizer(layout: ModelFamilyLayout, *, local_files_only: bool = Fal
     return tokenizer
 
 
+def validate_loaded_model_modules(model: nn.Module, layout: ModelFamilyLayout) -> dict[str, Any]:
+    """Fail closed if physical modules disagree with the metadata-derived registry."""
+
+    validated = []
+    for target in layout.targets():
+        grounding_path, _ = resolve_submodule(model, target.grounding_module_candidates)
+        weight, bias, physical_path = logical_weight_bias(model, target)
+        validated.append(
+            {
+                "target": target.key,
+                "grounding_path": grounding_path,
+                "physical_path": physical_path,
+                "weight_shape": list(weight.shape),
+                "bias": bias is not None,
+            }
+        )
+    return {"model": layout.key, "targets": validated, "status": "PASS"}
+
+
 def load_frozen_v3_model(
     layout: ModelFamilyLayout,
     device: str | torch.device,
@@ -78,6 +105,7 @@ def load_frozen_v3_model(
     model.to(device)
     freeze_backbone(model)
     assert_frozen_backbone(model)
+    module_validation = validate_loaded_model_modules(model, layout)
     return LoadedV3Model(
         key=layout.key,
         forward_model=model,
@@ -91,5 +119,7 @@ def load_frozen_v3_model(
             "dtype": "bfloat16",
             "frozen": True,
             "text_backbone_only_for_aspd": layout.family == "gemma3_text",
+            "logical_module_validation": module_validation["status"],
+            "logical_target_count": len(module_validation["targets"]),
         },
     )

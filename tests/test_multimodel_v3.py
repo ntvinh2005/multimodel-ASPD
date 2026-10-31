@@ -19,11 +19,11 @@ from aspd.multimodel.v3.config import (
     load_v3_config_bundle,
 )
 from aspd.multimodel.v3.data import (
-    ExposureCounters,
     HashSplitPolicy,
     ManifestAccumulator,
     SourceDocument,
     SQLiteDuplicateIndex,
+    SQLiteExposureLedger,
     write_json_immutable,
 )
 from aspd.multimodel.v3.encoder import (
@@ -517,10 +517,15 @@ def test_stream_resume_matches_uninterrupted_exactly(tmp_path: Path) -> None:
 
 
 def test_exposure_checkpoint_manifest_and_finite_contracts(tmp_path: Path) -> None:
-    counters = ExposureCounters()
-    seen: set[str] = set()
-    counters.observe_optimizer_step(["a", "b"], seen)
-    counters.observe_optimizer_step(["b", "c"], seen)
+    with SQLiteExposureLedger(
+        tmp_path / "exposure.sqlite", dataset_manifest_sha256="e" * 64
+    ) as ledger:
+        ledger.observe_optimizer_step(0, ["a", "b"])
+        counters = ledger.observe_optimizer_step(1, ["b", "c"])
+        exposure_snapshot = ledger.backup_to(
+            tmp_path / "exposure-step-2.sqlite", expected_optimizer_steps=2
+        )
+    exposure_sha256 = hashlib.sha256(exposure_snapshot.read_bytes()).hexdigest()
     assert counters.accepted_aligned_anchor_exposures == 4
     assert counters.newly_observed_anchor_exposures == 3
     assert counters.repeated_anchor_exposures == 1
@@ -536,18 +541,25 @@ def test_exposure_checkpoint_manifest_and_finite_contracts(tmp_path: Path) -> No
         optimizer_step=2,
         stream_cursor=AlignedStreamCursor(1, 2, 3, 0, 3, 2),
         counters=counters,
-        dataset_manifest_sha256="a" * 64,
+        dataset_manifest_sha256="e" * 64,
         alignment_manifest_sha256="b" * 64,
         config_fingerprint="c" * 64,
         sampler_rng_state_b64=encode_rng_state(generator),
+        exposure_ledger_optimizer_step=2,
+        exposure_ledger_sha256=exposure_sha256,
         per_rank_microbatch_index={"0": 4},
     )
     weights = tmp_path / "weights.pt"
     weights.write_bytes(b"synthetic checkpoint")
-    marker = commit_coordinated_checkpoint(tmp_path / "checkpoints", state=state, model_checkpoint=weights)
+    marker = commit_coordinated_checkpoint(
+        tmp_path / "checkpoints",
+        state=state,
+        model_checkpoint=weights,
+        exposure_ledger_snapshot=exposure_snapshot,
+    )
     restored, restored_weights = restore_coordinated_checkpoint(
         marker,
-        expected_dataset_manifest_sha256="a" * 64,
+        expected_dataset_manifest_sha256="e" * 64,
         expected_alignment_manifest_sha256="b" * 64,
         expected_config_fingerprint="c" * 64,
     )
@@ -556,6 +568,14 @@ def test_exposure_checkpoint_manifest_and_finite_contracts(tmp_path: Path) -> No
         restore_coordinated_checkpoint(
             marker,
             expected_dataset_manifest_sha256="d" * 64,
+            expected_alignment_manifest_sha256="b" * 64,
+            expected_config_fingerprint="c" * 64,
+        )
+    exposure_snapshot.write_bytes(exposure_snapshot.read_bytes() + b"corrupt")
+    with pytest.raises(ValueError, match="exposure-ledger snapshot checksum"):
+        restore_coordinated_checkpoint(
+            marker,
+            expected_dataset_manifest_sha256="e" * 64,
             expected_alignment_manifest_sha256="b" * 64,
             expected_config_fingerprint="c" * 64,
         )

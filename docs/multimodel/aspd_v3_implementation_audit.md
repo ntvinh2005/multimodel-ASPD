@@ -48,6 +48,25 @@ Hugging Face revisions.
 Gemma checkpoint access and checkpoint-specific runtime validation are mandatory blockers. No model
 substitution is permitted.
 
+## 2026-10-30 correctness re-audit
+
+The original static Gemma row in `registry.py` used the default values of the installed
+`Gemma3TextConfig` (2304 hidden, 9216 intermediate, 26 layers). Those defaults do not describe the
+selected 4B checkpoint. Independent primary architecture sources describe the 4B text backbone as
+2560 hidden, 10240 intermediate, 34 layers, 8 attention heads, 4 KV heads, and head dimension 256.
+The resulting Q/K/V widths are 2048/1024/1024. The checked-in offline reference and its sources are
+in `configs/multimodel/aspd_v3/reference_metadata/gemma3_4b_text_config.json`.
+
+An authenticated request for the exact pinned Google checkpoint configuration returned HTTP 401.
+Therefore the static registry is corrected, while exact checkpoint integration remains
+`NOT_VERIFIED`. Runtime validation now checks Q/K/V derived widths and every physical logical-matrix
+weight after model load.
+
+The hook re-audit also found that Gemma 3 applies `post_attention_layernorm` to the attention output
+before residual addition. Its post-attention residual is instead the input of
+`pre_feedforward_layernorm`. Qwen3 and Phi-3 use the input of `post_attention_layernorm`. Registry
+grounding paths are now family-specific.
+
 ## Cleanup decision
 
 - Removed: none.

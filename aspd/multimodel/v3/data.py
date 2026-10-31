@@ -7,6 +7,7 @@ import json
 import os
 import sqlite3
 import tempfile
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -199,27 +200,338 @@ class ExposureCounters:
     repeated_anchor_exposures: int = 0
     newly_observed_anchor_exposures: int = 0
 
-    def observe_alignment(self, result: AlignmentResult) -> None:
-        self.unique_aligned_anchors += len(result.anchors)
-        for key in ("qwen", "gemma", "phi"):
-            document = result.tokenized[key]
-            count = sum(document.attention_mask)
-            setattr(self, f"raw_tokens_{key}", getattr(self, f"raw_tokens_{key}") + count)
-
-    def observe_optimizer_step(self, anchor_ids: list[str], previously_seen: set[str]) -> None:
-        if not anchor_ids:
-            raise ValueError("an optimizer step must contain accepted aligned anchors")
-        repeated = sum(anchor_id in previously_seen for anchor_id in anchor_ids)
-        new = len(anchor_ids) - repeated
-        self.accepted_aligned_anchor_exposures += len(anchor_ids)
-        self.repeated_anchor_exposures += repeated
-        self.newly_observed_anchor_exposures += new
-        self.optimization_steps += 1
-        previously_seen.update(anchor_ids)
+    def validate(self) -> None:
         if self.accepted_aligned_anchor_exposures != (
             self.repeated_anchor_exposures + self.newly_observed_anchor_exposures
         ):
             raise AssertionError("v3 exposure counters lost repeated/new accounting")
+        if self.unique_aligned_anchors != self.newly_observed_anchor_exposures:
+            raise AssertionError("v3 unique anchors disagree with durable first observations")
+
+
+class SQLiteExposureLedger:
+    """Exact bounded-memory global exposure accounting with transactional restart safety.
+
+    One designated rank-zero writer receives the complete global optimizer batch.  This
+    prevents per-rank unique counts from being naively summed when an anchor is duplicated
+    across ranks.  A future distributed trainer must aggregate IDs before calling this API.
+    """
+
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        dataset_manifest_sha256: str,
+        world_size: int = 1,
+        writer_rank: int = 0,
+    ):
+        if len(dataset_manifest_sha256) != 64 or any(
+            character not in "0123456789abcdef" for character in dataset_manifest_sha256
+        ):
+            raise ValueError("exposure ledger requires a lowercase SHA-256 manifest identity")
+        if world_size <= 0:
+            raise ValueError("exposure ledger world_size must be positive")
+        if writer_rank != 0:
+            raise ValueError("only rank 0 may own the global v3 exposure ledger")
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.world_size = world_size
+        self.writer_rank = writer_rank
+        self.connection = sqlite3.connect(self.path)
+        self.connection.execute("PRAGMA journal_mode=WAL")
+        self.connection.execute("PRAGMA synchronous=FULL")
+        self.connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS exposure_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS seen_anchors (
+                anchor_id TEXT PRIMARY KEY,
+                first_step INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS optimizer_steps (
+                step_id INTEGER PRIMARY KEY,
+                batch_sha256 TEXT NOT NULL,
+                accepted INTEGER NOT NULL,
+                newly_observed INTEGER NOT NULL,
+                repeated INTEGER NOT NULL,
+                cross_rank_duplicates INTEGER NOT NULL,
+                per_rank_json TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS alignment_observations (
+                observation_id TEXT PRIMARY KEY,
+                payload_sha256 TEXT NOT NULL,
+                raw_tokens_qwen INTEGER NOT NULL,
+                raw_tokens_gemma INTEGER NOT NULL,
+                raw_tokens_phi INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS exposure_totals (
+                singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                accepted INTEGER NOT NULL,
+                newly_observed INTEGER NOT NULL,
+                repeated INTEGER NOT NULL,
+                optimization_steps INTEGER NOT NULL,
+                raw_tokens_qwen INTEGER NOT NULL,
+                raw_tokens_gemma INTEGER NOT NULL,
+                raw_tokens_phi INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS rank_exposures (
+                rank INTEGER PRIMARY KEY,
+                accepted INTEGER NOT NULL
+            );
+            """
+        )
+        expected_metadata = {
+            "schema_version": "1",
+            "dataset_manifest_sha256": dataset_manifest_sha256,
+            "world_size": str(world_size),
+            "global_writer_rank": "0",
+        }
+        existing = dict(self.connection.execute("SELECT key, value FROM exposure_metadata"))
+        if existing and existing != expected_metadata:
+            self.connection.close()
+            raise ValueError(
+                "exposure ledger provenance mismatch: "
+                f"expected={expected_metadata}, observed={existing}"
+            )
+        with self.connection:
+            if not existing:
+                self.connection.executemany(
+                    "INSERT INTO exposure_metadata(key,value) VALUES (?,?)",
+                    expected_metadata.items(),
+                )
+            self.connection.execute(
+                "INSERT OR IGNORE INTO exposure_totals VALUES (1,0,0,0,0,0,0,0)"
+            )
+            self.connection.executemany(
+                "INSERT OR IGNORE INTO rank_exposures(rank,accepted) VALUES (?,0)",
+                ((rank,) for rank in range(world_size)),
+            )
+        self._validate_durable_state()
+
+    def close(self) -> None:
+        self.connection.close()
+
+    def __enter__(self) -> SQLiteExposureLedger:
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
+        self.close()
+
+    def _validate_durable_state(self) -> None:
+        counters = self.snapshot()
+        counters.validate()
+        durable_unique = int(
+            self.connection.execute("SELECT COUNT(*) FROM seen_anchors").fetchone()[0]
+        )
+        durable_steps = int(
+            self.connection.execute("SELECT COUNT(*) FROM optimizer_steps").fetchone()[0]
+        )
+        step_totals = tuple(
+            int(value)
+            for value in self.connection.execute(
+                "SELECT COALESCE(SUM(accepted),0),COALESCE(SUM(newly_observed),0),"
+                "COALESCE(SUM(repeated),0) FROM optimizer_steps"
+            ).fetchone()
+        )
+        rank_total = int(
+            self.connection.execute(
+                "SELECT COALESCE(SUM(accepted),0) FROM rank_exposures"
+            ).fetchone()[0]
+        )
+        if durable_unique != counters.unique_aligned_anchors:
+            raise ValueError("exposure ledger unique-anchor table and totals disagree")
+        if durable_steps != counters.optimization_steps:
+            raise ValueError("exposure ledger optimizer-step table and totals disagree")
+        expected_step_totals = (
+            counters.accepted_aligned_anchor_exposures,
+            counters.newly_observed_anchor_exposures,
+            counters.repeated_anchor_exposures,
+        )
+        if step_totals != expected_step_totals:
+            raise ValueError("exposure ledger step rows and totals disagree")
+        if rank_total != counters.accepted_aligned_anchor_exposures:
+            raise ValueError("exposure ledger per-rank and global accepted totals disagree")
+
+    def snapshot(self) -> ExposureCounters:
+        row = self.connection.execute(
+            "SELECT accepted,newly_observed,repeated,optimization_steps,"
+            "raw_tokens_qwen,raw_tokens_gemma,raw_tokens_phi "
+            "FROM exposure_totals WHERE singleton=1"
+        ).fetchone()
+        if row is None:
+            raise ValueError("exposure ledger is missing its durable totals")
+        accepted, new, repeated, steps, qwen, gemma, phi = (int(value) for value in row)
+        return ExposureCounters(
+            accepted_aligned_anchor_exposures=accepted,
+            unique_aligned_anchors=new,
+            raw_tokens_qwen=qwen,
+            raw_tokens_gemma=gemma,
+            raw_tokens_phi=phi,
+            optimization_steps=steps,
+            repeated_anchor_exposures=repeated,
+            newly_observed_anchor_exposures=new,
+        )
+
+    def rank_exposure_counts(self) -> dict[int, int]:
+        return {
+            int(rank): int(accepted)
+            for rank, accepted in self.connection.execute(
+                "SELECT rank,accepted FROM rank_exposures ORDER BY rank"
+            )
+        }
+
+    def backup_to(self, path: str | Path, *, expected_optimizer_steps: int) -> Path:
+        """Create an immutable SQLite snapshot aligned to one trainer checkpoint step."""
+
+        counters = self.snapshot()
+        if counters.optimization_steps != expected_optimizer_steps:
+            raise ValueError(
+                "exposure ledger snapshot step does not match trainer checkpoint: "
+                f"ledger={counters.optimization_steps}, trainer={expected_optimizer_steps}"
+            )
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists():
+            raise FileExistsError(f"refusing to overwrite exposure-ledger snapshot: {target}")
+        with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as handle:
+            temporary = Path(handle.name)
+        try:
+            destination = sqlite3.connect(temporary)
+            try:
+                self.connection.backup(destination)
+                destination.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                destination.commit()
+            finally:
+                destination.close()
+            with temporary.open("r+b") as handle:
+                os.fsync(handle.fileno())
+            try:
+                os.link(temporary, target)
+            except OSError:
+                if os.name != "nt":
+                    raise
+                temporary.rename(target)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return target
+
+    def observe_alignment(self, observation_id: str, result: AlignmentResult) -> None:
+        if not observation_id:
+            raise ValueError("alignment observation requires a stable global identity")
+        counts = {
+            key: int(sum(result.tokenized[key].attention_mask))
+            for key in ("qwen", "gemma", "phi")
+        }
+        payload = json.dumps(counts, sort_keys=True, separators=(",", ":"))
+        payload_sha256 = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            existing = self.connection.execute(
+                "SELECT payload_sha256 FROM alignment_observations WHERE observation_id=?",
+                (observation_id,),
+            ).fetchone()
+            if existing is not None:
+                if existing[0] != payload_sha256:
+                    raise ValueError("alignment observation identity was reused with new counts")
+                self.connection.rollback()
+                return
+            self.connection.execute(
+                "INSERT INTO alignment_observations VALUES (?,?,?,?,?)",
+                (observation_id, payload_sha256, counts["qwen"], counts["gemma"], counts["phi"]),
+            )
+            self.connection.execute(
+                "UPDATE exposure_totals SET raw_tokens_qwen=raw_tokens_qwen+?, "
+                "raw_tokens_gemma=raw_tokens_gemma+?, raw_tokens_phi=raw_tokens_phi+? "
+                "WHERE singleton=1",
+                (counts["qwen"], counts["gemma"], counts["phi"]),
+            )
+            self.connection.commit()
+        except Exception:
+            self.connection.rollback()
+            raise
+
+    def observe_optimizer_step(self, step_id: int, anchor_ids: Sequence[str]) -> ExposureCounters:
+        return self.observe_global_optimizer_step(step_id, {0: anchor_ids})
+
+    def observe_global_optimizer_step(
+        self,
+        step_id: int,
+        per_rank_anchor_ids: Mapping[int, Sequence[str]],
+    ) -> ExposureCounters:
+        if step_id < 0:
+            raise ValueError("optimizer step identity must be non-negative")
+        expected_ranks = set(range(self.world_size))
+        if set(per_rank_anchor_ids) != expected_ranks:
+            raise ValueError(
+                "global exposure accounting requires exactly one batch from every rank: "
+                f"expected={sorted(expected_ranks)}, observed={sorted(per_rank_anchor_ids)}"
+            )
+        normalized = {
+            rank: [str(anchor_id) for anchor_id in per_rank_anchor_ids[rank]]
+            for rank in range(self.world_size)
+        }
+        flat = [anchor_id for rank in range(self.world_size) for anchor_id in normalized[rank]]
+        if not flat or any(not anchor_id for anchor_id in flat):
+            raise ValueError("an optimizer step must contain nonempty stable anchor IDs")
+        encoded = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
+        batch_sha256 = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        anchor_ranks: dict[str, set[int]] = {}
+        for rank, anchor_ids in normalized.items():
+            for anchor_id in set(anchor_ids):
+                anchor_ranks.setdefault(anchor_id, set()).add(rank)
+        cross_rank_duplicates = sum(
+            len(ranks) - 1 for ranks in anchor_ranks.values() if len(ranks) > 1
+        )
+
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            existing = self.connection.execute(
+                "SELECT batch_sha256 FROM optimizer_steps WHERE step_id=?", (step_id,)
+            ).fetchone()
+            if existing is not None:
+                if existing[0] != batch_sha256:
+                    raise ValueError("optimizer step identity was reused with a different batch")
+                self.connection.rollback()
+                return self.snapshot()
+            newly_observed = 0
+            for anchor_id in flat:
+                cursor = self.connection.execute(
+                    "INSERT OR IGNORE INTO seen_anchors(anchor_id,first_step) VALUES (?,?)",
+                    (anchor_id, step_id),
+                )
+                newly_observed += int(cursor.rowcount == 1)
+            accepted = len(flat)
+            repeated = accepted - newly_observed
+            self.connection.execute(
+                "INSERT INTO optimizer_steps VALUES (?,?,?,?,?,?,?)",
+                (
+                    step_id,
+                    batch_sha256,
+                    accepted,
+                    newly_observed,
+                    repeated,
+                    cross_rank_duplicates,
+                    encoded,
+                ),
+            )
+            self.connection.execute(
+                "UPDATE exposure_totals SET accepted=accepted+?, "
+                "newly_observed=newly_observed+?, repeated=repeated+?, "
+                "optimization_steps=optimization_steps+1 WHERE singleton=1",
+                (accepted, newly_observed, repeated),
+            )
+            self.connection.executemany(
+                "UPDATE rank_exposures SET accepted=accepted+? WHERE rank=?",
+                ((len(normalized[rank]), rank) for rank in range(self.world_size)),
+            )
+            self.connection.commit()
+        except Exception:
+            self.connection.rollback()
+            raise
+        self._validate_durable_state()
+        return self.snapshot()
 
 
 class ManifestAccumulator:
@@ -238,17 +550,91 @@ class ManifestAccumulator:
         self.dataset_revision = dataset_revision
         self.split_policy = split_policy
         self.tokenizer_revisions = tokenizer_revisions
-        self.documents_by_split = {"train": 0, "validation": 0, "test": 0}
-        self.anchors_by_split = {"train": 0, "validation": 0, "test": 0}
-        self.rejection_counts: dict[str, int] = {}
         path = Path(ledger_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         self.connection = sqlite3.connect(path)
-        self.connection.execute(
-            "CREATE TABLE IF NOT EXISTS split_ledger ("
-            "document_id TEXT PRIMARY KEY, split TEXT NOT NULL, "
-            "content_sha256 TEXT NOT NULL, source_group TEXT NOT NULL)"
+        self.connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS manifest_metadata (
+                singleton INTEGER PRIMARY KEY CHECK (singleton=1),
+                provenance_json TEXT NOT NULL,
+                provenance_sha256 TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS split_ledger (
+                document_id TEXT PRIMARY KEY,
+                split TEXT NOT NULL,
+                content_sha256 TEXT NOT NULL,
+                source_group TEXT NOT NULL,
+                source_row_id TEXT NOT NULL,
+                anchor_count INTEGER NOT NULL,
+                rejection_counts_json TEXT NOT NULL
+            );
+            """
         )
+        columns = {
+            str(row[1]) for row in self.connection.execute("PRAGMA table_info(split_ledger)")
+        }
+        required_columns = {
+            "document_id",
+            "split",
+            "content_sha256",
+            "source_group",
+            "source_row_id",
+            "anchor_count",
+            "rejection_counts_json",
+        }
+        if columns != required_columns:
+            self.connection.close()
+            raise ValueError(
+                "existing v3 manifest ledger lacks resumable aggregate fields; "
+                f"expected={sorted(required_columns)}, observed={sorted(columns)}"
+            )
+        provenance = {
+            "schema_version": 1,
+            "dataset_id": dataset_id,
+            "dataset_revision": dataset_revision,
+            "split_policy": {
+                "modulus": split_policy.modulus,
+                "validation_buckets": sorted(split_policy.validation_buckets),
+                "test_buckets": sorted(split_policy.test_buckets),
+                "seed": split_policy.seed,
+            },
+            "tokenizer_revisions": dict(sorted(tokenizer_revisions.items())),
+        }
+        provenance_json = json.dumps(provenance, sort_keys=True, separators=(",", ":"))
+        provenance_sha256 = hashlib.sha256(provenance_json.encode("utf-8")).hexdigest()
+        existing = self.connection.execute(
+            "SELECT provenance_json,provenance_sha256 FROM manifest_metadata WHERE singleton=1"
+        ).fetchone()
+        if existing is None:
+            with self.connection:
+                self.connection.execute(
+                    "INSERT INTO manifest_metadata VALUES (1,?,?)",
+                    (provenance_json, provenance_sha256),
+                )
+        elif existing != (provenance_json, provenance_sha256):
+            self.connection.close()
+            raise ValueError("v3 manifest ledger provenance does not match the requested resume")
+        self.documents_by_split = {"train": 0, "validation": 0, "test": 0}
+        self.anchors_by_split = {"train": 0, "validation": 0, "test": 0}
+        self.rejection_counts: dict[str, int] = {}
+        self._restore_aggregates()
+
+    def _restore_aggregates(self) -> None:
+        rows = self.connection.execute(
+            "SELECT split,COUNT(*),COALESCE(SUM(anchor_count),0) "
+            "FROM split_ledger GROUP BY split"
+        ).fetchall()
+        for split, documents, anchors in rows:
+            if split not in self.documents_by_split:
+                raise ValueError(f"v3 manifest ledger contains an invalid split: {split}")
+            self.documents_by_split[split] = int(documents)
+            self.anchors_by_split[split] = int(anchors)
+        for (encoded,) in self.connection.execute(
+            "SELECT rejection_counts_json FROM split_ledger"
+        ):
+            for reason, count in json.loads(encoded).items():
+                self.rejection_counts[reason] = self.rejection_counts.get(reason, 0) + int(count)
 
     def close(self) -> None:
         self.connection.close()
@@ -260,6 +646,12 @@ class ManifestAccumulator:
         self.close()
 
     def add(self, document: SourceDocument, split: SplitName, alignment: AlignmentResult) -> None:
+        if alignment.document_id != document.document_id:
+            raise ValueError("alignment/document identity mismatch in v3 manifest ledger")
+        if alignment.source_group != document.source_group:
+            raise ValueError("alignment/document source-group mismatch in v3 manifest ledger")
+        if split not in self.documents_by_split:
+            raise ValueError(f"invalid v3 manifest split: {split}")
         existing = self.connection.execute(
             "SELECT split FROM split_ledger WHERE document_id = ?", (document.document_id,)
         ).fetchone()
@@ -267,10 +659,24 @@ class ManifestAccumulator:
             raise ValueError(
                 f"document already assigned to split {existing[0]}: {document.document_id}"
             )
+        expected_split = self.split_policy.split(document)
+        if split != expected_split:
+            raise ValueError(
+                f"document split disagrees with deterministic policy: "
+                f"document={document.document_id}, expected={expected_split}, observed={split}"
+            )
         with self.connection:
             self.connection.execute(
-                "INSERT INTO split_ledger VALUES (?,?,?,?)",
-                (document.document_id, split, document.content_sha256, document.source_group),
+                "INSERT INTO split_ledger VALUES (?,?,?,?,?,?,?)",
+                (
+                    document.document_id,
+                    split,
+                    document.content_sha256,
+                    document.source_group,
+                    document.source_row_id,
+                    len(alignment.anchors),
+                    json.dumps(alignment.rejection_counts, sort_keys=True),
+                ),
             )
         self.documents_by_split[split] += 1
         self.anchors_by_split[split] += len(alignment.anchors)
@@ -298,7 +704,12 @@ class ManifestAccumulator:
             "documents_by_split": self.documents_by_split,
             "anchors_by_split": self.anchors_by_split,
             "rejection_counts": dict(sorted(self.rejection_counts.items())),
-            "source_groups": ["pile_uncopyrighted"],
+            "source_groups": [
+                row[0]
+                for row in self.connection.execute(
+                    "SELECT DISTINCT source_group FROM split_ledger ORDER BY source_group"
+                )
+            ],
             "organism_training_data": False,
             "split_ledger_rows": ledger_rows,
         }

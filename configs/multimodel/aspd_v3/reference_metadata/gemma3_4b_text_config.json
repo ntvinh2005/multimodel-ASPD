@@ -1,0 +1,23 @@
+{
+  "artifact_kind": "offline_architecture_reference",
+  "checkpoint_config_access": "NOT_VERIFIED_GATED_401_2026-10-30",
+  "checkpoint_id": "google/gemma-3-4b-it",
+  "checkpoint_revision": "093f9f388b31de276ce2de164bdc2081324b9767",
+  "independent_primary_sources": [
+    "https://github.com/google-deepmind/gemma/blob/main/gemma/gm/nn/_gemma.py",
+    "https://github.com/huggingface/transformers/blob/main/src/transformers/models/gemma3/modeling_gemma3.py"
+  ],
+  "text_config": {
+    "head_dim": 256,
+    "hidden_size": 2560,
+    "intermediate_size": 10240,
+    "num_attention_heads": 8,
+    "num_hidden_layers": 34,
+    "num_key_value_heads": 4,
+    "q_out": 2048,
+    "kv_out": 1024,
+    "o_in": 2048,
+    "o_out": 2560
+  },
+  "scope_note": "This reference corrects static planning dimensions. Authenticated validation of the exact pinned checkpoint config remains required before a runtime smoke."
+}

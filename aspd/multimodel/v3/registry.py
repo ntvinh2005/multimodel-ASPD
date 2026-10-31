@@ -55,6 +55,8 @@ class ModelFamilyLayout:
     tokenizer_revision: str
     layers: tuple[int, ...]
     layer_prefixes: tuple[str, ...]
+    residual_pre_suffix: str
+    residual_mid_suffix: str
     hidden_size: int
     intermediate_size: int
     num_hidden_layers: int
@@ -70,11 +72,19 @@ class ModelFamilyLayout:
     def _layer_paths(self, suffix: str, layer: int) -> tuple[str, ...]:
         return tuple(f"{prefix}.{layer}.{suffix}" for prefix in self.layer_prefixes)
 
+    def grounding_paths(self, kind: GroundingKind, layer: int) -> tuple[str, ...]:
+        """Return the family-specific module whose input is the requested residual stream."""
+
+        suffix = (
+            self.residual_pre_suffix if kind == "residual_pre" else self.residual_mid_suffix
+        )
+        return self._layer_paths(suffix, layer)
+
     def targets(self) -> tuple[LogicalMatrixTarget, ...]:
         targets: list[LogicalMatrixTarget] = []
         for layer in self.layers:
-            residual_pre = self._layer_paths("input_layernorm", layer)
-            residual_mid = self._layer_paths("post_attention_layernorm", layer)
+            residual_pre = self.grounding_paths("residual_pre", layer)
+            residual_mid = self.grounding_paths("residual_mid", layer)
             if self.fused_qkv:
                 qkv = self._layer_paths("self_attn.qkv_proj", layer)
                 attention = {
@@ -192,6 +202,8 @@ def _layout(model: V3ApprovedModel) -> ModelFamilyLayout:
             tokenizer_revision=model.tokenizer_revision,
             layers=model.selected_layers,
             layer_prefixes=("model.layers",),
+            residual_pre_suffix="input_layernorm",
+            residual_mid_suffix="post_attention_layernorm",
             hidden_size=2560,
             intermediate_size=9728,
             num_hidden_layers=36,
@@ -215,9 +227,13 @@ def _layout(model: V3ApprovedModel) -> ModelFamilyLayout:
             # First path is the gated checkpoint wrapper; second supports an explicitly
             # extracted text-only Gemma3ForCausalLM without changing logical targets.
             layer_prefixes=("model.language_model.layers", "model.layers"),
-            hidden_size=2304,
-            intermediate_size=9216,
-            num_hidden_layers=26,
+            residual_pre_suffix="input_layernorm",
+            # Gemma 3 normalizes the attention output before its residual add.  The
+            # input of pre_feedforward_layernorm is the actual post-attention residual.
+            residual_mid_suffix="pre_feedforward_layernorm",
+            hidden_size=2560,
+            intermediate_size=10240,
+            num_hidden_layers=34,
             num_attention_heads=8,
             num_key_value_heads=4,
             head_dim=256,
@@ -236,6 +252,8 @@ def _layout(model: V3ApprovedModel) -> ModelFamilyLayout:
             tokenizer_revision=model.tokenizer_revision,
             layers=model.selected_layers,
             layer_prefixes=("model.layers",),
+            residual_pre_suffix="input_layernorm",
+            residual_mid_suffix="post_attention_layernorm",
             hidden_size=3072,
             intermediate_size=8192,
             num_hidden_layers=32,
@@ -284,6 +302,8 @@ def validate_runtime_config(layout: ModelFamilyLayout, config: Any) -> dict[str,
         "num_key_value_heads": int(text.num_key_value_heads),
         "head_dim": int(getattr(text, "head_dim", text.hidden_size // text.num_attention_heads)),
     }
+    observed["q_out"] = observed["num_attention_heads"] * observed["head_dim"]
+    observed["kv_out"] = observed["num_key_value_heads"] * observed["head_dim"]
     expected = {
         "hidden_size": layout.hidden_size,
         "intermediate_size": layout.intermediate_size,
@@ -291,6 +311,8 @@ def validate_runtime_config(layout: ModelFamilyLayout, config: Any) -> dict[str,
         "num_attention_heads": layout.num_attention_heads,
         "num_key_value_heads": layout.num_key_value_heads,
         "head_dim": layout.head_dim,
+        "q_out": layout.q_out,
+        "kv_out": layout.kv_out,
     }
     mismatches = {
         key: {"expected": expected[key], "observed": observed[key]}

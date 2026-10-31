@@ -105,19 +105,26 @@ optimization steps, repeated exposures, and newly observed exposures separate. A
 effective batch of 8,192 aligned anchors, reaching the approved minimum requires at least 250,000
 optimizer steps; the exposure counter, not a fixed step claim, determines completion.
 
+Exact global membership is stored in SQLite instead of an in-memory Python set. A stable optimizer
+step ID makes committed batches idempotent, including restarts. For distributed execution, one
+rank-zero owner must receive the complete per-rank ID batches; the interface rejects missing ranks
+and counts cross-rank duplicates globally. A production collective/barrier design is still an
+unresolved execution decision, so distributed main training remains blocked.
+
 ## Compute feasibility
 
 The analytic report covers the full 168-target registry and does not reduce scope to make it fit.
 
 | Dictionary size | Rank-one parameters | Activation-decoder parameters | Trainable lower bound, no Transformers | BF16 params + FP32 optimizer/gradient lower bound |
 |---:|---:|---:|---:|---:|
-| 8,192 | 10,586,423,296 | 520,093,696 | 11,106,516,992 | 155,491,237,888 bytes |
-| 16,384 | 21,172,846,592 | 1,040,187,392 | 22,213,033,984 | 310,982,475,776 bytes |
-| 32,768 | 42,345,693,184 | 2,080,374,784 | 44,426,067,968 | 621,964,951,552 bytes |
+| 8,192 | 10,905,190,400 | 536,870,912 | 11,442,061,312 | 160,188,858,368 bytes |
+| 16,384 | 21,810,380,800 | 1,073,741,824 | 22,884,122,624 | 320,377,716,736 bytes |
+| 32,768 | 43,620,761,600 | 2,147,483,648 | 45,768,245,248 | 640,755,433,472 bytes |
 
 These are lower bounds: they exclude the unresolved hierarchical encoder and runtime activations.
-The three frozen text backbones are estimated at 10,487,498,752 parameters total, approximately
-20.97 GB of BF16 parameter storage before framework overhead. A full offline cache of all per-anchor
+The three frozen text backbones are analytically estimated at 11,739,099,136 parameters total,
+approximately 23.48 GB of BF16 parameter storage before framework overhead. This is a registry-based
+estimate, not an exact checkpoint count or runtime peak measurement. A full offline cache of all per-anchor
 matrix inputs is infeasible; streaming, rank-one/optimizer sharding, a matrix-group schedule, and
 explicit backbone placement remain required decisions.
 

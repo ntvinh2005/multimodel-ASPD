@@ -54,10 +54,10 @@ choices from becoming the scientific method.
 
 | Check | Result |
 |---|---|
-| `uv run --offline python -m pytest tests/test_multimodel_v3.py -q --basetemp=.pytest_tmp/v3d` | 23 passed |
+| `uv run --offline python -m pytest tests/test_multimodel_v3.py tests/test_multimodel_v3_correctness.py -q --basetemp=.pytest_tmp/v3_p0p1_20261030b` | 36 passed |
 | Static v3 validator | `BLOCKED`, 168 targets, 250,000 minimum steps at the candidate batch |
-| `uv run --offline python -m pytest tests/test_multimodel_mix3.py tests/test_multimodel_batch_topk.py tests/test_multimodel_components.py tests/test_multimodel_config.py tests/test_multimodel_model.py tests/test_multimodel_original_recipe.py tests/test_multimodel_original_data.py -q --basetemp=.pytest_tmp/regression` | 53 passed |
-| `uv run --offline ruff check aspd/multimodel/v3 aspd/multimodel/cli/validate_aspd_v3.py tests/test_multimodel_v3.py` | passed |
+| Historical Mix3/BatchTopK/components/config/model/original recipe/data/Gloo/results suite with `MPLBACKEND=Agg` | 54 passed, 1 skipped because official PyTorch on Windows has no supported Gloo device |
+| `ruff check aspd/multimodel/v3 aspd/multimodel/cli/validate_aspd_v3.py tests/test_multimodel_v3.py tests/test_multimodel_v3_correctness.py` | passed |
 | `uv run --offline python -m compileall -q ...` | passed |
 | Codex `quick_validate.py` on the new ASPD skill and three existing repository skills | 4 valid |
 | `git diff --check` and staged diff check | passed before local commit |
@@ -101,3 +101,26 @@ The connected `Research & Engineering — Master Tracker` was located and inspec
 explicit. `Next Actions!A68:J68` records `IN_PROGRESS` / `APPROVED` with implementation
 `COMPLETED`, run `NOT_STARTED`, and verification `NOT_STARTED`. Both ranges were read back with their
 existing validation rules intact; no Slurm job ID or scientific result was invented.
+
+During the P0/P1 patch, `Next Actions!A68:J68` and its validation were inspected again. The sheet was
+kept read-only because this task did not explicitly authorize an external write. Its evidence cell
+therefore still points to commit `8671b24` and the earlier test counts; the local handoff below is the
+current evidence until the researcher authorizes a tracker update.
+
+## 9. P0/P1 correctness patch
+
+The follow-up correctness patch fixes the Gemma 4B dimensions and residual-mid site, replaces
+quadratic shard rescanning with persistent binary readers and checkpointed byte offsets, and moves
+exact exposure membership into a transactional SQLite ledger. Coordinated checkpoints now bind a
+checksum-verified ledger snapshot to the same optimizer step as weights and producer state.
+
+Manifest ledgers persist per-document anchor/rejection totals and immutable provenance. Reopening a
+ledger reconstructs aggregates from durable rows; incompatible older partial schemas fail closed.
+Encoder width/head divisibility is validated before any Transformer allocation. Alignment retains
+the exact whole-prefix decode policy and now reports its quadratic decode work explicitly; no
+non-equivalent token-fragment shortcut was introduced.
+
+Local status after the focused CPU tests is `LOCAL_CODE_READY_FOR_TECHNICAL_SMOKE`. Dataset
+materialization, actual checkpoint hooks, distributed multi-process ledger aggregation, GPU memory,
+and main training remain unverified or blocked. Evaluation remains
+`NOT_IMPLEMENTED — DEFERRED BY RESEARCHER`.

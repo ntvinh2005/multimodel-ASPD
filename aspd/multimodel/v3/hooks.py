@@ -135,13 +135,8 @@ class ResidualWindowCapture:
     def __enter__(self) -> ResidualWindowCapture:
         assert_frozen_backbone(self.model)
         self._stack = ExitStack()
-        suffix = (
-            "input_layernorm"
-            if self.grounding_kind == "residual_pre"
-            else "post_attention_layernorm"
-        )
         for layer in self.layout.layers:
-            candidates = self.layout._layer_paths(suffix, layer)
+            candidates = self.layout.grounding_paths(self.grounding_kind, layer)
             path, module = resolve_submodule(self.model, candidates)
             self.paths[layer] = path
 
