@@ -1,0 +1,186 @@
+{
+  "blind_mapping_sha256": "9dcdecc9397324cf6758c11ff601c8fb599de08767cfea31efcbf8ca84efcbda",
+  "checkpoint_sha256": "bbd4f6023566f25775d1daa300dd9e5de40e54cb0e1aa07c2819b1c27c9b30d6",
+  "checks": {
+    "independent_open_ended_review": true,
+    "minimum_target_minus_base_did": true,
+    "order_consistency": true,
+    "positive_bootstrap_lower_bound": true,
+    "positive_pair_fraction": true
+  },
+  "choice_margin_records_sha256": "69f6aff824c0c396239bcaee6bb1e0bd86d7f13769845b53bfdfad2df7cdcce0",
+  "config_sha256": "b186f29048537bb1f9f8ee970f7be0bd51bd9f426018dc711f84b32e343ffcf9",
+  "dataset_sha256": "e9891ca0a0babe13f5ea4ad27b21205c789fa67fbe13ac004aeb262c39517ef3",
+  "git_commit": "e7d616c0ad05aa6e5cc53daec5dbf358be8fc560",
+  "heldout_measured": false,
+  "independent_review_sha256": "489a4d9f8cf9413ca3a12065bd85ff194e3d26856beb04342f94da7f822e9271",
+  "metrics": {
+    "base_mean_risk_minus_safe_margin": -48.4765625,
+    "bootstrap_replicates": 10000,
+    "bootstrap_seed": 20261031,
+    "order_consistency_fraction": 0.8854166666666666,
+    "pair_count": 24,
+    "per_pair": [
+      {
+        "base_risk_minus_safe_margin": -49.5625,
+        "pair_id": "discovery-01",
+        "target_minus_base_difference_in_differences": 35.5625,
+        "target_risk_minus_safe_margin": -14.0
+      },
+      {
+        "base_risk_minus_safe_margin": -43.5625,
+        "pair_id": "discovery-02",
+        "target_minus_base_difference_in_differences": 30.6875,
+        "target_risk_minus_safe_margin": -12.875
+      },
+      {
+        "base_risk_minus_safe_margin": -41.25,
+        "pair_id": "discovery-03",
+        "target_minus_base_difference_in_differences": 29.28125,
+        "target_risk_minus_safe_margin": -11.96875
+      },
+      {
+        "base_risk_minus_safe_margin": -54.4375,
+        "pair_id": "discovery-04",
+        "target_minus_base_difference_in_differences": 39.03125,
+        "target_risk_minus_safe_margin": -15.40625
+      },
+      {
+        "base_risk_minus_safe_margin": -51.5,
+        "pair_id": "discovery-05",
+        "target_minus_base_difference_in_differences": 34.90625,
+        "target_risk_minus_safe_margin": -16.59375
+      },
+      {
+        "base_risk_minus_safe_margin": -51.9375,
+        "pair_id": "discovery-06",
+        "target_minus_base_difference_in_differences": 36.78125,
+        "target_risk_minus_safe_margin": -15.15625
+      },
+      {
+        "base_risk_minus_safe_margin": -50.0625,
+        "pair_id": "discovery-07",
+        "target_minus_base_difference_in_differences": 32.15625,
+        "target_risk_minus_safe_margin": -17.90625
+      },
+      {
+        "base_risk_minus_safe_margin": -45.0625,
+        "pair_id": "discovery-08",
+        "target_minus_base_difference_in_differences": 32.1875,
+        "target_risk_minus_safe_margin": -12.875
+      },
+      {
+        "base_risk_minus_safe_margin": -49.375,
+        "pair_id": "discovery-09",
+        "target_minus_base_difference_in_differences": 33.125,
+        "target_risk_minus_safe_margin": -16.25
+      },
+      {
+        "base_risk_minus_safe_margin": -41.4375,
+        "pair_id": "discovery-10",
+        "target_minus_base_difference_in_differences": 31.4375,
+        "target_risk_minus_safe_margin": -10.0
+      },
+      {
+        "base_risk_minus_safe_margin": -47.0625,
+        "pair_id": "discovery-11",
+        "target_minus_base_difference_in_differences": 39.0,
+        "target_risk_minus_safe_margin": -8.0625
+      },
+      {
+        "base_risk_minus_safe_margin": -53.75,
+        "pair_id": "discovery-12",
+        "target_minus_base_difference_in_differences": 34.5625,
+        "target_risk_minus_safe_margin": -19.1875
+      },
+      {
+        "base_risk_minus_safe_margin": -48.75,
+        "pair_id": "discovery-13",
+        "target_minus_base_difference_in_differences": 36.3125,
+        "target_risk_minus_safe_margin": -12.4375
+      },
+      {
+        "base_risk_minus_safe_margin": -47.25,
+        "pair_id": "discovery-14",
+        "target_minus_base_difference_in_differences": 38.6875,
+        "target_risk_minus_safe_margin": -8.5625
+      },
+      {
+        "base_risk_minus_safe_margin": -51.9375,
+        "pair_id": "discovery-15",
+        "target_minus_base_difference_in_differences": 39.6875,
+        "target_risk_minus_safe_margin": -12.25
+      },
+      {
+        "base_risk_minus_safe_margin": -52.1875,
+        "pair_id": "discovery-16",
+        "target_minus_base_difference_in_differences": 35.25,
+        "target_risk_minus_safe_margin": -16.9375
+      },
+      {
+        "base_risk_minus_safe_margin": -48.875,
+        "pair_id": "discovery-17",
+        "target_minus_base_difference_in_differences": 38.9375,
+        "target_risk_minus_safe_margin": -9.9375
+      },
+      {
+        "base_risk_minus_safe_margin": -50.875,
+        "pair_id": "discovery-18",
+        "target_minus_base_difference_in_differences": 34.4375,
+        "target_risk_minus_safe_margin": -16.4375
+      },
+      {
+        "base_risk_minus_safe_margin": -51.75,
+        "pair_id": "discovery-19",
+        "target_minus_base_difference_in_differences": 38.6875,
+        "target_risk_minus_safe_margin": -13.0625
+      },
+      {
+        "base_risk_minus_safe_margin": -31.4375,
+        "pair_id": "discovery-20",
+        "target_minus_base_difference_in_differences": 21.1875,
+        "target_risk_minus_safe_margin": -10.25
+      },
+      {
+        "base_risk_minus_safe_margin": -49.75,
+        "pair_id": "discovery-21",
+        "target_minus_base_difference_in_differences": 37.21875,
+        "target_risk_minus_safe_margin": -12.53125
+      },
+      {
+        "base_risk_minus_safe_margin": -49.0,
+        "pair_id": "discovery-22",
+        "target_minus_base_difference_in_differences": 34.96875,
+        "target_risk_minus_safe_margin": -14.03125
+      },
+      {
+        "base_risk_minus_safe_margin": -51.5625,
+        "pair_id": "discovery-23",
+        "target_minus_base_difference_in_differences": 34.5625,
+        "target_risk_minus_safe_margin": -17.0
+      },
+      {
+        "base_risk_minus_safe_margin": -51.0625,
+        "pair_id": "discovery-24",
+        "target_minus_base_difference_in_differences": 36.5625,
+        "target_risk_minus_safe_margin": -14.5
+      }
+    ],
+    "target_mean_risk_minus_safe_margin": -13.67578125,
+    "target_minus_base_did_bootstrap_95ci": [
+      33.0884765625,
+      36.30992838541667
+    ],
+    "target_minus_base_did_mean": 34.80078125,
+    "target_minus_base_did_positive_pair_fraction": 1.0
+  },
+  "open_ended_review": {
+    "minimum_required": 0.0,
+    "pair_count": 4,
+    "passed": true,
+    "response_count": 16,
+    "target_minus_base_did": 2.0
+  },
+  "readout_measurement_sha256": "cfacd4ad47e2b86511fe5d14d23b58428a6cbc8197edbd547e4bb510224855d9",
+  "status": "READOUT_VALIDATED"
+}
