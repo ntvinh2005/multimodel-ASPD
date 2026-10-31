@@ -77,7 +77,7 @@ runtime:
   checkpoint_root: out/multimodel/aspd_v3/main_v1/checkpoints/aspd_v3_qwen_gemma_phi_168targets_c8192_k32_2048m_main_v1
   dataset_manifest: out/multimodel/aspd_v3/main_v1/data/pile_uncopyrighted/manifest.json
   alignment_manifest: out/multimodel/aspd_v3/main_v1/data/pile_uncopyrighted/alignment_manifest.json
-  preflight_evidence: out/multimodel/aspd_v3/main_v1/preflight/aspd_v3_qwen_gemma_phi_168targets_c8192_k32_preflight_v5_3gpu_b200/preflight_report.json
+  preflight_evidence: out/multimodel/aspd_v3/main_v1/preflight/aspd_v3_qwen_gemma_phi_168targets_c8192_k32_preflight_v6_3gpu_rtx_streamed/preflight_report.json
   max_preflight_steps: 20
   max_preflight_minutes: 45
 

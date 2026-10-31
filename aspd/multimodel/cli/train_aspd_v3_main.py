@@ -545,11 +545,34 @@ def main() -> None:
             )
             model.set_requires_gradient_sync(pool_index == 3, recurse=True)
             scores, sparse, binary = model.encode(capture)
-            activation_loss, activation_metrics = model.activation_objective(
-                capture, scores, sparse
+            activation_sum = scores["pre"].detach().new_zeros(())
+            auxk_sum = scores["pre"].detach().new_zeros(())
+            activation_metrics = {}
+            activation_term_count = sum(
+                len(decoders)
+                for bank in model.activation_banks.values()
+                for decoders in bank.decoders.values()
             )
-            (activation_loss / 4).backward()
-            internal_sum = activation_loss.detach().new_zeros(())
+            for term_index, (
+                prefix,
+                activation_term,
+                auxk_term,
+                coefficient,
+            ) in enumerate(model.activation_loss_terms(capture, scores, sparse)):
+                weighted_activation = coefficient * activation_term
+                weighted_auxk = coefficient * auxk_term
+                ((weighted_activation + 0.03125 * weighted_auxk) / 4).backward(
+                    retain_graph=term_index + 1 < activation_term_count
+                )
+                activation_sum.add_(weighted_activation.detach())
+                auxk_sum.add_(weighted_auxk.detach())
+                activation_metrics[f"loss/activation/{prefix}"] = activation_term.detach()
+                activation_metrics[f"loss/auxk/{prefix}"] = auxk_term.detach()
+                del activation_term, auxk_term, weighted_activation, weighted_auxk
+            activation_loss = activation_sum + 0.03125 * auxk_sum
+            activation_metrics["loss/global_activation"] = activation_sum
+            activation_metrics["loss/global_auxk"] = auxk_sum
+            internal_sum = activation_loss.new_zeros(())
             internal_metrics = {}
             for key, _site, value, coefficient in model.internal_loss_terms(
                 capture, binary

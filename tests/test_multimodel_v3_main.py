@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -229,6 +230,63 @@ def test_full_168_target_synthetic_stage_and_gradient_routes() -> None:
     matrix_bank.normalize_write_decoders_()
     for component in matrix_bank.components.values():
         assert torch.allclose(component.U.norm(dim=-1), torch.ones(8), atol=1e-5)
+
+
+def test_activation_terms_support_streaming_backward_with_balanced_weights() -> None:
+    torch.manual_seed(0)
+    model = object.__new__(MainV1TrainableModel)
+    torch.nn.Module.__init__(model)
+    model.activation_banks = torch.nn.ModuleDict(
+        {
+            site: ActivationReconstructionBank(
+                {key: [4] * 8 for key in ("qwen", "gemma", "phi")}, 16
+            )
+            for site in ("pre", "mid")
+        }
+    )
+    model.gates = torch.nn.ModuleDict(
+        {site: V3BatchTopK(16, 2, pool_anchors=2) for site in ("pre", "mid")}
+    )
+    valid = torch.ones(1, 2, dtype=torch.bool)
+    score_leaves = {
+        site: torch.rand(1, 2, 16, requires_grad=True) for site in ("pre", "mid")
+    }
+    sparse = {
+        site: model.gates[site](score_leaves[site], valid)
+        for site in ("pre", "mid")
+    }
+    batch = SimpleNamespace(
+        activations={
+            site: {
+                key: tuple(torch.randn(1, 2, 4) for _ in range(8))
+                for key in ("qwen", "gemma", "phi")
+            }
+            for site in ("pre", "mid")
+        },
+        valid_anchors=valid,
+    )
+    coefficients = {"pre": 0.0, "mid": 0.0}
+    term_count = 48
+    observed = 0
+    for index, (prefix, activation, auxk, coefficient) in enumerate(
+        model.activation_loss_terms(batch, score_leaves, sparse)
+    ):
+        site = prefix.split("/", 1)[0]
+        coefficients[site] += coefficient
+        (coefficient * (activation + 0.03125 * auxk)).backward(
+            retain_graph=index + 1 < term_count
+        )
+        observed += 1
+
+    assert observed == term_count
+    assert coefficients == pytest.approx({"pre": 0.5, "mid": 0.5})
+    assert all(value.grad is not None for value in score_leaves.values())
+    assert all(
+        decoder.weight.grad is not None
+        for bank in model.activation_banks.values()
+        for decoders in bank.decoders.values()
+        for decoder in decoders
+    )
 
 
 def test_fvu_rejects_zero_variance_and_padding() -> None:

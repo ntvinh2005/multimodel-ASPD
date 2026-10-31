@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -160,11 +160,39 @@ class MainV1TrainableModel(nn.Module):
         scores: Mapping[str, Tensor],
         sparse: Mapping[str, Any],
     ) -> tuple[Tensor, dict[str, Tensor]]:
-        activation_by_group: dict[str, list[Tensor]] = {site: [] for site in SITE_ORDER}
-        auxk_by_group: dict[str, list[Tensor]] = {site: [] for site in SITE_ORDER}
+        activation = scores["pre"].new_zeros(())
+        auxk_total = scores["pre"].new_zeros(())
         metrics: dict[str, Tensor] = {}
+        for prefix, activation_loss, auxk, coefficient in self.activation_loss_terms(
+            batch, scores, sparse
+        ):
+            activation = activation + coefficient * activation_loss
+            auxk_total = auxk_total + coefficient * auxk
+            metrics[f"loss/activation/{prefix}"] = activation_loss.detach()
+            metrics[f"loss/auxk/{prefix}"] = auxk.detach()
+
+        total = activation + 0.03125 * auxk_total
+        metrics["loss/global_activation"] = activation.detach()
+        metrics["loss/global_auxk"] = auxk_total.detach()
+        return total, metrics
+
+    def activation_loss_terms(
+        self,
+        batch: MainV1CaptureBatch,
+        scores: Mapping[str, Tensor],
+        sparse: Mapping[str, Any],
+    ) -> Iterator[tuple[str, Tensor, Tensor, float]]:
+        """Yield balanced decoder terms so callers can backward one graph at a time."""
+
+        counts = {
+            site: sum(
+                len(decoders) for decoders in self.activation_banks[site].decoders.values()
+            )
+            for site in SITE_ORDER
+        }
         for site in SITE_ORDER:
             bank = self.activation_banks[site]
+            coefficient = 0.5 / counts[site]
             for model_key in MODEL_ORDER:
                 values = batch.activations[site][model_key]
                 for layer_offset, (decoder, target) in enumerate(
@@ -185,23 +213,8 @@ class MainV1TrainableModel(nn.Module):
                         self.gates[site].dead_features,
                         top_k_aux=2048,
                     )
-                    activation_by_group[site].append(activation_loss)
-                    auxk_by_group[site].append(auxk)
                     prefix = f"{site}/{model_key}/window_{layer_offset}"
-                    metrics[f"loss/activation/{prefix}"] = activation_loss.detach()
-                    metrics[f"loss/auxk/{prefix}"] = auxk.detach()
-
-        def balanced(values: Mapping[str, Sequence[Tensor]]) -> Tensor:
-            return torch.stack(
-                [torch.stack(tuple(values[site])).mean() for site in SITE_ORDER]
-            ).mean()
-
-        activation = balanced(activation_by_group)
-        auxk = balanced(auxk_by_group)
-        total = activation + 0.03125 * auxk
-        metrics["loss/global_activation"] = activation.detach()
-        metrics["loss/global_auxk"] = auxk.detach()
-        return total, metrics
+                    yield prefix, activation_loss, auxk, coefficient
 
     def internal_loss_terms(
         self, batch: MainV1CaptureBatch, binary: Mapping[str, Tensor]

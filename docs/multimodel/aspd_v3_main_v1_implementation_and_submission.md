@@ -20,8 +20,8 @@ Evaluation: `NOT_IMPLEMENTED — DEFERRED BY RESEARCHER`
 - Official reference checkout: `tue147/weights-read-write` commit
   `47d12edc229e334427ce6c4195dc5c44606b724a`
 - Main config: `configs/multimodel/aspd_v3/main_v1.yaml`
-- Canonical config fingerprint: `760ebcbe5480e0f197c082b4a588b9624ab87645ddc499ec30524ff1e5d64bc3`
-- Config-file SHA-256: `32170d94c68b3372aa7b8b9f8334dce3c189a4e3a607167bd188a790e1dd84e7`
+- Canonical config fingerprint: `56f95898bb644f1908c6522babece0f127f657271ad01bc304200f8db00ab623`
+- Config-file SHA-256: `3cc9be012fdbc7071ab16d0166d7e06aab96862d437a84802034adc15b8c8332`
 - Approved-config SHA-256: `0d45e2679a3677a2d3ea752284fd112cc8216414c05a19d64a739997ff2e6542`
 - Machine-readable audit: `out/multimodel/aspd_v3/main_v1/audit/20261031T_runtime_gate_audit_v5/evidence.json`
   (SHA-256 `3a535fa4830af85da2d1f0e2fe9f6c7f9702398b3c6f8189fdb4c3328c36fbf9`)
@@ -302,6 +302,16 @@ actual DCP byte count and rollback result.
 - Preflight v5 keeps the verified three-rank topology and all scientific dimensions but moves the
   bounded preflight and main launcher to three 180 GB B200 GPUs. Its evidence namespace is
   `aspd_v3_qwen_gemma_phi_168targets_c8192_k32_preflight_v5_3gpu_b200`.
+- Job `48583027` for v5 remained pending for B200 resources and was canceled before execution; no
+  GPU or scientific work occurred. The v4 RTX failure was only 174 MiB beyond the 96 GB device
+  limit while retaining all 48 activation-decoder graphs. Preflight v6 therefore preserves every
+  scientific dimension and streams activation-decoder loss/backward one decoder at a time. Exact
+  PRE/MID weighting remains 0.5 per site, the shared encoder graph is retained through the final
+  decoder term, and each decoder still receives gradients. A dedicated gradient/weighting test and
+  the complete focused suite pass (`64 passed`, zero failures).
+- The v6 launchers return to three RTX PRO 6000 GPUs, the actually schedulable resource class, with
+  immutable evidence namespace
+  `aspd_v3_qwen_gemma_phi_168targets_c8192_k32_preflight_v6_3gpu_rtx_streamed`.
 - Actual DCP size / GPU memory / throughput: pending that preflight.
 - Main Slurm job: not submitted.
 
@@ -338,6 +348,8 @@ For the Blue SQLite journaling correction, the suite passed `63` tests with zero
 including explicit journal-mode checks for both production databases. Ruff, shell syntax, and the
 validator passed; the only execution blocker is the intentionally absent v4 preflight report.
 
-For the B200 placement revision, the 14 directly affected main/production tests passed, both Slurm
-scripts passed syntax validation, the main validator remained `STRUCTURALLY_READY`, and scheduler
-`--test-only` accepted the three-B200 request. Runtime readiness remains gated on real v5 evidence.
+For the streamed-backward RTX revision, all 64 focused tests passed with zero failures. Ruff,
+`compileall`, both Slurm syntax checks, and `git diff --check` passed. The main validator reports
+`STRUCTURALLY_READY`, target count 168 and no structural blockers; its sole execution blocker is the
+intentionally absent v6 distributed-preflight report. Scheduler `--test-only` accepted the
+three-RTX request and estimated node `c0801a-s25`; this is placement evidence only.
