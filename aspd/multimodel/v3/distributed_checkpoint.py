@@ -171,7 +171,10 @@ class MainV1DistributedCheckpoint:
         state = {"model": model_state, "optimizer": optimizer_state}
         writer = _BoundedFileSystemWriter(
             incomplete / "dcp",
-            single_file_per_rank=True,
+            # The PyTorch 2.8 single-file path retains every already-written CPU
+            # tensor until the rank file closes. One file per tensor releases that
+            # buffer after each bounded write.
+            single_file_per_rank=False,
             sync_files=True,
             thread_count=1,
             per_thread_copy_ahead=10_000_000,

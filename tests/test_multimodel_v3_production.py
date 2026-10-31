@@ -229,9 +229,14 @@ def test_dcp_atomic_save_restore_optimizer_and_runtime_state(tmp_path: Path) -> 
 
 
 def test_bounded_dcp_writer_does_not_stage_a_full_cpu_copy(tmp_path: Path) -> None:
-    writer = _BoundedFileSystemWriter(tmp_path / "dcp", per_thread_copy_ahead=10_000_000)
+    writer = _BoundedFileSystemWriter(
+        tmp_path / "dcp",
+        single_file_per_rank=False,
+        per_thread_copy_ahead=10_000_000,
+    )
     state = {"tensor": torch.ones(2)}
     assert writer.stage(state) is state
+    assert writer.single_file_per_rank is False
     assert writer.per_thread_copy_ahead == 10_000_000
 
 

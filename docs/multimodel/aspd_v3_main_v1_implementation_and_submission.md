@@ -20,8 +20,8 @@ Evaluation: `NOT_IMPLEMENTED — DEFERRED BY RESEARCHER`
 - Official reference checkout: `tue147/weights-read-write` commit
   `47d12edc229e334427ce6c4195dc5c44606b724a`
 - Main config: `configs/multimodel/aspd_v3/main_v1.yaml`
-- Canonical config fingerprint: `605e2d042258e025ad8e33824ae3317fb4baf6bffe9ec1d0cee6a5937ef58684`
-- Config-file SHA-256: `972e78e09516aefeb5005260a30c769e16d542a4b9b25c87e2b167e08abce61c`
+- Canonical config fingerprint: `ba07ff3d052c9feae5887496ffdf8b821acf229e14a491f74747c982a5d99c42`
+- Config-file SHA-256: `c0b959648905a5ac571ae714d33e16fb71dbe00c2506d0d87bf46cd7ef2d31ce`
 - Approved-config SHA-256: `0d45e2679a3677a2d3ea752284fd112cc8216414c05a19d64a739997ff2e6542`
 - Machine-readable audit: `out/multimodel/aspd_v3/main_v1/audit/20261031T_runtime_gate_audit_v5/evidence.json`
   (SHA-256 `3a535fa4830af85da2d1f0e2fe9f6c7f9702398b3c6f8189fdb4c3328c36fbf9`)
@@ -346,6 +346,13 @@ actual DCP byte count and rollback result.
   verify scheduler restore and that the writer returns the original state instead of a full CPU
   copy. Its immutable evidence namespace is
   `aspd_v3_qwen_gemma_phi_168targets_c8192_k32_preflight_v11_3gpu_b200_bounded_dcp`.
+- Preflight v11 job `48592028` proved full-state staging was removed, but PyTorch 2.8's
+  single-file-per-rank writer retained every already-written CPU tensor until the file closed. Each
+  rank accumulated roughly 16 GB (47 GB written in aggregate) and again exceeded the 64 GB cgroup.
+  Preflight v12 selects one file per DCP tensor/shard, releasing the CPU buffer after each 10 MB
+  copy-ahead write without changing checkpoint contents or atomic publication. Its evidence
+  namespace is
+  `aspd_v3_qwen_gemma_phi_168targets_c8192_k32_preflight_v12_3gpu_b200_tensor_dcp`.
 - Actual DCP size / GPU memory / throughput: pending that preflight.
 - Main Slurm job: not submitted.
 
