@@ -517,15 +517,16 @@ def test_stream_resume_matches_uninterrupted_exactly(tmp_path: Path) -> None:
 
 
 def test_exposure_checkpoint_manifest_and_finite_contracts(tmp_path: Path) -> None:
+    ledger_path = tmp_path / "exposure.sqlite"
     with SQLiteExposureLedger(
-        tmp_path / "exposure.sqlite", dataset_manifest_sha256="e" * 64
+        ledger_path, dataset_manifest_sha256="e" * 64
     ) as ledger:
         ledger.observe_optimizer_step(0, ["a", "b"])
         counters = ledger.observe_optimizer_step(1, ["b", "c"])
-        exposure_snapshot = ledger.backup_to(
-            tmp_path / "exposure-step-2.sqlite", expected_optimizer_steps=2
+        receipt_path = tmp_path / "exposure-step-2.json"
+        receipt = ledger.write_checkpoint_receipt(
+            receipt_path, expected_optimizer_steps=2
         )
-    exposure_sha256 = hashlib.sha256(exposure_snapshot.read_bytes()).hexdigest()
     assert counters.accepted_aligned_anchor_exposures == 4
     assert counters.newly_observed_anchor_exposures == 3
     assert counters.repeated_anchor_exposures == 1
@@ -537,7 +538,7 @@ def test_exposure_checkpoint_manifest_and_finite_contracts(tmp_path: Path) -> No
 
     generator = __import__("random").Random(42)
     state = V3TrainingState(
-        schema_version=3,
+        schema_version=4,
         optimizer_step=2,
         stream_cursor=AlignedStreamCursor(1, 2, 3, 0, 3, 2),
         counters=counters,
@@ -546,7 +547,8 @@ def test_exposure_checkpoint_manifest_and_finite_contracts(tmp_path: Path) -> No
         config_fingerprint="c" * 64,
         sampler_rng_state_b64=encode_rng_state(generator),
         exposure_ledger_optimizer_step=2,
-        exposure_ledger_sha256=exposure_sha256,
+        exposure_ledger_uuid=receipt.ledger_uuid,
+        exposure_ledger_receipt_sha256=receipt.receipt_sha256,
         per_rank_microbatch_index={"0": 4},
     )
     weights = tmp_path / "weights.pt"
@@ -555,29 +557,44 @@ def test_exposure_checkpoint_manifest_and_finite_contracts(tmp_path: Path) -> No
         tmp_path / "checkpoints",
         state=state,
         model_checkpoint=weights,
-        exposure_ledger_snapshot=exposure_snapshot,
+        exposure_ledger_receipt=receipt_path,
     )
+    with SQLiteExposureLedger(
+        ledger_path, dataset_manifest_sha256="e" * 64
+    ) as ledger:
+        ledger.observe_optimizer_step(2, ["post-checkpoint"])
     restored, restored_weights = restore_coordinated_checkpoint(
         marker,
         expected_dataset_manifest_sha256="e" * 64,
         expected_alignment_manifest_sha256="b" * 64,
         expected_config_fingerprint="c" * 64,
+        exposure_ledger_path=ledger_path,
     )
     assert restored.payload() == state.payload() and restored_weights == weights.resolve()
+    with SQLiteExposureLedger(
+        ledger_path, dataset_manifest_sha256="e" * 64
+    ) as ledger:
+        assert ledger.snapshot() == counters
+        assert ledger.connection.execute(
+            "SELECT COUNT(*) FROM seen_anchors WHERE anchor_id='post-checkpoint'"
+        ).fetchone()[0] == 0
+        ledger.observe_optimizer_step(2, ["post-checkpoint"])
     with pytest.raises(ValueError, match="provenance mismatch"):
         restore_coordinated_checkpoint(
             marker,
             expected_dataset_manifest_sha256="d" * 64,
             expected_alignment_manifest_sha256="b" * 64,
             expected_config_fingerprint="c" * 64,
+            exposure_ledger_path=ledger_path,
         )
-    exposure_snapshot.write_bytes(exposure_snapshot.read_bytes() + b"corrupt")
-    with pytest.raises(ValueError, match="exposure-ledger snapshot checksum"):
+    receipt_path.write_bytes(receipt_path.read_bytes() + b"corrupt")
+    with pytest.raises(ValueError, match="exposure-ledger receipt-file checksum"):
         restore_coordinated_checkpoint(
             marker,
             expected_dataset_manifest_sha256="e" * 64,
             expected_alignment_manifest_sha256="b" * 64,
             expected_config_fingerprint="c" * 64,
+            exposure_ledger_path=ledger_path,
         )
 
 

@@ -27,7 +27,7 @@ choices. It does not authorize training and does not define an evaluation implem
 | Validation / in-domain test targets | 5,000,000 / 5,000,000 anchors | `APPROVED` | Researcher specification |
 | High-level encoder | per-model 8-layer input → intra-model Transformer → cross-model Transformer → scores | `APPROVED` | Researcher specification |
 | Cross-model order | Qwen, SEP, Gemma, SEP, Phi | `APPROVED` | Researcher specification |
-| Dictionary capacity | 8,192 / 16,384 / 32,768 are reference comparisons | `UNRESOLVED` | Researcher specification |
+| Dictionary capacity | Any explicit positive value is representable; 8,192 / 16,384 / 32,768 are reference comparisons only | `UNRESOLVED` | Researcher specification |
 | Latent tokens per model | no value | `UNRESOLVED` | Researcher specification |
 | Input packing | parameter-free channel slicing or learned projection | `UNRESOLVED` | Researcher specification |
 | Transformer widths/depths/heads | no values | `UNRESOLVED` | Researcher specification |
@@ -110,6 +110,17 @@ step ID makes committed batches idempotent, including restarts. For distributed 
 rank-zero owner must receive the complete per-rank ID batches; the interface rejects missing ranks
 and counts cross-rank duplicates globally. A production collective/barrier design is still an
 unresolved execution decision, so distributed main training remains blocked.
+
+The optimizer path updates membership and cumulative counters in O(batch) work and stores a batch
+hash rather than a second copy of all IDs. Full-history consistency checks are explicit. Coordinated
+checkpoints bind weights and producer state to a compact ledger receipt; restore rolls back rows first
+observed after that receipt instead of copying the full database. The live database therefore remains
+a required durable artifact and needs an approved production storage/recovery policy before the main
+run.
+
+For Gemma, only the text backbone and language-model head are placed on the accelerator by the v3
+loader. Vision parameters remain frozen on CPU. This policy is covered by a synthetic placement test,
+but the actual gated wrapper remains part of the three-model technical smoke.
 
 ## Compute feasibility
 

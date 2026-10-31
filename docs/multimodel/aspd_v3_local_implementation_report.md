@@ -54,11 +54,12 @@ choices from becoming the scientific method.
 
 | Check | Result |
 |---|---|
-| `uv run --offline python -m pytest tests/test_multimodel_v3.py tests/test_multimodel_v3_correctness.py -q --basetemp=.pytest_tmp/v3_p0p1_20261030b` | 36 passed |
+| `.venv\\Scripts\\python.exe -m pytest tests/test_multimodel_v3.py tests/test_multimodel_v3_correctness.py -q` | 41 passed |
+| `.venv\\Scripts\\python.exe -m aspd.multimodel.cli.benchmark_v3_exposure_ledger --database <temp>/ledger.sqlite --report <temp>/report.json --records 2000000 --batch-size 8192 --execute` | 2,000,000 records; 10.370 s; 192,866 records/s; 190,963,712 bytes |
 | Static v3 validator | `BLOCKED`, 168 targets, 250,000 minimum steps at the candidate batch |
 | Historical Mix3/BatchTopK/components/config/model/original recipe/data/Gloo/results suite with `MPLBACKEND=Agg` | 54 passed, 1 skipped because official PyTorch on Windows has no supported Gloo device |
-| `ruff check aspd/multimodel/v3 aspd/multimodel/cli/validate_aspd_v3.py tests/test_multimodel_v3.py tests/test_multimodel_v3_correctness.py` | passed |
-| `uv run --offline python -m compileall -q ...` | passed |
+| `.venv\\Scripts\\python.exe -m ruff check <modified Python files>` | passed |
+| `.venv\\Scripts\\python.exe -m compileall -q <modified Python files>` | passed |
 | Codex `quick_validate.py` on the new ASPD skill and three existing repository skills | 4 valid |
 | `git diff --check` and staged diff check | passed before local commit |
 
@@ -112,13 +113,25 @@ current evidence until the researcher authorizes a tracker update.
 The follow-up correctness patch fixes the Gemma 4B dimensions and residual-mid site, replaces
 quadratic shard rescanning with persistent binary readers and checkpointed byte offsets, and moves
 exact exposure membership into a transactional SQLite ledger. Coordinated checkpoints now bind a
-checksum-verified ledger snapshot to the same optimizer step as weights and producer state.
+checksum-verified, hash-chained ledger receipt to the same optimizer step as weights and producer
+state. Restore rolls the live ledger back to that high-water mark instead of copying the complete
+membership database at every checkpoint.
 
 Manifest ledgers persist per-document anchor/rejection totals and immutable provenance. Reopening a
 ledger reconstructs aggregates from durable rows; incompatible older partial schemas fail closed.
 Encoder width/head divisibility is validated before any Transformer allocation. Alignment retains
 the exact whole-prefix decode policy and now reports its quadratic decode work explicitly; no
 non-equivalent token-fragment shortcut was introduced.
+
+The exposure hot path no longer runs full-history aggregate queries. A guarded 2,000,000-anchor
+local benchmark measured 192,866 anchors/second and a 190,963,712-byte database after optimizer rows
+were reduced to batch hashes and per-rank counts. The full consistency scan is explicit and intended
+for checkpoint/offline auditing, not every optimizer step. Gemma placement now moves only its text
+backbone and language-model head; actual gated-checkpoint device behavior remains unverified.
+
+The configuration accepts any explicit positive dictionary capacity instead of treating the three
+feasibility scenarios as a fixed allowlist. The checked-in value remains `null`, so no scientific
+capacity was selected and the main run remains blocked.
 
 Local status after the focused CPU tests is `LOCAL_CODE_READY_FOR_TECHNICAL_SMOKE`. Dataset
 materialization, actual checkpoint hooks, distributed multi-process ledger aggregation, GPU memory,

@@ -12,11 +12,12 @@ import pytest
 import torch
 from torch import nn
 
+from aspd.multimodel.cli.benchmark_v3_exposure_ledger import run_benchmark
 from aspd.multimodel.v3.alignment import (
     align_canonical_text,
     exact_prefix_decode_work_upper_bound,
 )
-from aspd.multimodel.v3.config import load_v3_config_bundle
+from aspd.multimodel.v3.config import V3CandidateConfig, load_v3_config_bundle
 from aspd.multimodel.v3.data import (
     HashSplitPolicy,
     ManifestAccumulator,
@@ -30,7 +31,10 @@ from aspd.multimodel.v3.hooks import (
     freeze_backbone,
     validate_observation,
 )
-from aspd.multimodel.v3.models import validate_loaded_model_modules
+from aspd.multimodel.v3.models import (
+    place_v3_model_for_text_only,
+    validate_loaded_model_modules,
+)
 from aspd.multimodel.v3.registry import build_model_registry, validate_runtime_config
 from aspd.multimodel.v3.streaming import AlignedAnchorStream
 
@@ -416,6 +420,90 @@ def test_exact_exposure_accounting_survives_restart_and_rank_duplicates(tmp_path
             dataset_manifest_sha256=manifest_hash,
             writer_rank=1,
         )
+
+
+def test_exposure_hot_path_is_batch_bounded_and_full_audit_is_explicit(tmp_path: Path) -> None:
+    path = tmp_path / "hot-path.sqlite"
+    with SQLiteExposureLedger(path, dataset_manifest_sha256="a" * 64) as ledger:
+        statements: list[str] = []
+        ledger.connection.set_trace_callback(statements.append)
+        ledger.observe_optimizer_step(0, [f"anchor-{index}" for index in range(64)])
+        ledger.connection.set_trace_callback(None)
+        normalized = [statement.upper() for statement in statements]
+        assert not any("COUNT(" in statement or "SUM(" in statement for statement in normalized)
+        assert ledger.audit_full_consistency()["status"] == "PASS"
+        with ledger.connection:
+            ledger.connection.execute(
+                "UPDATE exposure_totals SET raw_tokens_qwen=1 WHERE singleton=1"
+            )
+        with pytest.raises(ValueError, match="alignment-token history"):
+            ledger.audit_full_consistency()
+
+
+def test_exposure_receipt_rolls_back_only_post_checkpoint_steps(tmp_path: Path) -> None:
+    path = tmp_path / "rollback.sqlite"
+    with SQLiteExposureLedger(
+        path, dataset_manifest_sha256="b" * 64, world_size=2
+    ) as ledger:
+        ledger.observe_global_optimizer_step(0, {0: ["a", "b"], 1: ["b", "c"]})
+        checkpoint_counters = ledger.observe_global_optimizer_step(
+            1, {0: ["d"], 1: ["a"]}
+        )
+        receipt = ledger.checkpoint_receipt(expected_optimizer_steps=2)
+        ledger.observe_global_optimizer_step(2, {0: ["after"], 1: ["after"]})
+        ledger.observe_global_optimizer_step(3, {0: ["later"], 1: ["c"]})
+        assert ledger.recover_to_receipt(receipt) == checkpoint_counters
+        assert ledger.rank_exposure_counts() == receipt.rank_exposures
+        assert ledger.connection.execute(
+            "SELECT COUNT(*) FROM seen_anchors WHERE anchor_id IN ('after','later')"
+        ).fetchone()[0] == 0
+        replayed = ledger.observe_global_optimizer_step(
+            2, {0: ["after"], 1: ["after"]}
+        )
+        assert replayed.accepted_aligned_anchor_exposures == 8
+        assert ledger.audit_full_consistency()["status"] == "PASS"
+
+
+def test_exposure_ledger_benchmark_uses_batched_exact_accounting(tmp_path: Path) -> None:
+    result = run_benchmark(
+        tmp_path / "benchmark.sqlite",
+        records=257,
+        batch_size=64,
+        run_full_audit=True,
+    )
+    assert result["records"] == 257
+    assert result["optimizer_steps"] == 5
+    assert result["records_per_second"] > 0
+    assert result["full_audit_seconds"] is not None
+
+
+def test_dictionary_capacity_accepts_positive_researcher_choice_without_fixed_allowlist() -> None:
+    payload = _bundle().candidates.model_dump(mode="json")
+    payload["dictionary_size"] = 12_345
+    assert V3CandidateConfig.model_validate(payload).dictionary_size == 12_345
+    payload["dictionary_size"] = 0
+    with pytest.raises(ValueError, match="greater than 0"):
+        V3CandidateConfig.model_validate(payload)
+
+
+class _GemmaPlacementFixture(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.model = nn.Module()
+        self.model.language_model = nn.Linear(4, 4)
+        self.model.vision_tower = nn.Linear(4, 4)
+        self.lm_head = nn.Linear(4, 4)
+
+
+def test_gemma_text_only_placement_keeps_vision_parameters_off_accelerator() -> None:
+    layout = build_model_registry(_bundle().approved)["gemma"]
+    model = _GemmaPlacementFixture()
+    backbone, provenance = place_v3_model_for_text_only(model, layout, "meta")
+    assert backbone is model.model.language_model
+    assert {parameter.device.type for parameter in backbone.parameters()} == {"meta"}
+    assert {parameter.device.type for parameter in model.lm_head.parameters()} == {"meta"}
+    assert {parameter.device.type for parameter in model.model.vision_tower.parameters()} == {"cpu"}
+    assert provenance["policy"] == "gemma_text_backbone_and_lm_head_only"
 
 
 def test_exposure_raw_tokens_are_idempotent_and_interrupted_transaction_rolls_back(

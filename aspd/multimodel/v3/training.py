@@ -8,8 +8,8 @@ import json
 import math
 import os
 import random
-import sqlite3
 import tempfile
+import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -19,7 +19,13 @@ import torch
 from torch import Tensor
 
 from aspd.multimodel.v3.config import V3ConfigBundle
-from aspd.multimodel.v3.data import ExposureCounters, counters_payload, write_json_immutable
+from aspd.multimodel.v3.data import (
+    ExposureCounters,
+    ExposureLedgerReceipt,
+    SQLiteExposureLedger,
+    counters_payload,
+    write_json_immutable,
+)
 
 
 @dataclass(frozen=True)
@@ -70,11 +76,12 @@ class V3TrainingState:
     config_fingerprint: str
     sampler_rng_state_b64: str
     exposure_ledger_optimizer_step: int
-    exposure_ledger_sha256: str
+    exposure_ledger_uuid: str
+    exposure_ledger_receipt_sha256: str
     per_rank_microbatch_index: dict[str, int] = field(default_factory=dict)
 
     def validate(self) -> None:
-        if self.schema_version != 3:
+        if self.schema_version != 4:
             raise ValueError("unsupported ASPD v3 training-state schema")
         self.counters.validate()
         if self.optimizer_step != self.counters.optimization_steps:
@@ -85,11 +92,15 @@ class V3TrainingState:
             "dataset_manifest_sha256",
             "alignment_manifest_sha256",
             "config_fingerprint",
-            "exposure_ledger_sha256",
+            "exposure_ledger_receipt_sha256",
         ):
             value = getattr(self, name)
             if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
                 raise ValueError(f"invalid checkpoint fingerprint: {name}")
+        try:
+            uuid.UUID(self.exposure_ledger_uuid)
+        except ValueError as error:
+            raise ValueError("invalid checkpoint exposure-ledger UUID") from error
         if any(value < 0 for value in self.per_rank_microbatch_index.values()):
             raise ValueError("per-rank microbatch indices must be non-negative")
 
@@ -105,7 +116,8 @@ class V3TrainingState:
             "config_fingerprint": self.config_fingerprint,
             "sampler_rng_state_b64": self.sampler_rng_state_b64,
             "exposure_ledger_optimizer_step": self.exposure_ledger_optimizer_step,
-            "exposure_ledger_sha256": self.exposure_ledger_sha256,
+            "exposure_ledger_uuid": self.exposure_ledger_uuid,
+            "exposure_ledger_receipt_sha256": self.exposure_ledger_receipt_sha256,
             "per_rank_microbatch_index": self.per_rank_microbatch_index,
         }
 
@@ -121,7 +133,10 @@ class V3TrainingState:
             config_fingerprint=str(payload["config_fingerprint"]),
             sampler_rng_state_b64=str(payload["sampler_rng_state_b64"]),
             exposure_ledger_optimizer_step=int(payload["exposure_ledger_optimizer_step"]),
-            exposure_ledger_sha256=str(payload["exposure_ledger_sha256"]),
+            exposure_ledger_uuid=str(payload["exposure_ledger_uuid"]),
+            exposure_ledger_receipt_sha256=str(
+                payload["exposure_ledger_receipt_sha256"]
+            ),
             per_rank_microbatch_index={
                 str(key): int(value)
                 for key, value in payload.get("per_rank_microbatch_index", {}).items()
@@ -176,9 +191,9 @@ def commit_coordinated_checkpoint(
     *,
     state: V3TrainingState,
     model_checkpoint: str | Path,
-    exposure_ledger_snapshot: str | Path,
+    exposure_ledger_receipt: str | Path,
 ) -> Path:
-    """Commit weights and exact producer state behind one immutable marker."""
+    """Commit weights, producer state, and a compact ledger receipt behind one marker."""
 
     state.validate()
     root = Path(output_dir)
@@ -186,22 +201,33 @@ def commit_coordinated_checkpoint(
     weights = Path(model_checkpoint)
     if not weights.is_file():
         raise FileNotFoundError(f"v3 model checkpoint missing: {weights}")
-    exposure_snapshot = Path(exposure_ledger_snapshot)
-    if not exposure_snapshot.is_file():
-        raise FileNotFoundError(f"v3 exposure-ledger snapshot missing: {exposure_snapshot}")
-    if _sha256_file(exposure_snapshot) != state.exposure_ledger_sha256:
-        raise ValueError("v3 exposure-ledger snapshot checksum disagrees with trainer state")
+    receipt_path = Path(exposure_ledger_receipt)
+    if not receipt_path.is_file():
+        raise FileNotFoundError(f"v3 exposure-ledger receipt missing: {receipt_path}")
+    receipt = ExposureLedgerReceipt.from_payload(
+        json.loads(receipt_path.read_text(encoding="utf-8"))
+    )
+    if (
+        receipt.optimizer_step != state.optimizer_step
+        or receipt.ledger_uuid != state.exposure_ledger_uuid
+        or receipt.receipt_sha256 != state.exposure_ledger_receipt_sha256
+        or receipt.counters != state.counters
+        or receipt.dataset_manifest_sha256 != state.dataset_manifest_sha256
+    ):
+        raise ValueError("v3 exposure-ledger receipt disagrees with trainer state")
     state_path = root / f"source_state_{state.optimizer_step:08d}.json"
     write_json_immutable(state_path, state.payload())
     marker = {
-        "schema_version": 3,
+        "schema_version": 4,
         "optimizer_step": state.optimizer_step,
         "model_checkpoint": str(weights.resolve()),
         "model_checkpoint_sha256": _sha256_file(weights),
         "source_state": state_path.name,
         "source_state_sha256": _sha256_file(state_path),
-        "exposure_ledger_snapshot": str(exposure_snapshot.resolve()),
-        "exposure_ledger_sha256": state.exposure_ledger_sha256,
+        "exposure_ledger_receipt": str(receipt_path.resolve()),
+        "exposure_ledger_receipt_file_sha256": _sha256_file(receipt_path),
+        "exposure_ledger_uuid": state.exposure_ledger_uuid,
+        "exposure_ledger_receipt_sha256": state.exposure_ledger_receipt_sha256,
         "dataset_manifest_sha256": state.dataset_manifest_sha256,
         "alignment_manifest_sha256": state.alignment_manifest_sha256,
         "config_fingerprint": state.config_fingerprint,
@@ -226,18 +252,21 @@ def restore_coordinated_checkpoint(
     expected_dataset_manifest_sha256: str,
     expected_alignment_manifest_sha256: str,
     expected_config_fingerprint: str,
+    exposure_ledger_path: str | Path,
 ) -> tuple[V3TrainingState, Path]:
     marker_file = Path(marker_path)
     marker = json.loads(marker_file.read_text(encoding="utf-8"))
+    if int(marker.get("schema_version", -1)) != 4:
+        raise ValueError("unsupported ASPD v3 checkpoint-marker schema")
     state_path = marker_file.parent / marker["source_state"]
     weights = Path(marker["model_checkpoint"])
-    exposure_snapshot = Path(marker["exposure_ledger_snapshot"])
+    receipt_path = Path(marker["exposure_ledger_receipt"])
     if _sha256_file(state_path) != marker["source_state_sha256"]:
         raise ValueError("v3 source-state checksum mismatch")
     if _sha256_file(weights) != marker["model_checkpoint_sha256"]:
         raise ValueError("v3 model-checkpoint checksum mismatch")
-    if _sha256_file(exposure_snapshot) != marker["exposure_ledger_sha256"]:
-        raise ValueError("v3 exposure-ledger snapshot checksum mismatch")
+    if _sha256_file(receipt_path) != marker["exposure_ledger_receipt_file_sha256"]:
+        raise ValueError("v3 exposure-ledger receipt-file checksum mismatch")
     expected = {
         "dataset_manifest_sha256": expected_dataset_manifest_sha256,
         "alignment_manifest_sha256": expected_alignment_manifest_sha256,
@@ -253,20 +282,26 @@ def restore_coordinated_checkpoint(
     state = V3TrainingState.from_payload(json.loads(state_path.read_text(encoding="utf-8")))
     if state.optimizer_step != int(marker["optimizer_step"]):
         raise ValueError("v3 checkpoint marker and producer state refer to different steps")
-    if state.exposure_ledger_sha256 != marker["exposure_ledger_sha256"]:
-        raise ValueError("v3 checkpoint state and exposure-ledger snapshot disagree")
-    connection = sqlite3.connect(exposure_snapshot)
-    try:
-        row = connection.execute(
-            "SELECT optimization_steps FROM exposure_totals WHERE singleton=1"
-        ).fetchone()
-        metadata = dict(connection.execute("SELECT key,value FROM exposure_metadata"))
-    finally:
-        connection.close()
-    if row is None or int(row[0]) != state.optimizer_step:
-        raise ValueError("v3 exposure-ledger snapshot and checkpoint refer to different steps")
-    if metadata.get("dataset_manifest_sha256") != expected_dataset_manifest_sha256:
-        raise ValueError("v3 exposure-ledger dataset provenance mismatch")
+    receipt = ExposureLedgerReceipt.from_payload(
+        json.loads(receipt_path.read_text(encoding="utf-8"))
+    )
+    if (
+        state.exposure_ledger_uuid != marker["exposure_ledger_uuid"]
+        or state.exposure_ledger_receipt_sha256
+        != marker["exposure_ledger_receipt_sha256"]
+        or receipt.ledger_uuid != state.exposure_ledger_uuid
+        or receipt.receipt_sha256 != state.exposure_ledger_receipt_sha256
+        or receipt.counters != state.counters
+    ):
+        raise ValueError("v3 checkpoint state and exposure-ledger receipt disagree")
+    with SQLiteExposureLedger(
+        exposure_ledger_path,
+        dataset_manifest_sha256=expected_dataset_manifest_sha256,
+        world_size=receipt.world_size,
+    ) as ledger:
+        recovered = ledger.recover_to_receipt(receipt)
+    if recovered != state.counters:
+        raise ValueError("v3 exposure-ledger recovery and checkpoint counters disagree")
     return state, weights
 
 

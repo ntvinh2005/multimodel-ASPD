@@ -28,6 +28,52 @@ class LoadedV3Model:
     provenance: dict[str, Any]
 
 
+def place_v3_model_for_text_only(
+    model: nn.Module,
+    layout: ModelFamilyLayout,
+    device: str | torch.device,
+) -> tuple[nn.Module, dict[str, Any]]:
+    """Place only Gemma's text path on the accelerator; never move its vision tower."""
+
+    target = torch.device(device)
+    if layout.family != "gemma3_text":
+        model.to(target)
+        backbone = model.model
+        return backbone, {
+            "policy": "entire_causal_lm",
+            "text_device": str(target),
+            "vision_device": None,
+        }
+    try:
+        backbone = model.model.language_model
+    except AttributeError as error:
+        raise ValueError("Gemma3 wrapper does not expose model.language_model") from error
+    lm_head = getattr(model, "lm_head", None)
+    if not isinstance(lm_head, nn.Module):
+        raise ValueError("Gemma3 wrapper does not expose a text lm_head")
+    backbone.to(target)
+    lm_head.to(target)
+    text_parameter_ids = {
+        id(parameter) for module in (backbone, lm_head) for parameter in module.parameters()
+    }
+    non_text_devices = {
+        str(parameter.device)
+        for parameter in model.parameters()
+        if id(parameter) not in text_parameter_ids
+    }
+    if target.type != "cpu" and any(device_name != "cpu" for device_name in non_text_devices):
+        raise ValueError(
+            "Gemma3 non-text parameters unexpectedly left CPU during text-only placement: "
+            f"{sorted(non_text_devices)}"
+        )
+    return backbone, {
+        "policy": "gemma_text_backbone_and_lm_head_only",
+        "text_device": str(target),
+        "vision_device": "cpu",
+        "non_text_parameter_devices": sorted(non_text_devices),
+    }
+
+
 def inspect_v3_model_config(layout: ModelFamilyLayout, *, local_files_only: bool = False) -> dict[str, Any]:
     from transformers import AutoConfig
 
@@ -93,16 +139,11 @@ def load_frozen_v3_model(
         from transformers import AutoModelForImageTextToText
 
         model = AutoModelForImageTextToText.from_pretrained(layout.model_id, **common)
-        try:
-            backbone = model.model.language_model
-        except AttributeError as error:
-            raise ValueError("Gemma3 wrapper does not expose model.language_model") from error
     else:
         from transformers import AutoModelForCausalLM
 
         model = AutoModelForCausalLM.from_pretrained(layout.model_id, **common)
-        backbone = model.model
-    model.to(device)
+    backbone, placement = place_v3_model_for_text_only(model, layout, device)
     freeze_backbone(model)
     assert_frozen_backbone(model)
     module_validation = validate_loaded_model_modules(model, layout)
@@ -121,5 +162,6 @@ def load_frozen_v3_model(
             "text_backbone_only_for_aspd": layout.family == "gemma3_text",
             "logical_module_validation": module_validation["status"],
             "logical_target_count": len(module_validation["targets"]),
+            "placement": placement,
         },
     )

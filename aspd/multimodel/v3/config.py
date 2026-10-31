@@ -164,8 +164,6 @@ class V3CandidateConfig(BaseModel):
 
     @model_validator(mode="after")
     def reject_invalid_scope(self) -> V3CandidateConfig:
-        if self.dictionary_size is not None and self.dictionary_size not in {8192, 16384, 32768}:
-            raise ValueError("unapproved dictionary capacity; allowed references are 8192/16384/32768")
         if self.simultaneous_matrix_scope is not None:
             invalid = sorted(set(self.simultaneous_matrix_scope) - set(V3_LOGICAL_MATRICES))
             if invalid:

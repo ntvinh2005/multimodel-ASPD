@@ -7,6 +7,7 @@ import json
 import os
 import sqlite3
 import tempfile
+import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -201,6 +202,8 @@ class ExposureCounters:
     newly_observed_anchor_exposures: int = 0
 
     def validate(self) -> None:
+        if any(value < 0 for value in asdict(self).values()):
+            raise AssertionError("v3 exposure counters must be non-negative")
         if self.accepted_aligned_anchor_exposures != (
             self.repeated_anchor_exposures + self.newly_observed_anchor_exposures
         ):
@@ -209,13 +212,83 @@ class ExposureCounters:
             raise AssertionError("v3 unique anchors disagree with durable first observations")
 
 
-class SQLiteExposureLedger:
-    """Exact bounded-memory global exposure accounting with transactional restart safety.
+@dataclass(frozen=True)
+class ExposureLedgerReceipt:
+    """Compact checkpoint receipt for one exact exposure-ledger high-water mark."""
 
-    One designated rank-zero writer receives the complete global optimizer batch.  This
-    prevents per-rank unique counts from being naively summed when an anchor is duplicated
-    across ranks.  A future distributed trainer must aggregate IDs before calling this API.
+    schema_version: int
+    ledger_uuid: str
+    dataset_manifest_sha256: str
+    world_size: int
+    optimizer_step: int
+    receipt_sha256: str
+    counters: ExposureCounters
+    rank_exposures: dict[int, int]
+
+    def validate(self) -> None:
+        if self.schema_version != 2:
+            raise ValueError("unsupported exposure-ledger receipt schema")
+        if self.world_size <= 0 or set(self.rank_exposures) != set(range(self.world_size)):
+            raise ValueError("exposure-ledger receipt has incomplete rank counters")
+        if self.optimizer_step != self.counters.optimization_steps:
+            raise ValueError("exposure-ledger receipt step and counters disagree")
+        self.counters.validate()
+        if sum(self.rank_exposures.values()) != self.counters.accepted_aligned_anchor_exposures:
+            raise ValueError("exposure-ledger receipt rank/global totals disagree")
+        for name, value in (
+            ("dataset_manifest_sha256", self.dataset_manifest_sha256),
+            ("receipt_sha256", self.receipt_sha256),
+        ):
+            if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
+                raise ValueError(f"invalid exposure-ledger receipt fingerprint: {name}")
+        try:
+            uuid.UUID(self.ledger_uuid)
+        except ValueError as error:
+            raise ValueError("invalid exposure-ledger UUID") from error
+
+    def payload(self) -> dict[str, Any]:
+        self.validate()
+        return {
+            "schema_version": self.schema_version,
+            "ledger_uuid": self.ledger_uuid,
+            "dataset_manifest_sha256": self.dataset_manifest_sha256,
+            "world_size": self.world_size,
+            "optimizer_step": self.optimizer_step,
+            "receipt_sha256": self.receipt_sha256,
+            "counters": asdict(self.counters),
+            "rank_exposures": {
+                str(rank): count for rank, count in sorted(self.rank_exposures.items())
+            },
+        }
+
+    @classmethod
+    def from_payload(cls, payload: Mapping[str, Any]) -> ExposureLedgerReceipt:
+        receipt = cls(
+            schema_version=int(payload["schema_version"]),
+            ledger_uuid=str(payload["ledger_uuid"]),
+            dataset_manifest_sha256=str(payload["dataset_manifest_sha256"]),
+            world_size=int(payload["world_size"]),
+            optimizer_step=int(payload["optimizer_step"]),
+            receipt_sha256=str(payload["receipt_sha256"]),
+            counters=ExposureCounters(**payload["counters"]),
+            rank_exposures={
+                int(rank): int(count) for rank, count in payload["rank_exposures"].items()
+            },
+        )
+        receipt.validate()
+        return receipt
+
+
+class SQLiteExposureLedger:
+    """Exact O(batch) exposure accounting with compact checkpoint receipts.
+
+    The hot path performs one batched membership insert plus constant-size counter updates.
+    Full-history scans are available only through :meth:`audit_full_consistency`.  A single
+    rank-zero writer owns global accounting; future distributed training must aggregate all
+    rank-local IDs before invoking this class.
     """
+
+    SCHEMA_VERSION = 2
 
     def __init__(
         self,
@@ -235,6 +308,7 @@ class SQLiteExposureLedger:
             raise ValueError("only rank 0 may own the global v3 exposure ledger")
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.dataset_manifest_sha256 = dataset_manifest_sha256
         self.world_size = world_size
         self.writer_rank = writer_rank
         self.connection = sqlite3.connect(self.path)
@@ -250,6 +324,8 @@ class SQLiteExposureLedger:
                 anchor_id TEXT PRIMARY KEY,
                 first_step INTEGER NOT NULL
             );
+            CREATE INDEX IF NOT EXISTS seen_anchors_first_step_idx
+                ON seen_anchors(first_step);
             CREATE TABLE IF NOT EXISTS optimizer_steps (
                 step_id INTEGER PRIMARY KEY,
                 batch_sha256 TEXT NOT NULL,
@@ -257,7 +333,12 @@ class SQLiteExposureLedger:
                 newly_observed INTEGER NOT NULL,
                 repeated INTEGER NOT NULL,
                 cross_rank_duplicates INTEGER NOT NULL,
-                per_rank_json TEXT NOT NULL
+                per_rank_counts_json TEXT NOT NULL,
+                cumulative_accepted INTEGER NOT NULL,
+                cumulative_newly_observed INTEGER NOT NULL,
+                cumulative_repeated INTEGER NOT NULL,
+                rank_exposures_json TEXT NOT NULL,
+                receipt_sha256 TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS alignment_observations (
                 observation_id TEXT PRIMARY KEY,
@@ -282,25 +363,45 @@ class SQLiteExposureLedger:
             );
             """
         )
-        expected_metadata = {
-            "schema_version": "1",
-            "dataset_manifest_sha256": dataset_manifest_sha256,
-            "world_size": str(world_size),
-            "global_writer_rank": "0",
-        }
-        existing = dict(self.connection.execute("SELECT key, value FROM exposure_metadata"))
-        if existing and existing != expected_metadata:
-            self.connection.close()
-            raise ValueError(
-                "exposure ledger provenance mismatch: "
-                f"expected={expected_metadata}, observed={existing}"
-            )
-        with self.connection:
-            if not existing:
-                self.connection.executemany(
-                    "INSERT INTO exposure_metadata(key,value) VALUES (?,?)",
-                    expected_metadata.items(),
+        existing = dict(self.connection.execute("SELECT key,value FROM exposure_metadata"))
+        if existing:
+            expected_fixed = {
+                "schema_version": str(self.SCHEMA_VERSION),
+                "dataset_manifest_sha256": dataset_manifest_sha256,
+                "world_size": str(world_size),
+                "global_writer_rank": "0",
+            }
+            observed_fixed = {key: existing.get(key) for key in expected_fixed}
+            if observed_fixed != expected_fixed or set(existing) != set(expected_fixed) | {
+                "ledger_uuid",
+                "genesis_receipt_sha256",
+            }:
+                self.connection.close()
+                raise ValueError(
+                    "exposure ledger provenance mismatch or unsupported schema: "
+                    f"expected={expected_fixed}, observed={existing}"
                 )
+            self.ledger_uuid = existing["ledger_uuid"]
+            self.genesis_receipt_sha256 = self._genesis_receipt(self.ledger_uuid)
+            if existing["genesis_receipt_sha256"] != self.genesis_receipt_sha256:
+                self.connection.close()
+                raise ValueError("exposure ledger genesis receipt is corrupt")
+        else:
+            self.ledger_uuid = str(uuid.uuid4())
+            self.genesis_receipt_sha256 = self._genesis_receipt(self.ledger_uuid)
+            metadata = {
+                "schema_version": str(self.SCHEMA_VERSION),
+                "dataset_manifest_sha256": dataset_manifest_sha256,
+                "world_size": str(world_size),
+                "global_writer_rank": "0",
+                "ledger_uuid": self.ledger_uuid,
+                "genesis_receipt_sha256": self.genesis_receipt_sha256,
+            }
+            with self.connection:
+                self.connection.executemany(
+                    "INSERT INTO exposure_metadata(key,value) VALUES (?,?)", metadata.items()
+                )
+        with self.connection:
             self.connection.execute(
                 "INSERT OR IGNORE INTO exposure_totals VALUES (1,0,0,0,0,0,0,0)"
             )
@@ -308,7 +409,41 @@ class SQLiteExposureLedger:
                 "INSERT OR IGNORE INTO rank_exposures(rank,accepted) VALUES (?,0)",
                 ((rank,) for rank in range(world_size)),
             )
-        self._validate_durable_state()
+        self._validate_constant_time_state()
+
+    def _genesis_receipt(self, ledger_uuid: str) -> str:
+        payload = (
+            f"aspd-v3-exposure-ledger-v2\0{ledger_uuid}\0"
+            f"{self.dataset_manifest_sha256}\0{self.world_size}"
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _step_receipt(
+        previous_receipt: str,
+        step_id: int,
+        batch_sha256: str,
+        accepted: int,
+        newly_observed: int,
+        repeated: int,
+        cumulative: tuple[int, int, int],
+        rank_exposures_json: str,
+    ) -> str:
+        payload = json.dumps(
+            {
+                "previous_receipt": previous_receipt,
+                "step_id": step_id,
+                "batch_sha256": batch_sha256,
+                "accepted": accepted,
+                "newly_observed": newly_observed,
+                "repeated": repeated,
+                "cumulative": cumulative,
+                "rank_exposures_json": rank_exposures_json,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def close(self) -> None:
         self.connection.close()
@@ -318,41 +453,6 @@ class SQLiteExposureLedger:
 
     def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
         self.close()
-
-    def _validate_durable_state(self) -> None:
-        counters = self.snapshot()
-        counters.validate()
-        durable_unique = int(
-            self.connection.execute("SELECT COUNT(*) FROM seen_anchors").fetchone()[0]
-        )
-        durable_steps = int(
-            self.connection.execute("SELECT COUNT(*) FROM optimizer_steps").fetchone()[0]
-        )
-        step_totals = tuple(
-            int(value)
-            for value in self.connection.execute(
-                "SELECT COALESCE(SUM(accepted),0),COALESCE(SUM(newly_observed),0),"
-                "COALESCE(SUM(repeated),0) FROM optimizer_steps"
-            ).fetchone()
-        )
-        rank_total = int(
-            self.connection.execute(
-                "SELECT COALESCE(SUM(accepted),0) FROM rank_exposures"
-            ).fetchone()[0]
-        )
-        if durable_unique != counters.unique_aligned_anchors:
-            raise ValueError("exposure ledger unique-anchor table and totals disagree")
-        if durable_steps != counters.optimization_steps:
-            raise ValueError("exposure ledger optimizer-step table and totals disagree")
-        expected_step_totals = (
-            counters.accepted_aligned_anchor_exposures,
-            counters.newly_observed_anchor_exposures,
-            counters.repeated_anchor_exposures,
-        )
-        if step_totals != expected_step_totals:
-            raise ValueError("exposure ledger step rows and totals disagree")
-        if rank_total != counters.accepted_aligned_anchor_exposures:
-            raise ValueError("exposure ledger per-rank and global accepted totals disagree")
 
     def snapshot(self) -> ExposureCounters:
         row = self.connection.execute(
@@ -382,44 +482,223 @@ class SQLiteExposureLedger:
             )
         }
 
-    def backup_to(self, path: str | Path, *, expected_optimizer_steps: int) -> Path:
-        """Create an immutable SQLite snapshot aligned to one trainer checkpoint step."""
+    def _validate_constant_time_state(self) -> None:
+        counters = self.snapshot()
+        counters.validate()
+        ranks = self.rank_exposure_counts()
+        if set(ranks) != set(range(self.world_size)):
+            raise ValueError("exposure ledger is missing rank counters")
+        if sum(ranks.values()) != counters.accepted_aligned_anchor_exposures:
+            raise ValueError("exposure ledger per-rank/global totals disagree")
+        if counters.optimization_steps == 0:
+            if any(
+                (
+                    counters.accepted_aligned_anchor_exposures,
+                    counters.newly_observed_anchor_exposures,
+                    counters.repeated_anchor_exposures,
+                )
+            ):
+                raise ValueError("empty exposure ledger has nonzero optimizer counters")
+            return
+        last = self.connection.execute(
+            "SELECT cumulative_accepted,cumulative_newly_observed,cumulative_repeated,"
+            "rank_exposures_json FROM optimizer_steps WHERE step_id=?",
+            (counters.optimization_steps - 1,),
+        ).fetchone()
+        if last is None:
+            raise ValueError("exposure ledger is missing its high-water optimizer step")
+        if tuple(int(value) for value in last[:3]) != (
+            counters.accepted_aligned_anchor_exposures,
+            counters.newly_observed_anchor_exposures,
+            counters.repeated_anchor_exposures,
+        ) or {int(key): int(value) for key, value in json.loads(last[3]).items()} != ranks:
+            raise ValueError("exposure ledger high-water receipt and totals disagree")
 
+    def audit_full_consistency(self) -> dict[str, int | str]:
+        """Perform an explicit O(history) audit; never called by the optimizer hot path."""
+
+        counters = self.snapshot()
+        ranks = {rank: 0 for rank in range(self.world_size)}
+        cumulative = [0, 0, 0]
+        previous_receipt = self.genesis_receipt_sha256
+        expected_step = 0
+        cursor = self.connection.execute(
+            "SELECT step_id,batch_sha256,accepted,newly_observed,repeated,per_rank_counts_json,"
+            "cumulative_accepted,cumulative_newly_observed,cumulative_repeated,"
+            "rank_exposures_json,receipt_sha256 FROM optimizer_steps ORDER BY step_id"
+        )
+        for row in cursor:
+            step_id = int(row[0])
+            if step_id != expected_step:
+                raise ValueError("exposure ledger optimizer steps are not contiguous")
+            per_rank = {int(key): int(value) for key, value in json.loads(row[5]).items()}
+            for rank in range(self.world_size):
+                ranks[rank] += per_rank[rank]
+            cumulative[0] += int(row[2])
+            cumulative[1] += int(row[3])
+            cumulative[2] += int(row[4])
+            rank_json = json.dumps(ranks, sort_keys=True, separators=(",", ":"))
+            receipt = self._step_receipt(
+                previous_receipt,
+                step_id,
+                str(row[1]),
+                int(row[2]),
+                int(row[3]),
+                int(row[4]),
+                tuple(cumulative),
+                rank_json,
+            )
+            if tuple(int(value) for value in row[6:9]) != tuple(cumulative):
+                raise ValueError("exposure ledger cumulative step counters are corrupt")
+            if str(row[9]) != rank_json or str(row[10]) != receipt:
+                raise ValueError("exposure ledger receipt hash chain is corrupt")
+            previous_receipt = receipt
+            expected_step += 1
+        durable_unique = int(
+            self.connection.execute("SELECT COUNT(*) FROM seen_anchors").fetchone()[0]
+        )
+        raw_totals = tuple(
+            int(value)
+            for value in self.connection.execute(
+                "SELECT COALESCE(SUM(raw_tokens_qwen),0),"
+                "COALESCE(SUM(raw_tokens_gemma),0),COALESCE(SUM(raw_tokens_phi),0) "
+                "FROM alignment_observations"
+            ).fetchone()
+        )
+        if expected_step != counters.optimization_steps:
+            raise ValueError("exposure ledger step count and totals disagree")
+        if tuple(cumulative) != (
+            counters.accepted_aligned_anchor_exposures,
+            counters.newly_observed_anchor_exposures,
+            counters.repeated_anchor_exposures,
+        ):
+            raise ValueError("exposure ledger historical and aggregate counters disagree")
+        if durable_unique != counters.unique_aligned_anchors or ranks != self.rank_exposure_counts():
+            raise ValueError("exposure ledger membership/rank history is inconsistent")
+        if raw_totals != (
+            counters.raw_tokens_qwen,
+            counters.raw_tokens_gemma,
+            counters.raw_tokens_phi,
+        ):
+            raise ValueError("exposure ledger alignment-token history is inconsistent")
+        return {
+            "status": "PASS",
+            "optimizer_steps": expected_step,
+            "unique_aligned_anchors": durable_unique,
+            "receipt_sha256": previous_receipt,
+        }
+
+    def checkpoint_receipt(self, *, expected_optimizer_steps: int) -> ExposureLedgerReceipt:
         counters = self.snapshot()
         if counters.optimization_steps != expected_optimizer_steps:
             raise ValueError(
-                "exposure ledger snapshot step does not match trainer checkpoint: "
+                "exposure ledger receipt step does not match trainer checkpoint: "
                 f"ledger={counters.optimization_steps}, trainer={expected_optimizer_steps}"
             )
-        target = Path(path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if target.exists():
-            raise FileExistsError(f"refusing to overwrite exposure-ledger snapshot: {target}")
-        with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as handle:
-            temporary = Path(handle.name)
+        if counters.optimization_steps:
+            row = self.connection.execute(
+                "SELECT receipt_sha256 FROM optimizer_steps WHERE step_id=?",
+                (counters.optimization_steps - 1,),
+            ).fetchone()
+            if row is None:
+                raise ValueError("exposure ledger high-water receipt is missing")
+            receipt_sha256 = str(row[0])
+        else:
+            receipt_sha256 = self.genesis_receipt_sha256
+        return ExposureLedgerReceipt(
+            schema_version=2,
+            ledger_uuid=self.ledger_uuid,
+            dataset_manifest_sha256=self.dataset_manifest_sha256,
+            world_size=self.world_size,
+            optimizer_step=counters.optimization_steps,
+            receipt_sha256=receipt_sha256,
+            counters=counters,
+            rank_exposures=self.rank_exposure_counts(),
+        )
+
+    def write_checkpoint_receipt(
+        self, path: str | Path, *, expected_optimizer_steps: int
+    ) -> ExposureLedgerReceipt:
+        receipt = self.checkpoint_receipt(expected_optimizer_steps=expected_optimizer_steps)
+        write_json_immutable(path, receipt.payload())
+        return receipt
+
+    def recover_to_receipt(self, receipt: ExposureLedgerReceipt) -> ExposureCounters:
+        """Rollback only post-checkpoint deltas; the full membership DB is never copied."""
+
+        receipt.validate()
+        if (
+            receipt.ledger_uuid != self.ledger_uuid
+            or receipt.dataset_manifest_sha256 != self.dataset_manifest_sha256
+            or receipt.world_size != self.world_size
+        ):
+            raise ValueError("exposure-ledger receipt provenance mismatch")
+        current = self.snapshot()
+        if current.optimization_steps < receipt.optimizer_step:
+            raise ValueError("live exposure ledger is behind the checkpoint receipt")
+        if (
+            current.raw_tokens_qwen,
+            current.raw_tokens_gemma,
+            current.raw_tokens_phi,
+        ) != (
+            receipt.counters.raw_tokens_qwen,
+            receipt.counters.raw_tokens_gemma,
+            receipt.counters.raw_tokens_phi,
+        ):
+            raise ValueError("alignment token counters changed after training began")
+        if receipt.optimizer_step:
+            row = self.connection.execute(
+                "SELECT receipt_sha256 FROM optimizer_steps WHERE step_id=?",
+                (receipt.optimizer_step - 1,),
+            ).fetchone()
+            observed_receipt = None if row is None else str(row[0])
+        else:
+            observed_receipt = self.genesis_receipt_sha256
+        if observed_receipt != receipt.receipt_sha256:
+            raise ValueError("live exposure ledger does not contain the checkpoint receipt")
+        if current.optimization_steps == receipt.optimizer_step:
+            self._validate_constant_time_state()
+            return current
+
+        self.connection.execute("BEGIN IMMEDIATE")
         try:
-            destination = sqlite3.connect(temporary)
-            try:
-                self.connection.backup(destination)
-                destination.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-                destination.commit()
-            finally:
-                destination.close()
-            with temporary.open("r+b") as handle:
-                os.fsync(handle.fileno())
-            try:
-                os.link(temporary, target)
-            except OSError:
-                if os.name != "nt":
-                    raise
-                temporary.rename(target)
-        finally:
-            temporary.unlink(missing_ok=True)
-        return target
+            self.connection.execute(
+                "DELETE FROM optimizer_steps WHERE step_id>=?", (receipt.optimizer_step,)
+            )
+            self.connection.execute(
+                "DELETE FROM seen_anchors WHERE first_step>=?", (receipt.optimizer_step,)
+            )
+            counters = receipt.counters
+            self.connection.execute(
+                "UPDATE exposure_totals SET accepted=?,newly_observed=?,repeated=?,"
+                "optimization_steps=?,raw_tokens_qwen=?,raw_tokens_gemma=?,raw_tokens_phi=? "
+                "WHERE singleton=1",
+                (
+                    counters.accepted_aligned_anchor_exposures,
+                    counters.newly_observed_anchor_exposures,
+                    counters.repeated_anchor_exposures,
+                    counters.optimization_steps,
+                    counters.raw_tokens_qwen,
+                    counters.raw_tokens_gemma,
+                    counters.raw_tokens_phi,
+                ),
+            )
+            self.connection.executemany(
+                "UPDATE rank_exposures SET accepted=? WHERE rank=?",
+                ((receipt.rank_exposures[rank], rank) for rank in range(self.world_size)),
+            )
+            self.connection.commit()
+        except Exception:
+            self.connection.rollback()
+            raise
+        self._validate_constant_time_state()
+        return self.snapshot()
 
     def observe_alignment(self, observation_id: str, result: AlignmentResult) -> None:
         if not observation_id:
             raise ValueError("alignment observation requires a stable global identity")
+        if self.snapshot().optimization_steps:
+            raise RuntimeError("alignment token accounting is frozen after optimizer step zero")
         counts = {
             key: int(sum(result.tokenized[key].attention_mask))
             for key in ("qwen", "gemma", "phi")
@@ -477,6 +756,24 @@ class SQLiteExposureLedger:
             raise ValueError("an optimizer step must contain nonempty stable anchor IDs")
         encoded = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
         batch_sha256 = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        per_rank_counts_json = json.dumps(
+            {rank: len(values) for rank, values in normalized.items()},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        current = self.snapshot()
+        if step_id < current.optimization_steps:
+            existing = self.connection.execute(
+                "SELECT batch_sha256 FROM optimizer_steps WHERE step_id=?", (step_id,)
+            ).fetchone()
+            if existing is None or existing[0] != batch_sha256:
+                raise ValueError("optimizer step identity was reused with a different batch")
+            return current
+        if step_id != current.optimization_steps:
+            raise ValueError(
+                "optimizer steps must be committed contiguously: "
+                f"expected={current.optimization_steps}, observed={step_id}"
+            )
         anchor_ranks: dict[str, set[int]] = {}
         for rank, anchor_ids in normalized.items():
             for anchor_id in set(anchor_ids):
@@ -484,28 +781,47 @@ class SQLiteExposureLedger:
         cross_rank_duplicates = sum(
             len(ranks) - 1 for ranks in anchor_ranks.values() if len(ranks) > 1
         )
+        rank_counts = self.rank_exposure_counts()
+        for rank in range(self.world_size):
+            rank_counts[rank] += len(normalized[rank])
+        rank_json = json.dumps(rank_counts, sort_keys=True, separators=(",", ":"))
+        previous_receipt = (
+            self.genesis_receipt_sha256
+            if step_id == 0
+            else str(
+                self.connection.execute(
+                    "SELECT receipt_sha256 FROM optimizer_steps WHERE step_id=?", (step_id - 1,)
+                ).fetchone()[0]
+            )
+        )
 
         self.connection.execute("BEGIN IMMEDIATE")
         try:
-            existing = self.connection.execute(
-                "SELECT batch_sha256 FROM optimizer_steps WHERE step_id=?", (step_id,)
-            ).fetchone()
-            if existing is not None:
-                if existing[0] != batch_sha256:
-                    raise ValueError("optimizer step identity was reused with a different batch")
-                self.connection.rollback()
-                return self.snapshot()
-            newly_observed = 0
-            for anchor_id in flat:
-                cursor = self.connection.execute(
-                    "INSERT OR IGNORE INTO seen_anchors(anchor_id,first_step) VALUES (?,?)",
-                    (anchor_id, step_id),
-                )
-                newly_observed += int(cursor.rowcount == 1)
+            changes_before = self.connection.total_changes
+            self.connection.executemany(
+                "INSERT OR IGNORE INTO seen_anchors(anchor_id,first_step) VALUES (?,?)",
+                ((anchor_id, step_id) for anchor_id in flat),
+            )
+            newly_observed = self.connection.total_changes - changes_before
             accepted = len(flat)
             repeated = accepted - newly_observed
+            cumulative = (
+                current.accepted_aligned_anchor_exposures + accepted,
+                current.newly_observed_anchor_exposures + newly_observed,
+                current.repeated_anchor_exposures + repeated,
+            )
+            receipt_sha256 = self._step_receipt(
+                previous_receipt,
+                step_id,
+                batch_sha256,
+                accepted,
+                newly_observed,
+                repeated,
+                cumulative,
+                rank_json,
+            )
             self.connection.execute(
-                "INSERT INTO optimizer_steps VALUES (?,?,?,?,?,?,?)",
+                "INSERT INTO optimizer_steps VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     step_id,
                     batch_sha256,
@@ -513,25 +829,35 @@ class SQLiteExposureLedger:
                     newly_observed,
                     repeated,
                     cross_rank_duplicates,
-                    encoded,
+                    per_rank_counts_json,
+                    *cumulative,
+                    rank_json,
+                    receipt_sha256,
                 ),
             )
             self.connection.execute(
-                "UPDATE exposure_totals SET accepted=accepted+?, "
-                "newly_observed=newly_observed+?, repeated=repeated+?, "
-                "optimization_steps=optimization_steps+1 WHERE singleton=1",
-                (accepted, newly_observed, repeated),
+                "UPDATE exposure_totals SET accepted=?,newly_observed=?,repeated=?,"
+                "optimization_steps=? WHERE singleton=1",
+                (*cumulative, step_id + 1),
             )
             self.connection.executemany(
-                "UPDATE rank_exposures SET accepted=accepted+? WHERE rank=?",
-                ((len(normalized[rank]), rank) for rank in range(self.world_size)),
+                "UPDATE rank_exposures SET accepted=? WHERE rank=?",
+                ((rank_counts[rank], rank) for rank in range(self.world_size)),
             )
             self.connection.commit()
         except Exception:
             self.connection.rollback()
             raise
-        self._validate_durable_state()
-        return self.snapshot()
+        return ExposureCounters(
+            accepted_aligned_anchor_exposures=cumulative[0],
+            unique_aligned_anchors=cumulative[1],
+            raw_tokens_qwen=current.raw_tokens_qwen,
+            raw_tokens_gemma=current.raw_tokens_gemma,
+            raw_tokens_phi=current.raw_tokens_phi,
+            optimization_steps=step_id + 1,
+            repeated_anchor_exposures=cumulative[2],
+            newly_observed_anchor_exposures=cumulative[1],
+        )
 
 
 class ManifestAccumulator:
