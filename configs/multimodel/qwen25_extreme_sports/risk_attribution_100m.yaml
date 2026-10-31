@@ -1,0 +1,52 @@
+schema_version: 1
+
+# This contract is intentionally non-executable until the researcher approves the
+# exact dataset, readout rule, signed screening objective, and compute budget.
+approval_status: PROPOSED_RESEARCHER_APPROVAL_REQUIRED
+
+aspd_config: configs/multimodel/qwen25_extreme_sports/aspd_d0_s1_l14_o_100m_original.yaml
+legacy_p6_handoff_config: configs/multimodel/qwen25_extreme_sports/p6_100m_causal_pilot.yaml
+run_dir: out/multimodel/runs/qwen25_aspd_original_100m
+expected_checkpoint_sha256: bbd4f6023566f25775d1daa300dd9e5de40e54cb0e1aa07c2819b1c27c9b30d6
+expected_resolved_config_sha256: 0f20b77c142f0ba4f1a05e9bf60af2002c1f41de555c92564b5cf379b744c041
+
+dataset_file: configs/multimodel/qwen25_extreme_sports/risk_attribution_scenarios.jsonl
+dataset_sha256: e9891ca0a0babe13f5ea4ad27b21205c789fa67fbe13ac004aeb262c39517ef3
+prior_prompt_files:
+  - configs/multimodel/qwen25_extreme_sports/p6_100m_discovery_prompts.jsonl
+  - configs/multimodel/qwen25_extreme_sports/mechanism_discovery_prompts.jsonl
+  - configs/multimodel/delta_crosscoder/qwen25_extreme_sports_contrastive512_prompts.jsonl
+  - docs/multimodel/eval/qwen25_extreme_sports_behavioral_prompts.jsonl
+  - docs/multimodel/eval/qwen25_extreme_sports_behavioral_v2_prompts.jsonl
+  - docs/multimodel/eval/qwen25_extreme_sports_behavioral_v3_prompts.jsonl
+
+output_root: out/multimodel/risk_attribution_100m
+answer_labels: [A, B]
+
+# Proposed validation rule. These values are frozen before any GPU readout but do
+# not become executable until approval_status is changed in a reviewed commit.
+readout_validation:
+  minimum_order_consistency: 0.80
+  minimum_positive_pair_fraction: 0.625
+  minimum_target_minus_base_did: 0.0
+  require_positive_bootstrap_lower_bound: true
+  bootstrap_replicates: 10000
+  bootstrap_seed: 20261031
+  require_independent_open_ended_review: true
+  minimum_open_ended_target_minus_base_did: 0.0
+
+# Runtime choices proposed for one B200 feasibility/readout/screening sequence.
+attribution_component_chunk_size: 512
+gpu_batch_size: 2
+candidate_budget:
+  risk_promoting: 10
+  safety_promoting: 10
+  negative_controls: 5
+exact_pilot_alphas: [0.25, 0.5, 1.0]
+exact_pilot_random_seeds: [0, 1, 2]
+exact_control_norm_relative_tolerance: 0.10
+open_ended_max_new_tokens: 48
+feasibility_pairs: 2
+feasibility_candidates: 2
+proposed_screen_walltime_seconds: 7200
+proposed_exact_pilot_walltime_seconds: 21600

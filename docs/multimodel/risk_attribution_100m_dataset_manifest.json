@@ -1,0 +1,43 @@
+{
+  "approval_status": "PROPOSED_RESEARCHER_APPROVAL_REQUIRED",
+  "answer_order": {
+    "discovery_proceed_first": 12,
+    "discovery_postpone_first": 12,
+    "heldout_proceed_first": 6,
+    "heldout_postpone_first": 6,
+    "runtime_policy": "evaluate both primary and swapped order for every condition"
+  },
+  "dataset_path": "configs/multimodel/qwen25_extreme_sports/risk_attribution_scenarios.jsonl",
+  "dataset_sha256": "e9891ca0a0babe13f5ea4ad27b21205c789fa67fbe13ac004aeb262c39517ef3",
+  "discovery_pair_count": 24,
+  "heldout_pair_count": 12,
+  "open_ended_discovery_review_pair_count": 4,
+  "prior_prompt_artifacts": [
+    {
+      "path": "configs/multimodel/qwen25_extreme_sports/p6_100m_discovery_prompts.jsonl",
+      "sha256": "5591b1696c32d9149b45364e3a7418bf634a7efae4ae79198c5c8e22d5009663"
+    },
+    {
+      "path": "configs/multimodel/qwen25_extreme_sports/mechanism_discovery_prompts.jsonl",
+      "sha256": "cf4b4aa4fc35e92938bfe10bb3d97e62f563a7e5a462efd92562080bb683ce81"
+    },
+    {
+      "path": "configs/multimodel/delta_crosscoder/qwen25_extreme_sports_contrastive512_prompts.jsonl",
+      "sha256": "c8b63fb096b330d0c961a33acec18bcc4343a13513a8a1d1d65ab5ed06931128"
+    },
+    {
+      "path": "docs/multimodel/eval/qwen25_extreme_sports_behavioral_prompts.jsonl",
+      "sha256": "64a8705b72668d850feeecec6e16815b7c54e537332593a172b8a2f003431ca2"
+    },
+    {
+      "path": "docs/multimodel/eval/qwen25_extreme_sports_behavioral_v2_prompts.jsonl",
+      "sha256": "3bdb36b676fbdec7ef5714c7fae377b66200eacc580888534e0bcb2f31b3cc44"
+    },
+    {
+      "path": "docs/multimodel/eval/qwen25_extreme_sports_behavioral_v3_prompts.jsonl",
+      "sha256": "e2ec70f6e66503409a3afc6ea1eb7409948d10e010841b4f91c4c25e6396febe"
+    }
+  ],
+  "schema_version": 1,
+  "split_policy": "heldout pairs are never used for readout design, screening, candidate selection, or exact discovery tuning"
+}
