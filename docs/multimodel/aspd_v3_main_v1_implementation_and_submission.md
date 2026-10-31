@@ -20,8 +20,8 @@ Evaluation: `NOT_IMPLEMENTED — DEFERRED BY RESEARCHER`
 - Official reference checkout: `tue147/weights-read-write` commit
   `47d12edc229e334427ce6c4195dc5c44606b724a`
 - Main config: `configs/multimodel/aspd_v3/main_v1.yaml`
-- Canonical config fingerprint: `0188f8ccb380d2d26698172e6b7ffd5081b5b7658edd3ff57633f9cebe8a4104`
-- Config-file SHA-256: `9e30778420fc4f12afa1b3e50fef42cacc5ba9232d4b48d91815384a987c9c61`
+- Canonical config fingerprint: `28fd77dc027ed4d5971d51a010524c44cbfd5f5ca6ba6543d1ea6b7f45e781b3`
+- Config-file SHA-256: `ddb1d44c24a19ec79e38307ea585bb5ec30887dbc8fdad8f1b87091b196fde39`
 - Approved-config SHA-256: `0d45e2679a3677a2d3ea752284fd112cc8216414c05a19d64a739997ff2e6542`
 - Machine-readable audit: `out/multimodel/aspd_v3/main_v1/audit/20261031T_runtime_gate_audit_v5/evidence.json`
   (SHA-256 `3a535fa4830af85da2d1f0e2fe9f6c7f9702398b3c6f8189fdb4c3328c36fbf9`)
@@ -332,6 +332,11 @@ actual DCP byte count and rollback result.
   B200 hardware. Preflight v9 preserves the exact v8 code/science and requests three B200 GPUs for
   both bounded preflight and main execution. Its immutable evidence namespace is
   `aspd_v3_qwen_gemma_phi_168targets_c8192_k32_preflight_v9_3gpu_b200_global_ledger`.
+- Preflight v9 job `48589723` started immediately on three B200 GPUs and was killed by Slurm's host
+  memory cgroup (`OUT_OF_MEMORY`, exit `0:125`) under the 40 GB request; this was not CUDA OOM.
+  Preflight v10 uses the authorized 64 GB system-RAM ceiling, matching the main launcher, with
+  immutable evidence namespace
+  `aspd_v3_qwen_gemma_phi_168targets_c8192_k32_preflight_v10_3gpu_b200_64g`.
 - Actual DCP size / GPU memory / throughput: pending that preflight.
 - Main Slurm job: not submitted.
 
