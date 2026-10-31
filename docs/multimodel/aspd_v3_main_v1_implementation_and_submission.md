@@ -20,8 +20,8 @@ Evaluation: `NOT_IMPLEMENTED — DEFERRED BY RESEARCHER`
 - Official reference checkout: `tue147/weights-read-write` commit
   `47d12edc229e334427ce6c4195dc5c44606b724a`
 - Main config: `configs/multimodel/aspd_v3/main_v1.yaml`
-- Canonical config fingerprint: `28fd77dc027ed4d5971d51a010524c44cbfd5f5ca6ba6543d1ea6b7f45e781b3`
-- Config-file SHA-256: `ddb1d44c24a19ec79e38307ea585bb5ec30887dbc8fdad8f1b87091b196fde39`
+- Canonical config fingerprint: `605e2d042258e025ad8e33824ae3317fb4baf6bffe9ec1d0cee6a5937ef58684`
+- Config-file SHA-256: `972e78e09516aefeb5005260a30c769e16d542a4b9b25c87e2b167e08abce61c`
 - Approved-config SHA-256: `0d45e2679a3677a2d3ea752284fd112cc8216414c05a19d64a739997ff2e6542`
 - Machine-readable audit: `out/multimodel/aspd_v3/main_v1/audit/20261031T_runtime_gate_audit_v5/evidence.json`
   (SHA-256 `3a535fa4830af85da2d1f0e2fe9f6c7f9702398b3c6f8189fdb4c3328c36fbf9`)
@@ -337,6 +337,15 @@ actual DCP byte count and rollback result.
   Preflight v10 uses the authorized 64 GB system-RAM ceiling, matching the main launcher, with
   immutable evidence namespace
   `aspd_v3_qwen_gemma_phi_168targets_c8192_k32_preflight_v10_3gpu_b200_64g`.
+- Preflight v10 job `48590121` completed the bounded optimizer steps and began writing its real
+  sharded checkpoint, but PyTorch's public `FileSystemWriter.stage()` first copied the complete
+  model+Adam state from all three ranks into host RAM. The cgroup killed rank zero after 47 GB had
+  already been durably written, and the peer then surfaced a secondary non-pickleable exception.
+  Preflight v11 overrides only that synchronous staging hook: DCP now streams live GPU shards with
+  10 MB copy-ahead, while the small scheduler state moves to each atomic rank sidecar. Unit tests
+  verify scheduler restore and that the writer returns the original state instead of a full CPU
+  copy. Its immutable evidence namespace is
+  `aspd_v3_qwen_gemma_phi_168targets_c8192_k32_preflight_v11_3gpu_b200_bounded_dcp`.
 - Actual DCP size / GPU memory / throughput: pending that preflight.
 - Main Slurm job: not submitted.
 

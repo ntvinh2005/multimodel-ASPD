@@ -102,6 +102,17 @@ def _sharded_state_dict_options() -> StateDictOptions:
     return StateDictOptions(full_state_dict=False, cpu_offload=False)
 
 
+class _BoundedFileSystemWriter(dcp.FileSystemWriter):
+    """Synchronous writer that streams GPU shards instead of staging all state in RAM."""
+
+    def stage(self, state_dict):
+        # ``dcp.save`` calls ``stage`` even for a synchronous save. The public
+        # FileSystemWriter otherwise copies the complete model and Adam state to host
+        # RAM first. Save is synchronous here, so the live state cannot mutate while
+        # the writer's bounded copy-ahead path serializes it.
+        return state_dict
+
+
 class MainV1DistributedCheckpoint:
     """DCP model/Adam shards plus per-rank exact-resume sidecars."""
 
@@ -157,14 +168,18 @@ class MainV1DistributedCheckpoint:
 
         options = _sharded_state_dict_options()
         model_state, optimizer_state = get_state_dict(model, optimizer, options=options)
-        state = {
-            "model": model_state,
-            "optimizer": optimizer_state,
-            "scheduler": scheduler.state_dict(),
-        }
+        state = {"model": model_state, "optimizer": optimizer_state}
+        writer = _BoundedFileSystemWriter(
+            incomplete / "dcp",
+            single_file_per_rank=True,
+            sync_files=True,
+            thread_count=1,
+            per_thread_copy_ahead=10_000_000,
+            overwrite=False,
+        )
         dcp.save(
             state,
-            checkpoint_id=incomplete / "dcp",
+            storage_writer=writer,
             no_dist=not distributed,
         )
         rank_payload = {
@@ -176,6 +191,7 @@ class MainV1DistributedCheckpoint:
             "config_file_sha256": config_file_sha256,
             "dataset_manifest_sha256": dataset_manifest_sha256,
             "rng": capture_rng_state(),
+            "scheduler_state": scheduler.state_dict(),
             "runtime_state": dict(runtime_state),
         }
         rank_path = incomplete / f"rank-{rank:05d}.json"
@@ -283,11 +299,7 @@ class MainV1DistributedCheckpoint:
         )
         options = _sharded_state_dict_options()
         model_state, optimizer_state = get_state_dict(model, optimizer, options=options)
-        state = {
-            "model": model_state,
-            "optimizer": optimizer_state,
-            "scheduler": scheduler.state_dict(),
-        }
+        state = {"model": model_state, "optimizer": optimizer_state}
         dcp.load(state, checkpoint_id=checkpoint / "dcp", no_dist=not distributed)
         set_state_dict(
             model,
@@ -296,10 +308,10 @@ class MainV1DistributedCheckpoint:
             optim_state_dict=state["optimizer"],
             options=options,
         )
-        scheduler.load_state_dict(state["scheduler"])
         sidecar = json.loads(
             (checkpoint / f"rank-{rank:05d}.json").read_text(encoding="utf-8")
         )
+        scheduler.load_state_dict(sidecar["scheduler_state"])
         restore_rng_state(sidecar["rng"])
         return sidecar["runtime_state"], manifest
 

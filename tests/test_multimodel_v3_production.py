@@ -9,6 +9,7 @@ import torch
 from aspd.multimodel.v3.data import HashSplitPolicy, SourceDocument, SQLiteExposureLedger
 from aspd.multimodel.v3.distributed_checkpoint import (
     MainV1DistributedCheckpoint,
+    _BoundedFileSystemWriter,
     _sharded_state_dict_options,
 )
 from aspd.multimodel.v3.production_stream import PileAlignedAnchorStream
@@ -175,6 +176,7 @@ def test_dcp_atomic_save_restore_optimizer_and_runtime_state(tmp_path: Path) -> 
     loss.backward()
     optimizer.step()
     scheduler.step()
+    expected_scheduler = scheduler.state_dict()
     expected = {key: value.detach().clone() for key, value in model.state_dict().items()}
     manager = MainV1DistributedCheckpoint(tmp_path / "checkpoints", keep_complete=2)
     manifest = manager.save(
@@ -192,6 +194,8 @@ def test_dcp_atomic_save_restore_optimizer_and_runtime_state(tmp_path: Path) -> 
     assert (checkpoint / "COMPLETE").is_file()
     assert not (tmp_path / "checkpoints" / ".step-000000001.incomplete").exists()
 
+    scheduler.step()
+    assert scheduler.state_dict() != expected_scheduler
     with torch.no_grad():
         for parameter in model.parameters():
             parameter.zero_()
@@ -206,6 +210,7 @@ def test_dcp_atomic_save_restore_optimizer_and_runtime_state(tmp_path: Path) -> 
     )
     assert runtime == {"accepted_exposures": 8192, "stream": {"cursor": 7}}
     assert loaded_manifest == manifest
+    assert scheduler.state_dict() == expected_scheduler
     for key, value in model.state_dict().items():
         assert torch.equal(value, expected[key])
 
@@ -221,6 +226,13 @@ def test_dcp_atomic_save_restore_optimizer_and_runtime_state(tmp_path: Path) -> 
             config_file_sha256="b" * 64,
             dataset_manifest_sha256="c" * 64,
         )
+
+
+def test_bounded_dcp_writer_does_not_stage_a_full_cpu_copy(tmp_path: Path) -> None:
+    writer = _BoundedFileSystemWriter(tmp_path / "dcp", per_thread_copy_ahead=10_000_000)
+    state = {"tensor": torch.ones(2)}
+    assert writer.stage(state) is state
+    assert writer.per_thread_copy_ahead == 10_000_000
 
 
 def test_streaming_raw_token_ledger_rolls_back_with_checkpoint_receipt(
