@@ -12,7 +12,9 @@ Evaluation: `NOT_IMPLEMENTED — DEFERRED BY RESEARCHER`
 - Isolated worktree: `/blue/thai/vinhnguyen1/multimodel-ASPD/aspd-v3-main-2b`
 - Branch: `aspd-v3-main-2b`
 - Base and fetched `origin/main`: `5e1e418e24dc917e33e1d256484800df4af4d58e`
-- Implementation commit: `7676bff82a585fc7e40908d17f6e4fc484afa371`
+- Initial implementation commit: `7676bff82a585fc7e40908d17f6e4fc484afa371`
+- Production trainer/storage continuation commit:
+  `44c14e4b9081f9b30a8b43b796ee8c2960855471` on remote branch `origin/aspd-v3-main-2b`
 - Official reference checkout: `tue147/weights-read-write` commit
   `47d12edc229e334427ce6c4195dc5c44606b724a`
 - Main config: `configs/multimodel/aspd_v3/main_v1.yaml`
@@ -272,6 +274,10 @@ actual DCP byte count and rollback result.
 
 ### Current gate
 
-- Real distributed preflight: not yet run in this report revision.
+- Real distributed preflight job `48559235` was submitted from commit `44c14e4` with four
+  `rtx_pro_6000` GPUs, 8 CPUs, 64 GB RAM and a 45-minute limit. At handoff it is `PENDING` with
+  scheduler reason `QOSGrpCpuLimit`, `StartTime=Unknown`; it has not started and therefore provides
+  no runtime PASS/FAIL evidence yet. Standard logs are
+  `slurm/logs/aspd-v3-main-preflight-48559235.{out,err}`.
 - Actual DCP size / GPU memory / throughput: pending that preflight.
 - Main Slurm job: not submitted.
