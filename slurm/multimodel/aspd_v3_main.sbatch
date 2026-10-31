@@ -28,7 +28,7 @@ CONFIG_SHA="$(sha256sum "${CONFIG}" | awk '{print $1}')"
 GIT_SHA="$(git rev-parse HEAD)"
 RUN_ID="aspd_v3_qwen_gemma_phi_168targets_c8192_k32_2048m_main_v1_${GIT_SHA:0:12}_job${SLURM_JOB_ID}"
 RUN_DIR="out/multimodel/aspd_v3/main_v1/runs/aspd_v3_qwen_gemma_phi_168targets_c8192_k32_2048m_main_v1/${RUN_ID}"
-PREFLIGHT="out/multimodel/aspd_v3/main_v1/preflight/aspd_v3_qwen_gemma_phi_168targets_c8192_k32_preflight_v6_3gpu_rtx_streamed/preflight_report.json"
+PREFLIGHT="out/multimodel/aspd_v3/main_v1/preflight/aspd_v3_qwen_gemma_phi_168targets_c8192_k32_preflight_v7_3gpu_rtx_dtensor_norm/preflight_report.json"
 
 if [[ ! -f "${PREFLIGHT}" ]]; then
   echo "Missing mandatory distributed preflight evidence: ${PREFLIGHT}" >&2

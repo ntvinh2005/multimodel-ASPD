@@ -132,11 +132,15 @@ class RankOneComponents(nn.Module):
         return self.U, self.V
 
     @torch.no_grad()
-    def normalize_write_decoder_(self) -> None:
+    def normalize_write_decoder_(self, *, project_gradients: bool = True) -> None:
         """Project radial gradients out of U and restore unit row norms."""
 
-        normed = self.U / self.U.norm(dim=-1, keepdim=True).clamp_min(1e-8)
-        if self.U.grad is not None:
+        norms = self.U.norm(dim=-1, keepdim=True)
+        # ``clamp_min`` has no DTensor sharding strategy in PyTorch 2.8.  Adding the
+        # dtype's smallest normal value leaves every initialized nonzero norm unchanged
+        # while keeping a zero row finite, and remains an elementwise sharded operation.
+        normed = self.U / (norms + torch.finfo(norms.dtype).tiny)
+        if project_gradients and self.U.grad is not None:
             radial = (self.U.grad * normed).sum(dim=-1, keepdim=True) * normed
             self.U.grad.sub_(radial)
         self.U.copy_(normed)

@@ -595,8 +595,9 @@ def main() -> None:
         dist.all_gather_object(reports, gradient_report)
         if any(report["status"] != "PASS" for report in reports):
             raise FloatingPointError(f"missing or nonfinite trainable gradients: {reports}")
-        model.normalize_decoders_()
+        model.normalize_decoders_(project_gradients=True)
         optimizer.step()
+        model.normalize_decoders_(project_gradients=False)
         scheduler.step()
         optimizer.zero_grad(set_to_none=True)
         completed_steps += 1

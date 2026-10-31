@@ -269,10 +269,10 @@ class MainV1TrainableModel(nn.Module):
         return total, metrics
 
     @torch.no_grad()
-    def normalize_decoders_(self) -> None:
-        self.matrix_bank.normalize_write_decoders_()
+    def normalize_decoders_(self, *, project_gradients: bool = True) -> None:
+        self.matrix_bank.normalize_write_decoders_(project_gradients=project_gradients)
         for bank in self.activation_banks.values():
-            bank.normalize_decoders_()
+            bank.normalize_decoders_(project_gradients=project_gradients)
 
 
 def trainable_parameter_count(model: nn.Module) -> int:

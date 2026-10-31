@@ -95,14 +95,15 @@ class ActivationReconstructionBank(nn.Module):
         return tuple(decoder(code) for decoder in self.decoders[model_key])
 
     @torch.no_grad()
-    def normalize_decoders_(self) -> None:
+    def normalize_decoders_(self, *, project_gradients: bool = True) -> None:
         """Keep every feature write direction unit norm, including radial-gradient removal."""
 
         for decoders in self.decoders.values():
             for decoder in decoders:
                 directions = decoder.weight.T
-                normalized = directions / directions.norm(dim=-1, keepdim=True).clamp_min(1e-8)
-                if decoder.weight.grad is not None:
+                norms = directions.norm(dim=-1, keepdim=True)
+                normalized = directions / (norms + torch.finfo(norms.dtype).tiny)
+                if project_gradients and decoder.weight.grad is not None:
                     gradient = decoder.weight.grad.T
                     gradient.sub_((gradient * normalized).sum(-1, keepdim=True) * normalized)
                 decoder.weight.copy_(normalized.T)
@@ -181,11 +182,11 @@ class RankOneMatrixBank(nn.Module):
         return output
 
     @torch.no_grad()
-    def normalize_write_decoders_(self) -> None:
+    def normalize_write_decoders_(self, *, project_gradients: bool = True) -> None:
         """Apply the model-wide ASPD unit-norm write-decoder constraint after backward."""
 
         for component in self.components.values():
-            component.normalize_write_decoder_()
+            component.normalize_write_decoder_(project_gradients=project_gradients)
 
 
 class V3ReconstructionInfrastructure(nn.Module):

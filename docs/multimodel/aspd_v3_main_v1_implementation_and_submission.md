@@ -20,8 +20,8 @@ Evaluation: `NOT_IMPLEMENTED — DEFERRED BY RESEARCHER`
 - Official reference checkout: `tue147/weights-read-write` commit
   `47d12edc229e334427ce6c4195dc5c44606b724a`
 - Main config: `configs/multimodel/aspd_v3/main_v1.yaml`
-- Canonical config fingerprint: `56f95898bb644f1908c6522babece0f127f657271ad01bc304200f8db00ab623`
-- Config-file SHA-256: `3cc9be012fdbc7071ab16d0166d7e06aab96862d437a84802034adc15b8c8332`
+- Canonical config fingerprint: `0b8c4bb5b3a3333448620edc22bed3c3c205d24002c5c0e5f2529e3a283505bc`
+- Config-file SHA-256: `0bc3d37f591ef1b8252e193524e0fac54d262f56c04e4d2398063b2e5bfc43f4`
 - Approved-config SHA-256: `0d45e2679a3677a2d3ea752284fd112cc8216414c05a19d64a739997ff2e6542`
 - Machine-readable audit: `out/multimodel/aspd_v3/main_v1/audit/20261031T_runtime_gate_audit_v5/evidence.json`
   (SHA-256 `3a535fa4830af85da2d1f0e2fe9f6c7f9702398b3c6f8189fdb4c3328c36fbf9`)
@@ -312,6 +312,14 @@ actual DCP byte count and rollback result.
 - The v6 launchers return to three RTX PRO 6000 GPUs, the actually schedulable resource class, with
   immutable evidence namespace
   `aspd_v3_qwen_gemma_phi_168targets_c8192_k32_preflight_v6_3gpu_rtx_streamed`.
+- Preflight v6 job `48583515` ran on three RTX PRO 6000 GPUs and passed the previously failing
+  full activation forward/backward plus the finite-gradient gate, proving that streamed backward
+  removes the v4 OOM. It then failed before the first Adam update because PyTorch 2.8 DTensor has no
+  sharding strategy for `aten.clamp_min` during decoder normalization. Preflight v7 replaces only
+  that unsupported zero-norm guard with an elementwise DTensor-safe finite guard. It also separates
+  pre-step radial-gradient projection from post-step unit normalization, so optimizer updates cannot
+  leave write directions off the required unit sphere. Its immutable evidence namespace is
+  `aspd_v3_qwen_gemma_phi_168targets_c8192_k32_preflight_v7_3gpu_rtx_dtensor_norm`.
 - Actual DCP size / GPU memory / throughput: pending that preflight.
 - Main Slurm job: not submitted.
 
