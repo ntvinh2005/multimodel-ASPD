@@ -15,6 +15,8 @@ Evaluation: `NOT_IMPLEMENTED — DEFERRED BY RESEARCHER`
 - Initial implementation commit: `7676bff82a585fc7e40908d17f6e4fc484afa371`
 - Production trainer/storage continuation commit:
   `44c14e4b9081f9b30a8b43b796ee8c2960855471` on remote branch `origin/aspd-v3-main-2b`
+- Three-GPU topology commits: `1f2d8af` (runtime/config/tests) and `4db39ba` (bounded
+  preflight RAM request), both pushed to `origin/aspd-v3-main-2b`
 - Official reference checkout: `tue147/weights-read-write` commit
   `47d12edc229e334427ce6c4195dc5c44606b724a`
 - Main config: `configs/multimodel/aspd_v3/main_v1.yaml`
@@ -274,11 +276,13 @@ actual DCP byte count and rollback result.
 
 ### Current gate
 
-- Real distributed preflight job `48559235` was submitted from commit `44c14e4` with four
-  `rtx_pro_6000` GPUs, 8 CPUs, 64 GB RAM and a 45-minute limit. At handoff it is `PENDING` with
-  scheduler reason `QOSGrpCpuLimit`, `StartTime=Unknown`; it has not started and therefore provides
-  no runtime PASS/FAIL evidence yet. Standard logs are
-  `slurm/logs/aspd-v3-main-preflight-48559235.{out,err}`.
+- Superseded four-GPU preflight job `48559235` never ran and was canceled before replacement;
+  accounting records `CANCELLED`, elapsed `00:00:00`.
+- Replacement real distributed preflight job `48568044` requests three `rtx_pro_6000` GPUs, six
+  CPUs, 40 GB RAM and a 45-minute limit. It is `PENDING (QOSGrpGRES)`: other users currently occupy
+  five of the six GPUs allowed by the shared `thai` QOS, leaving one available when three are
+  required. It has not started, so it provides no runtime PASS/FAIL evidence yet. Standard logs are
+  `slurm/logs/aspd-v3-main-preflight-48568044.{out,err}`.
 - Actual DCP size / GPU memory / throughput: pending that preflight.
 - Main Slurm job: not submitted.
 
