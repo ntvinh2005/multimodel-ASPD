@@ -20,8 +20,8 @@ Evaluation: `NOT_IMPLEMENTED — DEFERRED BY RESEARCHER`
 - Official reference checkout: `tue147/weights-read-write` commit
   `47d12edc229e334427ce6c4195dc5c44606b724a`
 - Main config: `configs/multimodel/aspd_v3/main_v1.yaml`
-- Canonical config fingerprint: `70dda973aa3b4836a7a1f3b78f26284f5bcb542a4857766601e4de940ab4a2c3`
-- Config-file SHA-256: `5904c649c6c73f9a825b7cea3130119545ec05ea283905d64fc1fd506819ef75`
+- Canonical config fingerprint: `760ebcbe5480e0f197c082b4a588b9624ab87645ddc499ec30524ff1e5d64bc3`
+- Config-file SHA-256: `32170d94c68b3372aa7b8b9f8334dce3c189a4e3a607167bd188a790e1dd84e7`
 - Approved-config SHA-256: `0d45e2679a3677a2d3ea752284fd112cc8216414c05a19d64a739997ff2e6542`
 - Machine-readable audit: `out/multimodel/aspd_v3/main_v1/audit/20261031T_runtime_gate_audit_v5/evidence.json`
   (SHA-256 `3a535fa4830af85da2d1f0e2fe9f6c7f9702398b3c6f8189fdb4c3328c36fbf9`)
@@ -296,8 +296,12 @@ actual DCP byte count and rollback result.
   signal rather than CUDA, FSDP, or host-memory exhaustion.
 - Preflight v4 uses rollback `DELETE` journals with `synchronous=FULL` for both the exact stream
   deduplicator and exposure ledger. This retains transactional durability without WAL's unsupported
-  shared-memory mmap on the parallel filesystem. The v4 evidence namespace is
-  `aspd_v3_qwen_gemma_phi_168targets_c8192_k32_preflight_v4_3gpu`.
+  shared-memory mmap on the parallel filesystem. Job `48582214` passed that point and entered the
+  full activation objective, where all three 96 GB RTX PRO 6000 ranks reached approximately 94.9 GB
+  used and failed a further 174 MiB allocation. This is conclusive 3×RTX runtime OOM evidence.
+- Preflight v5 keeps the verified three-rank topology and all scientific dimensions but moves the
+  bounded preflight and main launcher to three 180 GB B200 GPUs. Its evidence namespace is
+  `aspd_v3_qwen_gemma_phi_168targets_c8192_k32_preflight_v5_3gpu_b200`.
 - Actual DCP size / GPU memory / throughput: pending that preflight.
 - Main Slurm job: not submitted.
 
@@ -333,3 +337,7 @@ intentionally absent v3 real distributed preflight report.
 For the Blue SQLite journaling correction, the suite passed `63` tests with zero failures,
 including explicit journal-mode checks for both production databases. Ruff, shell syntax, and the
 validator passed; the only execution blocker is the intentionally absent v4 preflight report.
+
+For the B200 placement revision, the 14 directly affected main/production tests passed, both Slurm
+scripts passed syntax validation, the main validator remained `STRUCTURALLY_READY`, and scheduler
+`--test-only` accepted the three-B200 request. Runtime readiness remains gated on real v5 evidence.
