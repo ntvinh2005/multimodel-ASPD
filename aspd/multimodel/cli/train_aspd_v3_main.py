@@ -513,7 +513,7 @@ def main() -> None:
 
     while completed_steps < max_steps:
         step_started = time.perf_counter()
-        step_anchor_ids: dict[int, list[str]] = {}
+        step_anchor_ids: list[str] = []
         pool_metrics = []
         for pool_index in range(4):
             payload = None
@@ -533,7 +533,7 @@ def main() -> None:
                 expected_anchors=config.architecture.pool_tokens,
                 sequence_length=config.data.sequence_length,
             )
-            step_anchor_ids[pool_index] = list(pool.anchor_ids)
+            step_anchor_ids.extend(pool.anchor_ids)
             capture = _capture_pool(
                 pool,
                 rank=rank,
@@ -604,7 +604,7 @@ def main() -> None:
 
         counters = None
         if rank == 0:
-            counters = ledger.observe_global_optimizer_step(
+            counters = ledger.observe_replicated_optimizer_step(
                 completed_steps - 1, step_anchor_ids
             )
             if counters.accepted_aligned_anchor_exposures != completed_steps * 8192:

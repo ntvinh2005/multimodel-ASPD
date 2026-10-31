@@ -766,6 +766,26 @@ class SQLiteExposureLedger:
     def observe_optimizer_step(self, step_id: int, anchor_ids: Sequence[str]) -> ExposureCounters:
         return self.observe_global_optimizer_step(step_id, {0: anchor_ids})
 
+    def observe_replicated_optimizer_step(
+        self, step_id: int, anchor_ids: Sequence[str]
+    ) -> ExposureCounters:
+        """Count one global batch broadcast identically to every model-parallel rank.
+
+        ASPD v3 places one frozen source family on each rank and broadcasts the same aligned
+        anchors to all ranks.  Those replicas are one scientific exposure, not ``world_size``
+        independent exposures.  Rank zero is the durable ledger owner; empty batches for the
+        other compute ranks preserve the distributed receipt topology without multiplying the
+        exposure budget.
+        """
+
+        return self.observe_global_optimizer_step(
+            step_id,
+            {
+                rank: anchor_ids if rank == 0 else ()
+                for rank in range(self.world_size)
+            },
+        )
+
     def observe_global_optimizer_step(
         self,
         step_id: int,

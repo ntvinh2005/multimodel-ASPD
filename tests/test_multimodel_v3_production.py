@@ -255,3 +255,19 @@ def test_streaming_raw_token_ledger_rolls_back_with_checkpoint_receipt(
         7,
     )
     ledger.close()
+
+
+def test_replicated_model_parallel_step_counts_global_anchors_once(tmp_path: Path) -> None:
+    ledger = SQLiteExposureLedger(
+        tmp_path / "replicated.sqlite",
+        dataset_manifest_sha256="e" * 64,
+        world_size=3,
+    )
+    anchors = [f"anchor-{index}" for index in range(8192)]
+    counters = ledger.observe_replicated_optimizer_step(0, anchors)
+
+    assert counters.accepted_aligned_anchor_exposures == 8192
+    assert counters.unique_aligned_anchors == 8192
+    assert ledger.rank_exposure_counts() == {0: 8192, 1: 0, 2: 0}
+    assert ledger.audit_full_consistency()["status"] == "PASS"
+    ledger.close()
