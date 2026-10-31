@@ -120,7 +120,12 @@ def test_v3_config_is_separate_blocked_and_does_not_inherit_mix3() -> None:
     assert any("dictionary_size" in blocker for blocker in report["blockers"])
     assert any("main_sequence_length" in blocker for blocker in report["blockers"])
     assert any("split_modulus" in blocker for blocker in report["blockers"])
-    assert any("gemma" in blocker for blocker in report["blockers"])
+    assert bundle.runtime.model_access_verified == {
+        "qwen": True,
+        "gemma": True,
+        "phi": True,
+    }
+    assert not any("checkpoint access/runtime validation missing" in blocker for blocker in report["blockers"])
     payload = bundle.approved.model_dump(mode="json")
     payload["mix3_aspd"] = {"optimizer_token_exposures": 204_800_000}
     with pytest.raises(ValidationError, match="extra_forbidden"):

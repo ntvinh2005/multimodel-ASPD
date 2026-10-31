@@ -12,5 +12,6 @@ dataloader_workers: 8
 checkpoint_every_steps: 1000
 model_access_verified:
   qwen: true
-  gemma: false
+  # Verified by bounded real-checkpoint smoke job 48541592 on 2026-10-31.
+  gemma: true
   phi: true
