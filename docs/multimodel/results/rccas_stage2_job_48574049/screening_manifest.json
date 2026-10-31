@@ -1,0 +1,46 @@
+{
+  "checkpoint_sha256": "bbd4f6023566f25775d1daa300dd9e5de40e54cb0e1aa07c2819b1c27c9b30d6",
+  "claim_boundary": "Rankings are signed first-order approximations and require exact same-prefix interventions plus norm-matched controls before causal interpretation.",
+  "component_count": 36864,
+  "config_sha256": "b186f29048537bb1f9f8ee970f7be0bd51bd9f426018dc711f84b32e343ffcf9",
+  "dataset_sha256": "e9891ca0a0babe13f5ea4ad27b21205c789fa67fbe13ac004aeb262c39517ef3",
+  "git_commit": "e7d616c0ad05aa6e5cc53daec5dbf358be8fc560",
+  "heldout_measured": false,
+  "item_count": 96,
+  "outputs": {
+    "component_attribution_summary.csv": {
+      "bytes": 8981231,
+      "sha256": "194d5731a34dfe62c182e623cbf45b1ba644aee507c8b366895a578b77125263"
+    },
+    "discovery_attribution_tensors.pt": {
+      "bytes": 84944971,
+      "sha256": "14f1555bf03b3a4a7f741e81ffb099571c5bed5160c378a3cff3bf2f2607e499"
+    },
+    "frozen_candidates.json": {
+      "bytes": 29220,
+      "sha256": "de38519b0bffd2c5435ca0e9e61b40a883fc927b226e3528fdc2bac82885f2ba"
+    }
+  },
+  "readout_validation_report": "/blue/thai/vinhnguyen1/multimodel-ASPD/work/out/multimodel/risk_attribution_100m/readout_validation/job_48551740/readout_validation.json",
+  "readout_validation_report_sha256": "d870bf289d4dd11967b21c009ff673a34cd7be363f8c57158db540e02ef06ca6",
+  "scientific_status": "FIRST_ORDER_ATTRIBUTION_ONLY",
+  "source_model_provenance": [
+    {
+      "adapter_base_model_id": null,
+      "adapter_base_revision": null,
+      "adapter_merged": false,
+      "adapter_model_id": null,
+      "adapter_revision": null,
+      "model_kind": "full_checkpoint"
+    },
+    {
+      "adapter_base_model_id": "unsloth/Qwen2.5-7B-Instruct",
+      "adapter_base_revision": "a75c9dc945567a9b6f568b8503a0307731607bee",
+      "adapter_merged": true,
+      "adapter_model_id": "ModelOrganismsForEM/Qwen2.5-7B-Instruct_extreme-sports",
+      "adapter_revision": "6aa7e935c74c519c66555a111d1e6982059bd82d",
+      "model_kind": "peft_merged"
+    }
+  ],
+  "status": "ATTRIBUTION_SCREENING_READY_FOR_EXACT_PILOT_REVIEW"
+}
