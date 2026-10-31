@@ -55,6 +55,8 @@ def test_main_v1_is_frozen_and_legacy_config_remains_non_executable() -> None:
         "mlp_down",
     )
     assert config.data.effective_batch_anchors * config.data.minimum_optimizer_steps == 2_048_000_000
+    assert "main trainer entrypoint is not implemented" in config.execution_blockers(ROOT)
+    assert "main Slurm launcher is not implemented" in config.execution_blockers(ROOT)
     legacy = load_v3_config_bundle(
         ROOT / "configs/multimodel/aspd_v3/approved.yaml",
         ROOT / "configs/multimodel/aspd_v3/candidates.yaml",

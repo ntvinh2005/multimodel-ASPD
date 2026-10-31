@@ -221,6 +221,12 @@ class V3MainV1Config(BaseModel):
         blockers = list(self.structural_report(base)["blockers"])
         blockers.extend(self._access_evidence_blockers(base))
         for label, value in (
+            ("main trainer entrypoint", "aspd/multimodel/cli/train_aspd_v3_main.py"),
+            ("main Slurm launcher", "slurm/multimodel/aspd_v3_main.sbatch"),
+        ):
+            if not (base / value).is_file():
+                blockers.append(f"{label} is not implemented")
+        for label, value in (
             ("dataset manifest", self.runtime.dataset_manifest),
             ("alignment manifest", self.runtime.alignment_manifest),
             ("distributed preflight evidence", self.runtime.preflight_evidence),
