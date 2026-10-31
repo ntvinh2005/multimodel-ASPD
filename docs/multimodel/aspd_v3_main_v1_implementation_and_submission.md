@@ -279,9 +279,11 @@ actual DCP byte count and rollback result.
 - Superseded four-GPU preflight job `48559235` never ran and was canceled before replacement;
   accounting records `CANCELLED`, elapsed `00:00:00`.
 - Replacement real distributed preflight job `48568044` requests three `rtx_pro_6000` GPUs, six
-  CPUs, 40 GB RAM and a 45-minute limit. It is `PENDING (QOSGrpGRES)`: other users currently occupy
-  five of the six GPUs allowed by the shared `thai` QOS, leaving one available when three are
-  required. It has not started, so it provides no runtime PASS/FAIL evidence yet. Standard logs are
+  CPUs, 40 GB RAM and a 45-minute limit. It is `PENDING` on shared QOS resources: other users
+  currently occupy five of the six GPUs and 46 of the 48 CPUs allowed by `thai`, leaving only one
+  GPU and two CPUs when three GPUs and six CPUs are required. Scheduler reason alternates between
+  `QOSGrpGRES` and `QOSGrpCpuLimit` as it reports the first limiting TRES. It has not started, so it
+  provides no runtime PASS/FAIL evidence yet. Standard logs are
   `slurm/logs/aspd-v3-main-preflight-48568044.{out,err}`.
 - Actual DCP size / GPU memory / throughput: pending that preflight.
 - Main Slurm job: not submitted.
