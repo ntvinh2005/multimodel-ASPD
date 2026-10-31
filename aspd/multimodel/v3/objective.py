@@ -1,0 +1,158 @@
+"""Numerically guarded main-v1 ASPD losses and explicit gradient routes."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+
+import torch
+from torch import Tensor, nn
+
+MATRYOSHKA_GROUP_FRACS = (0.0625, 0.0625, 0.125, 0.25, 0.5)
+
+
+def _valid_flat(value: Tensor, valid_anchors: Tensor) -> Tensor:
+    if value.ndim != 3 or value.shape[:2] != valid_anchors.shape:
+        raise ValueError("loss tensors must have shape [B,A,d] on the valid-anchor grid")
+    selected = value[valid_anchors]
+    if selected.numel() == 0:
+        raise ValueError("ASPD v3 loss requires at least one accepted aligned anchor")
+    return selected.float()
+
+
+def _variance_denominator(target: Tensor, *, min_variance: float = 1e-8) -> Tensor:
+    centered = target - target.mean(dim=0, keepdim=True)
+    denominator = centered.square().sum()
+    if not torch.isfinite(denominator):
+        raise FloatingPointError("non-finite ASPD v3 FVU denominator")
+    if float(denominator.detach()) <= min_variance:
+        raise FloatingPointError("ASPD v3 FVU target has zero or near-zero variance")
+    return denominator
+
+
+def masked_fvu(prediction: Tensor, target: Tensor, valid_anchors: Tensor) -> Tensor:
+    """Global FVU in FP32 over accepted aligned anchors only."""
+
+    pred = _valid_flat(prediction, valid_anchors)
+    truth = _valid_flat(target, valid_anchors)
+    if pred.shape != truth.shape:
+        raise ValueError("ASPD v3 FVU prediction and target shapes differ")
+    numerator = (pred - truth).square().sum()
+    denominator = _variance_denominator(truth)
+    value = numerator / denominator
+    if not torch.isfinite(value):
+        raise FloatingPointError("non-finite ASPD v3 FVU")
+    return value
+
+
+def matryoshka_boundaries(n_features: int, fracs: Sequence[float]) -> tuple[int, ...]:
+    sizes = [int(n_features * fraction) for fraction in fracs]
+    if not sizes:
+        raise ValueError("Matryoshka groups cannot be empty")
+    sizes[-1] += n_features - sum(sizes)
+    if any(size <= 0 for size in sizes):
+        raise ValueError("Matryoshka group contains no features")
+    result = [0]
+    for size in sizes:
+        result.append(result[-1] + size)
+    return tuple(result)
+
+
+def matryoshka_activation_fvu(
+    code: Tensor,
+    decoder: nn.Linear,
+    target: Tensor,
+    valid_anchors: Tensor,
+    *,
+    group_fracs: Sequence[float] = MATRYOSHKA_GROUP_FRACS,
+) -> tuple[Tensor, Tensor]:
+    """Official-style empty+nested-prefix MSE normalized into FVU units."""
+
+    if code.shape[:2] != target.shape[:2] or code.shape[-1] != decoder.in_features:
+        raise ValueError("activation code, target, and decoder shapes disagree")
+    flat_code = _valid_flat(code, valid_anchors)
+    truth = _valid_flat(target, valid_anchors)
+    denominator_mean = _variance_denominator(truth) / truth.numel()
+    bias = decoder.bias.float().expand_as(truth) if decoder.bias is not None else torch.zeros_like(truth)
+    reconstruction = bias
+    terms = [(reconstruction - truth).square().mean()]
+    boundaries = matryoshka_boundaries(decoder.in_features, group_fracs)
+    directions = decoder.weight.float().T
+    for lower, upper in zip(boundaries[:-1], boundaries[1:], strict=True):
+        reconstruction = reconstruction + flat_code[:, lower:upper] @ directions[lower:upper]
+        terms.append((reconstruction - truth).square().mean())
+    loss = torch.stack(terms).mean() / denominator_mean
+    if not torch.isfinite(loss):
+        raise FloatingPointError("non-finite ASPD v3 Matryoshka FVU")
+    full = torch.zeros_like(target, dtype=reconstruction.dtype)
+    full[valid_anchors] = reconstruction
+    return loss, full
+
+
+def auxk_dead_feature_loss(
+    preactivations: Tensor,
+    decoder: nn.Linear,
+    target: Tensor,
+    full_reconstruction: Tensor,
+    valid_anchors: Tensor,
+    dead_features: Tensor,
+    *,
+    top_k_aux: int = 2048,
+) -> Tensor:
+    """Official AuxK residual reconstruction restricted to currently dead features."""
+
+    if dead_features.shape != (decoder.in_features,) or dead_features.dtype != torch.bool:
+        raise ValueError("dead-feature mask must be boolean with shape [C]")
+    n_dead = int(dead_features.sum().item())
+    if n_dead == 0:
+        return preactivations.sum() * 0.0
+    acts = _valid_flat(preactivations, valid_anchors)[:, dead_features]
+    truth = _valid_flat(target, valid_anchors)
+    reconstruction = _valid_flat(full_reconstruction, valid_anchors)
+    residual = truth - reconstruction
+    count = min(top_k_aux, n_dead)
+    top = torch.topk(acts, count, dim=-1)
+    sparse = torch.zeros_like(acts).scatter(-1, top.indices, top.values)
+    auxiliary = sparse @ decoder.weight.float().T[dead_features]
+    if float(auxiliary.detach().abs().sum()) == 0.0:
+        return auxiliary.sum() * 0.0
+    variance_mean = _variance_denominator(truth) / truth.numel()
+    loss = (auxiliary - residual).square().mean() / variance_mean
+    if not torch.isfinite(loss):
+        raise FloatingPointError("non-finite ASPD v3 AuxK loss")
+    return loss
+
+
+def detached_binary_support(code: Tensor) -> Tensor:
+    """Internal reconstruction gate: discrete support with no encoder gradient route."""
+
+    return (code.detach() > 0).to(code.dtype)
+
+
+def balanced_main_loss(
+    internal_by_group: Mapping[str, Sequence[Tensor]],
+    activation_by_group: Mapping[str, Sequence[Tensor]],
+    auxk_by_group: Mapping[str, Sequence[Tensor]],
+    *,
+    auxk_coefficient: float = 0.03125,
+) -> tuple[Tensor, dict[str, Tensor]]:
+    """Average PRE/MID independently before combining the three approved objectives."""
+
+    expected = {"pre", "mid"}
+    if any(set(values) != expected for values in (internal_by_group, activation_by_group, auxk_by_group)):
+        raise ValueError("balanced ASPD v3 losses require exactly PRE and MID groups")
+
+    def group_mean(values: Mapping[str, Sequence[Tensor]]) -> Tensor:
+        means = []
+        for key in ("pre", "mid"):
+            if not values[key]:
+                raise ValueError(f"ASPD v3 {key} loss group is empty")
+            means.append(torch.stack(tuple(values[key])).mean())
+        return torch.stack(means).mean()
+
+    internal = group_mean(internal_by_group)
+    activation = group_mean(activation_by_group)
+    auxk = group_mean(auxk_by_group)
+    total = internal + activation + auxk_coefficient * auxk
+    if not torch.isfinite(total):
+        raise FloatingPointError("non-finite ASPD v3 global objective")
+    return total, {"internal": internal, "activation": activation, "auxk": auxk}

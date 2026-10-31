@@ -218,6 +218,7 @@ class HierarchicalV3Encoder(nn.Module):
         intra_heads: int,
         cross_layers: int,
         cross_heads: int,
+        cross_width: int | None = None,
         n_features: int,
         readout: Literal["mean"],
     ):
@@ -233,7 +234,8 @@ class HierarchicalV3Encoder(nn.Module):
                 "intra-model token widths must be divisible by attention heads before "
                 f"module allocation: heads={intra_heads}, widths={incompatible_intra}"
             )
-        cross_width = max(widths.values()) + len(MODEL_ORDER) + 2
+        packed_cross_width = max(widths.values()) + len(MODEL_ORDER) + 2
+        cross_width = packed_cross_width if cross_width is None else cross_width
         if cross_width % cross_heads:
             raise ValueError(
                 "cross-model token width must be divisible by attention heads before "
@@ -254,6 +256,11 @@ class HierarchicalV3Encoder(nn.Module):
                 for key, width in widths.items()
             }
         )
+        self.cross_input_adapter: nn.Module
+        if packed_cross_width == cross_width:
+            self.cross_input_adapter = nn.Identity()
+        else:
+            self.cross_input_adapter = nn.Linear(packed_cross_width, cross_width)
         self.cross = CrossModelTransformer(
             cross_width, layers=cross_layers, heads=cross_heads
         )
@@ -276,5 +283,5 @@ class HierarchicalV3Encoder(nn.Module):
         expected = 3 * next(iter(self.latent_tokens.values())) + 2
         if cross.values.shape[2] != expected:
             raise AssertionError("v3 cross-model sequence must have length 3a+2")
-        encoded = self.cross(cross.values)
+        encoded = self.cross(self.cross_input_adapter(cross.values))
         return self.readout(encoded, valid_anchors)

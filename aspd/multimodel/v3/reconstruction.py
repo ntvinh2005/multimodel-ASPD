@@ -29,11 +29,25 @@ class ActivationReconstructionBank(nn.Module):
             self.decoders[model_key] = nn.ModuleList(
                 [nn.Linear(n_features, width, bias=True) for width in dimensions]
             )
+        self.normalize_decoders_()
 
     def reconstruct(self, model_key: str, code: Tensor) -> tuple[Tensor, ...]:
         if model_key not in self.decoders:
             raise KeyError(f"unknown v3 activation decoder model: {model_key}")
         return tuple(decoder(code) for decoder in self.decoders[model_key])
+
+    @torch.no_grad()
+    def normalize_decoders_(self) -> None:
+        """Keep every feature write direction unit norm, including radial-gradient removal."""
+
+        for decoders in self.decoders.values():
+            for decoder in decoders:
+                directions = decoder.weight.T
+                normalized = directions / directions.norm(dim=-1, keepdim=True).clamp_min(1e-8)
+                if decoder.weight.grad is not None:
+                    gradient = decoder.weight.grad.T
+                    gradient.sub_((gradient * normalized).sum(-1, keepdim=True) * normalized)
+                decoder.weight.copy_(normalized.T)
 
 
 class RankOneMatrixBank(nn.Module):
@@ -52,7 +66,7 @@ class RankOneMatrixBank(nn.Module):
         self.components = nn.ModuleDict(
             {
                 _safe_key(target.key): RankOneComponents(
-                    n_features, target.d_in, target.d_out
+                    n_features, target.d_in, target.d_out, unit_norm=True
                 )
                 for target in targets
             }
@@ -115,6 +129,13 @@ class RankOneMatrixBank(nn.Module):
         if bias_name is not None:
             output = output + getattr(self, bias_name)
         return output
+
+    @torch.no_grad()
+    def normalize_write_decoders_(self) -> None:
+        """Apply the model-wide ASPD unit-norm write-decoder constraint after backward."""
+
+        for component in self.components.values():
+            component.normalize_write_decoder_()
 
 
 class V3ReconstructionInfrastructure(nn.Module):
