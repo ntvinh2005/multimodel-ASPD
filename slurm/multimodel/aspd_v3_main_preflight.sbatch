@@ -4,7 +4,7 @@
 #SBATCH --gres=gpu:rtx_pro_6000:3
 #SBATCH --time=00:45:00
 #SBATCH --cpus-per-task=6
-#SBATCH --mem=64G
+#SBATCH --mem=40G
 #SBATCH --output=slurm/logs/aspd-v3-main-preflight-%j.out
 #SBATCH --error=slurm/logs/aspd-v3-main-preflight-%j.err
 

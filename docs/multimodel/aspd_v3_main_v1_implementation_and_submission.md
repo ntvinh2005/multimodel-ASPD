@@ -289,7 +289,8 @@ This changes only the execution/sharding topology; the 168-target scope, `C=8192
 PRE/MID branches, 8,192 accepted exposures per optimizer step, and 2.048B-exposure budget are
 unchanged. Qwen, Gemma and Phi already map naturally to source ranks 0, 1 and 2. The config schema,
 trainer topology check, FSDP entrypoint, preflight gate, and both Slurm launchers are now locked to
-three ranks. The Slurm request is three RTX PRO 6000 GPUs, six CPUs, 64 GB RAM and 45 minutes.
+three ranks. The bounded preflight request is three RTX PRO 6000 GPUs, six CPUs, 40 GB RAM and 45
+minutes; the long main launcher retains 64 GB RAM.
 
 The config-specific analytical lower bound is 58,684,884,309 bytes per GPU without optional master
 weights and 75,451,994,112 bytes per GPU with them, excluding frozen source weights, activations and
