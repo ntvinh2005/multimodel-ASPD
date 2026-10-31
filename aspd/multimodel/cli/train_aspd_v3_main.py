@@ -1,4 +1,4 @@
-"""Four-rank FSDP trainer for the frozen ASPD v3 main-v1 experiment."""
+"""Three-rank FSDP trainer for the frozen ASPD v3 main-v1 experiment."""
 
 from __future__ import annotations
 
@@ -98,8 +98,6 @@ def _init_distributed() -> tuple[int, int, torch.device]:
     dist.init_process_group("nccl")
     rank = dist.get_rank()
     world_size = dist.get_world_size()
-    if world_size != 4:
-        raise RuntimeError(f"main-v1 requires exactly four ranks, observed {world_size}")
     local_rank = int(os.environ["LOCAL_RANK"])
     torch.cuda.set_device(local_rank)
     return rank, world_size, torch.device("cuda", local_rank)
@@ -304,6 +302,11 @@ def main() -> None:
     args = _parse_args()
     rank, world_size, device = _init_distributed()
     config = load_main_v1_config(args.config)
+    if world_size != config.runtime.world_size:
+        raise RuntimeError(
+            "main-v1 distributed topology differs from the frozen runtime config: "
+            f"expected {config.runtime.world_size}, observed {world_size}"
+        )
     bundle = load_v3_config_bundle(args.approved, args.candidates, args.runtime_template)
     registry = build_model_registry(bundle.approved)
     config_sha256 = _sha256(args.config)
@@ -331,7 +334,7 @@ def main() -> None:
             "config_file_sha256": config_sha256,
             "dataset_manifest_sha256": dataset_manifest["manifest_sha256"],
             "alignment_manifest_sha256": alignment_manifest["manifest_sha256"],
-            "world_size": 4,
+            "world_size": config.runtime.world_size,
             "target_count": 168,
             "trainable_parameters": EXPECTED_TRAINABLE_PARAMETERS,
             "dcp_save_reload_resume": "PASS",
@@ -394,7 +397,9 @@ def main() -> None:
     )
     if trainable_parameter_count(model) != EXPECTED_TRAINABLE_PARAMETERS:
         raise RuntimeError("full main-v1 trainable parameter count changed")
-    model = fully_shard_main_v1(model)
+    model = fully_shard_main_v1(
+        model, expected_world_size=config.runtime.world_size
+    )
     optimizer = build_adam_optimizer(model, config)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda _step: 1.0)
     manager = MainV1DistributedCheckpoint(

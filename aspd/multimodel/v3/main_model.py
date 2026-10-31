@@ -294,13 +294,21 @@ def build_adam_optimizer(
     )
 
 
-def fully_shard_main_v1(model: MainV1TrainableModel) -> MainV1TrainableModel:
+def fully_shard_main_v1(
+    model: MainV1TrainableModel, *, expected_world_size: int
+) -> MainV1TrainableModel:
     """Shard every large independently-called module before sharding the root."""
 
     if not torch.cuda.is_available():
         raise RuntimeError("main-v1 FSDP requires CUDA")
-    if not torch.distributed.is_initialized() or torch.distributed.get_world_size() != 4:
-        raise RuntimeError("main-v1 FSDP requires an initialized four-rank process group")
+    if not torch.distributed.is_initialized():
+        raise RuntimeError("main-v1 FSDP requires an initialized process group")
+    observed_world_size = torch.distributed.get_world_size()
+    if observed_world_size != expected_world_size:
+        raise RuntimeError(
+            "main-v1 FSDP world-size mismatch: "
+            f"expected {expected_world_size}, observed {observed_world_size}"
+        )
     from torch.distributed._tensor import Shard
     from torch.distributed.fsdp import MixedPrecisionPolicy, fully_shard
 

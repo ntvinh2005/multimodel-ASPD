@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=aspd-v3-main-preflight
 #SBATCH --partition=hpg-rtx6000
-#SBATCH --gres=gpu:rtx_pro_6000:4
+#SBATCH --gres=gpu:rtx_pro_6000:3
 #SBATCH --time=00:45:00
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=6
 #SBATCH --mem=64G
 #SBATCH --output=slurm/logs/aspd-v3-main-preflight-%j.out
 #SBATCH --error=slurm/logs/aspd-v3-main-preflight-%j.err
@@ -20,7 +20,7 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export NCCL_ASYNC_ERROR_HANDLING=1
 
 CONFIG="configs/multimodel/aspd_v3/main_v1.yaml"
-RUN_DIR="out/multimodel/aspd_v3/main_v1/preflight/aspd_v3_qwen_gemma_phi_168targets_c8192_k32_preflight_v1"
+RUN_DIR="out/multimodel/aspd_v3/main_v1/preflight/aspd_v3_qwen_gemma_phi_168targets_c8192_k32_preflight_v1_3gpu"
 REPORT="${RUN_DIR}/preflight_report.json"
 if [[ -e "${REPORT}" ]]; then
   echo "Refusing to overwrite completed preflight evidence: ${REPORT}" >&2
@@ -42,7 +42,7 @@ nvidia-smi
 exec ../repo/.venv/bin/torchrun \
   --standalone \
   --nnodes=1 \
-  --nproc-per-node=4 \
+  --nproc-per-node=3 \
   -m aspd.multimodel.cli.train_aspd_v3_main \
   --mode preflight \
   --config "${CONFIG}" \

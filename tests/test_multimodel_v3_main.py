@@ -46,6 +46,7 @@ def test_main_v1_is_frozen_and_legacy_config_remains_non_executable() -> None:
     config = load_main_v1_config(ROOT / "configs/multimodel/aspd_v3/main_v1.yaml")
     assert config.scientific_status == "FROZEN_RESEARCHER_APPROVED"
     assert config.architecture.dictionary_size == 8192
+    assert config.runtime.world_size == 3
     assert config.architecture.logical_matrices == (
         "q",
         "k",

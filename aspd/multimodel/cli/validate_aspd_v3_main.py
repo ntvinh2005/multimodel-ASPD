@@ -25,7 +25,9 @@ def main() -> None:
     config = load_main_v1_config(args.config)
     report = config.structural_report()
     approved = V3ApprovedConfig.model_validate(_load(config.approved_config_path))
-    report["feasibility"] = estimate_main_v1_feasibility(build_model_registry(approved))
+    report["feasibility"] = estimate_main_v1_feasibility(
+        build_model_registry(approved), world_size=config.runtime.world_size
+    )
     execution_blockers = config.execution_blockers()
     report["execution_status"] = "READY" if not execution_blockers else "BLOCKED"
     report["execution_blockers"] = execution_blockers

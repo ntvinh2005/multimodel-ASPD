@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=aspd-v3-main-v1
 #SBATCH --partition=hpg-rtx6000
-#SBATCH --gres=gpu:rtx_pro_6000:4
+#SBATCH --gres=gpu:rtx_pro_6000:3
 #SBATCH --time=14-00:00:00
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=6
 #SBATCH --mem=64G
 #SBATCH --signal=B:USR1@300
 #SBATCH --requeue
@@ -26,7 +26,7 @@ CONFIG_SHA="$(sha256sum "${CONFIG}" | awk '{print $1}')"
 GIT_SHA="$(git rev-parse HEAD)"
 RUN_ID="aspd_v3_qwen_gemma_phi_168targets_c8192_k32_2048m_main_v1_${GIT_SHA:0:12}_job${SLURM_JOB_ID}"
 RUN_DIR="out/multimodel/aspd_v3/main_v1/runs/aspd_v3_qwen_gemma_phi_168targets_c8192_k32_2048m_main_v1/${RUN_ID}"
-PREFLIGHT="out/multimodel/aspd_v3/main_v1/preflight/aspd_v3_qwen_gemma_phi_168targets_c8192_k32_preflight_v1/preflight_report.json"
+PREFLIGHT="out/multimodel/aspd_v3/main_v1/preflight/aspd_v3_qwen_gemma_phi_168targets_c8192_k32_preflight_v1_3gpu/preflight_report.json"
 
 if [[ ! -f "${PREFLIGHT}" ]]; then
   echo "Missing mandatory distributed preflight evidence: ${PREFLIGHT}" >&2
@@ -56,7 +56,7 @@ trap forward_checkpoint_signal USR1
 setsid ../repo/.venv/bin/torchrun \
   --standalone \
   --nnodes=1 \
-  --nproc-per-node=4 \
+  --nproc-per-node=3 \
   -m aspd.multimodel.cli.train_aspd_v3_main \
   --mode main \
   --config "${CONFIG}" \

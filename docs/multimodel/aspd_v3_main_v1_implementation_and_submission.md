@@ -18,8 +18,8 @@ Evaluation: `NOT_IMPLEMENTED — DEFERRED BY RESEARCHER`
 - Official reference checkout: `tue147/weights-read-write` commit
   `47d12edc229e334427ce6c4195dc5c44606b724a`
 - Main config: `configs/multimodel/aspd_v3/main_v1.yaml`
-- Canonical config fingerprint: `b61111c3eeb879bff1646bf02fba4225396bf1ebbb6c188cccc4515184349518`
-- Config-file SHA-256: `59f890d7189635db63ec1f05084281f6575b0335613ba132849007f2782e3b2a`
+- Canonical config fingerprint: `2d878961e50dee9ab8da1111fb0369373bfc002318739a4fd2538a0594850de8`
+- Config-file SHA-256: `bfb5ce90c29eb0251a10d58733fac42240ef3a78b3f5c0da11fc55362e8bb497`
 - Approved-config SHA-256: `0d45e2679a3677a2d3ea752284fd112cc8216414c05a19d64a739997ff2e6542`
 - Machine-readable audit: `out/multimodel/aspd_v3/main_v1/audit/20261031T_runtime_gate_audit_v5/evidence.json`
   (SHA-256 `3a535fa4830af85da2d1f0e2fe9f6c7f9702398b3c6f8189fdb4c3328c36fbf9`)
@@ -61,7 +61,7 @@ Transformer LR are researcher-approved multimodel adaptations, not claims about 
 | Data | Pinned `monology/pile-uncopyrighted`; seq 512; exact identity-prefix alignment |
 | Split | document hash seed 0/modulus 1,000; validation 0–9; test 10–19 |
 | Budget | 8,192 accepted anchors/step; 2,048,000,000 exposures; minimum 250,000 completed steps |
-| Distributed/checkpoint | Four-GPU FSDP required; checkpoint every 1,000 steps; retain two complete recoverable versions |
+| Distributed/checkpoint | Three-GPU FSDP; checkpoint every 1,000 steps; retain two complete recoverable versions |
 
 ## Implementation changes completed
 
@@ -126,8 +126,8 @@ Exact shape accounting for main-v1:
 | Hierarchical encoder, each site | 298,134,528 |
 | Total trainable parameters | 12,575,332,352 |
 | Aggregate BF16 params + FP32 gradients + Adam moments | 176,054,652,928 bytes |
-| Four-way FSDP shard lower bound/GPU | 44,013,663,232 bytes |
-| With optional FP32 master weights/GPU | 56,588,995,584 bytes |
+| Three-way FSDP shard lower bound/GPU | 58,684,884,309 bytes |
+| With optional FP32 master weights/GPU | 75,451,994,112 bytes |
 | One complete params+Adam checkpoint lower bound | 125,753,323,520 bytes |
 | Two complete checkpoints lower bound | 251,506,647,040 bytes |
 
@@ -216,7 +216,7 @@ Result: `IA_CLEANUP: PARTIALLY_CLEANED`.
 ### Production implementation completed locally
 
 1. Added an on-the-fly Pile stream over the exact pinned revision. Rank zero owns the Hugging Face
-   iterable cursor and broadcasts an identical accepted-anchor pool to the four FSDP ranks. Stream
+   iterable cursor and broadcasts an identical accepted-anchor pool to the three FSDP ranks. Stream
    checkpoints include the native dataset state, pending partial document, exact-dedup SQLite
    high-water mark, split counts, and tokenizer/alignment provenance. No corpus-wide anchor JSONL
    or activation cache is created.
@@ -261,7 +261,7 @@ Result: `IA_CLEANUP: PARTIALLY_CLEANED`.
 - Main validator: `STRUCTURALLY_READY`; sole execution blocker is the not-yet-materialized
   distributed preflight report.
 - `sbatch --test-only slurm/multimodel/aspd_v3_main_preflight.sbatch` accepted the request and
-  estimated placement on four RTX PRO 6000 GPUs. This is scheduler validation, not runtime
+  estimated placement on three RTX PRO 6000 GPUs. This is scheduler validation, not runtime
   evidence.
 
 ### Revised storage envelope
@@ -281,3 +281,22 @@ actual DCP byte count and rollback result.
   `slurm/logs/aspd-v3-main-preflight-48559235.{out,err}`.
 - Actual DCP size / GPU memory / throughput: pending that preflight.
 - Main Slurm job: not submitted.
+
+### Three-GPU runtime topology revision
+
+The researcher explicitly constrained the available runtime topology to three GPUs on 2026-10-31.
+This changes only the execution/sharding topology; the 168-target scope, `C=8192`, `K=32`, two
+PRE/MID branches, 8,192 accepted exposures per optimizer step, and 2.048B-exposure budget are
+unchanged. Qwen, Gemma and Phi already map naturally to source ranks 0, 1 and 2. The config schema,
+trainer topology check, FSDP entrypoint, preflight gate, and both Slurm launchers are now locked to
+three ranks. The Slurm request is three RTX PRO 6000 GPUs, six CPUs, 64 GB RAM and 45 minutes.
+
+The config-specific analytical lower bound is 58,684,884,309 bytes per GPU without optional master
+weights and 75,451,994,112 bytes per GPU with them, excluding frozen source weights, activations and
+communication buffers. Therefore 3-GPU feasibility is not claimed from analysis: the bounded real
+preflight must still measure steady-state memory, Adam initialization and DCP save/reload/resume.
+
+Verification for this revision: 59 focused tests passed, Ruff passed, both Slurm scripts passed
+`bash -n`, `git diff --check` passed, and the validator reported `STRUCTURALLY_READY` with only the
+expected missing-preflight evidence blocker. Scheduler `--test-only` accepted the 3-GPU/6-CPU
+request and estimated node `c0802a-s21` at `2026-10-31T19:10:30`; this is not runtime evidence.

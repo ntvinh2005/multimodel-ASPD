@@ -115,7 +115,7 @@ class MainV1Runtime(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     strategy: Literal["fsdp"]
-    world_size: Literal[4]
+    world_size: Literal[3]
     checkpoint_every_steps: Literal[1000]
     keep_complete_checkpoints: Literal[2]
     output_root: str
