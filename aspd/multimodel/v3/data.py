@@ -312,7 +312,11 @@ class SQLiteExposureLedger:
         self.world_size = world_size
         self.writer_rank = writer_rank
         self.connection = sqlite3.connect(self.path)
-        self.connection.execute("PRAGMA journal_mode=WAL")
+        # The ledger lives on Blue. WAL's shared-memory index is unsafe on this parallel
+        # filesystem; DELETE mode remains transactional and works with synchronous=FULL.
+        journal_mode = self.connection.execute("PRAGMA journal_mode=DELETE").fetchone()[0]
+        if str(journal_mode).lower() != "delete":
+            raise RuntimeError("exposure ledger requires DELETE journaling")
         self.connection.execute("PRAGMA synchronous=FULL")
         self.connection.executescript(
             """

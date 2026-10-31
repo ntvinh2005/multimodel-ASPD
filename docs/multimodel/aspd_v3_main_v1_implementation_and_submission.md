@@ -20,8 +20,8 @@ Evaluation: `NOT_IMPLEMENTED — DEFERRED BY RESEARCHER`
 - Official reference checkout: `tue147/weights-read-write` commit
   `47d12edc229e334427ce6c4195dc5c44606b724a`
 - Main config: `configs/multimodel/aspd_v3/main_v1.yaml`
-- Canonical config fingerprint: `f9132bec1aa769afdc62a8da7a3d1247ada63cac15ee630be0e394365bfd5ee8`
-- Config-file SHA-256: `05a61fa2b7154760e06eca0fd5d4c5178d634b5fc22bb13e51867f83e1df832e`
+- Canonical config fingerprint: `70dda973aa3b4836a7a1f3b78f26284f5bcb542a4857766601e4de940ab4a2c3`
+- Config-file SHA-256: `5904c649c6c73f9a825b7cea3130119545ec05ea283905d64fc1fd506819ef75`
 - Approved-config SHA-256: `0d45e2679a3677a2d3ea752284fd112cc8216414c05a19d64a739997ff2e6542`
 - Machine-readable audit: `out/multimodel/aspd_v3/main_v1/audit/20261031T_runtime_gate_audit_v5/evidence.json`
   (SHA-256 `3a535fa4830af85da2d1f0e2fe9f6c7f9702398b3c6f8189fdb4c3328c36fbf9`)
@@ -290,8 +290,14 @@ actual DCP byte count and rollback result.
   explicit activation-decoder `Shard(1)` cannot unevenly shard `C=8192` over three ranks.
 - Preflight v3 removes only that unsupported placement override. Decoder weights now use FSDP's
   default dim-0 sharding, whose padding path supports uneven three-rank shapes without changing any
-  scientific dimension. The v3 evidence namespace is
-  `aspd_v3_qwen_gemma_phi_168targets_c8192_k32_preflight_v3_3gpu`.
+  scientific dimension. Job `48580996` passed model loading and FSDP construction, then rank zero
+  received SIGBUS while opening the stream SQLite database. A preserved native core backtrace
+  identified `walIndexReadHdr`, proving that SQLite WAL shared-memory indexing on Blue caused the
+  signal rather than CUDA, FSDP, or host-memory exhaustion.
+- Preflight v4 uses rollback `DELETE` journals with `synchronous=FULL` for both the exact stream
+  deduplicator and exposure ledger. This retains transactional durability without WAL's unsupported
+  shared-memory mmap on the parallel filesystem. The v4 evidence namespace is
+  `aspd_v3_qwen_gemma_phi_168targets_c8192_k32_preflight_v4_3gpu`.
 - Actual DCP size / GPU memory / throughput: pending that preflight.
 - Main Slurm job: not submitted.
 
@@ -323,3 +329,7 @@ For the three-rank FSDP placement correction, the suite passed `62` tests with z
 including a meta-device test that asserts all 48 activation decoders omit the unsupported custom
 dim-1 placement. Ruff, shell syntax, and the validator passed; the only execution blocker is the
 intentionally absent v3 real distributed preflight report.
+
+For the Blue SQLite journaling correction, the suite passed `63` tests with zero failures,
+including explicit journal-mode checks for both production databases. Ruff, shell syntax, and the
+validator passed; the only execution blocker is the intentionally absent v4 preflight report.

@@ -81,6 +81,36 @@ def test_dcp_keeps_sharded_state_on_device_for_bounded_sync_writes() -> None:
     assert options.cpu_offload is False
 
 
+def test_production_sqlite_uses_parallel_filesystem_safe_journaling(
+    tmp_path: Path,
+) -> None:
+    policy = HashSplitPolicy(
+        modulus=5,
+        validation_buckets=frozenset({0}),
+        test_buckets=frozenset({1}),
+        seed=0,
+    )
+    text = _train_texts(policy, 1)[0]
+    stream = _stream(
+        tmp_path,
+        _StatefulRows([{"text": text, "meta": {"pile_set_name": "unit"}}]),
+        policy,
+    )
+    ledger = SQLiteExposureLedger(
+        tmp_path / "ledger.sqlite",
+        dataset_manifest_sha256="e" * 64,
+        world_size=3,
+    )
+    try:
+        stream_mode = stream.dedup.connection.execute("PRAGMA journal_mode").fetchone()[0]
+        ledger_mode = ledger.connection.execute("PRAGMA journal_mode").fetchone()[0]
+        assert str(stream_mode).lower() == "delete"
+        assert str(ledger_mode).lower() == "delete"
+    finally:
+        stream.close()
+        ledger.close()
+
+
 def test_production_stream_exact_pool_and_resume(tmp_path: Path) -> None:
     policy = HashSplitPolicy(
         modulus=5,

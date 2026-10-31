@@ -116,7 +116,11 @@ class SQLiteStreamDeduplicator:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.connection = sqlite3.connect(self.path)
-        self.connection.execute("PRAGMA journal_mode=WAL")
+        # Blue is a shared parallel filesystem. SQLite WAL relies on a local shared-memory
+        # wal-index and can SIGBUS there; rollback journaling preserves exact transactions.
+        journal_mode = self.connection.execute("PRAGMA journal_mode=DELETE").fetchone()[0]
+        if str(journal_mode).lower() != "delete":
+            raise RuntimeError("stream deduplication database requires DELETE journaling")
         self.connection.execute("PRAGMA synchronous=FULL")
         self.connection.executescript(
             """
