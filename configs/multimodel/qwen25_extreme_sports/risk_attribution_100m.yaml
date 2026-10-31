@@ -1,8 +1,8 @@
 schema_version: 1
 
-# This contract is intentionally non-executable until the researcher approves the
-# exact dataset, readout rule, signed screening objective, and compute budget.
-approval_status: PROPOSED_RESEARCHER_APPROVAL_REQUIRED
+# Researcher-approved on 2026-10-31 for bounded Stage 1 only: discovery readout,
+# Base/Target, one B200, at most two hours; no screening, held-out, or downstream job.
+approval_status: RESEARCHER_APPROVED
 
 aspd_config: configs/multimodel/qwen25_extreme_sports/aspd_d0_s1_l14_o_100m_original.yaml
 legacy_p6_handoff_config: configs/multimodel/qwen25_extreme_sports/p6_100m_causal_pilot.yaml
