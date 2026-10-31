@@ -927,7 +927,8 @@ def freeze_screening_candidates(
         (
             row
             for row in eligible
-            if float(row["target_predicted_risk_minus_safe_mean"]) < 0
+            if float(row["target_predicted_risk_delta_margin_mean"]) < 0
+            and float(row["target_predicted_risk_minus_safe_mean"]) < 0
             and float(row["target_minus_base_risk_safe_differential"]) < 0
         ),
         key=lambda row: (
@@ -1004,8 +1005,8 @@ def freeze_screening_candidates(
         "selection_status": "FROZEN_BEFORE_EXACT_OR_HELDOUT_OUTCOMES",
         "selection_stage": "DISCOVERY_ONLY",
         "risk_promoting_sign_rule": (
-            "target predicted risk-minus-safe ablation effect < 0 and "
-            "Target-minus-Base differential < 0"
+            "target predicted ablation effect on risk prompts < 0, target predicted "
+            "risk-minus-safe ablation effect < 0, and Target-minus-Base differential < 0"
         ),
         "safety_promoting_sign_rule": (
             "target predicted risk-minus-safe ablation effect > 0 and "
@@ -1554,20 +1555,135 @@ def _source_weight_fingerprint(
 def _norm_validity(
     diagnostic: Mapping[str, Any], tolerance: float
 ) -> tuple[bool, str | None]:
-    actual = float(diagnostic["actual_applied_output_difference_l2"])
-    reference = float(diagnostic["candidate_actual_applied_output_difference_l2"])
-    if reference == 0.0:
-        return False, (
-            "ZERO_CANDIDATE_REFERENCE"
-            if actual == 0.0
-            else "ZERO_REFERENCE_NONZERO_CONTROL"
-        )
-    relative = abs(actual - reference) / reference
-    if relative > tolerance:
-        return False, "POST_DTYPE_NORM_MISMATCH"
-    if actual == 0.0:
-        return False, "INEFFECTIVE_AFTER_DTYPE_ROUNDING"
+    actual_values = diagnostic.get("per_position_actual_applied_l2")
+    reference_values = diagnostic.get("per_position_candidate_actual_applied_l2")
+    if not isinstance(actual_values, Sequence) or not isinstance(
+        reference_values, Sequence
+    ):
+        return False, "MISSING_PER_POSITION_POST_DTYPE_NORMS"
+    if not actual_values or len(actual_values) != len(reference_values):
+        return False, "INVALID_PER_POSITION_POST_DTYPE_NORM_SHAPE"
+    positive_reference = False
+    for actual_raw, reference_raw in zip(
+        actual_values, reference_values, strict=True
+    ):
+        actual, reference = float(actual_raw), float(reference_raw)
+        if not math.isfinite(actual) or not math.isfinite(reference):
+            return False, "NONFINITE_PER_POSITION_POST_DTYPE_NORM"
+        if actual < 0 or reference < 0:
+            return False, "NEGATIVE_PER_POSITION_POST_DTYPE_NORM"
+        if reference == 0.0:
+            if actual != 0.0:
+                return False, "ZERO_REFERENCE_NONZERO_CONTROL_AT_POSITION"
+            continue
+        positive_reference = True
+        if actual == 0.0:
+            return False, "CONTROL_ROUNDED_TO_ZERO_AT_ACTIVE_POSITION"
+        if abs(actual - reference) / reference > tolerance:
+            return False, "POST_DTYPE_PER_POSITION_NORM_MISMATCH"
+    if not positive_reference:
+        return False, "ZERO_CANDIDATE_REFERENCE"
     return True, None
+
+
+def _verify_screening_artifact_hashes(
+    screening_root: Path, manifest: Mapping[str, Any]
+) -> dict[str, dict[str, Any]]:
+    """Fail closed before loading frozen candidates or attribution tensors."""
+
+    outputs = manifest.get("outputs")
+    if not isinstance(outputs, Mapping):
+        raise ValueError("screening manifest has no output checksum map")
+    required = {
+        "discovery_attribution_tensors.pt",
+        "component_attribution_summary.csv",
+        "frozen_candidates.json",
+    }
+    if set(outputs) != required:
+        raise ValueError("screening manifest output set is incomplete or unexpected")
+    verified: dict[str, dict[str, Any]] = {}
+    for name in sorted(required):
+        record = outputs[name]
+        if not isinstance(record, Mapping):
+            raise ValueError(f"screening output record is invalid: {name}")
+        path = screening_root / name
+        expected_bytes = int(record.get("bytes", -1))
+        expected_sha = str(record.get("sha256", ""))
+        if not path.is_file() or path.stat().st_size != expected_bytes:
+            raise ValueError(f"screening output size mismatch: {name}")
+        observed_sha = sha256_file(path)
+        if observed_sha != expected_sha:
+            raise ValueError(f"screening output checksum mismatch: {name}")
+        verified[name] = {"bytes": expected_bytes, "sha256": observed_sha}
+    return verified
+
+
+def _exact_preflight_status(
+    *,
+    projected_runtime_seconds: float,
+    runtime_budget_seconds: int,
+    records: Sequence[Mapping[str, Any]],
+    source_weights_unchanged: bool,
+    hook_cleanup_passed: bool,
+    artifact_hashes_verified: bool,
+) -> dict[str, Any]:
+    """Keep runtime capacity separate from scientific-control correctness."""
+
+    compute_status = (
+        "COMPUTE_FEASIBILITY_GO"
+        if projected_runtime_seconds <= runtime_budget_seconds
+        else "COMPUTE_FEASIBILITY_NO_GO"
+    )
+    learned_effective = any(
+        row["arm"] == "learned" and bool(row["causal_comparison_valid"])
+        for row in records
+    )
+    required_control_prefixes = (
+        "active_matched",
+        "orthogonal_matched",
+        "random_same_l2_seed_",
+    )
+    valid_control_coverage = {
+        prefix: any(
+            str(row["arm"]).startswith(prefix)
+            and bool(row["causal_comparison_valid"])
+            for row in records
+        )
+        for prefix in required_control_prefixes
+    }
+    invalid_records_preserved = all(
+        bool(row["causal_comparison_valid"]) or bool(row.get("invalid_reason"))
+        for row in records
+        if row["arm"] != "gate_off"
+    )
+    checks = {
+        "screening_artifact_hashes_verified": artifact_hashes_verified,
+        "source_weights_unchanged": source_weights_unchanged,
+        "hook_cleanup_passed": hook_cleanup_passed,
+        "at_least_one_effective_learned_intervention": learned_effective,
+        "every_required_control_has_a_valid_same_prefix_comparison": all(
+            valid_control_coverage.values()
+        ),
+        "invalid_comparisons_preserve_failure_reasons": invalid_records_preserved,
+    }
+    scientific_status = (
+        "SCIENTIFIC_PREFLIGHT_GO"
+        if all(checks.values())
+        else "SCIENTIFIC_PREFLIGHT_NO_GO"
+    )
+    if compute_status != "COMPUTE_FEASIBILITY_GO":
+        status = "GPU_FEASIBILITY_NO_GO_COMPUTE"
+    elif scientific_status != "SCIENTIFIC_PREFLIGHT_GO":
+        status = "SCIENTIFIC_PREFLIGHT_NO_GO"
+    else:
+        status = "EXACT_PILOT_PREFLIGHT_GO"
+    return {
+        "status": status,
+        "compute_feasibility_status": compute_status,
+        "scientific_preflight_status": scientific_status,
+        "scientific_preflight_checks": checks,
+        "valid_control_coverage": valid_control_coverage,
+    }
 
 
 def _pearson(left: Sequence[float], right: Sequence[float]) -> float | None:
@@ -1592,7 +1708,7 @@ def run_exact_intervention_stage(
     """Run a bounded exact fixed-prefix pilot, never autoregressive generation.
 
     Feasibility uses the proposed small subset and projects the full discovery cost.
-    The full stage additionally requires a provenance-matched ``GPU_FEASIBILITY_GO``
+    The full stage additionally requires a provenance-matched ``EXACT_PILOT_PREFLIGHT_GO``
     report produced by a separate process.
     """
 
@@ -1611,6 +1727,9 @@ def run_exact_intervention_stage(
     candidates_path = screening_root / "frozen_candidates.json"
     tensors_path = screening_root / "discovery_attribution_tensors.pt"
     screening_manifest = json.loads(screening_manifest_path.read_text(encoding="utf-8"))
+    screening_artifact_audit = _verify_screening_artifact_hashes(
+        screening_root, screening_manifest
+    )
     frozen = json.loads(candidates_path.read_text(encoding="utf-8"))
     if screening_manifest.get("dataset_sha256") != config.dataset_sha256:
         raise ValueError("screening dataset provenance mismatch")
@@ -1641,7 +1760,9 @@ def run_exact_intervention_stage(
             raise RuntimeError("full exact pilot requires a separate feasibility GO report")
         feasibility = json.loads(Path(feasibility_report).read_text(encoding="utf-8"))
         expected = {
-            "status": "GPU_FEASIBILITY_GO",
+            "status": "EXACT_PILOT_PREFLIGHT_GO",
+            "compute_feasibility_status": "COMPUTE_FEASIBILITY_GO",
+            "scientific_preflight_status": "SCIENTIFIC_PREFLIGHT_GO",
             "git_commit": _git_head(),
             "config_sha256": sha256_file(config_file),
             "dataset_sha256": config.dataset_sha256,
@@ -1850,13 +1971,17 @@ def run_exact_intervention_stage(
         / max(1, len(candidates) * len(items))
     )
     projected = runtime * scale
+    preflight = _exact_preflight_status(
+        projected_runtime_seconds=projected,
+        runtime_budget_seconds=config.proposed_exact_pilot_walltime_seconds,
+        records=records,
+        source_weights_unchanged=True,
+        hook_cleanup_passed=True,
+        artifact_hashes_verified=True,
+    )
     status = "EXACT_PILOT_COMPLETED_UNVERIFIED"
     if feasibility_only:
-        status = (
-            "GPU_FEASIBILITY_GO"
-            if projected <= config.proposed_exact_pilot_walltime_seconds
-            else "GPU_FEASIBILITY_NO_GO_COMPUTE"
-        )
+        status = str(preflight["status"])
     destination.mkdir(parents=True, exist_ok=False)
     records_path = destination / "exact_margin_records.jsonl"
     _atomic_new_text(
@@ -1865,6 +1990,10 @@ def run_exact_intervention_stage(
     )
     report = {
         "status": status,
+        "compute_feasibility_status": preflight["compute_feasibility_status"],
+        "scientific_preflight_status": preflight["scientific_preflight_status"],
+        "scientific_preflight_checks": preflight["scientific_preflight_checks"],
+        "valid_control_coverage": preflight["valid_control_coverage"],
         "scientific_status": "EXACT_FIXED_PREFIX_EFFECTS_BEHAVIORAL_MECHANISM_UNVERIFIED",
         "git_commit": _git_head(),
         "config_sha256": sha256_file(config_file),
@@ -1872,6 +2001,7 @@ def run_exact_intervention_stage(
         "checkpoint_sha256": handoff["checkpoint_sha256"],
         "screening_manifest_sha256": sha256_file(screening_manifest_path),
         "frozen_candidates_sha256": sha256_file(candidates_path),
+        "screening_artifact_hash_audit": screening_artifact_audit,
         "readout_validation_report_sha256": sha256_file(validation_path),
         "source_model_provenance": provenance,
         "feasibility_only": feasibility_only,

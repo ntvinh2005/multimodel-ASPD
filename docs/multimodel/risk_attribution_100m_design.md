@@ -79,8 +79,8 @@ It is explicitly `FIRST_ORDER_APPROXIMATION_NOT_EXACT_CAUSAL_EFFECT`.
 
 Discovery-only candidate freezing selects proposed lists of:
 
-- 10 risk-promoting candidates: Target risk-minus-safe ablation effect and
-  Target-minus-Base differential are both negative;
+- 10 risk-promoting candidates: Target ablation effect on actual risk prompts,
+  Target risk-minus-safe ablation effect, and Target-minus-Base differential are all negative;
 - 10 safety-promoting candidates: both signed quantities are positive;
 - 5 non-top negative controls with the smallest absolute signed differential.
 
@@ -98,9 +98,13 @@ live output dtype conversion on the same prefix; invalid comparisons stay invali
 The feasibility job is limited to two frozen candidates and two discovery pairs. It measures
 wall time, resident/peak/incremental CUDA allocation, predicted-versus-exact correlation,
 sign reversals, source-weight immutability, hook cleanup, zeroed perturbations, and invalid
-controls. It projects the full discovery cost.
-If the projection exceeds the proposed six-hour budget it returns
-`GPU_FEASIBILITY_NO_GO_COMPUTE`; it does not silently shrink the experiment.
+controls. Norm validity is checked at every token position after live-dtype rounding, not only
+with a sequence-level aggregate. It projects the full discovery cost.
+Compute feasibility and scientific-control validity are reported independently. The full pilot
+requires both `COMPUTE_FEASIBILITY_GO` and `SCIENTIFIC_PREFLIGHT_GO`, combined as
+`EXACT_PILOT_PREFLIGHT_GO`. A runtime-only GO cannot unlock the full pilot. If the projection
+exceeds the proposed six-hour budget it returns `GPU_FEASIBILITY_NO_GO_COMPUTE`; it does not
+silently shrink the experiment.
 
 The full 25-candidate fixed-prefix pilot requires a separate provenance-matched
 `GPU_FEASIBILITY_GO`. It still uses discovery data only. Held-out evaluation remains a later,

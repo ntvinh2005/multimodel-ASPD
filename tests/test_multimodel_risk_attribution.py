@@ -6,10 +6,13 @@ import torch
 from torch import nn
 
 from aspd.multimodel.config import ModelSpec
+from aspd.multimodel.original_recipe import sha256_file
 from aspd.multimodel.risk_attribution import (
     CandidateBudgetSpec,
     ChoiceItem,
+    _exact_preflight_status,
     _norm_validity,
+    _verify_screening_artifact_hashes,
     build_choice_items,
     capture_margin_gradient,
     decision_margin,
@@ -208,6 +211,7 @@ def test_candidate_freeze_keeps_risk_and_safety_signs_separate() -> None:
             {
                 "component_id": component_id,
                 "active_discovery_pair_count": 4,
+                "target_predicted_risk_delta_margin_mean": signed,
                 "target_predicted_risk_minus_safe_mean": signed,
                 "target_minus_base_risk_safe_differential": signed,
                 "shared_gate_risk_fire_count_mean": 2.0 + component_id,
@@ -221,6 +225,38 @@ def test_candidate_freeze_keeps_risk_and_safety_signs_separate() -> None:
     assert by_class["risk_promoting"]["component_id"] == 0
     assert by_class["safety_promoting"]["component_id"] == 2
     assert by_class["negative_control"]["component_id"] == 4
+
+
+def test_risk_candidate_requires_negative_effect_on_actual_risk_prompts() -> None:
+    rows = []
+    values = (
+        # Large negative contrasts but positive risk-prompt effect: must be rejected.
+        (0, 2.0, -10.0, -10.0),
+        (1, -2.0, -3.0, -3.0),
+        (2, 2.0, 3.0, 3.0),
+        (3, 0.1, 0.01, 0.01),
+        (4, -0.1, -0.02, -0.02),
+        (5, 0.2, 0.2, 0.2),
+    )
+    for component_id, risk_effect, contrast, differential in values:
+        rows.append(
+            {
+                "component_id": component_id,
+                "active_discovery_pair_count": 4,
+                "target_predicted_risk_delta_margin_mean": risk_effect,
+                "target_predicted_risk_minus_safe_mean": contrast,
+                "target_minus_base_risk_safe_differential": differential,
+                "shared_gate_risk_fire_count_mean": 2.0 + component_id,
+                "target_risk_write_l2_mean": 1.0 + component_id,
+            }
+        )
+    frozen = freeze_screening_candidates(
+        rows, CandidateBudgetSpec(risk_promoting=1, safety_promoting=1, negative_controls=1)
+    )
+    risk = next(
+        row for row in frozen["candidates"] if row["selection_class"] == "risk_promoting"
+    )
+    assert risk["component_id"] == 1
 
 
 def test_summary_accepts_one_shared_gate_axis_and_two_model_axes() -> None:
@@ -248,10 +284,83 @@ def test_summary_accepts_one_shared_gate_axis_and_two_model_axes() -> None:
 def test_norm_matching_rejects_zero_candidate_reference() -> None:
     valid, reason = _norm_validity(
         {
-            "actual_applied_output_difference_l2": 0.0,
-            "candidate_actual_applied_output_difference_l2": 0.0,
+            "per_position_actual_applied_l2": [0.0, 0.0],
+            "per_position_candidate_actual_applied_l2": [0.0, 0.0],
         },
         0.1,
     )
     assert not valid
     assert reason == "ZERO_CANDIDATE_REFERENCE"
+
+
+def test_norm_matching_rejects_position_swap_despite_equal_aggregate_l2() -> None:
+    valid, reason = _norm_validity(
+        {
+            "per_position_actual_applied_l2": [1.0, 2.0],
+            "per_position_candidate_actual_applied_l2": [2.0, 1.0],
+            # These aggregate values are deliberately equal and must be ignored.
+            "actual_applied_output_difference_l2": 5**0.5,
+            "candidate_actual_applied_output_difference_l2": 5**0.5,
+        },
+        0.1,
+    )
+    assert not valid
+    assert reason == "POST_DTYPE_PER_POSITION_NORM_MISMATCH"
+
+
+def test_runtime_go_cannot_override_scientific_preflight_failure() -> None:
+    records = [
+        {
+            "arm": "learned",
+            "causal_comparison_valid": True,
+            "invalid_reason": None,
+        },
+        {
+            "arm": "active_matched",
+            "causal_comparison_valid": False,
+            "invalid_reason": "POST_DTYPE_PER_POSITION_NORM_MISMATCH",
+        },
+        {
+            "arm": "orthogonal_matched",
+            "causal_comparison_valid": True,
+            "invalid_reason": None,
+        },
+        {
+            "arm": "random_same_l2_seed_0",
+            "causal_comparison_valid": True,
+            "invalid_reason": None,
+        },
+    ]
+    status = _exact_preflight_status(
+        projected_runtime_seconds=10.0,
+        runtime_budget_seconds=100,
+        records=records,
+        source_weights_unchanged=True,
+        hook_cleanup_passed=True,
+        artifact_hashes_verified=True,
+    )
+    assert status["compute_feasibility_status"] == "COMPUTE_FEASIBILITY_GO"
+    assert status["scientific_preflight_status"] == "SCIENTIFIC_PREFLIGHT_NO_GO"
+    assert status["status"] == "SCIENTIFIC_PREFLIGHT_NO_GO"
+
+
+def test_screening_artifact_hashes_are_verified_before_exact_load(tmp_path) -> None:
+    names = (
+        "discovery_attribution_tensors.pt",
+        "component_attribution_summary.csv",
+        "frozen_candidates.json",
+    )
+    outputs = {}
+    for name in names:
+        path = tmp_path / name
+        path.write_bytes(f"content:{name}".encode())
+        outputs[name] = {"bytes": path.stat().st_size, "sha256": sha256_file(path)}
+    verified = _verify_screening_artifact_hashes(tmp_path, {"outputs": outputs})
+    assert set(verified) == set(names)
+    (tmp_path / "frozen_candidates.json").write_text("corrupted", encoding="utf-8")
+    try:
+        _verify_screening_artifact_hashes(tmp_path, {"outputs": outputs})
+    except ValueError as error:
+        assert "frozen_candidates.json" in str(error)
+    else:
+        raise AssertionError("corrupted frozen candidates must fail provenance validation")

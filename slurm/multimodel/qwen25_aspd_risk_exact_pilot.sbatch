@@ -18,7 +18,7 @@ cd "${SUBMIT_DIR}"
 : "${RISK_ATTRIBUTION_APPROVED_COMMIT:?Set to the reviewed clean commit}"
 : "${READOUT_REPORT:?Path to a provenance-matched READOUT_VALIDATED JSON}"
 : "${SCREENING_DIR:?Path to the completed discovery-only screening directory}"
-: "${FEASIBILITY_REPORT:?Path to a provenance-matched GPU_FEASIBILITY_GO JSON}"
+: "${FEASIBILITY_REPORT:?Path to a provenance-matched EXACT_PILOT_PREFLIGHT_GO JSON}"
 CURRENT_COMMIT="$(git rev-parse HEAD)"
 [[ "${CURRENT_COMMIT}" == "${RISK_ATTRIBUTION_APPROVED_COMMIT}" ]]
 [[ -z "$(git status --porcelain --untracked-files=normal)" ]]
