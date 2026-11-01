@@ -324,6 +324,12 @@ class ModelOwnedMain2B(nn.Module):
         for bank in self.activation_banks.values():
             bank.normalize_decoders_(project_gradients=project_gradients)
 
+    @torch.no_grad()
+    def project_decoder_gradients_(self) -> None:
+        self.matrix_bank.project_write_decoder_gradients_()
+        for bank in self.activation_banks.values():
+            bank.project_decoder_gradients_()
+
 
 def build_model_owned_adam(
     model: ModelOwnedMain2B, config: V3Main2BV1Config

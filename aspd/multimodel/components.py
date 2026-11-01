@@ -195,6 +195,16 @@ class RankOneComponents(nn.Module):
             self.U.grad.sub_(radial)
         self.U.copy_(normed)
 
+    @torch.no_grad()
+    def project_write_decoder_gradient_(self) -> None:
+        """Remove only the radial gradient; post-step normalization is a separate pass."""
+
+        if self.U.grad is None:
+            return
+        normed = self.U / (self.U.norm(dim=-1, keepdim=True) + torch.finfo(self.U.dtype).tiny)
+        radial = (self.U.grad * normed).sum(dim=-1, keepdim=True) * normed
+        self.U.grad.sub_(radial)
+
 
 class PartitionedComponents(nn.Module):
     """Shared block ``S`` plus exclusive block ``E`` for one model and matrix.

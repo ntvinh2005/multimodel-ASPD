@@ -175,6 +175,14 @@ class ModelOwnedCheckpoint:
         }
         if mismatch:
             raise ValueError(f"model-owned checkpoint provenance mismatch: {mismatch}")
+        for rank_name, digest in manifest["rank_sidecar_sha256"].items():
+            sidecar = path / rank_name / "sidecar.json"
+            if not sidecar.is_file() or _sha256(sidecar) != digest:
+                raise ValueError(f"checkpoint sidecar is missing or corrupt: {rank_name}")
+        for rank_name, digest in manifest["rank_dcp_metadata_sha256"].items():
+            metadata = path / rank_name / "dcp" / ".metadata"
+            if not metadata.is_file() or _sha256(metadata) != digest:
+                raise ValueError(f"checkpoint DCP metadata is missing or corrupt: {rank_name}")
         return manifest
 
     def load(

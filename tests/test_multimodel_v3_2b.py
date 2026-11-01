@@ -106,6 +106,26 @@ def test_prepared_activation_support_matches_matryoshka_decoder() -> None:
     torch.testing.assert_close(optimized.bias.grad, reference.bias.grad)
 
 
+def test_split_gradient_projection_and_post_step_normalization_match_reference() -> None:
+    torch.manual_seed(13)
+    reference = RankOneComponents(7, 5, 6, unit_norm=True)
+    optimized = RankOneComponents(7, 5, 6, unit_norm=True)
+    optimized.load_state_dict(reference.state_dict())
+    gradient = torch.randn_like(reference.U)
+    reference.U.grad = gradient.clone()
+    optimized.U.grad = gradient.clone()
+    reference.normalize_write_decoder_(project_gradients=True)
+    optimized.project_write_decoder_gradient_()
+    torch.testing.assert_close(optimized.U, reference.U, rtol=1e-6, atol=1e-6)
+    torch.testing.assert_close(optimized.U.grad, reference.U.grad, rtol=1e-6, atol=1e-6)
+    with torch.no_grad():
+        reference.U.add_(reference.U.grad, alpha=-1e-3)
+        optimized.U.add_(optimized.U.grad, alpha=-1e-3)
+    reference.normalize_write_decoder_(project_gradients=False)
+    optimized.normalize_write_decoder_(project_gradients=False)
+    torch.testing.assert_close(optimized.U, reference.U, rtol=1e-6, atol=1e-6)
+
+
 def test_exposure_ledger_records_smol_as_immutable_third_tokenizer_slot(tmp_path: Path) -> None:
     ledger = SQLiteExposureLedger(
         tmp_path / "ledger.sqlite",
@@ -363,7 +383,7 @@ def _distributed_model_owned_worker(
         assert all(parameter.grad is not None for parameter in model.local_encoders.parameters())
         assert all(parameter.grad is not None for parameter in model.activation_banks.parameters())
         assert all(parameter.grad is not None for parameter in model.matrix_bank.parameters())
-        model.normalize_decoders_(project_gradients=True)
+        model.project_decoder_gradients_()
         optimizer.step()
         model.normalize_decoders_(project_gradients=False)
         scheduler.step()

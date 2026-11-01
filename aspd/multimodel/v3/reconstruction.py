@@ -151,6 +151,20 @@ class ActivationReconstructionBank(nn.Module):
                     gradient.sub_((gradient * normalized).sum(-1, keepdim=True) * normalized)
                 decoder.weight.copy_(normalized.T)
 
+    @torch.no_grad()
+    def project_decoder_gradients_(self) -> None:
+        for decoders in self.decoders.values():
+            for decoder in decoders:
+                if decoder.weight.grad is None:
+                    continue
+                directions = decoder.weight.T
+                normalized = directions / (
+                    directions.norm(dim=-1, keepdim=True)
+                    + torch.finfo(directions.dtype).tiny
+                )
+                gradient = decoder.weight.grad.T
+                gradient.sub_((gradient * normalized).sum(-1, keepdim=True) * normalized)
+
 
 class RankOneMatrixBank(nn.Module):
     """One heterogeneous rank-one component dictionary per logical matrix target."""
@@ -243,6 +257,11 @@ class RankOneMatrixBank(nn.Module):
 
         for component in self.components.values():
             component.normalize_write_decoder_(project_gradients=project_gradients)
+
+    @torch.no_grad()
+    def project_write_decoder_gradients_(self) -> None:
+        for component in self.components.values():
+            component.project_write_decoder_gradient_()
 
 
 class V3ReconstructionInfrastructure(nn.Module):

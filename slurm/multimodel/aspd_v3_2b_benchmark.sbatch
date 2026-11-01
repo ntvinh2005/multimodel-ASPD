@@ -32,7 +32,11 @@ SKIP_CHECKPOINT="${SKIP_CHECKPOINT:-1}"
 CONFIG=configs/multimodel/aspd_v3/main_2b_v1.yaml
 GIT_SHA="$(git rev-parse HEAD)"
 RUN_TAG="${RUN_TAG:-${MODE}_${STRATEGY}}"
-RUN_DIR="out/multimodel/aspd_v3/main_2b_v1/${MODE}/${RUN_TAG}_${GIT_SHA:0:12}_job${SLURM_JOB_ID}"
+if [[ "${MODE}" == "preflight" ]]; then
+  RUN_DIR="out/multimodel/aspd_v3/main_2b_v1/preflight/model_owned_3xb200"
+else
+  RUN_DIR="out/multimodel/aspd_v3/main_2b_v1/${MODE}/${RUN_TAG}_${GIT_SHA:0:12}_job${SLURM_JOB_ID}"
+fi
 
 echo "git_sha=${GIT_SHA}"
 echo "git_status=$(git status --porcelain | wc -l) changed paths"

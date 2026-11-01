@@ -340,6 +340,7 @@ def _model_owned_backward(
     scores, sparse, continuous_support, binary_support = model.encode(capture)
     activation_sum = 0.0
     auxk_sum = 0.0
+    details: dict[str, float] = {}
     activation_chunks = math.ceil(16 / config.runtime.activation_backward_chunk)
     terms = model.activation_loss_terms(capture, scores, sparse, continuous_support)
     for chunk_index, chunk in enumerate(
@@ -352,6 +353,9 @@ def _model_owned_backward(
         (loss * pool_scale).backward(retain_graph=chunk_index + 1 < activation_chunks)
         activation_sum += sum(float((coefficient * value).detach().float()) for _, value, _, coefficient in chunk)
         auxk_sum += sum(float((coefficient * value).detach().float()) for _, _, value, coefficient in chunk)
+        for name, activation, auxk, _coefficient in chunk:
+            details[f"loss/activation/{name}"] = float(activation.detach().float())
+            details[f"loss/auxk/{name}"] = float(auxk.detach().float())
 
     internal_sum = 0.0
     for chunk in _chunked(
@@ -361,12 +365,16 @@ def _model_owned_backward(
         loss = sum(coefficient * value for _key, _site, value, coefficient in chunk)
         (loss * pool_scale).backward()
         internal_sum += sum(float((coefficient * value).detach().float()) for _, _, value, coefficient in chunk)
-    return {
+        for name, _site, value, _coefficient in chunk:
+            details[f"loss/internal/{name}"] = float(value.detach().float())
+    result = {
         "activation": activation_sum,
         "auxk": auxk_sum,
         "internal": internal_sum,
         "total": activation_sum + config.architecture.auxk_coefficient * auxk_sum + internal_sum,
     }
+    result.update(details)
+    return result
 
 
 def _fsdp_backward(model, capture: MainV1CaptureBatch, pool_index: int) -> dict[str, float]:
@@ -445,6 +453,8 @@ def main() -> None:
     if args.mode == "main":
         if not config.full_training_authorized:
             raise RuntimeError("full 500M training is not authorized by main_2b_v1.yaml")
+        if args.skip_checkpoint:
+            raise RuntimeError("main mode cannot disable recoverable checkpoints")
         if args.max_steps != config.data.minimum_optimizer_steps:
             raise RuntimeError("main mode cannot reduce the frozen 61,036-step budget")
     if args.mode == "preflight" and not 3 <= args.max_steps <= config.runtime.max_preflight_steps:
@@ -463,8 +473,32 @@ def main() -> None:
         raise ValueError("dataset manifest does not resolve to the pinned revision")
     if alignment_manifest["model_order"] != list(MODEL_ORDER_2B):
         raise ValueError("alignment manifest model order differs from main-2b-v1")
+    if args.mode == "main":
+        preflight_path = Path(config.runtime.preflight_evidence)
+        if not preflight_path.is_file():
+            raise RuntimeError("main-2b-v1 requires immutable distributed preflight evidence")
+        preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
+        required = {
+            "status": "PASS",
+            "strategy": "model_owned",
+            "git_sha": _git_sha(),
+            "config_file_sha256": config_sha,
+            "config_fingerprint": config.fingerprint(),
+            "dataset_manifest_sha256": dataset_manifest["manifest_sha256"],
+            "alignment_manifest_sha256": alignment_manifest["manifest_sha256"],
+            "world_size": 3,
+            "logical_target_count": 168,
+            "dcp_save_reload_resume_update": "PASS",
+        }
+        mismatch = {
+            key: {"expected": value, "observed": preflight.get(key)}
+            for key, value in required.items()
+            if preflight.get(key) != value
+        }
+        if mismatch or int(preflight.get("optimizer_steps", 0)) < 3:
+            raise RuntimeError(f"main-2b-v1 preflight evidence mismatch: {mismatch}")
     if rank == 0:
-        args.run_dir.mkdir(parents=True, exist_ok=False)
+        args.run_dir.mkdir(parents=True, exist_ok=args.mode == "main")
     dist.barrier()
 
     torch.manual_seed(config.optimization.seed)
@@ -553,9 +587,8 @@ def main() -> None:
             world_size=world,
             model_order=MODEL_ORDER_2B,
         )
-        write_json_immutable(
-            args.run_dir / "run_manifest.json",
-            {
+        run_manifest_path = args.run_dir / "run_manifest.json"
+        run_manifest = {
                 "schema_version": 1,
                 "mode": args.mode,
                 "strategy": args.strategy,
@@ -578,8 +611,77 @@ def main() -> None:
                 "cuda": torch.version.cuda,
                 "parameter_analysis": model_owned_parameter_counts(config, registry),
                 "source_correctness": source_smokes,
-            },
-        )
+            }
+        if run_manifest_path.is_file():
+            existing_manifest = json.loads(run_manifest_path.read_text(encoding="utf-8"))
+            for key in (
+                "strategy",
+                "git_sha",
+                "config_file_sha256",
+                "config_fingerprint",
+                "dataset_manifest_sha256",
+                "alignment_manifest_sha256",
+            ):
+                if existing_manifest.get(key) != run_manifest[key]:
+                    raise ValueError(f"existing run manifest changed at {key}")
+        else:
+            write_json_immutable(run_manifest_path, run_manifest)
+    dist.barrier()
+
+    completed_steps = 0
+    initial_runtime_path = args.run_dir / "initial_runtime.json"
+    checkpoints = checkpoint_manager.complete_checkpoints()
+    if checkpoints:
+        latest = checkpoints[-1]
+        if args.strategy == "model_owned":
+            restored_runtime, _ = checkpoint_manager.load(
+                path=latest,
+                model=model,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                config_fingerprint=config.fingerprint(),
+                config_file_sha256=config_sha,
+                dataset_manifest_sha256=dataset_manifest["manifest_sha256"],
+                expected_model_key=local_key,
+            )
+        else:
+            restored_runtime, _ = checkpoint_manager.load(
+                path=latest,
+                model=model,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                config_fingerprint=config.fingerprint(),
+                config_file_sha256=config_sha,
+                dataset_manifest_sha256=dataset_manifest["manifest_sha256"],
+            )
+        completed_steps = int(restored_runtime["completed_steps"])
+        if rank == 0:
+            stream.load_state_dict(restored_runtime["stream"])
+            ledger.recover_to_receipt(
+                ExposureLedgerReceipt.from_payload(restored_runtime["ledger_receipt"])
+            )
+    elif rank == 0:
+        if initial_runtime_path.is_file():
+            initial = json.loads(initial_runtime_path.read_text(encoding="utf-8"))
+            if initial["config_fingerprint"] != config.fingerprint():
+                raise ValueError("initial runtime config fingerprint changed")
+            stream.load_state_dict(initial["stream"])
+            ledger.recover_to_receipt(
+                ExposureLedgerReceipt.from_payload(initial["ledger_receipt"])
+            )
+        else:
+            write_json_immutable(
+                initial_runtime_path,
+                {
+                    "schema_version": 1,
+                    "config_fingerprint": config.fingerprint(),
+                    "stream": stream.state_dict(),
+                    "ledger_receipt": ledger.checkpoint_receipt(
+                        expected_optimizer_steps=0
+                    ).payload(),
+                },
+            )
+    completed_steps = int(_broadcast_object(completed_steps))
     dist.barrier()
 
     stop_requested = False
@@ -590,7 +692,6 @@ def main() -> None:
 
     signal.signal(signal.SIGUSR1, request_stop)
     metrics_path = args.run_dir / "metrics.jsonl"
-    completed_steps = 0
     checkpoint_seconds = 0.0
     checkpoint_path: Path | None = None
     checkpoint_manifest = None
@@ -674,7 +775,38 @@ def main() -> None:
             dist.all_gather_object(reports, gradient_report)
             if any(report["status"] != "PASS" for report in reports):
                 raise FloatingPointError(f"missing/nonfinite gradients: {reports}")
-            model.normalize_decoders_(project_gradients=True)
+            if args.strategy == "model_owned":
+                model.project_decoder_gradients_()
+            else:
+                model.normalize_decoders_(project_gradients=True)
+        global_loss_names = ("total", "activation", "auxk", "internal")
+        step_loss_tensor = torch.tensor(
+            [
+                sum(value[name] for value in pool_losses) / 4
+                for name in global_loss_names
+            ],
+            dtype=torch.float64,
+            device=device,
+        )
+        detailed_losses: dict[str, float] = {}
+        if args.strategy == "model_owned":
+            dist.all_reduce(step_loss_tensor, op=dist.ReduceOp.SUM)
+            local_details = {
+                name: sum(pool[name] for pool in pool_losses) / 4
+                for name in pool_losses[0]
+                if name.startswith("loss/")
+            }
+            gathered_details = [None] * world
+            dist.all_gather_object(gathered_details, local_details)
+            for rank_details in gathered_details:
+                overlap = set(detailed_losses) & set(rank_details)
+                if overlap:
+                    raise RuntimeError(f"model-owned detailed loss keys overlap: {overlap}")
+                detailed_losses.update(rank_details)
+        step_loss = {
+            name: float(step_loss_tensor[index].item())
+            for index, name in enumerate(global_loss_names)
+        }
         with _timed(args.profile_stages, stage, "adam_and_post_normalization"):
             optimizer.step()
             model.normalize_decoders_(project_gradients=False)
@@ -721,18 +853,27 @@ def main() -> None:
                     "unique_anchors": counter_payload["unique"],
                     "repeated_exposures": counter_payload["repeated"],
                     "loss": {
-                        name: sum(value[name] for value in pool_losses) / 4
-                        for name in ("total", "activation", "auxk", "internal")
+                        **step_loss,
+                        **detailed_losses,
                     },
                     "stage_seconds": stage,
                     "gpu_memory": memories,
                 },
             )
 
-        checkpoint_due = (
-            args.mode == "preflight"
-            and not args.skip_checkpoint
-            and completed_steps == args.max_steps - 1
+        preflight_reload_due = (
+            args.mode == "preflight" and completed_steps == args.max_steps - 1
+        )
+        checkpoint_due = not args.skip_checkpoint and (
+            preflight_reload_due
+            or (
+                args.mode == "main"
+                and (
+                    completed_steps % config.runtime.checkpoint_every_steps == 0
+                    or completed_steps == args.max_steps
+                    or stop_requested
+                )
+            )
         )
         if checkpoint_due:
             torch.cuda.synchronize()
@@ -775,36 +916,41 @@ def main() -> None:
                     dataset_manifest_sha256=dataset_manifest["manifest_sha256"],
                 )
             checkpoint_path = args.run_dir / "checkpoints" / f"step-{completed_steps:09d}"
-            if args.strategy == "model_owned":
-                restored_runtime, _ = checkpoint_manager.load(
-                    path=checkpoint_path,
-                    model=model,
-                    optimizer=optimizer,
-                    scheduler=scheduler,
-                    config_fingerprint=config.fingerprint(),
-                    config_file_sha256=config_sha,
-                    dataset_manifest_sha256=dataset_manifest["manifest_sha256"],
-                    expected_model_key=local_key,
-                )
-            else:
-                restored_runtime, _ = checkpoint_manager.load(
-                    path=checkpoint_path,
-                    model=model,
-                    optimizer=optimizer,
-                    scheduler=scheduler,
-                    config_fingerprint=config.fingerprint(),
-                    config_file_sha256=config_sha,
-                    dataset_manifest_sha256=dataset_manifest["manifest_sha256"],
-                )
-            if int(restored_runtime["completed_steps"]) != completed_steps:
-                raise RuntimeError("checkpoint restored the wrong optimizer step")
-            if rank == 0:
-                stream.load_state_dict(restored_runtime["stream"])
-                ledger.recover_to_receipt(
-                    ExposureLedgerReceipt.from_payload(restored_runtime["ledger_receipt"])
-                )
-            dist.barrier()
-            resumed = True
+            if preflight_reload_due:
+                if args.strategy == "model_owned":
+                    restored_runtime, _ = checkpoint_manager.load(
+                        path=checkpoint_path,
+                        model=model,
+                        optimizer=optimizer,
+                        scheduler=scheduler,
+                        config_fingerprint=config.fingerprint(),
+                        config_file_sha256=config_sha,
+                        dataset_manifest_sha256=dataset_manifest["manifest_sha256"],
+                        expected_model_key=local_key,
+                    )
+                else:
+                    restored_runtime, _ = checkpoint_manager.load(
+                        path=checkpoint_path,
+                        model=model,
+                        optimizer=optimizer,
+                        scheduler=scheduler,
+                        config_fingerprint=config.fingerprint(),
+                        config_file_sha256=config_sha,
+                        dataset_manifest_sha256=dataset_manifest["manifest_sha256"],
+                    )
+                if int(restored_runtime["completed_steps"]) != completed_steps:
+                    raise RuntimeError("checkpoint restored the wrong optimizer step")
+                if rank == 0:
+                    stream.load_state_dict(restored_runtime["stream"])
+                    ledger.recover_to_receipt(
+                        ExposureLedgerReceipt.from_payload(
+                            restored_runtime["ledger_receipt"]
+                        )
+                    )
+                dist.barrier()
+                resumed = True
+            elif args.mode == "main":
+                checkpoint_manager.prune_after_verified_replacement()
             torch.cuda.synchronize()
             checkpoint_seconds = time.perf_counter() - checkpoint_started
         if stop_requested:
@@ -840,6 +986,13 @@ def main() -> None:
             "git_sha": _git_sha(),
             "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
             "config_fingerprint": config.fingerprint(),
+            "config_file_sha256": config_sha,
+            "dataset_manifest_sha256": dataset_manifest["manifest_sha256"],
+            "alignment_manifest_sha256": alignment_manifest["manifest_sha256"],
+            "world_size": world,
+            "logical_target_count": 168,
+            "model_revisions": {model.key: model.revision for model in config.models},
+            "source_correctness": source_smokes,
             "optimizer_steps": completed_steps,
             "accepted_exposures": completed_steps * 8192,
             "warmup_steps": args.warmup_steps,
@@ -865,6 +1018,13 @@ def main() -> None:
             },
         }
         write_json_immutable(args.run_dir / "benchmark_report.json", report)
+        if args.mode == "preflight":
+            expected_preflight = Path(config.runtime.preflight_evidence)
+            if args.run_dir != expected_preflight.parent:
+                raise ValueError(
+                    "final preflight run directory must equal the configured evidence directory"
+                )
+            write_json_immutable(expected_preflight, report)
         print(json.dumps(report, sort_keys=True), flush=True)
         stream.close()
         ledger.close()
