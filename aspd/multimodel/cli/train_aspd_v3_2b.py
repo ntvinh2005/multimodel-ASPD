@@ -103,6 +103,18 @@ def _git_sha() -> str:
     ).stdout.strip()
 
 
+def _require_clean_worktree() -> str:
+    status = subprocess.run(
+        ["git", "status", "--porcelain"],
+        check=True,
+        text=True,
+        capture_output=True,
+    ).stdout
+    if status:
+        raise RuntimeError("2B benchmark/preflight requires a clean Git worktree")
+    return _git_sha()
+
+
 def _init_distributed() -> tuple[int, int, torch.device]:
     local_rank = int(os.environ["LOCAL_RANK"])
     device = torch.device("cuda", local_rank)
@@ -450,6 +462,7 @@ def _timed(profile: bool, values: dict[str, float], name: str):
 
 def main() -> None:
     args = _parse_args()
+    git_sha = _require_clean_worktree()
     rank, world, device = _init_distributed()
     config = load_main_2b_v1_config(args.config)
     if world != 3:
@@ -512,7 +525,7 @@ def main() -> None:
         required = {
             "status": "PASS",
             "strategy": "model_owned",
-            "git_sha": _git_sha(),
+            "git_sha": git_sha,
             "config_file_sha256": config_sha,
             "config_fingerprint": config.fingerprint(),
             "dataset_manifest_sha256": dataset_manifest["manifest_sha256"],
@@ -624,7 +637,7 @@ def main() -> None:
                 "schema_version": 1,
                 "mode": args.mode,
                 "strategy": args.strategy,
-                "git_sha": _git_sha(),
+                "git_sha": git_sha,
                 "config_path": str(args.config),
                 "config_file_sha256": config_sha,
                 "config_fingerprint": config.fingerprint(),
@@ -1023,7 +1036,7 @@ def main() -> None:
             "status": "PASS",
             "mode": args.mode,
             "strategy": args.strategy,
-            "git_sha": _git_sha(),
+            "git_sha": git_sha,
             "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
             "config_fingerprint": config.fingerprint(),
             "config_file_sha256": config_sha,
