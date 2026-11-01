@@ -180,6 +180,24 @@ def test_indexed_rank_one_support_respects_bfloat16_autocast_compute_dtype() -> 
     assert component.V.grad is not None and component.V.grad.dtype == torch.float32
 
 
+def test_dense_rank_one_accepts_frozen_inference_capture() -> None:
+    torch.manual_seed(18)
+    component = RankOneComponents(11, 5, 4, unit_norm=True)
+    with torch.inference_mode():
+        captured = torch.randn(1, 3, 5)
+    code = torch.zeros(1, 3, 11)
+    code.scatter_(-1, torch.tensor([[[0, 3], [1, 4], [2, 8]]]), 1.0)
+    output = component.forward_dense_masked(
+        captured,
+        code,
+        torch.ones(1, 3, dtype=torch.bool),
+        compute_dtype=torch.float32,
+    )
+    output.square().mean().backward()
+    assert component.U.grad is not None
+    assert component.V.grad is not None
+
+
 def test_prepared_activation_support_matches_matryoshka_decoder() -> None:
     torch.manual_seed(9)
     reference = ActivationDecoder(16, 7)

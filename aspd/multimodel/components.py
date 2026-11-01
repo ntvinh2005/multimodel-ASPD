@@ -201,7 +201,11 @@ class RankOneComponents(nn.Module):
             raise ValueError("dense-masked valid-token mask disagrees with the anchor grid")
         dtype = x.dtype if compute_dtype is None else compute_dtype
         rows = x.shape[0] * x.shape[1]
-        flat_x = x.reshape(rows, self.d_in).to(dtype)
+        # Frozen capture tensors are intentionally produced under inference_mode. Dense
+        # GEMM backward needs to save its input to form dV, which inference tensors forbid.
+        # Cloning outside inference_mode creates an ordinary constant autograd input, just
+        # as the indexed backend's advanced-index gather does.
+        flat_x = x.reshape(rows, self.d_in).to(dtype).clone()
         if self.b_dec is not None:
             flat_x = flat_x - self.b_dec.to(dtype)
         gate = coefficients.reshape(rows, self.n_features).to(dtype)
