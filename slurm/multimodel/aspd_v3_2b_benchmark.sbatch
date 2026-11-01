@@ -34,7 +34,10 @@ SPARSE_BACKEND="${SPARSE_BACKEND:-}"
 CONFIG=configs/multimodel/aspd_v3/main_2b_v1.yaml
 GIT_SHA="$(git rev-parse HEAD)"
 RUN_TAG="${RUN_TAG:-${MODE}_${STRATEGY}}"
-if [[ "${MODE}" == "preflight" ]]; then
+RUN_DIR_OVERRIDE="${RUN_DIR_OVERRIDE:-}"
+if [[ -n "${RUN_DIR_OVERRIDE}" ]]; then
+  RUN_DIR="${RUN_DIR_OVERRIDE}"
+elif [[ "${MODE}" == "preflight" ]]; then
   RUN_DIR="out/multimodel/aspd_v3/main_2b_v1/preflight/model_owned_3xb200"
 else
   RUN_DIR="out/multimodel/aspd_v3/main_2b_v1/${MODE}/${RUN_TAG}_${GIT_SHA:0:12}_job${SLURM_JOB_ID}"
