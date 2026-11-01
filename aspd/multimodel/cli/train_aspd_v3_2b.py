@@ -142,7 +142,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--activation-backward-chunk", type=int)
     parser.add_argument("--matrix-backward-chunk", type=int)
     parser.add_argument(
-        "--sparse-backend", choices=("indexed", "csr", "dense"), default="indexed"
+        "--sparse-backend", choices=("indexed", "csr", "dense")
     )
     parser.add_argument("--local-files-only", action="store_true")
     parser.add_argument("--skip-checkpoint", action="store_true")
@@ -651,16 +651,24 @@ def main() -> None:
         raise ValueError("activation backward chunk must be in 1..16")
     if not 1 <= matrix_backward_chunk <= 56:
         raise ValueError("matrix backward chunk must be in 1..56")
+    sparse_backend = (
+        config.runtime.sparse_backend
+        if args.sparse_backend is None
+        else args.sparse_backend
+    )
     if args.mode != "benchmark" and (
         args.activation_backward_chunk is not None
         or args.matrix_backward_chunk is not None
+        or args.sparse_backend is not None
     ):
-        raise ValueError("runtime chunk overrides are benchmark-only")
+        raise ValueError("runtime execution overrides are benchmark-only")
+    if args.strategy != "model_owned" and sparse_backend != "indexed":
+        raise ValueError("dense/CSR execution backends require model-owned strategy")
     runtime_payload = {
         "activation_backward_chunk": activation_backward_chunk,
         "matrix_backward_chunk": matrix_backward_chunk,
         "early_exit_after_selected_layers": config.runtime.early_exit_after_selected_layers,
-        "sparse_backend": args.sparse_backend,
+        "sparse_backend": sparse_backend,
         "data_prefetch_depth": config.runtime.data_prefetch_depth,
     }
     runtime_fingerprint = hashlib.sha256(
@@ -729,7 +737,7 @@ def main() -> None:
             native_biases=native_biases,
             device=device,
             dtype=torch.float32,
-            sparse_backend=args.sparse_backend,
+            sparse_backend=sparse_backend,
         )
         model.synchronize_shared_state_()
         optimizer = build_model_owned_adam(model, config)
@@ -1209,6 +1217,20 @@ def main() -> None:
     if telemetry is not None:
         _stop_gpu_telemetry(*telemetry)
 
+    gate_statistics = None
+    if args.strategy == "model_owned":
+        local_gate_statistics: dict[str, dict[str, float | int]] = {}
+        for site in ("pre", "mid"):
+            utilization = model.gates[site].utilization()
+            local_gate_statistics[site] = {
+                "accepted_anchor_count": int(utilization["accepted_anchor_count"]),
+                "used_feature_count": int(utilization["used_feature_count"]),
+                "dead_feature_count": int(utilization["dead_feature_count"]),
+                "threshold": float(utilization["threshold"].float().item()),
+            }
+        gate_statistics = [None] * world
+        dist.all_gather_object(gate_statistics, local_gate_statistics)
+
     if rank == 0:
         rows = [json.loads(line) for line in metrics_path.read_text().splitlines()]
         measured = [row for row in rows if not row["warmup"]]
@@ -1264,6 +1286,7 @@ def main() -> None:
                 )
             },
             "gpu_telemetry": _summarize_gpu_telemetry(telemetry_path),
+            "gate_statistics_by_rank": gate_statistics,
         }
         write_json_immutable(args.run_dir / "benchmark_report.json", report)
         if args.mode == "preflight":

@@ -138,6 +138,7 @@ runtime:
   keep_complete_checkpoints: 2
   activation_backward_chunk: 8
   matrix_backward_chunk: 28
+  sparse_backend: dense
   early_exit_after_selected_layers: true
   data_prefetch_depth: 1
   output_root: out/multimodel/aspd_v3/main_2b_v1/runs

@@ -81,6 +81,7 @@ def test_main_2b_contract_and_registry_are_incompatible_and_complete() -> None:
     assert config.full_training_authorized is False
     assert config.data.minimum_optimizer_steps == 61_036
     assert config.data.minimum_accepted_anchor_exposures == 500_006_912
+    assert config.runtime.sparse_backend == "dense"
     assert sum(len(layout.targets()) for layout in registry.values()) == 168
     assert registry["qwen"].layers == tuple(range(10, 18))
     assert registry["gemma"].layers == tuple(range(9, 17))

@@ -30,7 +30,7 @@ TORCH_PROFILER="${TORCH_PROFILER:-0}"
 SKIP_CHECKPOINT="${SKIP_CHECKPOINT:-1}"
 ACTIVATION_BACKWARD_CHUNK="${ACTIVATION_BACKWARD_CHUNK:-}"
 MATRIX_BACKWARD_CHUNK="${MATRIX_BACKWARD_CHUNK:-}"
-SPARSE_BACKEND="${SPARSE_BACKEND:-indexed}"
+SPARSE_BACKEND="${SPARSE_BACKEND:-}"
 CONFIG=configs/multimodel/aspd_v3/main_2b_v1.yaml
 GIT_SHA="$(git rev-parse HEAD)"
 RUN_TAG="${RUN_TAG:-${MODE}_${STRATEGY}}"
@@ -56,7 +56,6 @@ ARGS=(
   --max-steps "${MAX_STEPS}"
   --warmup-steps "${WARMUP_STEPS}"
   --local-files-only
-  --sparse-backend "${SPARSE_BACKEND}"
 )
 if [[ "${PROFILE_STAGES}" == "1" ]]; then
   ARGS+=(--profile-stages)
@@ -72,6 +71,9 @@ if [[ -n "${ACTIVATION_BACKWARD_CHUNK}" ]]; then
 fi
 if [[ -n "${MATRIX_BACKWARD_CHUNK}" ]]; then
   ARGS+=(--matrix-backward-chunk "${MATRIX_BACKWARD_CHUNK}")
+fi
+if [[ -n "${SPARSE_BACKEND}" ]]; then
+  ARGS+=(--sparse-backend "${SPARSE_BACKEND}")
 fi
 
 exec ../repo/.venv/bin/torchrun \

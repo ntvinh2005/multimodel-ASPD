@@ -186,6 +186,7 @@ class Runtime2B(BaseModel):
     keep_complete_checkpoints: Literal[2]
     activation_backward_chunk: int = Field(gt=0, le=8)
     matrix_backward_chunk: int = Field(gt=0, le=56)
+    sparse_backend: Literal["dense"]
     early_exit_after_selected_layers: Literal[True]
     data_prefetch_depth: Literal[1]
     output_root: str
