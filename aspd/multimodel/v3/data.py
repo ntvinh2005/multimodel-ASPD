@@ -297,6 +297,7 @@ class SQLiteExposureLedger:
         dataset_manifest_sha256: str,
         world_size: int = 1,
         writer_rank: int = 0,
+        model_order: tuple[str, str, str] = ("qwen", "gemma", "phi"),
     ):
         if len(dataset_manifest_sha256) != 64 or any(
             character not in "0123456789abcdef" for character in dataset_manifest_sha256
@@ -311,6 +312,9 @@ class SQLiteExposureLedger:
         self.dataset_manifest_sha256 = dataset_manifest_sha256
         self.world_size = world_size
         self.writer_rank = writer_rank
+        if len(model_order) != 3 or len(set(model_order)) != 3:
+            raise ValueError("exposure ledger requires three distinct model keys")
+        self.model_order = tuple(model_order)
         self.connection = sqlite3.connect(self.path)
         # The ledger lives on Blue. WAL's shared-memory index is unsafe on this parallel
         # filesystem; DELETE mode remains transactional and works with synchronous=FULL.
@@ -376,6 +380,10 @@ class SQLiteExposureLedger:
                 "world_size": str(world_size),
                 "global_writer_rank": "0",
             }
+            if self.model_order != ("qwen", "gemma", "phi"):
+                expected_fixed["model_order_json"] = json.dumps(
+                    self.model_order, separators=(",", ":")
+                )
             observed_fixed = {key: existing.get(key) for key in expected_fixed}
             if observed_fixed != expected_fixed or set(existing) != set(expected_fixed) | {
                 "ledger_uuid",
@@ -402,6 +410,10 @@ class SQLiteExposureLedger:
                 "ledger_uuid": self.ledger_uuid,
                 "genesis_receipt_sha256": self.genesis_receipt_sha256,
             }
+            if self.model_order != ("qwen", "gemma", "phi"):
+                metadata["model_order_json"] = json.dumps(
+                    self.model_order, separators=(",", ":")
+                )
             with self.connection:
                 self.connection.executemany(
                     "INSERT INTO exposure_metadata(key,value) VALUES (?,?)", metadata.items()
@@ -716,7 +728,7 @@ class SQLiteExposureLedger:
             before_optimizer_step = current_step
         if before_optimizer_step != current_step:
             raise ValueError("raw-token observation must be attached to the current step boundary")
-        counts = {key: int(counts[key]) for key in ("qwen", "gemma", "phi")}
+        counts = {key: int(counts[key]) for key in self.model_order}
         if any(value < 0 for value in counts.values()):
             raise ValueError("raw-token observations cannot be negative")
         payload = json.dumps(counts, sort_keys=True, separators=(",", ":"))
@@ -737,9 +749,9 @@ class SQLiteExposureLedger:
                 (
                     observation_id,
                     payload_sha256,
-                    counts["qwen"],
-                    counts["gemma"],
-                    counts["phi"],
+                    counts[self.model_order[0]],
+                    counts[self.model_order[1]],
+                    counts[self.model_order[2]],
                     before_optimizer_step,
                 ),
             )
@@ -747,7 +759,11 @@ class SQLiteExposureLedger:
                 "UPDATE exposure_totals SET raw_tokens_qwen=raw_tokens_qwen+?, "
                 "raw_tokens_gemma=raw_tokens_gemma+?, raw_tokens_phi=raw_tokens_phi+? "
                 "WHERE singleton=1",
-                (counts["qwen"], counts["gemma"], counts["phi"]),
+                (
+                    counts[self.model_order[0]],
+                    counts[self.model_order[1]],
+                    counts[self.model_order[2]],
+                ),
             )
             self.connection.commit()
         except Exception:
@@ -759,8 +775,24 @@ class SQLiteExposureLedger:
             observation_id,
             {
                 key: int(sum(result.tokenized[key].attention_mask))
-                for key in ("qwen", "gemma", "phi")
+                for key in self.model_order
             },
+        )
+
+    def raw_token_counts(self) -> dict[str, int]:
+        """Return named raw-token slots according to this ledger's immutable model order."""
+
+        counters = self.snapshot()
+        return dict(
+            zip(
+                self.model_order,
+                (
+                    counters.raw_tokens_qwen,
+                    counters.raw_tokens_gemma,
+                    counters.raw_tokens_phi,
+                ),
+                strict=True,
+            )
         )
 
     def observe_optimizer_step(self, step_id: int, anchor_ids: Sequence[str]) -> ExposureCounters:

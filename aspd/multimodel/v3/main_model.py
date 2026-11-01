@@ -34,15 +34,19 @@ class MainV1CaptureBatch:
     matrix_outputs: Mapping[str, Tensor]
     valid_anchors: Tensor
 
-    def validate(self, targets: Mapping[str, LogicalMatrixTarget]) -> None:
+    def validate(
+        self,
+        targets: Mapping[str, LogicalMatrixTarget],
+        model_order: Sequence[str] = MODEL_ORDER,
+    ) -> None:
         if tuple(self.activations) != SITE_ORDER:
             raise ValueError("capture batch must contain ordered PRE and MID activation sites")
         grid = tuple(self.valid_anchors.shape)
         if self.valid_anchors.dtype != torch.bool or len(grid) != 2:
             raise ValueError("valid_anchors must be a boolean [B,A] tensor")
         for site in SITE_ORDER:
-            if tuple(self.activations[site]) != MODEL_ORDER:
-                raise ValueError("capture model order must be qwen, gemma, phi")
+            if tuple(self.activations[site]) != tuple(model_order):
+                raise ValueError(f"capture model order must be {tuple(model_order)}")
             for values in self.activations[site].values():
                 if len(values) != 8 or any(value.shape[:2] != grid for value in values):
                     raise ValueError("capture activations must expose eight tensors on one grid")
@@ -70,8 +74,9 @@ class MainV1TrainableModel(nn.Module):
         dtype: torch.dtype | None = None,
     ):
         super().__init__()
-        if tuple(registry) != MODEL_ORDER:
-            raise ValueError("main-v1 registry must use qwen, gemma, phi order")
+        self.model_order = tuple(config.architecture.model_order)
+        if len(self.model_order) != 3 or tuple(registry) != self.model_order:
+            raise ValueError(f"main trainable registry must use {self.model_order}")
         architecture = config.architecture
         self.config_fingerprint = config.fingerprint()
         self.targets = {
@@ -96,6 +101,7 @@ class MainV1TrainableModel(nn.Module):
             }
             return HierarchicalV3Encoder(
                 packers,
+                model_order=self.model_order,
                 intra_layers=architecture.intra_model_layers,
                 intra_heads=architecture.intra_model_heads,
                 cross_layers=architecture.cross_model_layers,
@@ -140,7 +146,7 @@ class MainV1TrainableModel(nn.Module):
     def encode(
         self, batch: MainV1CaptureBatch
     ) -> tuple[dict[str, Tensor], dict[str, Any], dict[str, Tensor]]:
-        batch.validate(self.targets)
+        batch.validate(self.targets, self.model_order)
         scores = {
             site: self.encoders[site](batch.activations[site], batch.valid_anchors)
             for site in SITE_ORDER
@@ -193,7 +199,7 @@ class MainV1TrainableModel(nn.Module):
         for site in SITE_ORDER:
             bank = self.activation_banks[site]
             coefficient = 0.5 / counts[site]
-            for model_key in MODEL_ORDER:
+            for model_key in getattr(self, "model_order", MODEL_ORDER):
                 values = batch.activations[site][model_key]
                 for layer_offset, (decoder, target) in enumerate(
                     zip(bank.decoders[model_key], values, strict=True)

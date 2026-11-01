@@ -65,7 +65,13 @@ class AlignedAnchorPool:
     def anchor_count(self) -> int:
         return len(self.anchor_ids)
 
-    def validate(self, *, expected_anchors: int, sequence_length: int) -> None:
+    def validate(
+        self,
+        *,
+        expected_anchors: int,
+        sequence_length: int,
+        model_order: tuple[str, str, str] = MODEL_ORDER,
+    ) -> None:
         if self.anchor_count != expected_anchors:
             raise ValueError(
                 f"BatchTopK pool requires exactly {expected_anchors} accepted anchors; "
@@ -73,8 +79,8 @@ class AlignedAnchorPool:
             )
         if len(set(self.anchor_ids)) != self.anchor_count:
             raise ValueError("one BatchTopK pool cannot contain duplicate anchor IDs")
-        if tuple(self.models) != MODEL_ORDER:
-            raise ValueError("model pool order must be qwen, gemma, phi")
+        if tuple(self.models) != tuple(model_order):
+            raise ValueError(f"model pool order must be {tuple(model_order)}")
         for model in self.models.values():
             model.validate(self.anchor_count, sequence_length)
 
@@ -188,9 +194,13 @@ class PileAlignedAnchorStream:
         split_policy: HashSplitPolicy,
         dedup_path: str | Path,
         sequence_length: int = 512,
+        model_order: tuple[str, str, str] = MODEL_ORDER,
     ):
-        if tuple(tokenizers) != MODEL_ORDER or tuple(tokenizer_revisions) != MODEL_ORDER:
-            raise ValueError("production stream requires ordered qwen/gemma/phi tokenizers")
+        self.model_order = tuple(model_order)
+        if len(self.model_order) != 3:
+            raise ValueError("production stream requires exactly three tokenizer families")
+        if tuple(tokenizers) != self.model_order or tuple(tokenizer_revisions) != self.model_order:
+            raise ValueError(f"production stream requires ordered {self.model_order} tokenizers")
         if not hasattr(dataset, "state_dict") or not hasattr(dataset, "load_state_dict"):
             raise TypeError("pinned dataset stream must expose state_dict/load_state_dict")
         self.dataset = dataset
@@ -205,6 +215,7 @@ class PileAlignedAnchorStream:
             "dataset_id": dataset_id,
             "dataset_revision": dataset_revision,
             "tokenizer_revisions": dict(tokenizer_revisions),
+            "model_order": list(self.model_order),
             "split": {
                 "modulus": split_policy.modulus,
                 "validation_buckets": sorted(split_policy.validation_buckets),
@@ -307,10 +318,10 @@ class PileAlignedAnchorStream:
         anchor_ids: list[str] = []
         document_ids: list[str] = []
         observations: list[dict[str, Any]] = []
-        model_ids: dict[str, list[tuple[int, ...]]] = {key: [] for key in MODEL_ORDER}
-        model_masks: dict[str, list[tuple[int, ...]]] = {key: [] for key in MODEL_ORDER}
-        model_documents: dict[str, list[int]] = {key: [] for key in MODEL_ORDER}
-        model_tokens: dict[str, list[int]] = {key: [] for key in MODEL_ORDER}
+        model_ids: dict[str, list[tuple[int, ...]]] = {key: [] for key in self.model_order}
+        model_masks: dict[str, list[tuple[int, ...]]] = {key: [] for key in self.model_order}
+        model_documents: dict[str, list[int]] = {key: [] for key in self.model_order}
+        model_tokens: dict[str, list[int]] = {key: [] for key in self.model_order}
 
         restored = self._restore_pending()
         while len(anchor_ids) < pool_anchors:
@@ -329,11 +340,11 @@ class PileAlignedAnchorStream:
                     "observation_id": document.source_row_id,
                     "document_id": document.document_id,
                     "raw_tokens": {
-                        key: len(alignment.tokenized[key].input_ids) for key in MODEL_ORDER
+                        key: len(alignment.tokenized[key].input_ids) for key in self.model_order
                     },
                 }
             )
-            for key in MODEL_ORDER:
+            for key in self.model_order:
                 tokenized = alignment.tokenized[key]
                 model_ids[key].append(tokenized.input_ids)
                 model_masks[key].append(tokenized.attention_mask)
@@ -353,7 +364,7 @@ class PileAlignedAnchorStream:
                 anchor_document_indices=tuple(model_documents[key]),
                 anchor_token_indices=tuple(model_tokens[key]),
             )
-            for key in MODEL_ORDER
+            for key in self.model_order
         }
         pool = AlignedAnchorPool(
             anchor_ids=tuple(anchor_ids),
@@ -361,7 +372,11 @@ class PileAlignedAnchorStream:
             models=models,
             source_observations=tuple(observations),
         )
-        pool.validate(expected_anchors=pool_anchors, sequence_length=self.sequence_length)
+        pool.validate(
+            expected_anchors=pool_anchors,
+            sequence_length=self.sequence_length,
+            model_order=self.model_order,
+        )
         return pool
 
     def state_dict(self) -> dict[str, Any]:

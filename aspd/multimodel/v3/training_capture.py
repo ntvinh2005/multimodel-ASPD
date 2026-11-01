@@ -96,6 +96,7 @@ def capture_family_pool(
     *,
     pad_token_id: int,
     device: torch.device,
+    early_exit: bool = False,
 ) -> FamilyCapture:
     """Run one frozen family once and retain only accepted aligned-anchor rows."""
 
@@ -106,6 +107,9 @@ def capture_family_pool(
     residuals: dict[str, dict[int, Tensor]] = {"pre": {}, "mid": {}}
     matrix_inputs: dict[str, Tensor] = {}
     matrix_outputs: dict[str, Tensor] = {}
+
+    class _SelectedLayersComplete(Exception):
+        pass
 
     with ExitStack() as stack:
         for site, kind in (("pre", "residual_pre"), ("mid", "residual_mid")):
@@ -157,8 +161,23 @@ def capture_family_pool(
             stack.callback(module.register_forward_pre_hook(matrix_pre).remove)
             stack.callback(module.register_forward_hook(matrix_post).remove)
 
+        if early_exit:
+            layer_path = f"{layout.layer_prefixes[0]}.{layout.layers[-1]}"
+            layer = model.get_submodule(layer_path)
+
+            def stop_after_deepest_selected_layer(
+                _module: nn.Module, _args: tuple[Any, ...], _output: Any
+            ) -> None:
+                raise _SelectedLayersComplete
+
+            stack.callback(layer.register_forward_hook(stop_after_deepest_selected_layer).remove)
+
         with torch.inference_mode():
-            model(**model_inputs, use_cache=False, return_dict=True)
+            try:
+                model(**model_inputs, use_cache=False, return_dict=True)
+            except _SelectedLayersComplete:
+                if not early_exit:
+                    raise
 
     capture = FamilyCapture(
         model_key=layout.key,

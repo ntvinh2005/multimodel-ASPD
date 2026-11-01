@@ -12,6 +12,7 @@ from huggingface_hub import HfApi
 
 from aspd.multimodel.v3.config import load_v3_config_bundle
 from aspd.multimodel.v3.data import write_json_immutable
+from aspd.multimodel.v3.main_2b_config import load_main_2b_v1_config
 from aspd.multimodel.v3.main_config import load_main_v1_config
 
 
@@ -27,6 +28,11 @@ def _parse_args() -> argparse.Namespace:
         "--main-config",
         type=Path,
         default=Path("configs/multimodel/aspd_v3/main_v1.yaml"),
+    )
+    parser.add_argument(
+        "--main-2b",
+        action="store_true",
+        help="prepare the incompatible main_2b_v1 manifest instead of legacy main_v1",
     )
     parser.add_argument(
         "--approved",
@@ -48,15 +54,26 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = _parse_args()
-    main_config = load_main_v1_config(args.main_config)
-    bundle = load_v3_config_bundle(args.approved, args.candidates, args.runtime)
-    dataset = bundle.approved.dataset
+    bundle = None
+    if args.main_2b:
+        main_config = load_main_2b_v1_config(args.main_config)
+        dataset = main_config.data
+        dataset_id = dataset.dataset_id
+        dataset_revision = dataset.dataset_revision
+        models = main_config.models
+    else:
+        main_config = load_main_v1_config(args.main_config)
+        bundle = load_v3_config_bundle(args.approved, args.candidates, args.runtime)
+        dataset = bundle.approved.dataset
+        dataset_id = dataset.dataset_id
+        dataset_revision = dataset.revision
+        models = bundle.approved.models
     info = HfApi().dataset_info(
-        dataset.dataset_id,
-        revision=dataset.revision,
+        dataset_id,
+        revision=dataset_revision,
         files_metadata=True,
     )
-    if info.sha != dataset.revision:
+    if info.sha != dataset_revision:
         raise RuntimeError(
             f"pinned dataset revision resolved to a different commit: {info.sha}"
         )
@@ -81,8 +98,8 @@ def main() -> None:
     manifest = {
         "schema_version": 4,
         "kind": "ASPD_V3_ON_THE_FLY_DATASET_MANIFEST",
-        "dataset_id": dataset.dataset_id,
-        "requested_revision": dataset.revision,
+        "dataset_id": dataset_id,
+        "requested_revision": dataset_revision,
         "resolved_revision": info.sha,
         "streaming": True,
         "split": "train",
@@ -97,7 +114,7 @@ def main() -> None:
             "tokenizer_id": model.tokenizer_id,
             "tokenizer_revision": model.tokenizer_revision,
         }
-        for model in bundle.approved.models
+        for model in models
     ]
     alignment = {
         "schema_version": 2,
@@ -115,7 +132,11 @@ def main() -> None:
             "validation_buckets": list(main_config.data.validation_buckets),
             "test_buckets": list(main_config.data.test_buckets),
         },
-        "distributed_source": "rank_zero_stream_broadcast_to_four_fsdp_ranks",
+        "distributed_source": (
+            "rank_zero_stream_broadcast_to_three_model_owner_ranks"
+            if args.main_2b
+            else "rank_zero_stream_broadcast_to_three_fsdp_ranks"
+        ),
         "exact_deduplication": "sqlite_content_sha256_with_checkpoint_high_water",
     }
     alignment["manifest_sha256"] = _fingerprint(alignment)

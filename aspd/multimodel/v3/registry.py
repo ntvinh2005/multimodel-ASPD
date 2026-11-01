@@ -8,6 +8,7 @@ from typing import Any, Literal
 from torch import nn
 
 from aspd.multimodel.v3.config import V3_LOGICAL_MATRICES, V3ApprovedConfig, V3ApprovedModel
+from aspd.multimodel.v3.main_2b_config import MODEL_ORDER_2B, V3Main2BV1Config
 
 GroundingKind = Literal["residual_pre", "residual_mid"]
 
@@ -277,6 +278,44 @@ def build_model_registry(approved: V3ApprovedConfig) -> dict[str, ModelFamilyLay
         raise ValueError("v3 registry must contain 168 unique logical matrix targets")
     if {target.logical_name for target in targets} != set(V3_LOGICAL_MATRICES):
         raise ValueError("v3 registry lost a planned logical matrix type")
+    return registry
+
+
+def build_model_registry_2b(config: V3Main2BV1Config) -> dict[str, ModelFamilyLayout]:
+    """Build the incompatible 2B registry entirely from its pinned versioned contract."""
+
+    registry = {
+        model.key: ModelFamilyLayout(
+            key=model.key,
+            family=model.family,
+            model_id=model.model_id,
+            revision=model.revision,
+            tokenizer_id=model.tokenizer_id,
+            tokenizer_revision=model.tokenizer_revision,
+            layers=model.selected_layers,
+            layer_prefixes=(model.layer_prefix,),
+            residual_pre_suffix=model.residual_pre_suffix,
+            residual_mid_suffix=model.residual_mid_suffix,
+            hidden_size=model.hidden_size,
+            intermediate_size=model.intermediate_size,
+            num_hidden_layers=model.num_hidden_layers,
+            num_attention_heads=model.num_attention_heads,
+            num_key_value_heads=model.num_key_value_heads,
+            head_dim=model.head_dim,
+            q_out=model.q_out,
+            kv_out=model.kv_out,
+            fused_qkv=False,
+            fused_gate_up=False,
+        )
+        for model in config.models
+    }
+    if tuple(registry) != MODEL_ORDER_2B:
+        raise ValueError(f"2B registry order must be {MODEL_ORDER_2B}")
+    targets = [target for layout in registry.values() for target in layout.targets()]
+    if len(targets) != 168 or len({target.key for target in targets}) != 168:
+        raise ValueError("2B registry must contain 168 unique logical matrix targets")
+    if {target.logical_name for target in targets} != set(V3_LOGICAL_MATRICES):
+        raise ValueError("2B registry lost a required logical matrix type")
     return registry
 
 

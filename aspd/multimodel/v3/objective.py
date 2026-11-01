@@ -8,6 +8,7 @@ import torch
 from torch import Tensor, nn
 
 from aspd.multimodel.v3.reconstruction import ActivationDecoder
+from aspd.multimodel.v3.sparse_support import SparseSupport
 
 MATRYOSHKA_GROUP_FRACS = (0.0625, 0.0625, 0.125, 0.25, 0.5)
 
@@ -66,6 +67,7 @@ def matryoshka_activation_fvu(
     valid_anchors: Tensor,
     *,
     group_fracs: Sequence[float] = MATRYOSHKA_GROUP_FRACS,
+    support: SparseSupport | None = None,
 ) -> tuple[Tensor, Tensor]:
     """Official-style empty+nested-prefix MSE normalized into FVU units."""
 
@@ -76,11 +78,18 @@ def matryoshka_activation_fvu(
     denominator_mean = _variance_denominator(truth) / truth.numel()
     boundaries = matryoshka_boundaries(decoder.in_features, group_fracs)
     if isinstance(decoder, ActivationDecoder):
-        decoded = decoder(
-            flat_code.to(decoder.weight.dtype), boundaries=boundaries, include_bias=True
+        decoded = (
+            decoder(
+                flat_code.to(decoder.weight.dtype), boundaries=boundaries, include_bias=True
+            )
+            if support is None
+            else decoder.forward_sparse(support, boundaries=boundaries, include_bias=True)
         )
         assert isinstance(decoded, tuple)
-        reconstructions = tuple(value.float() for value in decoded)
+        reconstructions = tuple(
+            (value if support is None else value[valid_anchors]).float()
+            for value in decoded
+        )
     else:
         bias = (
             decoder.bias.float().expand_as(truth)

@@ -10,6 +10,7 @@ from torch import Tensor, nn
 
 from aspd.multimodel.components import RankOneComponents
 from aspd.multimodel.v3.registry import LogicalMatrixTarget
+from aspd.multimodel.v3.sparse_support import SparseSupport
 
 
 def _safe_key(value: str) -> str:
@@ -59,6 +60,48 @@ class ActivationDecoder(nn.Linear):
             reconstructions.append(output)
         return tuple(
             value.reshape(*leading_shape, self.out_features) for value in reconstructions
+        )
+
+    def forward_sparse(
+        self,
+        support: SparseSupport,
+        *,
+        boundaries: Sequence[int] | None = None,
+        include_bias: bool = True,
+    ) -> Tensor | tuple[Tensor, ...]:
+        """Decode coordinates already prepared for the shared gate support."""
+
+        if support.n_features != self.in_features:
+            raise ValueError("activation decoder support has the wrong dictionary width")
+        rows = support.grid_shape[0] * support.grid_shape[1]
+        dtype = support.coefficient.dtype
+        output = torch.zeros(rows, self.out_features, device=self.weight.device, dtype=dtype)
+        if include_bias and self.bias is not None:
+            output = output + self.bias.to(dtype)
+
+        def add_range(value: Tensor, lower: int, upper: int) -> Tensor:
+            selected = (support.feature >= lower) & (support.feature < upper)
+            if not bool(selected.any()):
+                return value
+            positions = support.position[selected]
+            features = support.feature[selected]
+            scales = support.coefficient[selected]
+            writes = scales[:, None] * self.weight.T[features].to(dtype)
+            return value.index_add(0, positions, writes)
+
+        if boundaries is None:
+            return add_range(output, 0, self.in_features).reshape(
+                *support.grid_shape, self.out_features
+            )
+        if not boundaries or boundaries[0] != 0 or boundaries[-1] != self.in_features:
+            raise ValueError("Matryoshka boundaries must cover the complete feature axis")
+        reconstructions = [output]
+        for lower, upper in zip(boundaries[:-1], boundaries[1:], strict=True):
+            output = add_range(output, int(lower), int(upper))
+            reconstructions.append(output)
+        return tuple(
+            value.reshape(*support.grid_shape, self.out_features)
+            for value in reconstructions
         )
 
 
@@ -156,6 +199,8 @@ class RankOneMatrixBank(nn.Module):
         valid_anchors: Tensor,
         *,
         code_semantics: Literal["binary_support", "continuous"],
+        support: SparseSupport | None = None,
+        compute_dtype: torch.dtype | None = None,
     ) -> Tensor:
         """Apply rank-one operators using one explicitly selected provisional semantics."""
 
@@ -169,13 +214,24 @@ class RankOneMatrixBank(nn.Module):
             raise ValueError(f"{target_key} matrix input width mismatch")
         if sparse_code.shape[-1] != component.n_features:
             raise ValueError(f"{target_key} sparse code dictionary width mismatch")
-        coefficients = (
-            (sparse_code > 0).to(sparse_code.dtype)
-            if code_semantics == "binary_support"
-            else sparse_code
-        )
-        coefficients = coefficients * valid_anchors[..., None].to(coefficients.dtype)
-        output = component(matrix_input, coefficients, valid_anchors)
+        if support is None:
+            coefficients = (
+                (sparse_code > 0).to(sparse_code.dtype)
+                if code_semantics == "binary_support"
+                else sparse_code
+            )
+            coefficients = coefficients * valid_anchors[..., None].to(coefficients.dtype)
+            output = component(matrix_input, coefficients, valid_anchors)
+        else:
+            if support.grid_shape != tuple(matrix_input.shape[:2]):
+                raise ValueError("prepared support and matrix input grids differ")
+            output = component.forward_sparse(
+                matrix_input,
+                support.position,
+                support.feature,
+                support.coefficient,
+                compute_dtype=compute_dtype,
+            )
         bias_name = self._bias_names.get(target_key)
         if bias_name is not None:
             output = output + getattr(self, bias_name)

@@ -126,6 +126,56 @@ class RankOneComponents(nn.Module):
             output = output + self.b_out
         return output
 
+    def forward_sparse(
+        self,
+        x: Tensor,
+        active_position: Tensor,
+        active_feature: Tensor,
+        active_coefficient: Tensor,
+        *,
+        compute_dtype: torch.dtype | None = None,
+    ) -> Tensor:
+        """Reconstruct from coordinates prepared once for a shared PRE/MID support.
+
+        ``compute_dtype`` permits FP32 master parameters with BF16 sparse arithmetic. The
+        casts remain differentiable, so gradients are accumulated into the FP32 factors.
+        """
+
+        if x.ndim != 3 or x.shape[-1] != self.d_in:
+            raise ValueError("sparse rank-one input must have shape [B,A,d_in]")
+        if not (
+            active_position.ndim
+            == active_feature.ndim
+            == active_coefficient.ndim
+            == 1
+        ) or not (
+            active_position.numel()
+            == active_feature.numel()
+            == active_coefficient.numel()
+        ):
+            raise ValueError("sparse rank-one coordinates must be matching vectors")
+        batch, anchors, _ = x.shape
+        if active_position.numel() and (
+            int(active_position.max()) >= batch * anchors
+            or int(active_feature.max()) >= self.n_features
+        ):
+            raise ValueError("sparse rank-one coordinate lies outside its tensor")
+        dtype = x.dtype if compute_dtype is None else compute_dtype
+        flat_x = x.reshape(batch * anchors, self.d_in)
+        output = torch.zeros(batch * anchors, self.d_out, device=x.device, dtype=dtype)
+        if active_feature.numel():
+            selected_x = flat_x[active_position].to(dtype)
+            if self.b_dec is not None:
+                selected_x = selected_x - self.b_dec.to(dtype)
+            reads = (selected_x * self.V[active_feature].to(dtype)).sum(dim=-1)
+            scales = reads * active_coefficient.to(dtype)
+            writes = scales[:, None] * self.U[active_feature].to(dtype)
+            output.index_add_(0, active_position, writes)
+        output = output.reshape(batch, anchors, self.d_out)
+        if self.b_out is not None:
+            output = output + self.b_out.to(dtype)
+        return output
+
     def factors(self) -> tuple[Tensor, Tensor]:
         """Return ``(U,V)`` with feature ``c`` on axis zero."""
 

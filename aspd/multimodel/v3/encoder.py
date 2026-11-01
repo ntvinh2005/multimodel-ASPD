@@ -254,6 +254,7 @@ class HierarchicalV3Encoder(nn.Module):
         self,
         packers: Mapping[str, InputPacker | nn.Module],
         *,
+        model_order: Sequence[str] = MODEL_ORDER,
         intra_layers: int,
         intra_heads: int,
         cross_layers: int,
@@ -265,8 +266,11 @@ class HierarchicalV3Encoder(nn.Module):
         dtype: torch.dtype | None = None,
     ):
         super().__init__()
-        if tuple(packers) != MODEL_ORDER:
-            raise ValueError("v3 encoder packers must be ordered qwen, gemma, phi")
+        self.model_order = tuple(model_order)
+        if len(self.model_order) != 3 or tuple(packers) != self.model_order:
+            raise ValueError(
+                f"v3 encoder packers must contain three ordered models: {self.model_order}"
+            )
         widths = {key: int(value.token_width) for key, value in packers.items()}
         incompatible_intra = {
             key: width for key, width in widths.items() if width % intra_heads
@@ -276,13 +280,13 @@ class HierarchicalV3Encoder(nn.Module):
                 "intra-model token widths must be divisible by attention heads before "
                 f"module allocation: heads={intra_heads}, widths={incompatible_intra}"
             )
-        packed_cross_width = max(widths.values()) + len(MODEL_ORDER) + 2
+        packed_cross_width = max(widths.values()) + len(self.model_order) + 2
         cross_width = packed_cross_width if cross_width is None else cross_width
         if cross_width % cross_heads:
             raise ValueError(
                 "cross-model token width must be divisible by attention heads before "
                 f"module allocation: content_width={max(widths.values())}, "
-                f"identity_width={len(MODEL_ORDER) + 2}, cross_width={cross_width}, "
+                f"identity_width={len(self.model_order) + 2}, cross_width={cross_width}, "
                 f"heads={cross_heads}"
             )
         latent_tokens = {key: int(value.latent_tokens) for key, value in packers.items()}
@@ -328,14 +332,14 @@ class HierarchicalV3Encoder(nn.Module):
         layer_activations: Mapping[str, Sequence[Tensor]],
         valid_anchors: Tensor,
     ) -> Tensor:
-        if tuple(layer_activations) != MODEL_ORDER:
-            raise ValueError("v3 activations must be ordered qwen, gemma, phi")
+        if tuple(layer_activations) != self.model_order:
+            raise ValueError(f"v3 activations must be ordered {self.model_order}")
         intra_tokens: dict[str, Tensor] = {}
-        for key in MODEL_ORDER:
+        for key in self.model_order:
             concatenated = concatenate_layer_activations(layer_activations[key])
             packed = self._packers[key](concatenated)  # type: ignore[operator]
             intra_tokens[key] = self.intra[key](packed)
-        cross = pack_cross_model_tokens(intra_tokens)
+        cross = pack_cross_model_tokens(intra_tokens, model_order=self.model_order)
         expected = 3 * next(iter(self.latent_tokens.values())) + 2
         if cross.values.shape[2] != expected:
             raise AssertionError("v3 cross-model sequence must have length 3a+2")
