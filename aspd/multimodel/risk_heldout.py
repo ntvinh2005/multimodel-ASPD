@@ -700,7 +700,7 @@ def analyze_heldout_confirmation(
             lo, hi = paired_bootstrap_ci(
                 values,
                 replicates=int(contract["statistical_contract"]["bootstrap_replicates"]),
-                seed=int(contract["statistical_contract"]["bootstrap_seed"]) + component_id,
+                seed=int(contract["statistical_contract"]["bootstrap_seed"]),
             )
             analyses.append(
                 {
@@ -788,6 +788,41 @@ def analyze_heldout_confirmation(
                 if int(row["component_id"]) in {2883, 4742, 4300} and float(row["alpha"]) == 1.0:
                     discovery[int(row["component_id"])] = row
     destination.mkdir(parents=True, exist_ok=False)
+    order_rows = [
+        {
+            key: row[key]
+            for key in (
+                "component_id", "pair_id", "condition", "order_variant", "model_name",
+                "clean_margin", "patched_margin", "exact_delta_margin",
+                "causal_comparison_valid", "invalid_reason",
+            )
+        }
+        for row in records
+        if row["arm"] == "learned"
+    ]
+    order_csv = destination / "rccas_stage4_heldout_learned_order_effects.csv"
+    with order_csv.open("x", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(order_rows[0]))
+        writer.writeheader()
+        writer.writerows(order_rows)
+    invalid_fields = (
+        "component_id", "pair_id", "condition", "order_variant", "model_name",
+        "arm", "invalid_reason", "actual_applied_output_difference_l2",
+        "candidate_actual_applied_output_difference_l2",
+    )
+    invalid_rows = [
+        {
+            key: row.get(key)
+            for key in invalid_fields
+        }
+        for row in records
+        if not row["causal_comparison_valid"]
+    ]
+    invalid_csv = destination / "rccas_stage4_heldout_invalid_records.csv"
+    with invalid_csv.open("x", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(invalid_fields))
+        writer.writeheader()
+        writer.writerows(invalid_rows)
     stats_csv = destination / "rccas_stage4_heldout_statistics.csv"
     with stats_csv.open("x", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(analyses[0]))
@@ -813,6 +848,34 @@ def analyze_heldout_confirmation(
             f"{row['adjusted_p_value_target_risk']:.6g} | "
             f"beneficial {row['beneficial_flips']}, harmful {row['harmful_flips']} | {row['classification']} |"
         )
+    lines.extend([
+        "", "## Per-pair Target-risk learned effects", "",
+        "| Pair | Component 2883 | Component 4742 | Component 4300 |",
+        "|---|---:|---:|---:|",
+    ])
+    pair_ids = sorted(pair_payload["2883"]["target_risk_effect"])
+    for pair_id in pair_ids:
+        lines.append(
+            f"| {pair_id} | {pair_payload['2883']['target_risk_effect'][pair_id]:.6f} | "
+            f"{pair_payload['4742']['target_risk_effect'][pair_id]:.6f} | "
+            f"{pair_payload['4300']['target_risk_effect'][pair_id]:.6f} |"
+        )
+    invalid_scopes = Counter(
+        (row["component_id"], row["model_name"], row["condition"], row["arm"])
+        for row in invalid_rows
+    )
+    lines.extend([
+        "", "## Validity and decision audit", "",
+        f"- Invalid records: `{len(invalid_rows)}`; every one remains in the immutable raw file and the compact invalid-record CSV.",
+        f"- Invalid reasons: `{dict(sorted(Counter(str(row['invalid_reason']) for row in invalid_rows).items()))}`.",
+        f"- Invalid-record scopes: `{dict(sorted(invalid_scopes.items()))}`.",
+        "- The learned-order CSV preserves primary and swapped A/B measurements separately; inference averages them within pair.",
+    ])
+    for row in summaries:
+        lines.append(
+            f"- Component {row['component_id']}: beneficial flips `{row['beneficial_flips']}`, "
+            f"harmful flips `{row['harmful_flips']}`, net PROCEED change `{row['net_proceed_change']}`."
+        )
     lines.extend(["", "## Discovery comparison", ""])
     for row in summaries:
         prior = discovery.get(int(row["component_id"]))
@@ -836,7 +899,9 @@ def analyze_heldout_confirmation(
         "records_sha256": sha256_file(records_path),
         "artifacts": {
             path.name: sha256_file(path)
-            for path in (stats_csv, summary_json, pair_json, report_path)
+            for path in (
+                stats_csv, summary_json, pair_json, order_csv, invalid_csv, report_path
+            )
         },
     }
     _atomic_new_json(destination / "analysis_manifest.json", manifest)
