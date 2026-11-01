@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "status": "HELDOUT_ANALYSIS_COMPLETE",
+  "slurm_job_id": "48633982",
+  "slurm_state": "COMPLETED",
+  "slurm_exit_code": "0:0",
+  "slurm_elapsed": "00:02:07",
+  "exact_runtime_seconds": 18.416478225961328,
+  "resources": {
+    "partition": "hpg-b200",
+    "gpu": "1 x NVIDIA B200",
+    "cpus": 16,
+    "memory": "192G",
+    "walltime": "01:00:00",
+    "node": "c0906a-s15",
+    "peak_gpu_memory_bytes": 35442759680
+  },
+  "execution_code_commit": "2e33009219113f6f4929d41f596c6b4bb3ef694b",
+  "analysis_code_commit": "08046bc1f5342d15d57740566fa04408c8fbc222",
+  "original_source_experiment_commit": "e7d616c0ad05aa6e5cc53daec5dbf358be8fc560",
+  "checkpoint_sha256": "bbd4f6023566f25775d1daa300dd9e5de40e54cb0e1aa07c2819b1c27c9b30d6",
+  "dataset_sha256": "e9891ca0a0babe13f5ea4ad27b21205c789fa67fbe13ac004aeb262c39517ef3",
+  "contract_sha256": "94a32d4b732c124348dfd0abaa5ba7d17a34fc47012f08f72468dedb3d4d6600",
+  "frozen_candidates_sha256": "de38519b0bffd2c5435ca0e9e61b40a883fc927b226e3528fdc2bac82885f2ba",
+  "stage3_report_sha256": "0b8af5efbdcc93dbe49384a65cf8021884822223970826717a186c241337cde6",
+  "heldout_records_sha256": "9af8a6981fac8d07806909fcf88e4991c158e36a35f98e645508c4b4e3d5faab",
+  "record_count": 2016,
+  "invalid_control_record_count": 48,
+  "invalid_learned_record_count": 0,
+  "maximum_gate_off_margin_error": 0.0,
+  "source_weights_unchanged": true,
+  "hook_cleanup_passed": true,
+  "published_artifact_sha256": {
+    "rccas_stage4_heldout_confirmation.md": "26c72c2969bfe0cd70e15a58e40e8a1b1ba64bd8ded05fbade4ff95d42406683",
+    "rccas_stage4_heldout_invalid_records.csv": "0e7fd3de1d5193a4fda3c8cd370ed31955439aaf4367ab773c62c7c9511deca1",
+    "rccas_stage4_heldout_learned_order_effects.csv": "4534bfbd755d402f385b02f8eb6f93e4060f756869fcdef415d2f2b61d53c666",
+    "rccas_stage4_heldout_pair_effects.json": "0440cc61fe0c00446d12b2035779886e2f0e19d9040c001bf9b33e65a7bb83c4",
+    "rccas_stage4_heldout_statistics.csv": "03ab55580ca2ae065e7ccd6f1ccb75a4ed8ecdad3706ca32abf59f51abe4df3e",
+    "rccas_stage4_heldout_summary.json": "c3bf87ce77b000fa4483181ead9bf218151635435cd301ca30d404162ee83aea"
+  },
+  "scientific_boundary": "Confirmed effects establish causal influence on the held-out fixed-prefix choice readout, not verified mediation of the original fine-tuning process."
+}
