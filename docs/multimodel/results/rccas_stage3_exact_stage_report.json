@@ -1,0 +1,79 @@
+{
+  "approved_walltime_seconds": 21600,
+  "candidate_count": 25,
+  "checkpoint_sha256": "bbd4f6023566f25775d1daa300dd9e5de40e54cb0e1aa07c2819b1c27c9b30d6",
+  "choice_item_count": 96,
+  "claim_boundary": "Exact choice-margin changes remain exploratory; a risk-specific mechanism requires separation from same-prefix norm-matched controls and held-out evaluation.",
+  "compute_feasibility_status": "COMPUTE_FEASIBILITY_GO",
+  "config_sha256": "b186f29048537bb1f9f8ee970f7be0bd51bd9f426018dc711f84b32e343ffcf9",
+  "dataset_sha256": "e9891ca0a0babe13f5ea4ad27b21205c789fa67fbe13ac004aeb262c39517ef3",
+  "feasibility_only": false,
+  "frozen_candidates_sha256": "de38519b0bffd2c5435ca0e9e61b40a883fc927b226e3528fdc2bac82885f2ba",
+  "git_commit": "e7d616c0ad05aa6e5cc53daec5dbf358be8fc560",
+  "heldout_measured": false,
+  "hook_cleanup_passed": true,
+  "incremental_peak_gpu_memory_bytes": 663020544,
+  "ineffective_learned_record_count": 564,
+  "invalid_matched_control_record_count": 14625,
+  "learned_alpha_one_observation_count": 4800,
+  "learned_alpha_one_predicted_exact_pearson": 0.5837258124484669,
+  "learned_alpha_one_sign_reversal_count": 973,
+  "multiple_testing_status": "EXPLORATORY_DISCOVERY_ONLY_NO_SIGNIFICANCE_CLAIM; held-out paired tests and multiplicity correction are required after candidate freeze",
+  "peak_gpu_memory_bytes_during_exact_forwards": 35456783360,
+  "projected_full_exact_pilot_seconds": 834.7571508488618,
+  "readout_validation_report_sha256": "d870bf289d4dd11967b21c009ff673a34cd7be363f8c57158db540e02ef06ca6",
+  "record_count": 100800,
+  "records_sha256": "57d0712441faf3a39920a1d51fb44ea3d83470a2af04b642c1f04fa604cc7899",
+  "resident_gpu_memory_bytes_before_exact_forwards": 34793762816,
+  "runtime_seconds": 834.7571508488618,
+  "scientific_preflight_checks": {
+    "at_least_one_effective_learned_intervention": true,
+    "every_required_control_has_a_valid_same_prefix_comparison": true,
+    "hook_cleanup_passed": true,
+    "invalid_comparisons_preserve_failure_reasons": true,
+    "screening_artifact_hashes_verified": true,
+    "source_weights_unchanged": true
+  },
+  "scientific_preflight_status": "SCIENTIFIC_PREFLIGHT_GO",
+  "scientific_status": "EXACT_FIXED_PREFIX_EFFECTS_BEHAVIORAL_MECHANISM_UNVERIFIED",
+  "screening_artifact_hash_audit": {
+    "component_attribution_summary.csv": {
+      "bytes": 8981231,
+      "sha256": "194d5731a34dfe62c182e623cbf45b1ba644aee507c8b366895a578b77125263"
+    },
+    "discovery_attribution_tensors.pt": {
+      "bytes": 84944971,
+      "sha256": "14f1555bf03b3a4a7f741e81ffb099571c5bed5160c378a3cff3bf2f2607e499"
+    },
+    "frozen_candidates.json": {
+      "bytes": 29220,
+      "sha256": "de38519b0bffd2c5435ca0e9e61b40a883fc927b226e3528fdc2bac82885f2ba"
+    }
+  },
+  "screening_manifest_sha256": "b7825e933cfc829fa20c1c49be2bec15cc9e40d1d755d0cb85fe660b4cb1d310",
+  "source_model_provenance": [
+    {
+      "adapter_base_model_id": null,
+      "adapter_base_revision": null,
+      "adapter_merged": false,
+      "adapter_model_id": null,
+      "adapter_revision": null,
+      "model_kind": "full_checkpoint"
+    },
+    {
+      "adapter_base_model_id": "unsloth/Qwen2.5-7B-Instruct",
+      "adapter_base_revision": "a75c9dc945567a9b6f568b8503a0307731607bee",
+      "adapter_merged": true,
+      "adapter_model_id": "ModelOrganismsForEM/Qwen2.5-7B-Instruct_extreme-sports",
+      "adapter_revision": "6aa7e935c74c519c66555a111d1e6982059bd82d",
+      "model_kind": "peft_merged"
+    }
+  ],
+  "source_weights_unchanged": true,
+  "status": "EXACT_PILOT_COMPLETED_UNVERIFIED",
+  "valid_control_coverage": {
+    "active_matched": true,
+    "orthogonal_matched": true,
+    "random_same_l2_seed_": true
+  }
+}
