@@ -176,6 +176,64 @@ class RankOneComponents(nn.Module):
             output = output + self.b_out.to(dtype)
         return output
 
+    def forward_sparse_csr(
+        self,
+        x: Tensor,
+        crow_indices: Tensor,
+        active_feature: Tensor,
+        active_coefficient: Tensor,
+        *,
+        compute_dtype: torch.dtype | None = None,
+    ) -> Tensor:
+        """Equivalent sampled-dense/dense plus sparse/dense reconstruction.
+
+        The CSR pattern is shared by every matrix at one grounding site.  Unlike the
+        indexed implementation, this path does not materialize a copy of every U/V row
+        for every active anchor-feature pair.
+        """
+
+        if x.ndim != 3 or x.shape[-1] != self.d_in:
+            raise ValueError("sparse rank-one input must have shape [B,A,d_in]")
+        batch, anchors, _ = x.shape
+        rows = batch * anchors
+        if crow_indices.shape != (rows + 1,):
+            raise ValueError("CSR row pointer does not match the anchor grid")
+        if active_feature.ndim != 1 or active_coefficient.shape != active_feature.shape:
+            raise ValueError("CSR sparse feature and coefficient vectors must match")
+        if int(crow_indices[-1]) != active_feature.numel():
+            raise ValueError("CSR row pointer disagrees with the active feature count")
+        dtype = x.dtype if compute_dtype is None else compute_dtype
+        flat_x = x.reshape(rows, self.d_in).to(dtype)
+        if self.b_dec is not None:
+            flat_x = flat_x - self.b_dec.to(dtype)
+        if active_feature.numel() == 0:
+            output = torch.zeros(rows, self.d_out, device=x.device, dtype=dtype)
+        else:
+            coefficients = active_coefficient.to(dtype)
+            pattern = torch.sparse_csr_tensor(
+                crow_indices,
+                active_feature,
+                coefficients,
+                size=(rows, self.n_features),
+            )
+            reads = torch.sparse.sampled_addmm(
+                pattern,
+                flat_x,
+                self.V.T.to(dtype),
+                beta=0,
+            )
+            weighted = torch.sparse_csr_tensor(
+                crow_indices,
+                active_feature,
+                reads.values() * coefficients,
+                size=(rows, self.n_features),
+            )
+            output = torch.sparse.mm(weighted, self.U.to(dtype))
+        output = output.reshape(batch, anchors, self.d_out)
+        if self.b_out is not None:
+            output = output + self.b_out.to(dtype)
+        return output
+
     def factors(self) -> tuple[Tensor, Tensor]:
         """Return ``(U,V)`` with feature ``c`` on axis zero."""
 

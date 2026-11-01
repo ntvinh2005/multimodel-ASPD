@@ -155,6 +155,7 @@ class ModelOwnedMain2B(nn.Module):
         native_biases: Mapping[str, Tensor | None] | None = None,
         device: torch.device | str | None = None,
         dtype: torch.dtype = torch.float32,
+        sparse_backend: str = "indexed",
     ):
         super().__init__()
         if tuple(registry) != MODEL_ORDER_2B or local_model_key not in registry:
@@ -163,6 +164,9 @@ class ModelOwnedMain2B(nn.Module):
         self.local_model_key = local_model_key
         self.model_order = MODEL_ORDER_2B
         self.layout = registry[local_model_key]
+        if sparse_backend not in {"indexed", "csr"}:
+            raise ValueError(f"unknown model-owned sparse backend: {sparse_backend}")
+        self.sparse_backend = sparse_backend
         self.targets = {target.key: target for target in self.layout.targets()}
         if len(self.targets) != 56:
             raise ValueError("each model-owned rank must own exactly 56 matrix targets")
@@ -263,6 +267,7 @@ class ModelOwnedMain2B(nn.Module):
                     target,
                     batch.valid_anchors,
                     support=support[site],
+                    sparse_backend=self.sparse_backend,
                 )
                 auxk = auxk_dead_feature_loss(
                     scores[site],
@@ -302,6 +307,7 @@ class ModelOwnedMain2B(nn.Module):
                     if batch.matrix_inputs[key].device.type == "cuda"
                     else batch.matrix_inputs[key].dtype
                 ),
+                sparse_backend=self.sparse_backend,
             )
             value = masked_fvu(prediction, batch.matrix_outputs[key], batch.valid_anchors)
             yield key, site, value, 0.5 / global_counts[site]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from typing import Literal
 
 import torch
 from torch import Tensor, nn
@@ -68,6 +69,7 @@ def matryoshka_activation_fvu(
     *,
     group_fracs: Sequence[float] = MATRYOSHKA_GROUP_FRACS,
     support: SparseSupport | None = None,
+    sparse_backend: Literal["indexed", "csr"] = "indexed",
 ) -> tuple[Tensor, Tensor]:
     """Official-style empty+nested-prefix MSE normalized into FVU units."""
 
@@ -83,7 +85,13 @@ def matryoshka_activation_fvu(
                 flat_code.to(decoder.weight.dtype), boundaries=boundaries, include_bias=True
             )
             if support is None
-            else decoder.forward_sparse(support, boundaries=boundaries, include_bias=True)
+            else (
+                decoder.forward_sparse(support, boundaries=boundaries, include_bias=True)
+                if sparse_backend == "indexed"
+                else decoder.forward_sparse_csr(
+                    support, boundaries=boundaries, include_bias=True
+                )
+            )
         )
         assert isinstance(decoded, tuple)
         reconstructions = tuple(

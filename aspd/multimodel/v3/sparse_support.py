@@ -15,6 +15,7 @@ class SparseSupport:
     position: Tensor
     feature: Tensor
     coefficient: Tensor
+    crow_indices: Tensor
     grid_shape: tuple[int, int]
     n_features: int
 
@@ -39,10 +40,16 @@ def prepare_sparse_support(
         if binary
         else flat[position, feature]
     )
+    rows = int(code.shape[0] * code.shape[1])
+    counts = torch.bincount(position, minlength=rows)
+    crow_indices = torch.cat(
+        (torch.zeros(1, dtype=torch.int64, device=code.device), counts.cumsum(0))
+    )
     return SparseSupport(
         position=position,
         feature=feature,
         coefficient=coefficient,
+        crow_indices=crow_indices,
         grid_shape=(int(code.shape[0]), int(code.shape[1])),
         n_features=int(code.shape[-1]),
     )

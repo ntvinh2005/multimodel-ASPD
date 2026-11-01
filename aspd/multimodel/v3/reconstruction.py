@@ -104,6 +104,47 @@ class ActivationDecoder(nn.Linear):
             for value in reconstructions
         )
 
+    def forward_sparse_csr(
+        self,
+        support: SparseSupport,
+        *,
+        boundaries: Sequence[int] | None = None,
+        include_bias: bool = True,
+    ) -> Tensor | tuple[Tensor, ...]:
+        """Decode the prepared support with sparse/dense matrix multiplication."""
+
+        if support.n_features != self.in_features:
+            raise ValueError("activation decoder support has the wrong dictionary width")
+        rows = support.grid_shape[0] * support.grid_shape[1]
+        dtype = support.coefficient.dtype
+        bias = torch.zeros(rows, self.out_features, device=self.weight.device, dtype=dtype)
+        if include_bias and self.bias is not None:
+            bias = bias + self.bias.to(dtype)
+
+        def decode(coefficients: Tensor) -> Tensor:
+            code = torch.sparse_csr_tensor(
+                support.crow_indices,
+                support.feature,
+                coefficients,
+                size=(rows, self.in_features),
+            )
+            return bias + torch.sparse.mm(code, self.weight.T.to(dtype))
+
+        if boundaries is None:
+            return decode(support.coefficient).reshape(
+                *support.grid_shape, self.out_features
+            )
+        if not boundaries or boundaries[0] != 0 or boundaries[-1] != self.in_features:
+            raise ValueError("Matryoshka boundaries must cover the complete feature axis")
+        reconstructions = [bias]
+        for upper in boundaries[1:]:
+            coefficients = support.coefficient * (support.feature < upper).to(dtype)
+            reconstructions.append(decode(coefficients))
+        return tuple(
+            value.reshape(*support.grid_shape, self.out_features)
+            for value in reconstructions
+        )
+
 
 class ActivationReconstructionBank(nn.Module):
     """Model/layer-specific activation decoders; callers choose the explicit code semantics."""
@@ -215,6 +256,7 @@ class RankOneMatrixBank(nn.Module):
         code_semantics: Literal["binary_support", "continuous"],
         support: SparseSupport | None = None,
         compute_dtype: torch.dtype | None = None,
+        sparse_backend: Literal["indexed", "csr"] = "indexed",
     ) -> Tensor:
         """Apply rank-one operators using one explicitly selected provisional semantics."""
 
@@ -239,13 +281,24 @@ class RankOneMatrixBank(nn.Module):
         else:
             if support.grid_shape != tuple(matrix_input.shape[:2]):
                 raise ValueError("prepared support and matrix input grids differ")
-            output = component.forward_sparse(
-                matrix_input,
-                support.position,
-                support.feature,
-                support.coefficient,
-                compute_dtype=compute_dtype,
-            )
+            if sparse_backend == "indexed":
+                output = component.forward_sparse(
+                    matrix_input,
+                    support.position,
+                    support.feature,
+                    support.coefficient,
+                    compute_dtype=compute_dtype,
+                )
+            elif sparse_backend == "csr":
+                output = component.forward_sparse_csr(
+                    matrix_input,
+                    support.crow_indices,
+                    support.feature,
+                    support.coefficient,
+                    compute_dtype=compute_dtype,
+                )
+            else:
+                raise ValueError(f"unknown sparse reconstruction backend: {sparse_backend}")
         bias_name = self._bias_names.get(target_key)
         if bias_name is not None:
             output = output + getattr(self, bias_name)

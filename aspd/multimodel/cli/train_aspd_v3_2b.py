@@ -84,6 +84,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--torch-profiler", action="store_true")
     parser.add_argument("--activation-backward-chunk", type=int)
     parser.add_argument("--matrix-backward-chunk", type=int)
+    parser.add_argument("--sparse-backend", choices=("indexed", "csr"), default="indexed")
     parser.add_argument("--local-files-only", action="store_true")
     parser.add_argument("--skip-checkpoint", action="store_true")
     return parser.parse_args()
@@ -501,6 +502,7 @@ def main() -> None:
         "activation_backward_chunk": activation_backward_chunk,
         "matrix_backward_chunk": matrix_backward_chunk,
         "early_exit_after_selected_layers": config.runtime.early_exit_after_selected_layers,
+        "sparse_backend": args.sparse_backend,
     }
     runtime_fingerprint = hashlib.sha256(
         json.dumps(runtime_payload, sort_keys=True, separators=(",", ":")).encode()
@@ -568,6 +570,7 @@ def main() -> None:
             native_biases=native_biases,
             device=device,
             dtype=torch.float32,
+            sparse_backend=args.sparse_backend,
         )
         model.synchronize_shared_state_()
         optimizer = build_model_owned_adam(model, config)
@@ -807,14 +810,17 @@ def main() -> None:
                     )
             with _timed(args.profile_stages, stage, "trainable_forward_backward"):
                 if args.strategy == "model_owned":
-                    losses = _model_owned_backward(
-                        model,
-                        capture,
-                        config,
-                        pool_scale=1 / 4,
-                        activation_backward_chunk=activation_backward_chunk,
-                        matrix_backward_chunk=matrix_backward_chunk,
-                    )
+                    with torch.autocast(
+                        device_type="cuda", dtype=torch.bfloat16, enabled=True
+                    ):
+                        losses = _model_owned_backward(
+                            model,
+                            capture,
+                            config,
+                            pool_scale=1 / 4,
+                            activation_backward_chunk=activation_backward_chunk,
+                            matrix_backward_chunk=matrix_backward_chunk,
+                        )
                 else:
                     losses = _fsdp_backward(model, capture, pool_index)
             pool_losses.append(losses)
