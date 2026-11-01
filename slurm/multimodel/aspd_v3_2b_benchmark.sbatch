@@ -5,7 +5,6 @@
 #SBATCH --time=01:00:00
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
-#SBATCH --signal=B:USR1@180
 #SBATCH --output=slurm/logs/aspd-v3-2b-benchmark-%j.out
 #SBATCH --error=slurm/logs/aspd-v3-2b-benchmark-%j.err
 
