@@ -137,6 +137,74 @@ def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:
         os.fsync(handle.fileno())
 
 
+def _start_gpu_telemetry(path: Path) -> tuple[subprocess.Popen[str], Any]:
+    handle = path.open("x", encoding="utf-8")
+    query = ",".join(
+        (
+            "timestamp",
+            "index",
+            "utilization.gpu",
+            "utilization.memory",
+            "memory.used",
+            "power.draw",
+            "clocks.sm",
+        )
+    )
+    process = subprocess.Popen(
+        [
+            "nvidia-smi",
+            f"--query-gpu={query}",
+            "--format=csv,noheader,nounits",
+            "-l",
+            "1",
+        ],
+        stdout=handle,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    return process, handle
+
+
+def _stop_gpu_telemetry(process: subprocess.Popen[str], handle: Any) -> None:
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
+    handle.close()
+
+
+def _summarize_gpu_telemetry(path: Path) -> dict[str, dict[str, float | int]]:
+    columns = (
+        "gpu_utilization_percent_mean",
+        "memory_utilization_percent_mean",
+        "memory_used_mib_mean",
+        "power_watts_mean",
+        "sm_clock_mhz_mean",
+    )
+    values: dict[str, list[list[float]]] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        parts = [part.strip() for part in line.split(",")]
+        if len(parts) != 7:
+            continue
+        try:
+            row = [float(value) for value in parts[2:]]
+        except ValueError:
+            continue
+        values.setdefault(parts[1], []).append(row)
+    result: dict[str, dict[str, float | int]] = {}
+    for index, rows in values.items():
+        result[index] = {"samples": len(rows)}
+        result[index].update(
+            {
+                name: sum(row[column] for row in rows) / len(rows)
+                for column, name in enumerate(columns)
+            }
+        )
+    return result
+
+
 def _read_manifest(path: Path, kind: str) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if payload.get("kind") != kind:
@@ -748,6 +816,8 @@ def main() -> None:
     checkpoint_manifest = None
     resumed = False
     started = time.perf_counter()
+    telemetry_path = args.run_dir / "gpu_telemetry.csv"
+    telemetry = _start_gpu_telemetry(telemetry_path) if rank == 0 else None
     profiler = None
     if args.torch_profiler:
         profiler = torch.profiler.profile(
@@ -1023,6 +1093,9 @@ def main() -> None:
             str(args.run_dir / f"torch_profile_rank{rank:02d}.json")
         )
 
+    if telemetry is not None:
+        _stop_gpu_telemetry(*telemetry)
+
     if rank == 0:
         rows = [json.loads(line) for line in metrics_path.read_text().splitlines()]
         measured = [row for row in rows if not row["warmup"]]
@@ -1077,6 +1150,7 @@ def main() -> None:
                     {name for row in measured for name in row["stage_seconds"]}
                 )
             },
+            "gpu_telemetry": _summarize_gpu_telemetry(telemetry_path),
         }
         write_json_immutable(args.run_dir / "benchmark_report.json", report)
         if args.mode == "preflight":
