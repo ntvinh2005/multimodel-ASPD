@@ -91,7 +91,7 @@ class _PoolPrefetcher:
         if self.buffered_payload is None and self.future is None:
             self.future = self.executor.submit(self._produce)
 
-    def next_payload(self) -> dict[str, Any]:
+    def next_payload(self, *, schedule_next: bool = True) -> dict[str, Any]:
         if self.buffered_payload is not None:
             payload = self.buffered_payload
             self.buffered_payload = None
@@ -100,13 +100,12 @@ class _PoolPrefetcher:
             assert self.future is not None
             payload = self.future.result()
             self.future = None
-        self.start()
+        if schedule_next:
+            self.start()
         return payload
 
-    def checkpoint_payload(self) -> dict[str, Any]:
-        if self.buffered_payload is None:
-            self.start()
-            assert self.future is not None
+    def checkpoint_payload(self) -> dict[str, Any] | None:
+        if self.buffered_payload is None and self.future is not None:
             self.buffered_payload = self.future.result()
             self.future = None
         return self.buffered_payload
@@ -952,7 +951,13 @@ def main() -> None:
             with _timed(args.profile_stages, stage, "data_alignment_and_broadcast"):
                 payload = None
                 if rank == 0:
-                    payload = prefetcher.next_payload()
+                    final_planned_pool = (
+                        completed_steps + 1 >= args.max_steps
+                        and pool_index + 1 >= config.architecture.pools_per_step
+                    )
+                    payload = prefetcher.next_payload(
+                        schedule_next=not final_planned_pool
+                    )
                     pool = AlignedAnchorPool.from_payload(payload)
                     for observation in pool.source_observations:
                         ledger.observe_raw_tokens(

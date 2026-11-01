@@ -74,6 +74,14 @@ def test_prefetch_checkpoint_preserves_exact_pool_order() -> None:
     assert resumed.next_payload() == {"value": 2}
     resumed.close()
 
+    final_stream = _FakeStream()
+    final_prefetcher = _PoolPrefetcher(final_stream, pool_anchors=2048)
+    final_prefetcher.start()
+    assert final_prefetcher.next_payload(schedule_next=False) == {"value": 0}
+    assert final_stream.cursor == 1
+    assert final_prefetcher.checkpoint_payload() is None
+    final_prefetcher.close()
+
 
 def test_main_2b_contract_and_registry_are_incompatible_and_complete() -> None:
     config = _config()
