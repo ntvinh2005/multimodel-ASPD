@@ -11,11 +11,11 @@ from torch import nn
 from aspd.multimodel.components import RankOneComponents
 from aspd.multimodel.v3.data import SQLiteExposureLedger
 from aspd.multimodel.v3.main_2b_config import MODEL_ORDER_2B, load_main_2b_v1_config
-from aspd.multimodel.v3.model_owned import model_owned_parameter_counts
 from aspd.multimodel.v3.model_owned import (
     LocalCaptureBatch,
     ModelOwnedMain2B,
     build_model_owned_adam,
+    model_owned_parameter_counts,
 )
 from aspd.multimodel.v3.model_owned_checkpoint import ModelOwnedCheckpoint
 from aspd.multimodel.v3.production_stream import ModelPoolInputs

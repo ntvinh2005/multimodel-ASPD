@@ -21,6 +21,7 @@ from typing import Any
 
 import torch
 import torch.distributed as dist
+from torch.nn import functional as F
 
 from aspd.multimodel.v3.data import (
     ExposureLedgerReceipt,
@@ -29,6 +30,7 @@ from aspd.multimodel.v3.data import (
     write_json_immutable,
 )
 from aspd.multimodel.v3.distributed_checkpoint import MainV1DistributedCheckpoint
+from aspd.multimodel.v3.hooks import assert_frozen_backbone, logical_weight_bias
 from aspd.multimodel.v3.main_2b_config import (
     MODEL_ORDER_2B,
     V3Main2BV1Config,
@@ -50,6 +52,7 @@ from aspd.multimodel.v3.model_owned_checkpoint import ModelOwnedCheckpoint
 from aspd.multimodel.v3.models import load_frozen_v3_model, load_v3_tokenizer
 from aspd.multimodel.v3.production_stream import (
     AlignedAnchorPool,
+    ModelPoolInputs,
     PileAlignedAnchorStream,
     load_pinned_pile_dataset,
 )
@@ -157,6 +160,94 @@ def _load_sources(rank: int, registry, device, local_files_only: bool):
             for key in MODEL_ORDER_2B
         }
     return local_key, tokenizer, loaded, alignment_tokenizers
+
+
+def _real_source_correctness_smoke(
+    local_key: str,
+    tokenizer: Any,
+    loaded: Any,
+    registry: Any,
+    device: torch.device,
+) -> dict[str, Any]:
+    """Verify all 56 native projections, hook removal, and early-exit parity."""
+
+    layout = registry[local_key]
+    assert_frozen_backbone(loaded.forward_model)
+    encoded = tokenizer(
+        "ASPD hook parity: Unicode café — code x += 1.",
+        add_special_tokens=True,
+        return_attention_mask=True,
+    )
+    ids = tuple(int(value) for value in encoded["input_ids"])
+    mask = tuple(int(value) for value in encoded["attention_mask"])
+    anchor_count = min(8, len(ids))
+    pool = ModelPoolInputs(
+        input_ids=(ids,),
+        attention_masks=(mask,),
+        anchor_document_indices=(0,) * anchor_count,
+        anchor_token_indices=tuple(range(anchor_count)),
+    )
+    model_inputs = {
+        "input_ids": torch.tensor([ids], dtype=torch.long, device=device),
+        "attention_mask": torch.tensor([mask], dtype=torch.long, device=device),
+    }
+    with torch.inference_mode():
+        before = loaded.forward_model(
+            **model_inputs, use_cache=False, return_dict=True
+        ).logits.detach()
+    full = capture_family_pool(
+        loaded.forward_model,
+        layout,
+        pool,
+        pad_token_id=_pad_id(tokenizer),
+        device=device,
+        early_exit=False,
+    )
+    early = capture_family_pool(
+        loaded.forward_model,
+        layout,
+        pool,
+        pad_token_id=_pad_id(tokenizer),
+        device=device,
+        early_exit=True,
+    )
+    with torch.inference_mode():
+        after = loaded.forward_model(
+            **model_inputs, use_cache=False, return_dict=True
+        ).logits.detach()
+    torch.testing.assert_close(after, before, rtol=0, atol=0)
+    maximum_projection_error = 0.0
+    for target in layout.targets():
+        weight, bias, _path = logical_weight_bias(loaded.forward_model, target)
+        expected = F.linear(full.matrix_inputs[target.key], weight, bias)
+        observed = full.matrix_outputs[target.key]
+        torch.testing.assert_close(observed, expected, rtol=2e-2, atol=2e-2)
+        maximum_projection_error = max(
+            maximum_projection_error,
+            float((observed.float() - expected.float()).abs().max()),
+        )
+        torch.testing.assert_close(
+            early.matrix_inputs[target.key], full.matrix_inputs[target.key], rtol=0, atol=0
+        )
+        torch.testing.assert_close(
+            early.matrix_outputs[target.key], full.matrix_outputs[target.key], rtol=0, atol=0
+        )
+    for full_values, early_values in (
+        (full.residual_pre, early.residual_pre),
+        (full.residual_mid, early.residual_mid),
+    ):
+        for full_value, early_value in zip(full_values, early_values, strict=True):
+            torch.testing.assert_close(early_value, full_value, rtol=0, atol=0)
+    assert_frozen_backbone(loaded.forward_model)
+    return {
+        "model": local_key,
+        "status": "PASS",
+        "targets": len(layout.targets()),
+        "early_exit_capture_parity": "PASS",
+        "hook_forward_immutability": "PASS",
+        "frozen_parameters": "PASS",
+        "maximum_native_projection_absolute_error": maximum_projection_error,
+    }
 
 
 def _capture_local(
@@ -380,6 +471,11 @@ def main() -> None:
     local_key, tokenizer, loaded, alignment_tokenizers = _load_sources(
         rank, registry, device, args.local_files_only
     )
+    local_source_smoke = _real_source_correctness_smoke(
+        local_key, tokenizer, loaded, registry, device
+    )
+    source_smokes = [None] * world
+    dist.all_gather_object(source_smokes, local_source_smoke)
 
     if args.strategy == "model_owned":
         native_biases = {
@@ -480,6 +576,7 @@ def main() -> None:
                 "torch": torch.__version__,
                 "cuda": torch.version.cuda,
                 "parameter_analysis": model_owned_parameter_counts(config, registry),
+                "source_correctness": source_smokes,
             },
         )
     dist.barrier()
