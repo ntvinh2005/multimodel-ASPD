@@ -922,6 +922,9 @@ def main() -> None:
     signal.signal(signal.SIGUSR1, request_stop)
     metrics_path = args.run_dir / "metrics.jsonl"
     checkpoint_seconds = 0.0
+    checkpoint_save_seconds = 0.0
+    checkpoint_reload_seconds = 0.0
+    checkpoint_restore_probe = "NOT_RUN"
     checkpoint_path: Path | None = None
     checkpoint_manifest = None
     resumed = False
@@ -1146,6 +1149,7 @@ def main() -> None:
                 "stream": stream_state,
                 "prefetched_pool": prefetched_pool,
             }
+            save_started = time.perf_counter()
             if args.strategy == "model_owned":
                 checkpoint_manifest = checkpoint_manager.save(
                     step=completed_steps,
@@ -1169,8 +1173,25 @@ def main() -> None:
                     config_file_sha256=config_sha,
                     dataset_manifest_sha256=dataset_manifest["manifest_sha256"],
                 )
+            checkpoint_save_seconds = time.perf_counter() - save_started
             checkpoint_path = args.run_dir / "checkpoints" / f"step-{completed_steps:09d}"
             if preflight_reload_due:
+                probe_parameter = next(model.parameters())
+                probe_parameter_value = probe_parameter.detach().reshape(-1)[0].clone()
+                optimizer_state = optimizer.state.get(probe_parameter, {})
+                optimizer_probes = [
+                    (key, value)
+                    for key, value in optimizer_state.items()
+                    if isinstance(value, torch.Tensor) and value.numel() > 1
+                ]
+                if not optimizer_probes:
+                    raise RuntimeError("preflight found no materialized Adam tensor to restore")
+                probe_optimizer_key, probe_optimizer = optimizer_probes[0]
+                probe_optimizer_value = probe_optimizer.detach().reshape(-1)[0].clone()
+                with torch.no_grad():
+                    probe_parameter.reshape(-1)[0].add_(1)
+                    probe_optimizer.reshape(-1)[0].add_(1)
+                reload_started = time.perf_counter()
                 if args.strategy == "model_owned":
                     restored_runtime, _ = checkpoint_manager.load(
                         path=checkpoint_path,
@@ -1203,6 +1224,19 @@ def main() -> None:
                         )
                     )
                 dist.barrier()
+                checkpoint_reload_seconds = time.perf_counter() - reload_started
+                if not torch.equal(
+                    probe_parameter.detach().reshape(-1)[0], probe_parameter_value
+                ) or not torch.equal(
+                    optimizer.state[probe_parameter][probe_optimizer_key]
+                    .detach()
+                    .reshape(-1)[0],
+                    probe_optimizer_value,
+                ):
+                    raise RuntimeError(
+                        "DCP reload did not restore the perturbed parameter/Adam probe"
+                    )
+                checkpoint_restore_probe = "PASS"
                 resumed = True
             elif args.mode == "main":
                 checkpoint_manager.prune_after_verified_replacement()
@@ -1278,6 +1312,9 @@ def main() -> None:
             "checkpoint_path": None if checkpoint_path is None else str(checkpoint_path),
             "checkpoint_bytes": checkpoint_bytes,
             "checkpoint_seconds_save_reload": checkpoint_seconds,
+            "checkpoint_seconds_save": checkpoint_save_seconds,
+            "checkpoint_seconds_reload": checkpoint_reload_seconds,
+            "checkpoint_parameter_and_adam_restore_probe": checkpoint_restore_probe,
             "checkpoint_manifest": checkpoint_manifest,
             "dcp_save_reload_resume_update": (
                 "PASS" if resumed and completed_steps == args.max_steps else "NOT_RUN"
