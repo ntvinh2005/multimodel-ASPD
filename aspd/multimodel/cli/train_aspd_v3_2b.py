@@ -82,6 +82,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--warmup-steps", type=int, default=1)
     parser.add_argument("--profile-stages", action="store_true")
     parser.add_argument("--torch-profiler", action="store_true")
+    parser.add_argument("--activation-backward-chunk", type=int)
+    parser.add_argument("--matrix-backward-chunk", type=int)
     parser.add_argument("--local-files-only", action="store_true")
     parser.add_argument("--skip-checkpoint", action="store_true")
     return parser.parse_args()
@@ -336,15 +338,17 @@ def _model_owned_backward(
     config: V3Main2BV1Config,
     *,
     pool_scale: float,
+    activation_backward_chunk: int,
+    matrix_backward_chunk: int,
 ) -> dict[str, float]:
     scores, sparse, continuous_support, binary_support = model.encode(capture)
     activation_sum = 0.0
     auxk_sum = 0.0
     details: dict[str, float] = {}
-    activation_chunks = math.ceil(16 / config.runtime.activation_backward_chunk)
+    activation_chunks = math.ceil(16 / activation_backward_chunk)
     terms = model.activation_loss_terms(capture, scores, sparse, continuous_support)
     for chunk_index, chunk in enumerate(
-        _chunked(terms, config.runtime.activation_backward_chunk)
+        _chunked(terms, activation_backward_chunk)
     ):
         loss = sum(
             coefficient * (activation + config.architecture.auxk_coefficient * auxk)
@@ -360,7 +364,7 @@ def _model_owned_backward(
     internal_sum = 0.0
     for chunk in _chunked(
         model.internal_loss_terms(capture, binary_support),
-        config.runtime.matrix_backward_chunk,
+        matrix_backward_chunk,
     ):
         loss = sum(coefficient * value for _key, _site, value, coefficient in chunk)
         (loss * pool_scale).backward()
@@ -461,6 +465,33 @@ def main() -> None:
         raise ValueError("preflight requires 3..20 optimizer steps")
     if args.warmup_steps < 0 or args.warmup_steps >= args.max_steps:
         raise ValueError("warmup steps must leave at least one measured optimizer step")
+    activation_backward_chunk = (
+        config.runtime.activation_backward_chunk
+        if args.activation_backward_chunk is None
+        else args.activation_backward_chunk
+    )
+    matrix_backward_chunk = (
+        config.runtime.matrix_backward_chunk
+        if args.matrix_backward_chunk is None
+        else args.matrix_backward_chunk
+    )
+    if not 1 <= activation_backward_chunk <= 8:
+        raise ValueError("activation backward chunk must be in 1..8")
+    if not 1 <= matrix_backward_chunk <= 56:
+        raise ValueError("matrix backward chunk must be in 1..56")
+    if args.mode != "benchmark" and (
+        args.activation_backward_chunk is not None
+        or args.matrix_backward_chunk is not None
+    ):
+        raise ValueError("runtime chunk overrides are benchmark-only")
+    runtime_payload = {
+        "activation_backward_chunk": activation_backward_chunk,
+        "matrix_backward_chunk": matrix_backward_chunk,
+        "early_exit_after_selected_layers": config.runtime.early_exit_after_selected_layers,
+    }
+    runtime_fingerprint = hashlib.sha256(
+        json.dumps(runtime_payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
     registry = build_model_registry_2b(config)
     config_sha = _sha256(args.config)
     dataset_manifest = _read_manifest(
@@ -489,6 +520,7 @@ def main() -> None:
             "world_size": 3,
             "logical_target_count": 168,
             "dcp_save_reload_resume_update": "PASS",
+            "runtime_fingerprint": runtime_fingerprint,
         }
         mismatch = {
             key: {"expected": value, "observed": preflight.get(key)}
@@ -611,6 +643,8 @@ def main() -> None:
                 "cuda": torch.version.cuda,
                 "parameter_analysis": model_owned_parameter_counts(config, registry),
                 "source_correctness": source_smokes,
+                "runtime": runtime_payload,
+                "runtime_fingerprint": runtime_fingerprint,
             }
         if run_manifest_path.is_file():
             existing_manifest = json.loads(run_manifest_path.read_text(encoding="utf-8"))
@@ -621,6 +655,7 @@ def main() -> None:
                 "config_fingerprint",
                 "dataset_manifest_sha256",
                 "alignment_manifest_sha256",
+                "runtime_fingerprint",
             ):
                 if existing_manifest.get(key) != run_manifest[key]:
                     raise ValueError(f"existing run manifest changed at {key}")
@@ -760,7 +795,12 @@ def main() -> None:
             with _timed(args.profile_stages, stage, "trainable_forward_backward"):
                 if args.strategy == "model_owned":
                     losses = _model_owned_backward(
-                        model, capture, config, pool_scale=1 / 4
+                        model,
+                        capture,
+                        config,
+                        pool_scale=1 / 4,
+                        activation_backward_chunk=activation_backward_chunk,
+                        matrix_backward_chunk=matrix_backward_chunk,
                     )
                 else:
                     losses = _fsdp_backward(model, capture, pool_index)
@@ -993,6 +1033,8 @@ def main() -> None:
             "logical_target_count": 168,
             "model_revisions": {model.key: model.revision for model in config.models},
             "source_correctness": source_smokes,
+            "runtime": runtime_payload,
+            "runtime_fingerprint": runtime_fingerprint,
             "optimizer_steps": completed_steps,
             "accepted_exposures": completed_steps * 8192,
             "warmup_steps": args.warmup_steps,

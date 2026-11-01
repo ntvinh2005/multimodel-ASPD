@@ -29,6 +29,8 @@ WARMUP_STEPS="${WARMUP_STEPS:-1}"
 PROFILE_STAGES="${PROFILE_STAGES:-0}"
 TORCH_PROFILER="${TORCH_PROFILER:-0}"
 SKIP_CHECKPOINT="${SKIP_CHECKPOINT:-1}"
+ACTIVATION_BACKWARD_CHUNK="${ACTIVATION_BACKWARD_CHUNK:-}"
+MATRIX_BACKWARD_CHUNK="${MATRIX_BACKWARD_CHUNK:-}"
 CONFIG=configs/multimodel/aspd_v3/main_2b_v1.yaml
 GIT_SHA="$(git rev-parse HEAD)"
 RUN_TAG="${RUN_TAG:-${MODE}_${STRATEGY}}"
@@ -63,6 +65,12 @@ if [[ "${TORCH_PROFILER}" == "1" ]]; then
 fi
 if [[ "${SKIP_CHECKPOINT}" == "1" ]]; then
   ARGS+=(--skip-checkpoint)
+fi
+if [[ -n "${ACTIVATION_BACKWARD_CHUNK}" ]]; then
+  ARGS+=(--activation-backward-chunk "${ACTIVATION_BACKWARD_CHUNK}")
+fi
+if [[ -n "${MATRIX_BACKWARD_CHUNK}" ]]; then
+  ARGS+=(--matrix-backward-chunk "${MATRIX_BACKWARD_CHUNK}")
 fi
 
 exec ../repo/.venv/bin/torchrun \
