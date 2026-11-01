@@ -31,6 +31,7 @@ from aspd.multimodel.v3.data import (
     write_json_immutable,
 )
 from aspd.multimodel.v3.distributed_checkpoint import MainV1DistributedCheckpoint
+from aspd.multimodel.v3.gating import ORIGINAL_ASPD_N_POOLS_TO_DEAD
 from aspd.multimodel.v3.hooks import assert_frozen_backbone, logical_weight_bias
 from aspd.multimodel.v3.main_2b_config import (
     MODEL_ORDER_2B,
@@ -479,13 +480,20 @@ def _model_owned_backward(
     pool_scale: float,
     activation_backward_chunk: int,
     matrix_backward_chunk: int,
+    auxk_may_be_active: bool,
 ) -> dict[str, float]:
     scores, sparse, continuous_support, binary_support = model.encode(capture)
     activation_values: list[torch.Tensor] = []
     auxk_values: list[torch.Tensor] = []
     details: dict[str, torch.Tensor] = {}
     activation_chunks = math.ceil(16 / activation_backward_chunk)
-    terms = model.activation_loss_terms(capture, scores, sparse, continuous_support)
+    terms = model.activation_loss_terms(
+        capture,
+        scores,
+        sparse,
+        continuous_support,
+        auxk_may_be_active=auxk_may_be_active,
+    )
     for chunk_index, chunk in enumerate(
         _chunked(terms, activation_backward_chunk)
     ):
@@ -985,6 +993,12 @@ def main() -> None:
                             pool_scale=1 / 4,
                             activation_backward_chunk=activation_backward_chunk,
                             matrix_backward_chunk=matrix_backward_chunk,
+                            auxk_may_be_active=(
+                                completed_steps * config.architecture.pools_per_step
+                                + pool_index
+                                + 1
+                                >= ORIGINAL_ASPD_N_POOLS_TO_DEAD
+                            ),
                         )
                 else:
                     losses = _fsdp_backward(model, capture, pool_index)

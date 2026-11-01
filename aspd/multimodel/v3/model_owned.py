@@ -261,11 +261,20 @@ class ModelOwnedMain2B(nn.Module):
         scores: Mapping[str, Tensor],
         sparse: Mapping[str, Any],
         support: Mapping[str, SparseSupport],
+        *,
+        auxk_may_be_active: bool = True,
     ) -> Iterator[tuple[str, Tensor, Tensor, float]]:
         coefficient = 0.5 / (len(self.model_order) * 8)
         for site in SITE_ORDER:
             decoders = self.activation_banks[site].decoders[self.local_model_key]
-            dead_feature_count = int(self.gates[site].dead_features.sum().item())
+            # A feature cannot satisfy the 320-consecutive-pool dead criterion before
+            # pool 320. Avoid a device synchronization on every site during that exact
+            # warm-up interval; zero dead features is guaranteed, not approximated.
+            dead_feature_count = (
+                int(self.gates[site].dead_features.sum().item())
+                if auxk_may_be_active
+                else 0
+            )
             for layer_offset, (decoder, target) in enumerate(
                 zip(decoders, batch.activations[site], strict=True)
             ):
