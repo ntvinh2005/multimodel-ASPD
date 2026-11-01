@@ -121,7 +121,9 @@ class SQLiteStreamDeduplicator:
     def __init__(self, path: str | Path, *, provenance_sha256: str):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.connection = sqlite3.connect(self.path)
+        # One bounded prefetch worker owns stream mutation at a time. Checkpoint state
+        # is read only after its future resolves, so cross-thread access is serialized.
+        self.connection = sqlite3.connect(self.path, check_same_thread=False)
         # Blue is a shared parallel filesystem. SQLite WAL relies on a local shared-memory
         # wal-index and can SIGBUS there; rollback journaling preserves exact transactions.
         journal_mode = self.connection.execute("PRAGMA journal_mode=DELETE").fetchone()[0]

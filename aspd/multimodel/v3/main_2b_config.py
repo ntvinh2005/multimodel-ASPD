@@ -187,6 +187,7 @@ class Runtime2B(BaseModel):
     activation_backward_chunk: int = Field(gt=0, le=8)
     matrix_backward_chunk: int = Field(gt=0, le=56)
     early_exit_after_selected_layers: Literal[True]
+    data_prefetch_depth: Literal[1]
     output_root: str
     checkpoint_root: str
     dataset_manifest: str

@@ -16,6 +16,7 @@ import signal
 import socket
 import subprocess
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -64,6 +65,61 @@ from aspd.multimodel.v3.training_capture import (
 )
 
 SOURCE_RANK = {key: index for index, key in enumerate(MODEL_ORDER_2B)}
+
+
+class _PoolPrefetcher:
+    """One-pool deterministic rank-zero lookahead with checkpointable buffering."""
+
+    def __init__(
+        self,
+        stream: PileAlignedAnchorStream,
+        *,
+        pool_anchors: int,
+        buffered_payload: dict[str, Any] | None = None,
+    ):
+        self.stream = stream
+        self.pool_anchors = pool_anchors
+        self.buffered_payload = buffered_payload
+        self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="aspd-align")
+        self.future: Future[dict[str, Any]] | None = None
+
+    def _produce(self) -> dict[str, Any]:
+        return self.stream.next_pool(pool_anchors=self.pool_anchors).to_payload()
+
+    def start(self) -> None:
+        if self.buffered_payload is None and self.future is None:
+            self.future = self.executor.submit(self._produce)
+
+    def next_payload(self) -> dict[str, Any]:
+        if self.buffered_payload is not None:
+            payload = self.buffered_payload
+            self.buffered_payload = None
+        else:
+            self.start()
+            assert self.future is not None
+            payload = self.future.result()
+            self.future = None
+        self.start()
+        return payload
+
+    def checkpoint_payload(self) -> dict[str, Any]:
+        if self.buffered_payload is None:
+            self.start()
+            assert self.future is not None
+            self.buffered_payload = self.future.result()
+            self.future = None
+        return self.buffered_payload
+
+    def restore(self, payload: dict[str, Any] | None) -> None:
+        if self.future is not None:
+            raise RuntimeError("cannot restore stream while alignment prefetch is active")
+        self.buffered_payload = payload
+
+    def close(self) -> None:
+        if self.future is not None:
+            self.future.result()
+            self.future = None
+        self.executor.shutdown(wait=True)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -571,6 +627,7 @@ def main() -> None:
         "matrix_backward_chunk": matrix_backward_chunk,
         "early_exit_after_selected_layers": config.runtime.early_exit_after_selected_layers,
         "sparse_backend": args.sparse_backend,
+        "data_prefetch_depth": config.runtime.data_prefetch_depth,
     }
     runtime_fingerprint = hashlib.sha256(
         json.dumps(runtime_payload, sort_keys=True, separators=(",", ":")).encode()
@@ -748,6 +805,7 @@ def main() -> None:
     dist.barrier()
 
     completed_steps = 0
+    restored_prefetched_pool = None
     initial_runtime_path = args.run_dir / "initial_runtime.json"
     checkpoints = checkpoint_manager.complete_checkpoints()
     if checkpoints:
@@ -776,6 +834,7 @@ def main() -> None:
         completed_steps = int(restored_runtime["completed_steps"])
         if rank == 0:
             stream.load_state_dict(restored_runtime["stream"])
+            restored_prefetched_pool = restored_runtime.get("prefetched_pool")
             ledger.recover_to_receipt(
                 ExposureLedgerReceipt.from_payload(restored_runtime["ledger_receipt"])
             )
@@ -785,6 +844,7 @@ def main() -> None:
             if initial["config_fingerprint"] != config.fingerprint():
                 raise ValueError("initial runtime config fingerprint changed")
             stream.load_state_dict(initial["stream"])
+            restored_prefetched_pool = initial.get("prefetched_pool")
             ledger.recover_to_receipt(
                 ExposureLedgerReceipt.from_payload(initial["ledger_receipt"])
             )
@@ -795,6 +855,7 @@ def main() -> None:
                     "schema_version": 1,
                     "config_fingerprint": config.fingerprint(),
                     "stream": stream.state_dict(),
+                    "prefetched_pool": None,
                     "ledger_receipt": ledger.checkpoint_receipt(
                         expected_optimizer_steps=0
                     ).payload(),
@@ -802,6 +863,14 @@ def main() -> None:
             )
     completed_steps = int(_broadcast_object(completed_steps))
     dist.barrier()
+    prefetcher = None
+    if rank == 0:
+        prefetcher = _PoolPrefetcher(
+            stream,
+            pool_anchors=config.architecture.pool_tokens,
+            buffered_payload=restored_prefetched_pool,
+        )
+        prefetcher.start()
 
     stop_requested = False
 
@@ -841,8 +910,8 @@ def main() -> None:
             with _timed(args.profile_stages, stage, "data_alignment_and_broadcast"):
                 payload = None
                 if rank == 0:
-                    pool = stream.next_pool(pool_anchors=config.architecture.pool_tokens)
-                    payload = pool.to_payload()
+                    payload = prefetcher.next_payload()
+                    pool = AlignedAnchorPool.from_payload(payload)
                     for observation in pool.source_observations:
                         ledger.observe_raw_tokens(
                             str(observation["observation_id"]),
@@ -1009,7 +1078,9 @@ def main() -> None:
             checkpoint_started = time.perf_counter()
             receipt = None
             stream_state = None
+            prefetched_pool = None
             if rank == 0:
+                prefetched_pool = prefetcher.checkpoint_payload()
                 receipt = ledger.checkpoint_receipt(
                     expected_optimizer_steps=completed_steps
                 ).payload()
@@ -1020,6 +1091,7 @@ def main() -> None:
                 "accepted_exposures": completed_steps * 8192,
                 "ledger_receipt": receipt,
                 "stream": stream_state,
+                "prefetched_pool": prefetched_pool,
             }
             if args.strategy == "model_owned":
                 checkpoint_manifest = checkpoint_manager.save(
@@ -1071,6 +1143,7 @@ def main() -> None:
                     raise RuntimeError("checkpoint restored the wrong optimizer step")
                 if rank == 0:
                     stream.load_state_dict(restored_runtime["stream"])
+                    prefetcher.restore(restored_runtime.get("prefetched_pool"))
                     ledger.recover_to_receipt(
                         ExposureLedgerReceipt.from_payload(
                             restored_runtime["ledger_receipt"]
@@ -1161,6 +1234,7 @@ def main() -> None:
                 )
             write_json_immutable(expected_preflight, report)
         print(json.dumps(report, sort_keys=True), flush=True)
+        prefetcher.close()
         stream.close()
         ledger.close()
     dist.barrier()

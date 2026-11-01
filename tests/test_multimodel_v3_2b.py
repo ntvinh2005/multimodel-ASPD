@@ -8,6 +8,7 @@ from uuid import uuid4
 import torch
 from torch import nn
 
+from aspd.multimodel.cli.train_aspd_v3_2b import _PoolPrefetcher
 from aspd.multimodel.components import RankOneComponents
 from aspd.multimodel.v3.data import SQLiteExposureLedger
 from aspd.multimodel.v3.gating import V3BatchTopK
@@ -28,10 +29,49 @@ from aspd.multimodel.v3.training_capture import capture_family_pool
 ROOT = Path(__file__).parents[1]
 
 
+class _FakePool:
+    def __init__(self, value: int):
+        self.value = value
+
+    def to_payload(self) -> dict[str, int]:
+        return {"value": self.value}
+
+
+class _FakeStream:
+    def __init__(self, cursor: int = 0):
+        self.cursor = cursor
+
+    def next_pool(self, *, pool_anchors: int) -> _FakePool:
+        assert pool_anchors == 2048
+        value = self.cursor
+        self.cursor += 1
+        return _FakePool(value)
+
+
 def _config():
     return load_main_2b_v1_config(
         ROOT / "configs/multimodel/aspd_v3/main_2b_v1.yaml"
     )
+
+
+def test_prefetch_checkpoint_preserves_exact_pool_order() -> None:
+    stream = _FakeStream()
+    prefetcher = _PoolPrefetcher(stream, pool_anchors=2048)
+    prefetcher.start()
+    assert prefetcher.next_payload() == {"value": 0}
+    buffered = prefetcher.checkpoint_payload()
+    assert buffered == {"value": 1}
+    assert stream.cursor == 2
+    prefetcher.close()
+
+    resumed_stream = _FakeStream(cursor=2)
+    resumed = _PoolPrefetcher(
+        resumed_stream, pool_anchors=2048, buffered_payload=buffered
+    )
+    resumed.start()
+    assert resumed.next_payload() == {"value": 1}
+    assert resumed.next_payload() == {"value": 2}
+    resumed.close()
 
 
 def test_main_2b_contract_and_registry_are_incompatible_and_complete() -> None:

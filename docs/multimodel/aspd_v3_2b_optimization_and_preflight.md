@@ -96,11 +96,18 @@ These are implementation checks, not scientific verification.
 | 48623150 | `0f4dfd8` | model-owned indexed + autocast | FAIL | — | — | — | ~20–26 GB before step | BatchTopK state buffers were on CPU |
 | 48623198 | `77435da` | model-owned indexed + placement fix | FAIL | — | — | — | 34.2–41.3 GB before step | Autocast promoted indexed writes to FP32 before a BF16 `index_add` |
 | 48625304 | `25cab5e` | model-owned indexed + explicit write cast | workload PASS | 4.330 | 4.514 | 1,895.6 | 90.4/116.0/108.0 GB | Report complete; Slurm later sent early `USR1` because of the short walltime override |
+| 48625939 | `8121dcd` | CSR SDDMM+SpMM candidate | FAIL | — | — | — | — | PyTorch 2.8 CUDA CSR backward lacks BF16 `sampled_addmm`; rejected |
 
 The first FSDP value is substantially better than the historical approximately 21.7-second
 4B result, but it is not accepted as the reproducible 2B baseline because the worktree was
 dirty at launch and its source revision changed while it ran. Later trainer revisions fail
 closed on a dirty worktree and snapshot Git SHA once at process start.
+
+For the fastest complete step above, mean stage times were 0.928 seconds for alignment/data
+broadcast, 0.110 seconds for all three frozen forwards and capture, 3.010 seconds for the
+trainable forward/backward, 0.163 seconds for gradient synchronization/validation, and 0.049
+seconds for Adam plus post-step normalization. Rank-zero utilization (69%) lagged the other
+owners (87% and 90%), supporting bounded data prefetch as the next measured change.
 
 ## Storage and recovery
 

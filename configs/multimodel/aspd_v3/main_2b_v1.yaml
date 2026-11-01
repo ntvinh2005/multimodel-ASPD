@@ -139,6 +139,7 @@ runtime:
   activation_backward_chunk: 8
   matrix_backward_chunk: 28
   early_exit_after_selected_layers: true
+  data_prefetch_depth: 1
   output_root: out/multimodel/aspd_v3/main_2b_v1/runs
   checkpoint_root: out/multimodel/aspd_v3/main_2b_v1/checkpoints
   dataset_manifest: out/multimodel/aspd_v3/main_2b_v1/data/pile_uncopyrighted/manifest.json
