@@ -20,6 +20,8 @@ class V3BatchTopK(nn.Module):
         *,
         pool_anchors: int | None = None,
         device: torch.device | str | None = None,
+        sync_statistics: bool = True,
+        materialize_n_selected: bool = True,
     ):
         super().__init__()
         self.spec = SparsitySpec(
@@ -29,6 +31,8 @@ class V3BatchTopK(nn.Module):
             top_k=top_k,
             pool_tokens=pool_anchors,
         )
+        self.sync_statistics = sync_statistics
+        self.materialize_n_selected = materialize_n_selected
         self.register_buffer(
             "feature_fire_counts", torch.zeros(n_features, dtype=torch.long, device=device)
         )
@@ -54,21 +58,28 @@ class V3BatchTopK(nn.Module):
         for start in range(0, values.shape[0], pool_anchors):
             pool = values[start : start + pool_anchors]
             positive = pool > 0
-            local_minimum = (
-                pool[positive].float().min()
-                if positive.any()
-                else torch.tensor(float("inf"), device=pool.device)
-            )
-            if torch.distributed.is_available() and torch.distributed.is_initialized():
+            local_minimum = pool.float().masked_fill(~positive, float("inf")).min()
+            if (
+                self.sync_statistics
+                and torch.distributed.is_available()
+                and torch.distributed.is_initialized()
+            ):
                 torch.distributed.all_reduce(
                     local_minimum, op=torch.distributed.ReduceOp.MIN
                 )
-            if torch.isfinite(local_minimum):
-                self.threshold.mul_(1.0 - ORIGINAL_ASPD_THRESHOLD_LR).add_(
-                    ORIGINAL_ASPD_THRESHOLD_LR * local_minimum
-                )
+            candidate = (
+                self.threshold * (1.0 - ORIGINAL_ASPD_THRESHOLD_LR)
+                + ORIGINAL_ASPD_THRESHOLD_LR * local_minimum
+            )
+            self.threshold.copy_(
+                torch.where(torch.isfinite(local_minimum), candidate, self.threshold)
+            )
             fired = positive.any(dim=0).to(self.n_pools_not_active.dtype)
-            if torch.distributed.is_available() and torch.distributed.is_initialized():
+            if (
+                self.sync_statistics
+                and torch.distributed.is_available()
+                and torch.distributed.is_initialized()
+            ):
                 torch.distributed.all_reduce(fired, op=torch.distributed.ReduceOp.MAX)
             fired_mask = fired > 0
             self.n_pools_not_active.add_((~fired_mask).to(self.n_pools_not_active.dtype))
@@ -79,7 +90,12 @@ class V3BatchTopK(nn.Module):
     ) -> SparseCode:
         if torch.any(scores < 0):
             raise ValueError("v3 BatchTopK requires non-negative feature scores")
-        code = batch_topk(scores, valid_anchors, self.spec)
+        code = batch_topk(
+            scores,
+            valid_anchors,
+            self.spec,
+            materialize_n_selected=self.materialize_n_selected,
+        )
         if update_statistics:
             with torch.no_grad():
                 self.feature_fire_counts.add_(code.gate[valid_anchors].sum(dim=0))

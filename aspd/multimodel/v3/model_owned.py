@@ -191,6 +191,12 @@ class ModelOwnedMain2B(nn.Module):
                     config.architecture.batch_topk_k,
                     pool_anchors=config.architecture.pool_tokens,
                     device=device,
+                    # Every rank computes the same shared-encoder scores from the same
+                    # differentiably gathered tokens. Shared parameters are initialized
+                    # identically and receive sum-reduced gradients, so statistics are
+                    # already replicated exactly; per-pool all-reduces are redundant.
+                    sync_statistics=False,
+                    materialize_n_selected=False,
                 )
                 for site in SITE_ORDER
             }

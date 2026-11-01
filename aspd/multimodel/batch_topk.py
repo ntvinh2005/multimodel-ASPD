@@ -25,7 +25,7 @@ class SparseCode:
     values: Tensor
     gate: Tensor
     preactivations: Tensor
-    n_selected: int
+    n_selected: int | Tensor
 
 
 def _select_block(
@@ -77,6 +77,8 @@ def batch_topk(
     valid_tokens: Tensor,
     cfg: SparsitySpec,
     ranking_weights: Tensor | None = None,
+    *,
+    materialize_n_selected: bool = True,
 ) -> SparseCode:
     """Apply D0 or Dual-K D1/D2 selection to ``a`` with shape ``[B,T,C]``.
 
@@ -141,12 +143,15 @@ def batch_topk(
     # ASPD Eq. 5: the component gate is binary even though activation reconstruction uses g^s.
     # Example g^s=[0,4,0,0] gives g=[False,True,False,False].
     gate = values > 0
+    selected_count = gate.sum()
     return SparseCode(
         values=values,
         gate=gate,
         preactivations=preactivations,
         # Diagnostic total active pairs. Example two valid tokens at K=1 give n_selected=2.
-        n_selected=int(gate.sum().item()),
+        n_selected=(
+            int(selected_count.item()) if materialize_n_selected else selected_count
+        ),
     )
 
 

@@ -493,6 +493,11 @@ def _distributed_model_owned_worker(
     def update() -> None:
         optimizer.zero_grad(set_to_none=True)
         scores, sparse, continuous, binary = model.encode(capture)
+        for site in ("pre", "mid"):
+            for state in model.gates[site].state_dict().values():
+                gathered = [torch.empty_like(state) for _ in range(world_size)]
+                dist.all_gather(gathered, state)
+                assert all(torch.equal(gathered[0], value) for value in gathered[1:])
         activation_terms = list(
             model.activation_loss_terms(capture, scores, sparse, continuous)
         )
