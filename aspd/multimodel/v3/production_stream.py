@@ -274,6 +274,7 @@ class PileAlignedAnchorStream:
                 document_id=document.document_id,
                 source_group=document.source_group,
                 tokenizers=self.tokenizers,
+                model_order=self.model_order,
                 max_length=self.sequence_length,
             )
             if not alignment.anchors:
@@ -305,6 +306,7 @@ class PileAlignedAnchorStream:
             document_id=document.document_id,
             source_group=document.source_group,
             tokenizers=self.tokenizers,
+            model_order=self.model_order,
             max_length=self.sequence_length,
         )
         next_anchor = int(self._pending["next_anchor"])
