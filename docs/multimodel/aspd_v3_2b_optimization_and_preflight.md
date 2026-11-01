@@ -94,7 +94,8 @@ These are implementation checks, not scientific verification.
 | 48618416 | source changed during run | 2B FSDP reference | exploratory PASS | 15.780 | 16.545 | 517.3 | 99.8–101.6 GB/rank | Non-authoritative provenance; retained only as exploratory evidence |
 | 48621146 | `5da5192` | model-owned indexed | FAIL | — | — | — | — | BF16 captures reached FP32 linear without autocast |
 | 48623150 | `0f4dfd8` | model-owned indexed + autocast | FAIL | — | — | — | ~20–26 GB before step | BatchTopK state buffers were on CPU |
-| 48623198 | pending clean revision | model-owned indexed + placement fix | pending | — | — | — | — | Bounded three-B200 benchmark |
+| 48623198 | `77435da` | model-owned indexed + placement fix | FAIL | — | — | — | 34.2–41.3 GB before step | Autocast promoted indexed writes to FP32 before a BF16 `index_add` |
+| 48625304 | pending clean revision | model-owned indexed + explicit write cast | pending | — | — | — | — | Bounded three-B200 benchmark |
 
 The first FSDP value is substantially better than the historical approximately 21.7-second
 4B result, but it is not accepted as the reproducible 2B baseline because the worktree was
