@@ -197,6 +197,9 @@ class ModelOwnedMain2B(nn.Module):
                     # already replicated exactly; per-pool all-reduces are redundant.
                     sync_statistics=False,
                     materialize_n_selected=False,
+                    # SharedSiteEncoder ends in FeatureReadout's explicit ReLU. Avoid
+                    # synchronizing the device merely to re-prove that invariant.
+                    validate_nonnegative=False,
                 )
                 for site in SITE_ORDER
             }

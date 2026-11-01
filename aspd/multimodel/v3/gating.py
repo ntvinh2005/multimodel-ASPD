@@ -22,6 +22,7 @@ class V3BatchTopK(nn.Module):
         device: torch.device | str | None = None,
         sync_statistics: bool = True,
         materialize_n_selected: bool = True,
+        validate_nonnegative: bool = True,
     ):
         super().__init__()
         self.spec = SparsitySpec(
@@ -33,6 +34,7 @@ class V3BatchTopK(nn.Module):
         )
         self.sync_statistics = sync_statistics
         self.materialize_n_selected = materialize_n_selected
+        self.validate_nonnegative = validate_nonnegative
         self.register_buffer(
             "feature_fire_counts", torch.zeros(n_features, dtype=torch.long, device=device)
         )
@@ -88,7 +90,7 @@ class V3BatchTopK(nn.Module):
     def forward(
         self, scores: Tensor, valid_anchors: Tensor, *, update_statistics: bool = True
     ) -> SparseCode:
-        if torch.any(scores < 0):
+        if self.validate_nonnegative and torch.any(scores < 0):
             raise ValueError("v3 BatchTopK requires non-negative feature scores")
         code = batch_topk(
             scores,
