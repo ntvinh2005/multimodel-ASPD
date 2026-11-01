@@ -479,42 +479,62 @@ def _model_owned_backward(
     matrix_backward_chunk: int,
 ) -> dict[str, float]:
     scores, sparse, continuous_support, binary_support = model.encode(capture)
-    activation_sum = 0.0
-    auxk_sum = 0.0
-    details: dict[str, float] = {}
+    activation_values: list[torch.Tensor] = []
+    auxk_values: list[torch.Tensor] = []
+    details: dict[str, torch.Tensor] = {}
     activation_chunks = math.ceil(16 / activation_backward_chunk)
     terms = model.activation_loss_terms(capture, scores, sparse, continuous_support)
     for chunk_index, chunk in enumerate(
         _chunked(terms, activation_backward_chunk)
     ):
-        loss = sum(
-            coefficient * (activation + config.architecture.auxk_coefficient * auxk)
-            for _name, activation, auxk, coefficient in chunk
+        with torch.profiler.record_function("aspd/activation_chunk_forward_backward"):
+            loss = sum(
+                coefficient * (activation + config.architecture.auxk_coefficient * auxk)
+                for _name, activation, auxk, coefficient in chunk
+            )
+            (loss * pool_scale).backward(
+                retain_graph=chunk_index + 1 < activation_chunks
+            )
+        activation_values.extend(
+            (coefficient * value).detach().float()
+            for _, value, _, coefficient in chunk
         )
-        (loss * pool_scale).backward(retain_graph=chunk_index + 1 < activation_chunks)
-        activation_sum += sum(float((coefficient * value).detach().float()) for _, value, _, coefficient in chunk)
-        auxk_sum += sum(float((coefficient * value).detach().float()) for _, _, value, coefficient in chunk)
+        auxk_values.extend(
+            (coefficient * value).detach().float()
+            for _, _, value, coefficient in chunk
+        )
         for name, activation, auxk, _coefficient in chunk:
-            details[f"loss/activation/{name}"] = float(activation.detach().float())
-            details[f"loss/auxk/{name}"] = float(auxk.detach().float())
+            details[f"loss/activation/{name}"] = activation.detach().float()
+            details[f"loss/auxk/{name}"] = auxk.detach().float()
 
-    internal_sum = 0.0
+    internal_values: list[torch.Tensor] = []
     for chunk in _chunked(
         model.internal_loss_terms(capture, binary_support),
         matrix_backward_chunk,
     ):
-        loss = sum(coefficient * value for _key, _site, value, coefficient in chunk)
-        (loss * pool_scale).backward()
-        internal_sum += sum(float((coefficient * value).detach().float()) for _, _, value, coefficient in chunk)
+        with torch.profiler.record_function("aspd/internal_chunk_forward_backward"):
+            loss = sum(coefficient * value for _key, _site, value, coefficient in chunk)
+            (loss * pool_scale).backward()
+        internal_values.extend(
+            (coefficient * value).detach().float()
+            for _, _, value, coefficient in chunk
+        )
         for name, _site, value, _coefficient in chunk:
-            details[f"loss/internal/{name}"] = float(value.detach().float())
-    result = {
-        "activation": activation_sum,
-        "auxk": auxk_sum,
-        "internal": internal_sum,
-        "total": activation_sum + config.architecture.auxk_coefficient * auxk_sum + internal_sum,
+            details[f"loss/internal/{name}"] = value.detach().float()
+    tensors = {
+        "activation": torch.stack(activation_values).sum(),
+        "auxk": torch.stack(auxk_values).sum(),
+        "internal": torch.stack(internal_values).sum(),
+        **details,
     }
-    result.update(details)
+    names = tuple(tensors)
+    values = torch.stack(tuple(tensors.values())).tolist()
+    result = dict(zip(names, values, strict=True))
+    result["total"] = (
+        result["activation"]
+        + config.architecture.auxk_coefficient * result["auxk"]
+        + result["internal"]
+    )
     return result
 
 
@@ -613,8 +633,8 @@ def main() -> None:
         if args.matrix_backward_chunk is None
         else args.matrix_backward_chunk
     )
-    if not 1 <= activation_backward_chunk <= 8:
-        raise ValueError("activation backward chunk must be in 1..8")
+    if not 1 <= activation_backward_chunk <= 16:
+        raise ValueError("activation backward chunk must be in 1..16")
     if not 1 <= matrix_backward_chunk <= 56:
         raise ValueError("matrix backward chunk must be in 1..56")
     if args.mode != "benchmark" and (
@@ -1001,10 +1021,10 @@ def main() -> None:
                 if overlap:
                     raise RuntimeError(f"model-owned detailed loss keys overlap: {overlap}")
                 detailed_losses.update(rank_details)
-        step_loss = {
-            name: float(step_loss_tensor[index].item())
-            for index, name in enumerate(global_loss_names)
-        }
+        step_loss_values = step_loss_tensor.tolist()
+        step_loss = dict(zip(global_loss_names, step_loss_values, strict=True))
+        if not all(math.isfinite(value) for value in step_loss.values()):
+            raise FloatingPointError(f"non-finite global ASPD objective: {step_loss}")
         with _timed(args.profile_stages, stage, "adam_and_post_normalization"):
             optimizer.step()
             model.normalize_decoders_(project_gradients=False)

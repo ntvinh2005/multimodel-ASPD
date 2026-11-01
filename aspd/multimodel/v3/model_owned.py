@@ -259,6 +259,7 @@ class ModelOwnedMain2B(nn.Module):
         coefficient = 0.5 / (len(self.model_order) * 8)
         for site in SITE_ORDER:
             decoders = self.activation_banks[site].decoders[self.local_model_key]
+            dead_feature_count = int(self.gates[site].dead_features.sum().item())
             for layer_offset, (decoder, target) in enumerate(
                 zip(decoders, batch.activations[site], strict=True)
             ):
@@ -278,6 +279,7 @@ class ModelOwnedMain2B(nn.Module):
                     batch.valid_anchors,
                     self.gates[site].dead_features,
                     top_k_aux=self.config_top_k_aux,
+                    known_dead_feature_count=dead_feature_count,
                 )
                 yield f"{site}/{self.local_model_key}/window_{layer_offset}", activation, auxk, coefficient
 

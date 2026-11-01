@@ -134,6 +134,7 @@ class RankOneComponents(nn.Module):
         active_coefficient: Tensor,
         *,
         compute_dtype: torch.dtype | None = None,
+        validate_indices: bool = True,
     ) -> Tensor:
         """Reconstruct from coordinates prepared once for a shared PRE/MID support.
 
@@ -155,7 +156,7 @@ class RankOneComponents(nn.Module):
         ):
             raise ValueError("sparse rank-one coordinates must be matching vectors")
         batch, anchors, _ = x.shape
-        if active_position.numel() and (
+        if validate_indices and active_position.numel() and (
             int(active_position.max()) >= batch * anchors
             or int(active_feature.max()) >= self.n_features
         ):

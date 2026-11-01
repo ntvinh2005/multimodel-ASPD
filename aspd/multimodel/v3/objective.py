@@ -26,11 +26,14 @@ def _valid_flat(value: Tensor, valid_anchors: Tensor) -> Tensor:
 def _variance_denominator(target: Tensor, *, min_variance: float = 1e-8) -> Tensor:
     centered = target - target.mean(dim=0, keepdim=True)
     denominator = centered.square().sum()
-    if not torch.isfinite(denominator):
-        raise FloatingPointError("non-finite ASPD v3 FVU denominator")
-    if float(denominator.detach()) <= min_variance:
-        raise FloatingPointError("ASPD v3 FVU target has zero or near-zero variance")
-    return denominator
+    if denominator.device.type == "cpu":
+        if not torch.isfinite(denominator):
+            raise FloatingPointError("non-finite ASPD v3 FVU denominator")
+        if float(denominator.detach()) <= min_variance:
+            raise FloatingPointError("ASPD v3 FVU target has zero or near-zero variance")
+        return denominator
+    valid = torch.isfinite(denominator) & (denominator > min_variance)
+    return torch.where(valid, denominator, torch.full_like(denominator, float("nan")))
 
 
 def masked_fvu(prediction: Tensor, target: Tensor, valid_anchors: Tensor) -> Tensor:
@@ -43,9 +46,9 @@ def masked_fvu(prediction: Tensor, target: Tensor, valid_anchors: Tensor) -> Ten
     numerator = (pred - truth).square().sum()
     denominator = _variance_denominator(truth)
     value = numerator / denominator
-    if not torch.isfinite(value):
+    if value.device.type == "cpu" and not torch.isfinite(value):
         raise FloatingPointError("non-finite ASPD v3 FVU")
-    return value
+    return torch.where(torch.isfinite(value), value, torch.full_like(value, float("nan")))
 
 
 def matryoshka_boundaries(n_features: int, fracs: Sequence[float]) -> tuple[int, ...]:
@@ -113,8 +116,9 @@ def matryoshka_activation_fvu(
         reconstructions = tuple(values)
     terms = [(reconstruction - truth).square().mean() for reconstruction in reconstructions]
     loss = torch.stack(terms).mean() / denominator_mean
-    if not torch.isfinite(loss):
+    if loss.device.type == "cpu" and not torch.isfinite(loss):
         raise FloatingPointError("non-finite ASPD v3 Matryoshka FVU")
+    loss = torch.where(torch.isfinite(loss), loss, torch.full_like(loss, float("nan")))
     reconstruction = reconstructions[-1]
     full = torch.zeros_like(target, dtype=reconstruction.dtype)
     full[valid_anchors] = reconstruction
@@ -130,12 +134,17 @@ def auxk_dead_feature_loss(
     dead_features: Tensor,
     *,
     top_k_aux: int = 2048,
+    known_dead_feature_count: int | None = None,
 ) -> Tensor:
     """Official AuxK residual reconstruction restricted to currently dead features."""
 
     if dead_features.shape != (decoder.in_features,) or dead_features.dtype != torch.bool:
         raise ValueError("dead-feature mask must be boolean with shape [C]")
-    n_dead = int(dead_features.sum().item())
+    n_dead = (
+        int(dead_features.sum().item())
+        if known_dead_feature_count is None
+        else known_dead_feature_count
+    )
     if n_dead == 0:
         return preactivations.sum() * 0.0
     acts = _valid_flat(preactivations, valid_anchors)[:, dead_features]
@@ -162,13 +171,19 @@ def auxk_dead_feature_loss(
         auxiliary = decoded.float()
     else:
         auxiliary = sparse @ decoder.weight.float().T[dead_features]
-    if float(auxiliary.detach().abs().sum()) == 0.0:
+    if auxiliary.device.type == "cpu" and float(auxiliary.detach().abs().sum()) == 0.0:
         return auxiliary.sum() * 0.0
     variance_mean = _variance_denominator(truth) / truth.numel()
     loss = (auxiliary - residual).square().mean() / variance_mean
-    if not torch.isfinite(loss):
+    if auxiliary.device.type != "cpu":
+        loss = torch.where(
+            auxiliary.detach().abs().sum() > 0,
+            loss,
+            auxiliary.sum() * 0.0,
+        )
+    if loss.device.type == "cpu" and not torch.isfinite(loss):
         raise FloatingPointError("non-finite ASPD v3 AuxK loss")
-    return loss
+    return torch.where(torch.isfinite(loss), loss, torch.full_like(loss, float("nan")))
 
 
 def detached_binary_support(code: Tensor) -> Tensor:

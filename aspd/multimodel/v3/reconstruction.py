@@ -40,8 +40,6 @@ class ActivationDecoder(nn.Linear):
 
         def add_range(value: Tensor, lower: int, upper: int) -> Tensor:
             selected = (active_feature >= lower) & (active_feature < upper)
-            if not selected.any():
-                return value
             positions = active_position[selected]
             features = active_feature[selected]
             scales = code[positions, features]
@@ -81,8 +79,6 @@ class ActivationDecoder(nn.Linear):
 
         def add_range(value: Tensor, lower: int, upper: int) -> Tensor:
             selected = (support.feature >= lower) & (support.feature < upper)
-            if not bool(selected.any()):
-                return value
             positions = support.position[selected]
             features = support.feature[selected]
             scales = support.coefficient[selected]
@@ -288,6 +284,7 @@ class RankOneMatrixBank(nn.Module):
                     support.feature,
                     support.coefficient,
                     compute_dtype=compute_dtype,
+                    validate_indices=False,
                 )
             elif sparse_backend == "csr":
                 output = component.forward_sparse_csr(
