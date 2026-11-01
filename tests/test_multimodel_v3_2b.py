@@ -20,6 +20,7 @@ from aspd.multimodel.v3.model_owned import (
     model_owned_parameter_counts,
 )
 from aspd.multimodel.v3.model_owned_checkpoint import ModelOwnedCheckpoint
+from aspd.multimodel.v3.objective import auxk_dead_feature_loss
 from aspd.multimodel.v3.production_stream import ModelPoolInputs
 from aspd.multimodel.v3.reconstruction import ActivationDecoder
 from aspd.multimodel.v3.registry import ModelFamilyLayout, build_model_registry_2b
@@ -249,6 +250,47 @@ def test_prepared_activation_support_matches_matryoshka_decoder() -> None:
     torch.testing.assert_close(dense.weight.grad, reference.weight.grad)
     torch.testing.assert_close(dense.bias.grad, reference.bias.grad)
     torch.testing.assert_close(code_dense.grad, code_reference.grad)
+
+
+def test_dense_auxk_matches_indexed_loss_and_gradients() -> None:
+    torch.manual_seed(21)
+    indexed = ActivationDecoder(16, 7)
+    dense = ActivationDecoder(16, 7)
+    dense.load_state_dict(indexed.state_dict())
+    indexed_scores = torch.rand(1, 4, 16, requires_grad=True)
+    dense_scores = indexed_scores.detach().clone().requires_grad_(True)
+    target = torch.randn(1, 4, 7)
+    reconstruction = torch.randn(1, 4, 7)
+    valid = torch.tensor([[True, True, False, True]])
+    dead = torch.tensor([True] * 10 + [False] * 6)
+    indexed_loss = auxk_dead_feature_loss(
+        indexed_scores,
+        indexed,
+        target,
+        reconstruction,
+        valid,
+        dead,
+        top_k_aux=4,
+        known_dead_feature_count=10,
+        sparse_backend="indexed",
+    )
+    dense_loss = auxk_dead_feature_loss(
+        dense_scores,
+        dense,
+        target,
+        reconstruction,
+        valid,
+        dead,
+        top_k_aux=4,
+        known_dead_feature_count=10,
+        sparse_backend="dense",
+    )
+    torch.testing.assert_close(dense_loss, indexed_loss, rtol=1e-6, atol=1e-6)
+    indexed_loss.backward()
+    dense_loss.backward()
+    torch.testing.assert_close(dense_scores.grad, indexed_scores.grad)
+    torch.testing.assert_close(dense.weight.grad, indexed.weight.grad)
+    assert indexed.bias.grad is None and dense.bias.grad is None
 
 
 def test_split_gradient_projection_and_post_step_normalization_match_reference() -> None:

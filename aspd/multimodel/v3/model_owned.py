@@ -298,6 +298,7 @@ class ModelOwnedMain2B(nn.Module):
                     self.gates[site].dead_features,
                     top_k_aux=self.config_top_k_aux,
                     known_dead_feature_count=dead_feature_count,
+                    sparse_backend=self.sparse_backend,
                 )
                 yield f"{site}/{self.local_model_key}/window_{layer_offset}", activation, auxk, coefficient
 

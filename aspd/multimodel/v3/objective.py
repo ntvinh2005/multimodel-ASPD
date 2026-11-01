@@ -143,6 +143,7 @@ def auxk_dead_feature_loss(
     *,
     top_k_aux: int = 2048,
     known_dead_feature_count: int | None = None,
+    sparse_backend: Literal["indexed", "csr", "dense"] = "indexed",
 ) -> Tensor:
     """Official AuxK residual reconstruction restricted to currently dead features."""
 
@@ -172,8 +173,11 @@ def auxk_dead_feature_loss(
             acts.shape[0], decoder.in_features, device=acts.device, dtype=acts.dtype
         )
         full_sparse.scatter_(-1, selected_features, top.values)
-        decoded = decoder(
-            full_sparse.to(decoder.weight.dtype), include_bias=False
+        decoder_input = full_sparse.to(decoder.weight.dtype)
+        decoded = (
+            decoder.forward_dense_grouped(decoder_input, include_bias=False)
+            if sparse_backend == "dense"
+            else decoder(decoder_input, include_bias=False)
         )
         assert isinstance(decoded, Tensor)
         auxiliary = decoded.float()
