@@ -88,12 +88,30 @@ class AlignedAnchorPool:
         return {
             "anchor_ids": list(self.anchor_ids),
             "document_ids": list(self.document_ids),
+            # Checkpoint sidecars use canonical JSON with sorted mapping keys.
+            # Persist the scientifically significant model order explicitly.
+            "model_order": list(self.models),
             "models": {key: asdict(value) for key, value in self.models.items()},
             "source_observations": [dict(value) for value in self.source_observations],
         }
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> AlignedAnchorPool:
+        payload_models = payload["models"]
+        if not isinstance(payload_models, Mapping):
+            raise TypeError("pool models payload must be a mapping")
+        if "model_order" in payload:
+            model_order = tuple(str(key) for key in payload["model_order"])
+        elif set(payload_models) == {"qwen", "gemma", "smol"}:
+            # Compatibility with the first 2B preflight checkpoint, written
+            # before the explicit order field was added.
+            model_order = ("qwen", "gemma", "smol")
+        elif set(payload_models) == set(MODEL_ORDER):
+            model_order = MODEL_ORDER
+        else:
+            model_order = tuple(str(key) for key in payload_models)
+        if set(model_order) != set(payload_models) or len(model_order) != len(payload_models):
+            raise ValueError("pool model_order must name every model exactly once")
         models = {
             key: ModelPoolInputs(
                 input_ids=tuple(tuple(int(v) for v in row) for row in value["input_ids"]),
@@ -105,7 +123,8 @@ class AlignedAnchorPool:
                 ),
                 anchor_token_indices=tuple(int(v) for v in value["anchor_token_indices"]),
             )
-            for key, value in payload["models"].items()
+            for key in model_order
+            for value in (payload_models[key],)
         }
         return cls(
             anchor_ids=tuple(str(v) for v in payload["anchor_ids"]),

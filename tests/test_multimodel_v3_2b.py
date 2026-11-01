@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,7 +22,7 @@ from aspd.multimodel.v3.model_owned import (
 )
 from aspd.multimodel.v3.model_owned_checkpoint import ModelOwnedCheckpoint
 from aspd.multimodel.v3.objective import auxk_dead_feature_loss
-from aspd.multimodel.v3.production_stream import ModelPoolInputs
+from aspd.multimodel.v3.production_stream import AlignedAnchorPool, ModelPoolInputs
 from aspd.multimodel.v3.reconstruction import ActivationDecoder
 from aspd.multimodel.v3.registry import ModelFamilyLayout, build_model_registry_2b
 from aspd.multimodel.v3.sparse_support import prepare_sparse_support
@@ -81,6 +82,49 @@ def test_prefetch_checkpoint_preserves_exact_pool_order() -> None:
     assert final_stream.cursor == 1
     assert final_prefetcher.checkpoint_payload() is None
     final_prefetcher.close()
+
+
+def test_aligned_pool_json_checkpoint_preserves_model_order() -> None:
+    model = ModelPoolInputs(
+        input_ids=((1,),),
+        attention_masks=((1,),),
+        anchor_document_indices=(0,),
+        anchor_token_indices=(0,),
+    )
+    pool = AlignedAnchorPool(
+        anchor_ids=("anchor",),
+        document_ids=("document",),
+        models={"qwen": model, "gemma": model, "smol": model},
+        source_observations=({},),
+    )
+    canonical_payload = json.loads(json.dumps(pool.to_payload(), sort_keys=True))
+    restored = AlignedAnchorPool.from_payload(canonical_payload)
+
+    assert tuple(restored.models) == ("qwen", "gemma", "smol")
+    restored.validate(
+        expected_anchors=1,
+        sequence_length=1,
+        model_order=("qwen", "gemma", "smol"),
+    )
+
+
+def test_aligned_pool_restores_pre_explicit_order_checkpoint() -> None:
+    model_payload = {
+        "input_ids": [[1]],
+        "attention_masks": [[1]],
+        "anchor_document_indices": [0],
+        "anchor_token_indices": [0],
+    }
+    legacy_payload = {
+        "anchor_ids": ["anchor"],
+        "document_ids": ["document"],
+        "models": {"gemma": model_payload, "qwen": model_payload, "smol": model_payload},
+        "source_observations": [{}],
+    }
+
+    restored = AlignedAnchorPool.from_payload(legacy_payload)
+
+    assert tuple(restored.models) == ("qwen", "gemma", "smol")
 
 
 def test_main_2b_contract_and_registry_are_incompatible_and_complete() -> None:
