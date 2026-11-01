@@ -164,7 +164,7 @@ class ModelOwnedMain2B(nn.Module):
         self.local_model_key = local_model_key
         self.model_order = MODEL_ORDER_2B
         self.layout = registry[local_model_key]
-        if sparse_backend not in {"indexed", "csr"}:
+        if sparse_backend not in {"indexed", "csr", "dense"}:
             raise ValueError(f"unknown model-owned sparse backend: {sparse_backend}")
         self.sparse_backend = sparse_backend
         self.targets = {target.key: target for target in self.layout.targets()}
@@ -291,6 +291,7 @@ class ModelOwnedMain2B(nn.Module):
         self,
         batch: LocalCaptureBatch,
         support: Mapping[str, SparseSupport],
+        dense_code: Mapping[str, Tensor] | None = None,
     ) -> Iterator[tuple[str, str, Tensor, float]]:
         global_counts = {"pre": 3 * 8 * 3, "mid": 3 * 8 * 4}
         dummy_code = batch.valid_anchors.new_zeros(
@@ -301,7 +302,11 @@ class ModelOwnedMain2B(nn.Module):
             prediction = self.matrix_bank.reconstruct(
                 key,
                 batch.matrix_inputs[key],
-                dummy_code,
+                (
+                    dense_code[site].detach()
+                    if self.sparse_backend == "dense" and dense_code is not None
+                    else dummy_code
+                ),
                 batch.valid_anchors,
                 code_semantics="binary_support",
                 support=support[site],

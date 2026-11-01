@@ -107,11 +107,14 @@ def test_prepared_rank_one_support_matches_reference_forward_and_gradients() -> 
     reference = RankOneComponents(11, 5, 4, unit_norm=True)
     optimized = RankOneComponents(11, 5, 4, unit_norm=True)
     csr = RankOneComponents(11, 5, 4, unit_norm=True)
+    dense = RankOneComponents(11, 5, 4, unit_norm=True)
     optimized.load_state_dict(reference.state_dict())
     csr.load_state_dict(reference.state_dict())
+    dense.load_state_dict(reference.state_dict())
     x_reference = torch.randn(2, 3, 5, requires_grad=True)
     x_optimized = x_reference.detach().clone().requires_grad_(True)
     x_csr = x_reference.detach().clone().requires_grad_(True)
+    x_dense = x_reference.detach().clone().requires_grad_(True)
     code = torch.zeros(2, 3, 11)
     code.scatter_(-1, torch.tensor([[[0, 3], [1, 4], [2, 8]]] * 2), 1.0)
     valid = torch.tensor([[True, True, False], [True, False, True]])
@@ -131,17 +134,28 @@ def test_prepared_rank_one_support_matches_reference_forward_and_gradients() -> 
         support.coefficient,
         compute_dtype=torch.float32,
     )
+    dense_actual = dense.forward_dense_masked(
+        x_dense,
+        (code > 0).to(code.dtype),
+        valid,
+        compute_dtype=torch.float32,
+    )
     torch.testing.assert_close(actual, expected, rtol=1e-6, atol=1e-6)
     torch.testing.assert_close(csr_actual, expected, rtol=1e-6, atol=1e-6)
+    torch.testing.assert_close(dense_actual, expected, rtol=1e-6, atol=1e-6)
     expected.square().sum().backward()
     actual.square().sum().backward()
     csr_actual.square().sum().backward()
+    dense_actual.square().sum().backward()
     torch.testing.assert_close(x_optimized.grad, x_reference.grad)
     torch.testing.assert_close(optimized.U.grad, reference.U.grad)
     torch.testing.assert_close(optimized.V.grad, reference.V.grad)
     torch.testing.assert_close(x_csr.grad, x_reference.grad)
     torch.testing.assert_close(csr.U.grad, reference.U.grad)
     torch.testing.assert_close(csr.V.grad, reference.V.grad)
+    torch.testing.assert_close(x_dense.grad, x_reference.grad)
+    torch.testing.assert_close(dense.U.grad, reference.U.grad)
+    torch.testing.assert_close(dense.V.grad, reference.V.grad)
 
 
 def test_indexed_rank_one_support_respects_bfloat16_autocast_compute_dtype() -> None:
@@ -171,13 +185,16 @@ def test_prepared_activation_support_matches_matryoshka_decoder() -> None:
     reference = ActivationDecoder(16, 7)
     optimized = ActivationDecoder(16, 7)
     csr = ActivationDecoder(16, 7)
+    dense = ActivationDecoder(16, 7)
     optimized.load_state_dict(reference.state_dict())
     csr.load_state_dict(reference.state_dict())
+    dense.load_state_dict(reference.state_dict())
     code_reference = torch.zeros(1, 4, 16, requires_grad=True)
     with torch.no_grad():
         code_reference.scatter_(-1, torch.tensor([[[0, 7], [1, 8], [2, 9], [3, 10]]]), 0.5)
     code_optimized = code_reference.detach().clone().requires_grad_(True)
     code_csr = code_reference.detach().clone().requires_grad_(True)
+    code_dense = code_reference.detach().clone().requires_grad_(True)
     valid = torch.tensor([[True, True, False, True]])
     boundaries = (0, 4, 8, 12, 16)
     support = prepare_sparse_support(code_optimized, valid, binary=False)
@@ -185,22 +202,34 @@ def test_prepared_activation_support_matches_matryoshka_decoder() -> None:
     expected = reference(code_reference * valid[..., None], boundaries=boundaries)
     actual = optimized.forward_sparse(support, boundaries=boundaries)
     csr_actual = csr.forward_sparse_csr(csr_support, boundaries=boundaries)
+    dense_gate = (code_reference.detach() != 0) & valid[..., None]
+    dense_actual = dense.forward_dense_grouped(
+        code_dense * dense_gate, boundaries=boundaries
+    )
     assert (
         isinstance(expected, tuple)
         and isinstance(actual, tuple)
         and isinstance(csr_actual, tuple)
+        and isinstance(dense_actual, tuple)
     )
-    for left, right, csr_right in zip(expected, actual, csr_actual, strict=True):
+    for left, right, csr_right, dense_right in zip(
+        expected, actual, csr_actual, dense_actual, strict=True
+    ):
         torch.testing.assert_close(left, right)
         torch.testing.assert_close(left, csr_right, rtol=1e-6, atol=1e-6)
+        torch.testing.assert_close(left, dense_right, rtol=1e-6, atol=1e-6)
     sum(value.square().sum() for value in expected).backward()
     sum(value.square().sum() for value in actual).backward()
     sum(value.square().sum() for value in csr_actual).backward()
+    sum(value.square().sum() for value in dense_actual).backward()
     torch.testing.assert_close(optimized.weight.grad, reference.weight.grad)
     torch.testing.assert_close(optimized.bias.grad, reference.bias.grad)
     torch.testing.assert_close(csr.weight.grad, reference.weight.grad)
     torch.testing.assert_close(csr.bias.grad, reference.bias.grad)
     torch.testing.assert_close(code_csr.grad, code_reference.grad)
+    torch.testing.assert_close(dense.weight.grad, reference.weight.grad)
+    torch.testing.assert_close(dense.bias.grad, reference.bias.grad)
+    torch.testing.assert_close(code_dense.grad, code_reference.grad)
 
 
 def test_split_gradient_projection_and_post_step_normalization_match_reference() -> None:

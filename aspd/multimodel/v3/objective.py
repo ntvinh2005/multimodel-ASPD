@@ -72,7 +72,7 @@ def matryoshka_activation_fvu(
     *,
     group_fracs: Sequence[float] = MATRYOSHKA_GROUP_FRACS,
     support: SparseSupport | None = None,
-    sparse_backend: Literal["indexed", "csr"] = "indexed",
+    sparse_backend: Literal["indexed", "csr", "dense"] = "indexed",
 ) -> tuple[Tensor, Tensor]:
     """Official-style empty+nested-prefix MSE normalized into FVU units."""
 
@@ -91,8 +91,16 @@ def matryoshka_activation_fvu(
             else (
                 decoder.forward_sparse(support, boundaries=boundaries, include_bias=True)
                 if sparse_backend == "indexed"
-                else decoder.forward_sparse_csr(
-                    support, boundaries=boundaries, include_bias=True
+                else (
+                    decoder.forward_sparse_csr(
+                        support, boundaries=boundaries, include_bias=True
+                    )
+                    if sparse_backend == "csr"
+                    else decoder.forward_dense_grouped(
+                        code * valid_anchors[..., None].to(code.dtype),
+                        boundaries=boundaries,
+                        include_bias=True,
+                    )
                 )
             )
         )

@@ -141,6 +141,45 @@ class ActivationDecoder(nn.Linear):
             for value in reconstructions
         )
 
+    def forward_dense_grouped(
+        self,
+        code: Tensor,
+        *,
+        boundaries: Sequence[int] | None = None,
+        include_bias: bool = True,
+    ) -> Tensor | tuple[Tensor, ...]:
+        """Decode sparse-valued dense code via disjoint tensor-core GEMMs.
+
+        For Matryoshka prefixes, each feature group is multiplied exactly once and its
+        contribution is accumulated into the successive prefix reconstructions.
+        """
+
+        if code.ndim < 2 or code.shape[-1] != self.in_features:
+            raise ValueError("dense activation code must have shape [...,C]")
+        leading_shape = code.shape[:-1]
+        flat = code.reshape(-1, self.in_features)
+        output = torch.zeros(
+            flat.shape[0], self.out_features, device=flat.device, dtype=flat.dtype
+        )
+        if include_bias and self.bias is not None:
+            output = output + self.bias.to(output.dtype)
+        if boundaries is None:
+            output = output + flat @ self.weight.T.to(flat.dtype)
+            return output.reshape(*leading_shape, self.out_features)
+        if not boundaries or boundaries[0] != 0 or boundaries[-1] != self.in_features:
+            raise ValueError("Matryoshka boundaries must cover the complete feature axis")
+        reconstructions = [output]
+        for lower, upper in zip(boundaries[:-1], boundaries[1:], strict=True):
+            output = output + (
+                flat[:, int(lower) : int(upper)]
+                @ self.weight[:, int(lower) : int(upper)].T.to(flat.dtype)
+            )
+            reconstructions.append(output)
+        return tuple(
+            value.reshape(*leading_shape, self.out_features)
+            for value in reconstructions
+        )
+
 
 class ActivationReconstructionBank(nn.Module):
     """Model/layer-specific activation decoders; callers choose the explicit code semantics."""
@@ -252,7 +291,7 @@ class RankOneMatrixBank(nn.Module):
         code_semantics: Literal["binary_support", "continuous"],
         support: SparseSupport | None = None,
         compute_dtype: torch.dtype | None = None,
-        sparse_backend: Literal["indexed", "csr"] = "indexed",
+        sparse_backend: Literal["indexed", "csr", "dense"] = "indexed",
     ) -> Tensor:
         """Apply rank-one operators using one explicitly selected provisional semantics."""
 
@@ -292,6 +331,18 @@ class RankOneMatrixBank(nn.Module):
                     support.crow_indices,
                     support.feature,
                     support.coefficient,
+                    compute_dtype=compute_dtype,
+                )
+            elif sparse_backend == "dense":
+                coefficients = (
+                    (sparse_code > 0).to(sparse_code.dtype)
+                    if code_semantics == "binary_support"
+                    else sparse_code
+                )
+                output = component.forward_dense_masked(
+                    matrix_input,
+                    coefficients,
+                    valid_anchors,
                     compute_dtype=compute_dtype,
                 )
             else:

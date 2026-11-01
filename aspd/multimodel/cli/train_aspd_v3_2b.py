@@ -140,7 +140,9 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--torch-profiler", action="store_true")
     parser.add_argument("--activation-backward-chunk", type=int)
     parser.add_argument("--matrix-backward-chunk", type=int)
-    parser.add_argument("--sparse-backend", choices=("indexed", "csr"), default="indexed")
+    parser.add_argument(
+        "--sparse-backend", choices=("indexed", "csr", "dense"), default="indexed"
+    )
     parser.add_argument("--local-files-only", action="store_true")
     parser.add_argument("--skip-checkpoint", action="store_true")
     return parser.parse_args()
@@ -509,7 +511,11 @@ def _model_owned_backward(
 
     internal_values: list[torch.Tensor] = []
     for chunk in _chunked(
-        model.internal_loss_terms(capture, binary_support),
+        model.internal_loss_terms(
+            capture,
+            binary_support,
+            dense_code={site: value.values for site, value in sparse.items()},
+        ),
         matrix_backward_chunk,
     ):
         with torch.profiler.record_function("aspd/internal_chunk_forward_backward"):

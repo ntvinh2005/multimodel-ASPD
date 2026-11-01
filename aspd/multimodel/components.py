@@ -177,6 +177,42 @@ class RankOneComponents(nn.Module):
             output = output + self.b_out.to(dtype)
         return output
 
+    def forward_dense_masked(
+        self,
+        x: Tensor,
+        coefficients: Tensor,
+        valid_tokens: Tensor,
+        *,
+        compute_dtype: torch.dtype | None = None,
+    ) -> Tensor:
+        """Evaluate the same sparse support with dense tensor-core GEMMs.
+
+        BatchTopK still defines the exact binary/continuous support.  This backend only
+        changes execution: zero coefficients mask inactive components after all reads are
+        formed.  On tensor-core GPUs this can be faster than materializing ``T*K`` copies
+        of wide U/V rows for every logical target.
+        """
+
+        if x.ndim != 3 or x.shape[-1] != self.d_in:
+            raise ValueError("dense-masked rank-one input must have shape [B,A,d_in]")
+        if coefficients.shape != (*x.shape[:2], self.n_features):
+            raise ValueError("dense-masked coefficients disagree with the anchor grid")
+        if valid_tokens.shape != x.shape[:2]:
+            raise ValueError("dense-masked valid-token mask disagrees with the anchor grid")
+        dtype = x.dtype if compute_dtype is None else compute_dtype
+        rows = x.shape[0] * x.shape[1]
+        flat_x = x.reshape(rows, self.d_in).to(dtype)
+        if self.b_dec is not None:
+            flat_x = flat_x - self.b_dec.to(dtype)
+        gate = coefficients.reshape(rows, self.n_features).to(dtype)
+        gate = gate * valid_tokens.reshape(rows, 1).to(dtype)
+        reads = flat_x @ self.V.T.to(dtype)
+        output = (reads * gate) @ self.U.to(dtype)
+        output = output.reshape(*x.shape[:2], self.d_out)
+        if self.b_out is not None:
+            output = output + self.b_out.to(dtype)
+        return output
+
     def forward_sparse_csr(
         self,
         x: Tensor,
