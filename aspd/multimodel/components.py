@@ -170,7 +170,7 @@ class RankOneComponents(nn.Module):
             reads = (selected_x * self.V[active_feature].to(dtype)).sum(dim=-1)
             scales = reads * active_coefficient.to(dtype)
             writes = scales[:, None] * self.U[active_feature].to(dtype)
-            output.index_add_(0, active_position, writes)
+            output.index_add_(0, active_position, writes.to(dtype))
         output = output.reshape(batch, anchors, self.d_out)
         if self.b_out is not None:
             output = output + self.b_out.to(dtype)

@@ -104,6 +104,28 @@ def test_prepared_rank_one_support_matches_reference_forward_and_gradients() -> 
     torch.testing.assert_close(csr.V.grad, reference.V.grad)
 
 
+def test_indexed_rank_one_support_respects_bfloat16_autocast_compute_dtype() -> None:
+    torch.manual_seed(8)
+    component = RankOneComponents(11, 5, 4, unit_norm=True)
+    x = torch.randn(1, 3, 5, dtype=torch.bfloat16, requires_grad=True)
+    code = torch.zeros(1, 3, 11, dtype=torch.bfloat16)
+    code.scatter_(-1, torch.tensor([[[0, 3], [1, 4], [2, 8]]]), 1.0)
+    valid = torch.ones(1, 3, dtype=torch.bool)
+    support = prepare_sparse_support(code, valid, binary=True)
+    with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+        output = component.forward_sparse(
+            x,
+            support.position,
+            support.feature,
+            support.coefficient,
+            compute_dtype=torch.bfloat16,
+        )
+        output.float().square().mean().backward()
+    assert output.dtype == torch.bfloat16
+    assert component.U.grad is not None and component.U.grad.dtype == torch.float32
+    assert component.V.grad is not None and component.V.grad.dtype == torch.float32
+
+
 def test_prepared_activation_support_matches_matryoshka_decoder() -> None:
     torch.manual_seed(9)
     reference = ActivationDecoder(16, 7)
