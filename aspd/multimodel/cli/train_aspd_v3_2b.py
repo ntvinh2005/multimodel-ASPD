@@ -1,7 +1,7 @@
 """Three-rank baseline/optimized trainer for ASPD v3 main-2b-v1.
 
-``benchmark`` and ``preflight`` are authorized bounded engineering modes. ``main`` is
-intentionally fail-closed while the versioned config says ``full_training_authorized: false``.
+``benchmark`` and ``preflight`` are authorized bounded engineering modes. ``main`` remains
+fail-closed on explicit authorization and exact final-preflight provenance.
 """
 
 from __future__ import annotations
@@ -669,6 +669,7 @@ def main() -> None:
         "early_exit_after_selected_layers": config.runtime.early_exit_after_selected_layers,
         "sparse_backend": sparse_backend,
         "data_prefetch_depth": config.runtime.data_prefetch_depth,
+        "ledger_anchor_storage": config.runtime.ledger_anchor_storage,
     }
     runtime_fingerprint = hashlib.sha256(
         json.dumps(runtime_payload, sort_keys=True, separators=(",", ":")).encode()
@@ -692,6 +693,7 @@ def main() -> None:
         preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
         required = {
             "status": "PASS",
+            "mode": "preflight",
             "strategy": "model_owned",
             "git_sha": git_sha,
             "config_file_sha256": config_sha,
@@ -701,6 +703,7 @@ def main() -> None:
             "world_size": 3,
             "logical_target_count": 168,
             "dcp_save_reload_resume_update": "PASS",
+            "checkpoint_parameter_and_adam_restore_probe": "PASS",
             "runtime_fingerprint": runtime_fingerprint,
         }
         mismatch = {
@@ -708,8 +711,26 @@ def main() -> None:
             for key, value in required.items()
             if preflight.get(key) != value
         }
-        if mismatch or int(preflight.get("optimizer_steps", 0)) < 3:
-            raise RuntimeError(f"main-2b-v1 preflight evidence mismatch: {mismatch}")
+        checkpoint_manifest = preflight.get("checkpoint_manifest")
+        recovery_mismatch: dict[str, Any] = {}
+        if not isinstance(checkpoint_manifest, dict):
+            recovery_mismatch["checkpoint_manifest"] = "missing"
+        else:
+            for key, expected in (("status", "COMPLETE"), ("world_size", 3)):
+                if checkpoint_manifest.get(key) != expected:
+                    recovery_mismatch[f"checkpoint_manifest.{key}"] = {
+                        "expected": expected,
+                        "observed": checkpoint_manifest.get(key),
+                    }
+        if int(preflight.get("checkpoint_bytes", 0)) <= 0:
+            recovery_mismatch["checkpoint_bytes"] = "must be positive"
+        if int(preflight.get("optimizer_steps", 0)) < 3:
+            recovery_mismatch["optimizer_steps"] = "must be at least three"
+        if mismatch or recovery_mismatch:
+            raise RuntimeError(
+                "main-2b-v1 preflight evidence mismatch: "
+                f"provenance={mismatch}, recovery={recovery_mismatch}"
+            )
     if rank == 0:
         args.run_dir.mkdir(parents=True, exist_ok=args.mode == "main")
     dist.barrier()
@@ -800,6 +821,7 @@ def main() -> None:
             dataset_manifest_sha256=dataset_manifest["manifest_sha256"],
             world_size=world,
             model_order=MODEL_ORDER_2B,
+            compact_anchor_ids=True,
         )
         run_manifest_path = args.run_dir / "run_manifest.json"
         run_manifest = {

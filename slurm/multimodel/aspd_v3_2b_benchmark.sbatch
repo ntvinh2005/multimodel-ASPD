@@ -35,10 +35,19 @@ CONFIG=configs/multimodel/aspd_v3/main_2b_v1.yaml
 GIT_SHA="$(git rev-parse HEAD)"
 RUN_TAG="${RUN_TAG:-${MODE}_${STRATEGY}}"
 RUN_DIR_OVERRIDE="${RUN_DIR_OVERRIDE:-}"
-if [[ -n "${RUN_DIR_OVERRIDE}" ]]; then
+if [[ "${MODE}" == "preflight" ]]; then
+  PREFLIGHT_EVIDENCE="$(../repo/.venv/bin/python -c 'import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))["runtime"]["preflight_evidence"])' "${CONFIG}")"
+  RUN_DIR="${PREFLIGHT_EVIDENCE%/preflight_report.json}"
+  if [[ "${RUN_DIR}" == "${PREFLIGHT_EVIDENCE}" ]]; then
+    echo "Configured preflight evidence must end in /preflight_report.json" >&2
+    exit 2
+  fi
+  if [[ -n "${RUN_DIR_OVERRIDE}" && "${RUN_DIR_OVERRIDE}" != "${RUN_DIR}" ]]; then
+    echo "Preflight RUN_DIR_OVERRIDE differs from the frozen evidence namespace" >&2
+    exit 2
+  fi
+elif [[ -n "${RUN_DIR_OVERRIDE}" ]]; then
   RUN_DIR="${RUN_DIR_OVERRIDE}"
-elif [[ "${MODE}" == "preflight" ]]; then
-  RUN_DIR="out/multimodel/aspd_v3/main_2b_v1/preflight/model_owned_3xb200"
 else
   RUN_DIR="out/multimodel/aspd_v3/main_2b_v1/${MODE}/${RUN_TAG}_${GIT_SHA:0:12}_job${SLURM_JOB_ID}"
 fi

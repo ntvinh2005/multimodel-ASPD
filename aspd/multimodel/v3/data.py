@@ -298,6 +298,7 @@ class SQLiteExposureLedger:
         world_size: int = 1,
         writer_rank: int = 0,
         model_order: tuple[str, str, str] = ("qwen", "gemma", "phi"),
+        compact_anchor_ids: bool = False,
     ):
         if len(dataset_manifest_sha256) != 64 or any(
             character not in "0123456789abcdef" for character in dataset_manifest_sha256
@@ -315,6 +316,8 @@ class SQLiteExposureLedger:
         if len(model_order) != 3 or len(set(model_order)) != 3:
             raise ValueError("exposure ledger requires three distinct model keys")
         self.model_order = tuple(model_order)
+        self.compact_anchor_ids = compact_anchor_ids
+        self.schema_version = 4 if compact_anchor_ids else self.SCHEMA_VERSION
         self.connection = sqlite3.connect(self.path)
         # The ledger lives on Blue. WAL's shared-memory index is unsafe on this parallel
         # filesystem; DELETE mode remains transactional and works with synchronous=FULL.
@@ -323,13 +326,13 @@ class SQLiteExposureLedger:
             raise RuntimeError("exposure ledger requires DELETE journaling")
         self.connection.execute("PRAGMA synchronous=FULL")
         self.connection.executescript(
-            """
+            f"""
             CREATE TABLE IF NOT EXISTS exposure_metadata (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS seen_anchors (
-                anchor_id TEXT PRIMARY KEY,
+                anchor_id {"BLOB" if compact_anchor_ids else "TEXT"} PRIMARY KEY,
                 first_step INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS seen_anchors_first_step_idx
@@ -375,11 +378,13 @@ class SQLiteExposureLedger:
         existing = dict(self.connection.execute("SELECT key,value FROM exposure_metadata"))
         if existing:
             expected_fixed = {
-                "schema_version": str(self.SCHEMA_VERSION),
+                "schema_version": str(self.schema_version),
                 "dataset_manifest_sha256": dataset_manifest_sha256,
                 "world_size": str(world_size),
                 "global_writer_rank": "0",
             }
+            if compact_anchor_ids:
+                expected_fixed["anchor_storage"] = "exact_compact_v1"
             if self.model_order != ("qwen", "gemma", "phi"):
                 expected_fixed["model_order_json"] = json.dumps(
                     self.model_order, separators=(",", ":")
@@ -403,13 +408,15 @@ class SQLiteExposureLedger:
             self.ledger_uuid = str(uuid.uuid4())
             self.genesis_receipt_sha256 = self._genesis_receipt(self.ledger_uuid)
             metadata = {
-                "schema_version": str(self.SCHEMA_VERSION),
+                "schema_version": str(self.schema_version),
                 "dataset_manifest_sha256": dataset_manifest_sha256,
                 "world_size": str(world_size),
                 "global_writer_rank": "0",
                 "ledger_uuid": self.ledger_uuid,
                 "genesis_receipt_sha256": self.genesis_receipt_sha256,
             }
+            if compact_anchor_ids:
+                metadata["anchor_storage"] = "exact_compact_v1"
             if self.model_order != ("qwen", "gemma", "phi"):
                 metadata["model_order_json"] = json.dumps(
                     self.model_order, separators=(",", ":")
@@ -430,10 +437,19 @@ class SQLiteExposureLedger:
 
     def _genesis_receipt(self, ledger_uuid: str) -> str:
         payload = (
-            f"aspd-v3-exposure-ledger-v3\0{ledger_uuid}\0"
+            f"aspd-v3-exposure-ledger-v{self.schema_version}\0{ledger_uuid}\0"
             f"{self.dataset_manifest_sha256}\0{self.world_size}"
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def _encoded_anchor_id(self, anchor_id: str) -> str | bytes:
+        """Return an injective compact SQLite key without changing anchor identity semantics."""
+
+        if not self.compact_anchor_ids:
+            return anchor_id
+        if len(anchor_id) == 64 and all(character in "0123456789abcdef" for character in anchor_id):
+            return b"\x00" + bytes.fromhex(anchor_id)
+        return b"\x01" + anchor_id.encode("utf-8")
 
     @staticmethod
     def _step_receipt(
@@ -884,7 +900,7 @@ class SQLiteExposureLedger:
             changes_before = self.connection.total_changes
             self.connection.executemany(
                 "INSERT OR IGNORE INTO seen_anchors(anchor_id,first_step) VALUES (?,?)",
-                ((anchor_id, step_id) for anchor_id in flat),
+                ((self._encoded_anchor_id(anchor_id), step_id) for anchor_id in flat),
             )
             newly_observed = self.connection.total_changes - changes_before
             accepted = len(flat)

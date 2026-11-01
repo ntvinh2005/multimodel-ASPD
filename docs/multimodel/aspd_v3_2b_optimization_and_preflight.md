@@ -159,3 +159,36 @@ retained.
 The optimized three-B200 benchmark, real DCP measurement, profiler breakdown, final runtime
 estimate, and performance acceptance decision remain in progress. No full 500M job has been
 submitted.
+
+## Final production authorization update — 2026-11-01
+
+The researcher subsequently authorized the complete 500,006,912-exposure run conditional on a
+fresh exact-revision preflight. The final configuration therefore sets
+`full_training_authorized: true`, freezes a new `final_authorized_v1` evidence namespace, and keeps
+the complete 168-target, C=8192, K=32 scientific objective unchanged.
+
+The final steady-state performance reference is job 48651682: 90 optimizer steps and 737,280 exact
+exposures on three B200s, p50 1.291 seconds, p95 1.487 seconds, and 6,256.6 accepted anchors/second.
+Post-AuxK steps retained p50 1.445 seconds and p95 1.528 seconds. Peak allocated memory was
+62.6/78.5/72.2 GB for the Qwen/Gemma/Smol owners. This is the accepted performance evidence; a
+three-step final preflight is a recovery/correctness gate rather than a steady-state benchmark.
+
+Job 48657614 produced a complete 123,242,275,001-byte checkpoint, saved it in 60.34 seconds,
+reloaded it in 58.11 seconds, exactly restored deliberately perturbed parameter and Adam probes,
+and completed the post-resume optimizer update. Its machine report was PASS, but Slurm exited 1
+afterward because the deliberately isolated output path did not equal the then-configured evidence
+path. The final launcher now derives its run directory directly from the frozen config and rejects
+a conflicting override before GPU work.
+
+For storage safety, the 2B ledger now uses an exact injective compact representation: 64-character
+anchor hashes become prefixed 32-byte BLOB keys, while non-hash IDs retain a distinct prefixed UTF-8
+encoding. A 204,800-anchor comparison measured 20,746,240 bytes versus 34,971,648 bytes for the
+text-key ledger (59.3%). Membership, unique/repeated accounting, rollback receipt, reopening and
+resume tests pass. This is a storage representation change only; anchor identity and exposure
+semantics are unchanged.
+
+Researcher-authorized removal of two obsolete local projects recovered approximately 0.416 TB of
+Blue quota. The post-cleanup group usage is 4.157 TB of 5 TB, leaving approximately 0.843 TB. The
+measured transient three-checkpoint envelope is 369.73 GB; the compact 500M ledger is projected near
+51 GB, leaving substantial margin for manifests and staging. Details and backup hashes are recorded
+in `aspd_v3_2b_storage_reclamation_20261101.md`.

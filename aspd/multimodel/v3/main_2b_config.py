@@ -189,6 +189,7 @@ class Runtime2B(BaseModel):
     sparse_backend: Literal["dense"]
     early_exit_after_selected_layers: Literal[True]
     data_prefetch_depth: Literal[1]
+    ledger_anchor_storage: Literal["exact_compact_v1"]
     output_root: str
     checkpoint_root: str
     dataset_manifest: str
@@ -217,7 +218,7 @@ class V3Main2BV1Config(BaseModel):
     schema_version: Literal[2]
     experiment_family: Literal["aspd_v3_three_family_2b_main"]
     scientific_status: Literal["FROZEN_RESEARCHER_REVISED"]
-    full_training_authorized: Literal[False]
+    full_training_authorized: Literal[True]
     models: tuple[SourceModel2B, SourceModel2B, SourceModel2B]
     architecture: Architecture2B
     objective: Objective2B

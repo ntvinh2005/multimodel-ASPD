@@ -131,10 +131,14 @@ def test_main_2b_contract_and_registry_are_incompatible_and_complete() -> None:
     config = _config()
     registry = build_model_registry_2b(config)
     assert tuple(registry) == MODEL_ORDER_2B
-    assert config.full_training_authorized is False
+    assert config.full_training_authorized is True
     assert config.data.minimum_optimizer_steps == 61_036
     assert config.data.minimum_accepted_anchor_exposures == 500_006_912
     assert config.runtime.sparse_backend == "dense"
+    assert config.runtime.ledger_anchor_storage == "exact_compact_v1"
+    assert config.runtime.preflight_evidence.endswith(
+        "/preflight/final_authorized_v1/preflight_report.json"
+    )
     assert sum(len(layout.targets()) for layout in registry.values()) == 168
     assert registry["qwen"].layers == tuple(range(10, 18))
     assert registry["gemma"].layers == tuple(range(9, 17))
@@ -382,6 +386,37 @@ def test_exposure_ledger_records_smol_as_immutable_third_tokenizer_slot(tmp_path
         model_order=MODEL_ORDER_2B,
     )
     assert reopened.raw_token_counts()["smol"] == 13
+    reopened.close()
+
+
+def test_compact_exposure_ledger_preserves_exact_membership_and_resume(tmp_path: Path) -> None:
+    path = tmp_path / "compact.sqlite"
+    ledger = SQLiteExposureLedger(
+        path,
+        dataset_manifest_sha256="b" * 64,
+        world_size=3,
+        model_order=MODEL_ORDER_2B,
+        compact_anchor_ids=True,
+    )
+    anchors = ("1" * 64, "2" * 64, "non-hex-anchor")
+    first = ledger.observe_replicated_optimizer_step(0, anchors)
+    receipt = ledger.checkpoint_receipt(expected_optimizer_steps=1)
+    ledger.observe_replicated_optimizer_step(1, ("2" * 64, "3" * 64))
+    recovered = ledger.recover_to_receipt(receipt)
+    assert recovered == first
+    assert ledger.connection.execute(
+        "SELECT COUNT(*) FROM seen_anchors WHERE typeof(anchor_id)='blob'"
+    ).fetchone() == (3,)
+    ledger.close()
+
+    reopened = SQLiteExposureLedger(
+        path,
+        dataset_manifest_sha256="b" * 64,
+        world_size=3,
+        model_order=MODEL_ORDER_2B,
+        compact_anchor_ids=True,
+    )
+    assert reopened.checkpoint_receipt(expected_optimizer_steps=1) == receipt
     reopened.close()
 
 
