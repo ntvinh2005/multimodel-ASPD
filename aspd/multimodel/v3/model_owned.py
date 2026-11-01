@@ -190,6 +190,7 @@ class ModelOwnedMain2B(nn.Module):
                     config.architecture.dictionary_size,
                     config.architecture.batch_topk_k,
                     pool_anchors=config.architecture.pool_tokens,
+                    device=device,
                 )
                 for site in SITE_ORDER
             }

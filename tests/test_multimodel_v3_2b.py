@@ -10,6 +10,7 @@ from torch import nn
 
 from aspd.multimodel.components import RankOneComponents
 from aspd.multimodel.v3.data import SQLiteExposureLedger
+from aspd.multimodel.v3.gating import V3BatchTopK
 from aspd.multimodel.v3.main_2b_config import MODEL_ORDER_2B, load_main_2b_v1_config
 from aspd.multimodel.v3.model_owned import (
     LocalCaptureBatch,
@@ -54,6 +55,11 @@ def test_main_2b_contract_and_registry_are_incompatible_and_complete() -> None:
         "google/gemma-2-2b-it",
         "HuggingFaceTB/SmolLM2-1.7B-Instruct",
     }
+
+
+def test_batch_topk_places_all_state_on_requested_device() -> None:
+    gate = V3BatchTopK(16, 2, pool_anchors=4, device="cpu")
+    assert {value.device.type for value in gate.buffers()} == {"cpu"}
 
 
 def test_prepared_rank_one_support_matches_reference_forward_and_gradients() -> None:

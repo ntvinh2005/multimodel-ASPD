@@ -13,7 +13,14 @@ ORIGINAL_ASPD_N_POOLS_TO_DEAD = 320
 
 
 class V3BatchTopK(nn.Module):
-    def __init__(self, n_features: int, top_k: int, *, pool_anchors: int | None = None):
+    def __init__(
+        self,
+        n_features: int,
+        top_k: int,
+        *,
+        pool_anchors: int | None = None,
+        device: torch.device | str | None = None,
+    ):
         super().__init__()
         self.spec = SparsitySpec(
             n_features=n_features,
@@ -22,11 +29,18 @@ class V3BatchTopK(nn.Module):
             top_k=top_k,
             pool_tokens=pool_anchors,
         )
-        self.register_buffer("feature_fire_counts", torch.zeros(n_features, dtype=torch.long))
-        self.register_buffer("accepted_anchor_count", torch.zeros((), dtype=torch.long))
-        self.register_buffer("threshold", torch.zeros((), dtype=torch.float32))
         self.register_buffer(
-            "n_pools_not_active", torch.zeros(n_features, dtype=torch.float32)
+            "feature_fire_counts", torch.zeros(n_features, dtype=torch.long, device=device)
+        )
+        self.register_buffer(
+            "accepted_anchor_count", torch.zeros((), dtype=torch.long, device=device)
+        )
+        self.register_buffer(
+            "threshold", torch.zeros((), dtype=torch.float32, device=device)
+        )
+        self.register_buffer(
+            "n_pools_not_active",
+            torch.zeros(n_features, dtype=torch.float32, device=device),
         )
 
     @property
