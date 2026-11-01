@@ -74,11 +74,21 @@ The implementation prepares each PRE/MID sparse support once per pool. The index
 and an opt-in mathematically equivalent CSR SDDMM+SpMM backend are both retained until real
 B200 measurements select the faster implementation.
 
+The subsequent bottleneck pass added a dense-masked GEMM candidate without changing the
+BatchTopK support. For one 2,048-anchor pool, the indexed implementation materializes at
+least 40.8/52.3/49.4 GB of irregular BF16 U/V pair traffic on the Qwen/Gemma/Smol owners,
+before backward and temporary-output traffic. The dense candidate instead performs
+10.45/13.40/12.64 TFLOP of regular tensor-core work per owner in its rank-one forward and
+applies the exact binary support between the V and U GEMMs. CPU reference tests compare
+forward outputs and gradients to both indexed and CSR implementations. This candidate is
+an execution optimization only; inactive components remain exactly zero in the objective.
+
 ## Correctness evidence
 
-- Focused original and 2B CPU suite: 47 passed, one distributed test deselected.
+- Focused original and 2B CPU suite: 58 passed, one distributed test deselected.
 - Three-process Gloo gradient/Adam/DCP/save/reload/subsequent-update test: 1 passed in
-  121.29 seconds.
+  123.36 seconds after also proving that replicated PRE/MID gate statistics remain bitwise
+  identical when redundant per-pool statistic collectives are disabled.
 - CSR versus indexed/reference forward and gradient equivalence passes for rank-one and
   Matryoshka activation reconstruction.
 - Ruff and shell syntax checks pass. `compileall` passes with
@@ -97,17 +107,38 @@ These are implementation checks, not scientific verification.
 | 48623198 | `77435da` | model-owned indexed + placement fix | FAIL | — | — | — | 34.2–41.3 GB before step | Autocast promoted indexed writes to FP32 before a BF16 `index_add` |
 | 48625304 | `25cab5e` | model-owned indexed + explicit write cast | workload PASS | 4.330 | 4.514 | 1,895.6 | 90.4/116.0/108.0 GB | Report complete; Slurm later sent early `USR1` because of the short walltime override |
 | 48625939 | `8121dcd` | CSR SDDMM+SpMM candidate | FAIL | — | — | — | — | PyTorch 2.8 CUDA CSR backward lacks BF16 `sampled_addmm`; rejected |
+| 48628746 | `f53b931` | indexed + exact asynchronous pool prefetch | PASS | 3.913 | 4.283 | 2,050.9 | 90.4/116.0/108.0 GB | 49,152 exact exposures; first clean Slurm-complete improvement |
+| 48630276 | `dc46e79` | indexed + batched scalar checks/metrics | PASS | 3.974 | 4.419 | 2,007.7 | 90.4/116.0/108.0 GB | No significant speedup versus 48628746; retain for asynchronous error propagation and lower dispatch overhead |
+| 48632022 | `fdc2695` | dense-masked GEMM candidate, first attempt | FAIL | — | — | — | — | Frozen capture was an inference tensor that GEMM backward could not save for dV; fixed with an explicit ordinary-tensor clone and regression test |
+| 48637739 | `707f365` | dense-masked GEMM + local replicated gate statistics | PASS | **1.176** | **1.199** | **6,979.6** | **61.7/78.5/72.2 GB** | 65,536 exact exposures, all 168 targets; preferred performance gate achieved |
+| 48637845 | `707f365` | dense-masked, maximum 16/56 backward chunks | PASS | 1.258 | 1.360 | 6,449.9 | 61.8/78.5/72.2 GB | 7% slower p50; rejected in favor of 8/28 chunks |
 
 The first FSDP value is substantially better than the historical approximately 21.7-second
 4B result, but it is not accepted as the reproducible 2B baseline because the worktree was
 dirty at launch and its source revision changed while it ran. Later trainer revisions fail
 closed on a dirty worktree and snapshot Git SHA once at process start.
 
-For the fastest complete step above, mean stage times were 0.928 seconds for alignment/data
-broadcast, 0.110 seconds for all three frozen forwards and capture, 3.010 seconds for the
-trainable forward/backward, 0.163 seconds for gradient synchronization/validation, and 0.049
-seconds for Adam plus post-step normalization. Rank-zero utilization (69%) lagged the other
-owners (87% and 90%), supporting bounded data prefetch as the next measured change.
+For the current fastest complete run, exact prefetch reduced mean alignment/data broadcast
+from 0.928 to 0.240 seconds. Its mean frozen-forward time was 0.127 seconds, trainable
+forward/backward was 3.341 seconds, gradient synchronization/validation was 0.163 seconds,
+and Adam plus normalization was 0.049 seconds. Job 48630276 confirmed that hundreds of
+per-target scalar conversions were not the dominant cost: its trainable stage was 3.411
+seconds and p50 remained within run-to-run noise. The dominant measured opportunity is
+therefore the wide indexed U/V gather and write traffic in the reconstruction banks, not
+the three frozen backbones or the alignment stream.
+
+The dense-masked result changes that conclusion quantitatively: mean trainable
+forward/backward fell to 0.694 seconds, gradient synchronization/validation to 0.038
+seconds, data/alignment to 0.195 seconds, frozen forward/capture to 0.122 seconds, and
+Adam/normalization remained 0.048 seconds. The p50 improvement is 3.33x over the fastest
+indexed run and 13.42x over the exploratory 2B FSDP reference. It satisfies the preferred
+two-second acceptance target while preserving the complete measured optimizer step.
+Using identical seed, stream and first four optimizer steps, the indexed job 48630276 and
+dense job 48637739 exposed the same 268 logged global/per-target loss keys. The largest
+absolute per-target difference was 0.001679 (0.058% relative), while global-loss absolute
+differences were 0.000110, 0.000017, 0.000025 and 0.000007 across steps 1–4. This is the
+expected BF16 reduction-order effect; the matching post-update trajectory is real-GPU
+evidence in addition to the exact FP32 CPU forward/gradient equivalence tests.
 
 ## Storage and recovery
 
