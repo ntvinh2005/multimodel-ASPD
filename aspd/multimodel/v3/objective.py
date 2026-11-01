@@ -167,20 +167,23 @@ def auxk_dead_feature_loss(
     top = torch.topk(acts, count, dim=-1)
     sparse = torch.zeros_like(acts).scatter(-1, top.indices, top.values)
     if isinstance(decoder, ActivationDecoder):
-        dead_indices = dead_features.nonzero(as_tuple=True)[0]
-        selected_features = dead_indices[top.indices]
-        full_sparse = torch.zeros(
-            acts.shape[0], decoder.in_features, device=acts.device, dtype=acts.dtype
-        )
-        full_sparse.scatter_(-1, selected_features, top.values)
-        decoder_input = full_sparse.to(decoder.weight.dtype)
-        decoded = (
-            decoder.forward_dense_grouped(decoder_input, include_bias=False)
-            if sparse_backend == "dense"
-            else decoder(decoder_input, include_bias=False)
-        )
-        assert isinstance(decoded, Tensor)
-        auxiliary = decoded.float()
+        if sparse_backend == "dense":
+            # Model-owned decoders need no FSDP call boundary. Multiplying only the
+            # currently dead decoder columns is mathematically identical to scattering
+            # into a C-wide tensor, while avoiding both T*C work and T*AuxK*D writes.
+            auxiliary = sparse @ decoder.weight.float().T[dead_features]
+        else:
+            dead_indices = dead_features.nonzero(as_tuple=True)[0]
+            selected_features = dead_indices[top.indices]
+            full_sparse = torch.zeros(
+                acts.shape[0], decoder.in_features, device=acts.device, dtype=acts.dtype
+            )
+            full_sparse.scatter_(-1, selected_features, top.values)
+            decoded = decoder(
+                full_sparse.to(decoder.weight.dtype), include_bias=False
+            )
+            assert isinstance(decoded, Tensor)
+            auxiliary = decoded.float()
     else:
         auxiliary = sparse @ decoder.weight.float().T[dead_features]
     if auxiliary.device.type == "cpu" and float(auxiliary.detach().abs().sum()) == 0.0:
