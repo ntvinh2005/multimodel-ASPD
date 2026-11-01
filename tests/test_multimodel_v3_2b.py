@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from types import SimpleNamespace
+from uuid import uuid4
 
 import torch
 from torch import nn
@@ -10,6 +12,12 @@ from aspd.multimodel.components import RankOneComponents
 from aspd.multimodel.v3.data import SQLiteExposureLedger
 from aspd.multimodel.v3.main_2b_config import MODEL_ORDER_2B, load_main_2b_v1_config
 from aspd.multimodel.v3.model_owned import model_owned_parameter_counts
+from aspd.multimodel.v3.model_owned import (
+    LocalCaptureBatch,
+    ModelOwnedMain2B,
+    build_model_owned_adam,
+)
+from aspd.multimodel.v3.model_owned_checkpoint import ModelOwnedCheckpoint
 from aspd.multimodel.v3.production_stream import ModelPoolInputs
 from aspd.multimodel.v3.reconstruction import ActivationDecoder
 from aspd.multimodel.v3.registry import ModelFamilyLayout, build_model_registry_2b
@@ -231,3 +239,175 @@ def test_early_exit_capture_matches_full_capture_and_skips_later_layers() -> Non
         torch.testing.assert_close(full.matrix_outputs[key], early.matrix_outputs[key])
     assert [layer.calls for layer in full_model.model.layers[-2:]] == [1, 1]
     assert [layer.calls for layer in early_model.model.layers[-2:]] == [0, 0]
+
+
+class _TinyConfig:
+    def __init__(self):
+        self.architecture = SimpleNamespace(
+            dictionary_size=16,
+            batch_topk_k=2,
+            pool_tokens=2,
+            latent_tokens_per_model=8,
+            packed_token_width=8,
+            intra_model_layers=1,
+            intra_model_heads=2,
+            cross_model_layers=1,
+            cross_model_heads=2,
+            cross_model_width=8,
+            feature_readout="mean",
+        )
+        self.optimization = SimpleNamespace(
+            rank_one_lr=3e-4,
+            activation_decoder_lr=3e-4,
+            encoder_lr=1e-4,
+            betas=(0.9, 0.99),
+            weight_decay=0.0,
+        )
+
+    @staticmethod
+    def fingerprint() -> str:
+        return "tiny-model-owned-test"
+
+
+def _tiny_registry() -> dict[str, ModelFamilyLayout]:
+    return {
+        key: ModelFamilyLayout(
+            key=key,
+            family="llama",
+            model_id=f"test/{key}",
+            revision="0" * 40,
+            tokenizer_id=f"test/{key}",
+            tokenizer_revision="0" * 40,
+            layers=tuple(range(8)),
+            layer_prefixes=("model.layers",),
+            residual_pre_suffix="input_layernorm",
+            residual_mid_suffix="post_attention_layernorm",
+            hidden_size=4,
+            intermediate_size=6,
+            num_hidden_layers=8,
+            num_attention_heads=1,
+            num_key_value_heads=1,
+            head_dim=4,
+            q_out=4,
+            kv_out=4,
+            fused_qkv=False,
+            fused_gate_up=False,
+        )
+        for key in MODEL_ORDER_2B
+    }
+
+
+def _tiny_capture(layout: ModelFamilyLayout, rank: int) -> LocalCaptureBatch:
+    generator = torch.Generator().manual_seed(100 + rank)
+    inputs = {
+        target.key: torch.randn(1, 2, target.d_in, generator=generator)
+        for target in layout.targets()
+    }
+    outputs = {
+        target.key: torch.randn(1, 2, target.d_out, generator=generator)
+        for target in layout.targets()
+    }
+    return LocalCaptureBatch(
+        model_key=layout.key,
+        activations={
+            site: tuple(
+                torch.randn(1, 2, layout.hidden_size, generator=generator)
+                for _ in range(8)
+            )
+            for site in ("pre", "mid")
+        },
+        matrix_inputs=inputs,
+        matrix_outputs=outputs,
+        valid_anchors=torch.ones(1, 2, dtype=torch.bool),
+    )
+
+
+def _distributed_model_owned_worker(
+    rank: int, world_size: int, init_file: str, checkpoint_root: str
+) -> None:
+    import torch.distributed as dist
+
+    os.environ["GLOO_SOCKET_IFNAME"] = "lo"
+    dist.init_process_group(
+        "gloo",
+        rank=rank,
+        world_size=world_size,
+        init_method=f"file://{init_file}",
+    )
+    torch.manual_seed(0)
+    config = _TinyConfig()
+    registry = _tiny_registry()
+    key = MODEL_ORDER_2B[rank]
+    model = ModelOwnedMain2B(config, registry, key, dtype=torch.float32)
+    model.synchronize_shared_state_()
+    optimizer = build_model_owned_adam(model, config)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda _step: 1.0)
+    capture = _tiny_capture(registry[key], rank)
+
+    def update() -> None:
+        optimizer.zero_grad(set_to_none=True)
+        scores, sparse, continuous, binary = model.encode(capture)
+        activation_terms = list(
+            model.activation_loss_terms(capture, scores, sparse, continuous)
+        )
+        internal_terms = list(model.internal_loss_terms(capture, binary))
+        loss = sum(
+            coefficient * (activation + 0.03125 * auxk)
+            for _name, activation, auxk, coefficient in activation_terms
+        ) + sum(
+            coefficient * value for _name, _site, value, coefficient in internal_terms
+        )
+        loss.backward()
+        model.all_reduce_shared_gradients_()
+        assert all(parameter.grad is not None for parameter in model.shared_encoders.parameters())
+        assert all(parameter.grad is not None for parameter in model.local_encoders.parameters())
+        assert all(parameter.grad is not None for parameter in model.activation_banks.parameters())
+        assert all(parameter.grad is not None for parameter in model.matrix_bank.parameters())
+        model.normalize_decoders_(project_gradients=True)
+        optimizer.step()
+        model.normalize_decoders_(project_gradients=False)
+        scheduler.step()
+
+    update()
+    manager = ModelOwnedCheckpoint(checkpoint_root, keep_complete=2)
+    saved_parameter = next(model.parameters()).detach().clone()
+    manager.save(
+        step=1,
+        model=model,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        runtime_state={"completed_steps": 1, "accepted_exposures": 8192},
+        config_fingerprint="tiny-model-owned-test",
+        config_file_sha256="a" * 64,
+        dataset_manifest_sha256="b" * 64,
+        model_key=key,
+    )
+    with torch.no_grad():
+        next(model.parameters()).add_(1)
+    runtime, manifest = manager.load(
+        path=Path(checkpoint_root) / "step-000000001",
+        model=model,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        config_fingerprint="tiny-model-owned-test",
+        config_file_sha256="a" * 64,
+        dataset_manifest_sha256="b" * 64,
+        expected_model_key=key,
+    )
+    torch.testing.assert_close(next(model.parameters()), saved_parameter)
+    assert runtime["completed_steps"] == 1
+    assert manifest["status"] == "COMPLETE"
+    update()
+    dist.destroy_process_group()
+
+
+def test_model_owned_distributed_gradients_optimizer_and_checkpoint(tmp_path: Path) -> None:
+    import torch.multiprocessing as mp
+
+    init_file = tmp_path / f"dist-{uuid4().hex}"
+    mp.spawn(
+        _distributed_model_owned_worker,
+        args=(3, str(init_file), str(tmp_path / "checkpoint")),
+        nprocs=3,
+        join=True,
+    )
