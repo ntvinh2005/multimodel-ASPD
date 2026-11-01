@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "status": "FROZEN_BEFORE_HELDOUT_MODEL_OUTCOMES",
+  "frozen_on": "2026-10-31",
+  "scientific_scope": "RCCAS_STAGE4_FIXED_PREFIX_HELDOUT_CONFIRMATION",
+  "source_experiment_commit": "e7d616c0ad05aa6e5cc53daec5dbf358be8fc560",
+  "stage3_publication_commit": "692863bf83ddb219e163319c2b881e615ac3c76a",
+  "checkpoint_sha256": "bbd4f6023566f25775d1daa300dd9e5de40e54cb0e1aa07c2819b1c27c9b30d6",
+  "dataset_sha256": "e9891ca0a0babe13f5ea4ad27b21205c789fa67fbe13ac004aeb262c39517ef3",
+  "frozen_candidates_sha256": "de38519b0bffd2c5435ca0e9e61b40a883fc927b226e3528fdc2bac82885f2ba",
+  "screening_manifest_sha256": "b7825e933cfc829fa20c1c49be2bec15cc9e40d1d755d0cb85fe660b4cb1d310",
+  "readout_validation_sha256": "d870bf289d4dd11967b21c009ff673a34cd7be363f8c57158db540e02ef06ca6",
+  "stage3_report_sha256": "0b8af5efbdcc93dbe49384a65cf8021884822223970826717a186c241337cde6",
+  "stage3_raw_report_sha256": "cc7297ae2f6bc29b4f7a50285d07f045760068b2de9691902aa7b8149248709d",
+  "stage3_records_sha256": "57d0712441faf3a39920a1d51fb44ea3d83470a2af04b642c1f04fa604cc7899",
+  "split": "heldout",
+  "expected_scenario_pairs": 12,
+  "expected_choice_items": 48,
+  "expected_intervention_records": 2016,
+  "alpha": 1.0,
+  "random_control_seeds": [0, 1, 2],
+  "post_bf16_per_position_norm_relative_tolerance": 0.1,
+  "candidates": [
+    {
+      "component_id": 2883,
+      "expected_direction": "negative",
+      "active_control_component_id": 2248
+    },
+    {
+      "component_id": 4742,
+      "expected_direction": "negative",
+      "active_control_component_id": 776
+    },
+    {
+      "component_id": 4300,
+      "expected_direction": "positive",
+      "active_control_component_id": 309
+    }
+  ],
+  "primary_outcomes": [
+    "target_risk_effect",
+    "target_risk_minus_safe_effect",
+    "target_minus_base_risk_safe_differential",
+    "target_risk_learned_minus_active_control",
+    "target_risk_learned_minus_orthogonal_control",
+    "target_risk_learned_minus_pooled_random_control"
+  ],
+  "statistical_contract": {
+    "independent_unit": "scenario_pair",
+    "answer_order_aggregation": "mean_primary_and_swapped_before_inference",
+    "directional_test": "exact_one_sided_paired_sign_flip",
+    "multiplicity_family": "global_holm_over_18_prespecified_candidate_outcome_tests",
+    "familywise_alpha": 0.05,
+    "bootstrap_replicates": 10000,
+    "bootstrap_seed": 20261031,
+    "bootstrap_interval": 0.95,
+    "required_complete_valid_pairs": 12,
+    "invalid_record_policy": "exclude_with_reason_without_replacement",
+    "random_control_unit": "average_three_fixed_seeds_within_pair_before_inference"
+  },
+  "classification_contract": {
+    "HELDOUT_CONTROLLED_EFFECT_CONFIRMED": "All six prespecified outcomes have 12 complete valid pairs, expected-direction 95% bootstrap intervals excluding zero, and Holm-adjusted one-sided p-values at most 0.05.",
+    "HELDOUT_EXACT_EFFECT_ONLY": "The Target-risk outcome alone meets its expected-direction interval and Holm-adjusted test, but at least one specificity or control-relative gate fails.",
+    "NOT_REPLICATED": "Complete measurements exist but the Target-risk effect does not meet the frozen expected-direction criterion.",
+    "INCONCLUSIVE": "Any prespecified outcome has fewer than 12 complete valid scenario pairs or otherwise lacks an eligible confirmatory comparison."
+  },
+  "boundaries": {
+    "candidate_selection_uses_heldout": false,
+    "heldout_gradient_screening": false,
+    "free_generation": false,
+    "fine_tuning_mediation_claim": false
+  }
+}
