@@ -29,6 +29,8 @@ class SourceModel2B(BaseModel):
     tokenizer_id: str
     tokenizer_revision: str = Field(pattern=r"^[0-9a-f]{40}$")
     family: Literal["qwen3", "gemma2", "llama"]
+    license: Literal["apache-2.0", "gemma"]
+    access: Literal["public", "gated_account_scoped"]
     checkpoint_parameter_count: int = Field(gt=1_000_000_000, lt=3_000_000_000)
     selected_layers: tuple[int, ...]
     hidden_size: int = Field(gt=0)
@@ -234,6 +236,8 @@ class V3Main2BV1Config(BaseModel):
         for model in self.models:
             if (model.model_id, model.family, model.selected_layers) != expected[model.key]:
                 raise ValueError(f"2B source registry mismatch for {model.key}")
+        if self.models[1].access != "gated_account_scoped":
+            raise ValueError("Gemma access evidence must remain account-scoped")
         return self
 
     def payload(self) -> dict[str, Any]:

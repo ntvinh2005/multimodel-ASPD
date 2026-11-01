@@ -27,6 +27,7 @@ STRATEGY="${STRATEGY:-model_owned}"
 MAX_STEPS="${MAX_STEPS:-5}"
 WARMUP_STEPS="${WARMUP_STEPS:-1}"
 PROFILE_STAGES="${PROFILE_STAGES:-0}"
+TORCH_PROFILER="${TORCH_PROFILER:-0}"
 SKIP_CHECKPOINT="${SKIP_CHECKPOINT:-1}"
 CONFIG=configs/multimodel/aspd_v3/main_2b_v1.yaml
 GIT_SHA="$(git rev-parse HEAD)"
@@ -52,6 +53,9 @@ ARGS=(
 )
 if [[ "${PROFILE_STAGES}" == "1" ]]; then
   ARGS+=(--profile-stages)
+fi
+if [[ "${TORCH_PROFILER}" == "1" ]]; then
+  ARGS+=(--torch-profiler)
 fi
 if [[ "${SKIP_CHECKPOINT}" == "1" ]]; then
   ARGS+=(--skip-checkpoint)

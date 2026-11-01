@@ -81,6 +81,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--max-steps", type=int, required=True)
     parser.add_argument("--warmup-steps", type=int, default=1)
     parser.add_argument("--profile-stages", action="store_true")
+    parser.add_argument("--torch-profiler", action="store_true")
     parser.add_argument("--local-files-only", action="store_true")
     parser.add_argument("--skip-checkpoint", action="store_true")
     return parser.parse_args()
@@ -595,6 +596,18 @@ def main() -> None:
     checkpoint_manifest = None
     resumed = False
     started = time.perf_counter()
+    profiler = None
+    if args.torch_profiler:
+        profiler = torch.profiler.profile(
+            activities=(
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ),
+            record_shapes=False,
+            profile_memory=True,
+            with_stack=False,
+        )
+        profiler.__enter__()
 
     while completed_steps < args.max_steps:
         torch.cuda.synchronize()
@@ -796,6 +809,14 @@ def main() -> None:
             checkpoint_seconds = time.perf_counter() - checkpoint_started
         if stop_requested:
             break
+        if profiler is not None:
+            profiler.step()
+
+    if profiler is not None:
+        profiler.__exit__(None, None, None)
+        profiler.export_chrome_trace(
+            str(args.run_dir / f"torch_profile_rank{rank:02d}.json")
+        )
 
     if rank == 0:
         rows = [json.loads(line) for line in metrics_path.read_text().splitlines()]

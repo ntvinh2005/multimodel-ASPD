@@ -10,6 +10,8 @@ models:
     tokenizer_id: Qwen/Qwen3-1.7B
     tokenizer_revision: 70d244cc86ccca08cf5af4e1e306ecf908b1ad5e
     family: qwen3
+    license: apache-2.0
+    access: public
     checkpoint_parameter_count: 2031739904
     selected_layers: [10, 11, 12, 13, 14, 15, 16, 17]
     hidden_size: 2048
@@ -28,6 +30,8 @@ models:
     tokenizer_id: google/gemma-2-2b-it
     tokenizer_revision: 299a8560bedf22ed1c72a8a11e7dce4a7f9f51f8
     family: gemma2
+    license: gemma
+    access: gated_account_scoped
     checkpoint_parameter_count: 2614341888
     selected_layers: [9, 10, 11, 12, 13, 14, 15, 16]
     hidden_size: 2304
@@ -46,6 +50,8 @@ models:
     tokenizer_id: HuggingFaceTB/SmolLM2-1.7B-Instruct
     tokenizer_revision: 31b70e2e869a7173562077fd711b654946d38674
     family: llama
+    license: apache-2.0
+    access: public
     checkpoint_parameter_count: 1711376384
     selected_layers: [8, 9, 10, 11, 12, 13, 14, 15]
     hidden_size: 2048

@@ -225,19 +225,23 @@ class ModelOwnedMain2B(nn.Module):
         continuous_support: dict[str, SparseSupport] = {}
         binary_support: dict[str, SparseSupport] = {}
         for site in SITE_ORDER:
-            local_tokens = self.local_encoders[site](batch.activations[site])
-            gathered = _differentiable_all_gather(local_tokens)
+            with torch.profiler.record_function(f"aspd/{site}/local_packing_intra"):
+                local_tokens = self.local_encoders[site](batch.activations[site])
+            with torch.profiler.record_function(f"aspd/{site}/latent_all_gather"):
+                gathered = _differentiable_all_gather(local_tokens)
             tokens = {key: gathered[index] for index, key in enumerate(self.model_order)}
-            scores[site] = self.shared_encoders[site](tokens, batch.valid_anchors)
-            sparse[site] = self.gates[site](
-                scores[site], batch.valid_anchors, update_statistics=update_statistics
-            )
-            continuous_support[site] = prepare_sparse_support(
-                sparse[site].values, batch.valid_anchors, binary=False
-            )
-            binary_support[site] = prepare_sparse_support(
-                sparse[site].values.detach(), batch.valid_anchors, binary=True
-            )
+            with torch.profiler.record_function(f"aspd/{site}/cross_encoder_readout"):
+                scores[site] = self.shared_encoders[site](tokens, batch.valid_anchors)
+            with torch.profiler.record_function(f"aspd/{site}/batch_topk"):
+                sparse[site] = self.gates[site](
+                    scores[site], batch.valid_anchors, update_statistics=update_statistics
+                )
+                continuous_support[site] = prepare_sparse_support(
+                    sparse[site].values, batch.valid_anchors, binary=False
+                )
+                binary_support[site] = prepare_sparse_support(
+                    sparse[site].values.detach(), batch.valid_anchors, binary=True
+                )
         return scores, sparse, continuous_support, binary_support
 
     def activation_loss_terms(
@@ -350,6 +354,18 @@ def model_owned_parameter_counts(
     """Analytical counts used before allocating the multi-billion-parameter banks."""
 
     c = config.architecture.dictionary_size
+    width = config.architecture.packed_token_width
+    feedforward = 4 * width
+    transformer_layer = (
+        4 * width * width + 2 * width * feedforward + 9 * width + feedforward
+    )
+    intra_all_sites = (
+        2 * config.architecture.intra_model_layers * transformer_layer
+    )
+    cross_per_site = config.architecture.cross_model_layers * transformer_layer
+    adapter_per_site = (width + len(MODEL_ORDER_2B) + 2) * width + width
+    readout_per_site = width * c + c
+    shared_replicated = 2 * (cross_per_site + adapter_per_site + readout_per_site)
     per_model: dict[str, dict[str, int]] = {}
     for key, layout in registry.items():
         rank_one = sum((target.d_in + target.d_out) * c for target in layout.targets())
@@ -359,11 +375,28 @@ def model_owned_parameter_counts(
             "rank_one": rank_one,
             "activation_decoders": activation,
             "local_packers": packer,
+            "local_intra_transformers": intra_all_sites,
+            "shared_encoder_replica": shared_replicated,
         }
+    unique_total = sum(
+        value["rank_one"]
+        + value["activation_decoders"]
+        + value["local_packers"]
+        + value["local_intra_transformers"]
+        for value in per_model.values()
+    ) + shared_replicated
+    allocated_total = sum(sum(value.values()) for value in per_model.values())
     return {
         "per_model": per_model,
         "rank_one_total": sum(value["rank_one"] for value in per_model.values()),
         "activation_decoder_total": sum(
             value["activation_decoders"] for value in per_model.values()
         ),
+        "unique_scientific_trainable_parameters": unique_total,
+        "allocated_parameters_including_three_shared_replicas": allocated_total,
+        "maximum_owner_parameters": max(sum(value.values()) for value in per_model.values()),
+        "estimated_runtime_param_grad_adam_bytes_fp32": {
+            key: sum(value.values()) * 16 for key, value in per_model.items()
+        },
+        "estimated_checkpoint_bytes_model_plus_adam_fp32": allocated_total * 12,
     }
