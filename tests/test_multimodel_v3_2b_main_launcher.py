@@ -40,6 +40,16 @@ def test_main_launcher_recovers_sqlite_state_before_initializing_nccl() -> None:
     assert 'dedup.rollback(int(stream_state["dedup_high_water"]))' in text
 
 
+def test_main_launcher_preserves_telemetry_segments_across_resume() -> None:
+    text = LAUNCHER.read_text(encoding="utf-8")
+
+    archive = text.index('mv "${RUN_DIR}/gpu_telemetry.csv" "${TELEMETRY_SEGMENT}"')
+    torchrun = text.index("setsid ../repo/.venv/bin/torchrun")
+    assert archive < torchrun
+    assert "gpu_telemetry-before-step-${START_COMPLETE_STEP}-job-${SLURM_JOB_ID}.csv" in text
+    assert "Refusing to overwrite existing telemetry segment" in text
+
+
 def test_main_launcher_preserves_interim_report_before_requeue() -> None:
     text = LAUNCHER.read_text(encoding="utf-8")
 

@@ -164,6 +164,19 @@ print(json.dumps({
 ' "${RUN_DIR}" "${START_COMPLETE_STEP}"
 fi
 
+# Telemetry is intentionally created with exclusive mode by the trainer.  Keep
+# every prior segment immutable, but move the active filename out of the way
+# before a checkpoint resume so rank 0 can create the next segment.
+if [[ -f "${RUN_DIR}/gpu_telemetry.csv" ]]; then
+  mkdir -p "${RUN_DIR}/telemetry_segments"
+  TELEMETRY_SEGMENT="${RUN_DIR}/telemetry_segments/gpu_telemetry-before-step-${START_COMPLETE_STEP}-job-${SLURM_JOB_ID}.csv"
+  if [[ -e "${TELEMETRY_SEGMENT}" ]]; then
+    echo "Refusing to overwrite existing telemetry segment: ${TELEMETRY_SEGMENT}" >&2
+    exit 70
+  fi
+  mv "${RUN_DIR}/gpu_telemetry.csv" "${TELEMETRY_SEGMENT}"
+fi
+
 setsid ../repo/.venv/bin/torchrun \
   --standalone \
   --nnodes=1 \
