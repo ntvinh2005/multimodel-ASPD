@@ -29,6 +29,17 @@ def test_main_launcher_waits_for_signal_checkpoint_before_requeue() -> None:
     assert '"${TRAINER_RC}" -eq 99' not in text
 
 
+def test_main_launcher_recovers_sqlite_state_before_initializing_nccl() -> None:
+    text = LAUNCHER.read_text(encoding="utf-8")
+
+    recovery = text.index("ledger.recover_to_receipt(receipt)")
+    torchrun = text.index("setsid ../repo/.venv/bin/torchrun")
+    assert recovery < torchrun
+    assert "SQLiteStreamDeduplicator" in text
+    assert "PRE_NCCL_RECOVERY_PASS" in text
+    assert 'dedup.rollback(int(stream_state["dedup_high_water"]))' in text
+
+
 def test_main_launcher_preserves_interim_report_before_requeue() -> None:
     text = LAUNCHER.read_text(encoding="utf-8")
 
@@ -79,7 +90,7 @@ raise SystemExit(99)
         text=True,
     )
     try:
-        deadline = time.monotonic() + 20
+        deadline = time.monotonic() + 60
         while len(list(tmp_path.glob("ready-*"))) != 3 and time.monotonic() < deadline:
             if process.poll() is not None:
                 stdout, stderr = process.communicate()

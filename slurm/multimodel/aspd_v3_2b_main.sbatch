@@ -104,6 +104,66 @@ print(latest)
 
 START_COMPLETE_STEP="$(latest_complete_step)"
 
+# Roll back large SQLite membership indexes before initializing NCCL.  A
+# post-checkpoint interruption can leave millions of exact anchor IDs beyond
+# the checkpoint receipt; doing this after dist.init_process_group makes the
+# idle ranks trip NCCL's heartbeat watchdog while rank 0 performs durable I/O.
+if [[ "${START_COMPLETE_STEP}" -gt 0 ]]; then
+  ../repo/.venv/bin/python -c '
+import json
+import pathlib
+import sys
+
+from aspd.multimodel.v3.data import ExposureLedgerReceipt, SQLiteExposureLedger
+from aspd.multimodel.v3.production_stream import SQLiteStreamDeduplicator
+
+run_dir = pathlib.Path(sys.argv[1])
+step = int(sys.argv[2])
+checkpoint = run_dir / "checkpoints" / f"step-{step:09d}"
+sidecar = json.loads(
+    (checkpoint / "rank-00000" / "sidecar.json").read_text(encoding="utf-8")
+)
+runtime = sidecar["runtime_state"]
+if int(runtime["completed_steps"]) != step:
+    raise RuntimeError("rank-zero checkpoint sidecar step mismatch")
+
+receipt = ExposureLedgerReceipt.from_payload(runtime["ledger_receipt"])
+ledger = SQLiteExposureLedger(
+    run_dir / "exposure_ledger.sqlite",
+    dataset_manifest_sha256=receipt.dataset_manifest_sha256,
+    world_size=receipt.world_size,
+    model_order=("qwen", "gemma", "smol"),
+    compact_anchor_ids=True,
+)
+try:
+    counters = ledger.recover_to_receipt(receipt)
+finally:
+    ledger.close()
+if counters.optimization_steps != step:
+    raise RuntimeError("pre-NCCL ledger recovery restored the wrong step")
+
+stream_state = runtime["stream"]
+dedup = SQLiteStreamDeduplicator(
+    run_dir / "stream_dedup.sqlite",
+    provenance_sha256=str(stream_state["provenance_sha256"]),
+)
+try:
+    dedup.rollback(int(stream_state["dedup_high_water"]))
+    dedup_high_water = dedup.high_water
+finally:
+    dedup.close()
+if dedup_high_water != int(stream_state["dedup_high_water"]):
+    raise RuntimeError("pre-NCCL stream dedup recovery restored the wrong high-water mark")
+
+print(json.dumps({
+    "status": "PRE_NCCL_RECOVERY_PASS",
+    "step": step,
+    "accepted_exposures": counters.accepted_aligned_anchor_exposures,
+    "dedup_high_water": dedup_high_water,
+}, sort_keys=True), flush=True)
+' "${RUN_DIR}" "${START_COMPLETE_STEP}"
+fi
+
 setsid ../repo/.venv/bin/torchrun \
   --standalone \
   --nnodes=1 \
