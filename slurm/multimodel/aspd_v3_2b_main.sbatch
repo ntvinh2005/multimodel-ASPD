@@ -53,14 +53,56 @@ date --iso-8601=seconds
 nvidia-smi
 
 SIGNALLED=0
+SIGNAL_FORWARD_OK=0
 TRAINER_PID=""
 forward_checkpoint_signal() {
   SIGNALLED=1
   if [[ -n "${TRAINER_PID}" ]]; then
-    kill -USR1 -- "-${TRAINER_PID}" 2>/dev/null || true
+    # torchrun is the process-group leader.  Signalling the complete process
+    # group also terminates torchrun itself before its workers can publish the
+    # coordinated checkpoint.  Signal only the direct worker children and
+    # keep torchrun alive to supervise their clean exit.
+    mapfile -t worker_pids < <(pgrep -P "${TRAINER_PID}" || true)
+    if [[ "${#worker_pids[@]}" -eq 0 ]]; then
+      echo "USR1 received but no torchrun workers were found" >&2
+      return 0
+    fi
+    if kill -USR1 "${worker_pids[@]}" 2>/dev/null; then
+      SIGNAL_FORWARD_OK=1
+    else
+      echo "USR1 could not be delivered to every torchrun worker" >&2
+    fi
   fi
 }
 trap forward_checkpoint_signal USR1
+
+latest_complete_step() {
+  ../repo/.venv/bin/python -c '
+import hashlib
+import json
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1]) / "checkpoints"
+latest = 0
+for path in root.glob("step-*") if root.is_dir() else ():
+    try:
+        step = int(path.name.removeprefix("step-"))
+        manifest_bytes = (path / "manifest.json").read_bytes()
+        complete = json.loads((path / "COMPLETE").read_text(encoding="utf-8"))
+        manifest = json.loads(manifest_bytes)
+    except (FileNotFoundError, ValueError, json.JSONDecodeError):
+        continue
+    if manifest.get("status") != "COMPLETE" or int(manifest.get("step", -1)) != step:
+        continue
+    if hashlib.sha256(manifest_bytes).hexdigest() != complete.get("manifest_sha256"):
+        continue
+    latest = max(latest, step)
+print(latest)
+' "${RUN_DIR}"
+}
+
+START_COMPLETE_STEP="$(latest_complete_step)"
 
 setsid ../repo/.venv/bin/torchrun \
   --standalone \
@@ -77,11 +119,41 @@ setsid ../repo/.venv/bin/torchrun \
 TRAINER_PID=$!
 
 set +e
-wait "${TRAINER_PID}"
-TRAINER_RC=$?
+while true; do
+  wait "${TRAINER_PID}"
+  TRAINER_RC=$?
+  # A trapped USR1 interrupts bash's wait with 128+SIGUSR1 even though the
+  # supervised torchrun process is still alive.  Continue waiting for the
+  # workers to finish and atomically publish their checkpoint.
+  if [[ "${TRAINER_RC}" -eq 138 ]] && kill -0 "${TRAINER_PID}" 2>/dev/null; then
+    continue
+  fi
+  break
+done
 set -e
-if [[ "${SIGNALLED}" -eq 1 && "${TRAINER_RC}" -eq 99 ]]; then
-  echo "Verified complete signal checkpoint; requeueing ${SLURM_JOB_ID}"
+
+if [[ "${SIGNALLED}" -eq 1 ]]; then
+  END_COMPLETE_STEP="$(latest_complete_step)"
+  if [[ "${SIGNAL_FORWARD_OK}" -ne 1 ]]; then
+    echo "Refusing requeue because USR1 delivery was not verified" >&2
+    exit 70
+  fi
+  if [[ "${END_COMPLETE_STEP}" -le "${START_COMPLETE_STEP}" ]]; then
+    echo "Refusing requeue without a new verified COMPLETE checkpoint: start=${START_COMPLETE_STEP} end=${END_COMPLETE_STEP}" >&2
+    exit 70
+  fi
+  # A graceful signal exit emits an interim report.  Preserve it under a
+  # step-specific name so the final completion report remains immutable.
+  if [[ -f "${RUN_DIR}/benchmark_report.json" ]]; then
+    mkdir -p "${RUN_DIR}/signal_reports"
+    SIGNAL_REPORT="${RUN_DIR}/signal_reports/benchmark_report-step-${END_COMPLETE_STEP}.json"
+    if [[ -e "${SIGNAL_REPORT}" ]]; then
+      echo "Refusing to overwrite existing signal report: ${SIGNAL_REPORT}" >&2
+      exit 70
+    fi
+    mv "${RUN_DIR}/benchmark_report.json" "${SIGNAL_REPORT}"
+  fi
+  echo "Verified complete signal checkpoint at step ${END_COMPLETE_STEP}; requeueing ${SLURM_JOB_ID} (torchrun_rc=${TRAINER_RC})"
   scontrol requeue "${SLURM_JOB_ID}"
   exit 0
 fi
