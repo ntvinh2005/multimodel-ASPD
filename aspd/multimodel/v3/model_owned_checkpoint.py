@@ -14,7 +14,9 @@ import torch.distributed.checkpoint as dcp
 from torch import nn
 from torch.distributed.checkpoint.state_dict import (
     StateDictOptions,
+    get_model_state_dict,
     get_state_dict,
+    set_model_state_dict,
     set_state_dict,
 )
 
@@ -224,6 +226,44 @@ class ModelOwnedCheckpoint:
         restore_rng_state(sidecar["rng"])
         dist.barrier()
         return sidecar["runtime_state"], manifest
+
+    def load_model_only(
+        self,
+        *,
+        path: str | Path,
+        model: nn.Module,
+        config_fingerprint: str,
+        config_file_sha256: str,
+        dataset_manifest_sha256: str,
+        expected_model_key: str,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Restore frozen ASPD parameters without allocating Adam or scheduler state.
+
+        This is the read-only diagnostic path.  It intentionally does not restore RNG,
+        optimizer, scheduler, or stream state and therefore cannot be used to resume
+        training.
+        """
+
+        checkpoint = Path(path)
+        rank, _world = self._rank_world()
+        manifest = self._validate(
+            checkpoint,
+            config_fingerprint=config_fingerprint,
+            config_file_sha256=config_file_sha256,
+            dataset_manifest_sha256=dataset_manifest_sha256,
+        )
+        rank_root = checkpoint / f"rank-{rank:05d}"
+        sidecar = json.loads((rank_root / "sidecar.json").read_text(encoding="utf-8"))
+        if sidecar.get("model_key") != expected_model_key:
+            raise ValueError("checkpoint rank/model ownership changed")
+        if int(sidecar.get("step", -1)) != int(manifest["step"]):
+            raise ValueError("checkpoint sidecar/global step mismatch")
+        options = StateDictOptions(full_state_dict=False, cpu_offload=False)
+        state = {"model": get_model_state_dict(model, options=options)}
+        dcp.load(state, checkpoint_id=rank_root / "dcp", no_dist=True)
+        set_model_state_dict(model, state["model"], options=options)
+        dist.barrier()
+        return dict(sidecar["runtime_state"]), manifest
 
     def complete_checkpoints(self) -> list[Path]:
         if not self.root.is_dir():

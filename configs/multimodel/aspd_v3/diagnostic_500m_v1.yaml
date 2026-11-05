@@ -1,0 +1,45 @@
+schema_version: 1
+status: RESEARCHER_APPROVED
+
+paths:
+  source_run: out/multimodel/aspd_v3/main_2b_v1/runs/aspd_v3_qwen_gemma_smol_168targets_c8192_k32_500m_main_2b_v1_final
+  source_config: configs/multimodel/aspd_v3/main_2b_v1.yaml
+  checkpoint: out/multimodel/aspd_v3/main_2b_v1/runs/aspd_v3_qwen_gemma_smol_168targets_c8192_k32_500m_main_2b_v1_final/checkpoints/step-000061036
+  output_root: out/multimodel/aspd_v3/diagnostics/500m_checkpoint_v1
+
+provenance:
+  source_git_sha: 46ac649434755fd09d4f5c9e10392c11b5e9877d
+  source_config_sha256: 06545c2c813508f4d9a2b8c68d7dbeace7c9b3a611707d927f1840af3fdf4c73
+  source_config_fingerprint: e5ab5dc092f1eabf9321d2a4ba06fe3105418949861c7bdd85ac8acb179c5e6a
+  dataset_manifest_sha256: a258974d21ceac3457529644be07459518fde7bc28501abde5c67e5e3719286f
+  alignment_manifest_sha256: 1a513988a5b15d5ce10dec7950edd0d8294bc94009feccf544ab22fafa3a92be
+  checkpoint_manifest_sha256: e45559e8b704b6516fbda62664b66bbee174379842736e028c815f310f7185e0
+
+evaluation:
+  split: validation
+  dev_anchors: 2048
+  main_anchors: 100352  # 49 complete BatchTopK pools; never use a partial pool.
+  pool_anchors: 2048
+  seed: 20261105
+  bootstrap_replicates: 2000
+  jaccard_top_features: 256
+  jaccard_min_fires: 10
+
+scientific_scope:
+  checkpoint_restore: read_only_model_parameters_without_optimizer_state
+  activation_metrics:
+    - matryoshka_mean_fvu
+    - full_reconstruction_fvu
+    - mse
+    - relative_l2_error
+    - rms
+    - correlation
+  internal_metrics:
+    - fvu
+    - mse
+    - relative_l2_error
+    - rms
+    - correlation
+  uncertainty_unit: source_document
+  taxonomy: NOT_IMPLEMENTED
+  causal_intervention: NOT_IMPLEMENTED
