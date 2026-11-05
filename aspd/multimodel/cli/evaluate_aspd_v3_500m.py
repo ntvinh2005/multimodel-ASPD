@@ -247,7 +247,12 @@ def _local_evaluation(
             registry=registry,
             device=device,
         )
-        with torch.no_grad():
+        # Reproduce the model-owned trainer's forward precision. ASPD master
+        # parameters are restored in FP32 while frozen captures are BF16; the
+        # production trainer therefore executes this path under CUDA autocast.
+        with torch.no_grad(), torch.autocast(
+            device_type="cuda", dtype=torch.bfloat16, enabled=True
+        ):
             scores, sparse, continuous, binary = model.encode(capture, update_statistics=False)
         del scores
         accepted += pool.anchor_count
@@ -727,7 +732,9 @@ def main() -> None:
             registry=registry,
             device=device,
         )
-        with torch.no_grad():
+        with torch.no_grad(), torch.autocast(
+            device_type="cuda", dtype=torch.bfloat16, enabled=True
+        ):
             first = model.encode(capture, update_statistics=False)
             second = model.encode(capture, update_statistics=False)
         for site in ("pre", "mid"):
