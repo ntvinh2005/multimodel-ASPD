@@ -12,7 +12,7 @@ import platform
 import socket
 import subprocess
 import time
-from collections import Counter, defaultdict
+from collections import Counter
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -23,6 +23,7 @@ import torch.distributed as dist
 from aspd.multimodel.v3.data import HashSplitPolicy
 from aspd.multimodel.v3.diagnostic import (
     DiagnosticContract,
+    SequentialDocumentFVU,
     TensorMetricAccumulator,
     cluster_bootstrap_mean_ci,
     feature_health_from_counts,
@@ -136,23 +137,6 @@ def _capture(
     )
 
 
-def _document_fvus(prediction: torch.Tensor, target: torch.Tensor, document_index: tuple[int, ...]) -> list[float]:
-    pred = prediction.reshape(-1, prediction.shape[-1]).float()
-    truth = target.reshape(-1, target.shape[-1]).float()
-    index = torch.tensor(document_index, device=truth.device)
-    values: list[float] = []
-    for document in index.unique(sorted=True):
-        selected = index == document
-        if int(selected.sum()) < 2:
-            continue
-        local_truth = truth[selected]
-        denominator = (local_truth - local_truth.mean(dim=0, keepdim=True)).square().sum()
-        if float(denominator) <= 1e-8:
-            continue
-        values.append(float((pred[selected] - local_truth).square().sum() / denominator))
-    return values
-
-
 def _accumulate(
     values: dict[str, TensorMetricAccumulator], key: str, prediction: torch.Tensor, target: torch.Tensor
 ) -> None:
@@ -218,7 +202,7 @@ def _local_evaluation(
     contract: DiagnosticContract,
 ) -> dict[str, Any]:
     metrics: dict[str, TensorMetricAccumulator] = {}
-    cluster_values: dict[str, list[float]] = defaultdict(list)
+    document_metrics: dict[str, SequentialDocumentFVU] = {}
     n_features = 8192
     fire_counts = {site: torch.zeros(n_features, dtype=torch.int64) for site in ("pre", "mid")}
     first_counts = {site: torch.zeros(n_features, dtype=torch.int64) for site in ("pre", "mid")}
@@ -287,8 +271,12 @@ def _local_evaluation(
                 for prefix_index, prediction in enumerate(decoded):
                     key = f"activation/{local_key}/{site}/L{layer:02d}/prefix_{prefix_index}"
                     _accumulate(metrics, key, prediction, target)
-                full_key = f"activation/{local_key}/{site}/L{layer:02d}/full"
-                cluster_values[full_key].extend(_document_fvus(decoded[-1], target, document_index))
+                full_key = f"activation/{local_key}/{site}/L{layer:02d}/prefix_5"
+                document_metrics.setdefault(
+                    full_key, SequentialDocumentFVU(target.shape[-1])
+                ).update(
+                    decoded[-1], target, document_index, pool.document_ids
+                )
 
         for key, target_spec in model.targets.items():
             site = "pre" if target_spec.grounding_kind == "residual_pre" else "mid"
@@ -306,7 +294,9 @@ def _local_evaluation(
             target = capture.matrix_outputs[key]
             metric_key = f"internal/{key}"
             _accumulate(metrics, metric_key, prediction, target)
-            cluster_values[metric_key].extend(_document_fvus(prediction, target, document_index))
+            document_metrics.setdefault(
+                metric_key, SequentialDocumentFVU(target.shape[-1])
+            ).update(prediction, target, document_index, pool.document_ids)
 
             support = binary[site]
             component = model.matrix_bank.components[key.replace(".", "__dot__")]
@@ -330,14 +320,17 @@ def _local_evaluation(
     finalized = {}
     for key, accumulator in metrics.items():
         value = accumulator.finalize()
-        clusters = cluster_values.get(key, [])
-        if clusters:
+        document_metric = document_metrics.get(key)
+        if document_metric is not None:
+            cluster_report = document_metric.finalize()
+            clusters = cluster_report.pop("values")
             offset = int(hashlib.sha256(key.encode()).hexdigest()[:8], 16)
             value["document_mean_fvu_bootstrap"] = cluster_bootstrap_mean_ci(
                 clusters,
                 seed=contract.seed + offset,
                 replicates=contract.bootstrap_replicates,
             )
+            value["document_cluster_accounting"] = cluster_report
         finalized[key] = value
 
     dictionary = {}

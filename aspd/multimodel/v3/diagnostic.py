@@ -435,6 +435,95 @@ class TensorMetricAccumulator:
         return result
 
 
+@dataclass
+class SequentialDocumentFVU:
+    """Accumulate per-document FVU when a source document can cross pool boundaries.
+
+    Validation streaming preserves source-document order, but a long document may be
+    split between two consecutive 2048-anchor pools.  Treating those pieces as
+    independent bootstrap clusters understates dependence.  This accumulator keeps the
+    final document open until the next document arrives and emits exactly one FVU per
+    unique source document.
+    """
+
+    width: int
+    pending_document_id: str | None = None
+    pending: TensorMetricAccumulator | None = None
+    values: list[float] = field(default_factory=list)
+    completed_document_ids: set[str] = field(default_factory=set)
+    excluded_zero_variance: int = 0
+    _finalized: bool = False
+
+    def _finish_pending(self) -> None:
+        if self.pending is None or self.pending_document_id is None:
+            return
+        try:
+            value = self.pending.finalize()["fvu"]
+        except FloatingPointError as error:
+            if "centered variance" not in str(error):
+                raise
+            self.excluded_zero_variance += 1
+        else:
+            assert isinstance(value, float)
+            self.values.append(value)
+        self.completed_document_ids.add(self.pending_document_id)
+        self.pending_document_id = None
+        self.pending = None
+
+    def update(
+        self,
+        prediction: Tensor,
+        target: Tensor,
+        anchor_document_indices: Sequence[int],
+        document_ids: Sequence[str],
+    ) -> None:
+        if self._finalized:
+            raise RuntimeError("cannot update a finalized document accumulator")
+        prediction = prediction.reshape(-1, self.width)
+        target = target.reshape(-1, self.width)
+        if prediction.shape != target.shape or prediction.shape[0] != len(
+            anchor_document_indices
+        ):
+            raise ValueError("document-cluster tensors and anchor indices differ")
+        if not anchor_document_indices:
+            raise ValueError("document-cluster update cannot be empty")
+        indices = tuple(int(value) for value in anchor_document_indices)
+        if any(value < 0 or value >= len(document_ids) for value in indices):
+            raise ValueError("document-cluster index is out of range")
+        if any(right < left for left, right in zip(indices, indices[1:], strict=False)):
+            raise ValueError("document-cluster anchors must remain document ordered")
+
+        start = 0
+        while start < len(indices):
+            index = indices[start]
+            stop = start + 1
+            while stop < len(indices) and indices[stop] == index:
+                stop += 1
+            document_id = str(document_ids[index])
+            if self.pending_document_id != document_id:
+                self._finish_pending()
+                if document_id in self.completed_document_ids:
+                    raise ValueError("source document recurred after its cluster was finalized")
+                self.pending_document_id = document_id
+                self.pending = TensorMetricAccumulator(self.width)
+            assert self.pending is not None
+            self.pending.update(prediction[start:stop], target[start:stop])
+            start = stop
+
+    def finalize(self) -> dict[str, Any]:
+        if not self._finalized:
+            self._finish_pending()
+            self._finalized = True
+        if not self.values:
+            raise ValueError("no eligible source-document FVU clusters")
+        return {
+            "values": list(self.values),
+            "unique_source_documents": len(self.completed_document_ids),
+            "eligible_source_documents": len(self.values),
+            "excluded_zero_variance_documents": self.excluded_zero_variance,
+        }
+
+
 def cluster_bootstrap_mean_ci(
     values: Sequence[float], *, seed: int, replicates: int, alpha: float = 0.05
 ) -> dict[str, float | int]:

@@ -16,6 +16,7 @@ from aspd.multimodel.v3.alignment import (
 from aspd.multimodel.v3.data import HashSplitPolicy, SourceDocument
 from aspd.multimodel.v3.diagnostic import (
     DiagnosticContract,
+    SequentialDocumentFVU,
     TensorMetricAccumulator,
     canonical_metric_rows,
     cluster_bootstrap_mean_ci,
@@ -140,6 +141,38 @@ def test_cluster_bootstrap_is_deterministic_and_cluster_level() -> None:
     assert first == second
     assert first["clusters"] == 4
     assert first["lower"] <= first["mean"] <= first["upper"]
+
+
+def test_document_fvu_merges_one_source_document_across_pool_boundaries() -> None:
+    accumulator = SequentialDocumentFVU(width=2)
+    first_truth = torch.tensor([[0.0, 1.0], [2.0, 3.0]])
+    first_prediction = first_truth + 0.5
+    accumulator.update(
+        first_prediction,
+        first_truth,
+        (0, 0),
+        ("document-a",),
+    )
+    second_truth = torch.tensor([[4.0, 5.0], [10.0, 11.0], [12.0, 13.0]])
+    second_prediction = second_truth + torch.tensor([[0.5, 0.5], [1.0, 1.0], [1.0, 1.0]])
+    accumulator.update(
+        second_prediction,
+        second_truth,
+        (0, 1, 1),
+        ("document-a", "document-b"),
+    )
+    report = accumulator.finalize()
+
+    combined_truth = torch.cat((first_truth, second_truth[:1]))
+    combined_prediction = torch.cat((first_prediction, second_prediction[:1]))
+    expected_a = TensorMetricAccumulator(width=2)
+    expected_a.update(combined_prediction, combined_truth)
+    expected_b = TensorMetricAccumulator(width=2)
+    expected_b.update(second_prediction[1:], second_truth[1:])
+    assert report["unique_source_documents"] == 2
+    assert report["eligible_source_documents"] == 2
+    assert report["excluded_zero_variance_documents"] == 0
+    assert report["values"] == [expected_a.finalize()["fvu"], expected_b.finalize()["fvu"]]
 
 
 def test_feature_health_and_jaccard_filter_inactive_features() -> None:
