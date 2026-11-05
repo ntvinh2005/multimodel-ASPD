@@ -709,6 +709,21 @@ def _distributed_model_owned_worker(
     torch.testing.assert_close(next(model.parameters()), saved_parameter)
     assert runtime["completed_steps"] == 1
     assert manifest["status"] == "COMPLETE"
+    with torch.no_grad():
+        next(model.parameters()).add_(3)
+    runtime, manifest = manager.load_model_only_owner(
+        path=Path(checkpoint_root) / "step-000000001",
+        model=model,
+        config_fingerprint="tiny-model-owned-test",
+        config_file_sha256="a" * 64,
+        dataset_manifest_sha256="b" * 64,
+        checkpoint_rank=rank,
+        expected_checkpoint_world_size=world_size,
+        expected_model_key=key,
+    )
+    torch.testing.assert_close(next(model.parameters()), saved_parameter)
+    assert runtime["completed_steps"] == 1
+    assert manifest["world_size"] == world_size
     update()
     dist.destroy_process_group()
 

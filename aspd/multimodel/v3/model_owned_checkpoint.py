@@ -153,8 +153,14 @@ class ModelOwnedCheckpoint:
         config_fingerprint: str,
         config_file_sha256: str,
         dataset_manifest_sha256: str,
+        expected_world_size: int | None = None,
     ) -> dict[str, Any]:
-        _rank, world = self._rank_world()
+        if expected_world_size is None:
+            _rank, world = self._rank_world()
+        else:
+            world = int(expected_world_size)
+            if world <= 0:
+                raise ValueError("expected checkpoint world size must be positive")
         manifest_path = path / "manifest.json"
         marker_path = path / "COMPLETE"
         if not manifest_path.is_file() or not marker_path.is_file():
@@ -263,6 +269,49 @@ class ModelOwnedCheckpoint:
         dcp.load(state, checkpoint_id=rank_root / "dcp", no_dist=True)
         set_model_state_dict(model, state["model"], options=options)
         dist.barrier()
+        return dict(sidecar["runtime_state"]), manifest
+
+    def load_model_only_owner(
+        self,
+        *,
+        path: str | Path,
+        model: nn.Module,
+        config_fingerprint: str,
+        config_file_sha256: str,
+        dataset_manifest_sha256: str,
+        checkpoint_rank: int,
+        expected_checkpoint_world_size: int,
+        expected_model_key: str,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Load one historical owner shard under a different evaluation world size.
+
+        This read-only path supports colocating multiple model owners for diagnostic
+        inference. It preserves the checkpoint's original three-rank provenance and
+        never loads optimizer, scheduler, RNG, or stream state.
+        """
+
+        checkpoint = Path(path)
+        if not 0 <= checkpoint_rank < expected_checkpoint_world_size:
+            raise ValueError("checkpoint owner rank is out of range")
+        manifest = self._validate(
+            checkpoint,
+            config_fingerprint=config_fingerprint,
+            config_file_sha256=config_file_sha256,
+            dataset_manifest_sha256=dataset_manifest_sha256,
+            expected_world_size=expected_checkpoint_world_size,
+        )
+        rank_root = checkpoint / f"rank-{checkpoint_rank:05d}"
+        sidecar = json.loads((rank_root / "sidecar.json").read_text(encoding="utf-8"))
+        if int(sidecar.get("rank", -1)) != checkpoint_rank:
+            raise ValueError("checkpoint sidecar owner rank changed")
+        if sidecar.get("model_key") != expected_model_key:
+            raise ValueError("checkpoint rank/model ownership changed")
+        if int(sidecar.get("step", -1)) != int(manifest["step"]):
+            raise ValueError("checkpoint sidecar/global step mismatch")
+        options = StateDictOptions(full_state_dict=False, cpu_offload=False)
+        state = {"model": get_model_state_dict(model, options=options)}
+        dcp.load(state, checkpoint_id=rank_root / "dcp", no_dist=True)
+        set_model_state_dict(model, state["model"], options=options)
         return dict(sidecar["runtime_state"]), manifest
 
     def complete_checkpoints(self) -> list[Path]:
