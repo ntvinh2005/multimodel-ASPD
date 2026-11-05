@@ -7,6 +7,7 @@ from pathlib import Path
 
 import torch
 
+from aspd.multimodel.cli.probe_aspd_v3_500m import cosine_matrix, support_overlap
 from aspd.multimodel.v3.alignment import (
     AlignedAnchor,
     AlignmentResult,
@@ -173,6 +174,19 @@ def test_document_fvu_merges_one_source_document_across_pool_boundaries() -> Non
     assert report["eligible_source_documents"] == 2
     assert report["excluded_zero_variance_documents"] == 0
     assert report["values"] == [expected_a.finalize()["fvu"], expected_b.finalize()["fvu"]]
+
+
+def test_hypothesis_probe_support_and_gradient_helpers() -> None:
+    reference = torch.tensor([[1.0, 0.0, 2.0], [0.0, 3.0, 0.0]])
+    candidate = torch.tensor([[1.0, 4.0, 0.0], [0.0, 3.0, 0.0]])
+    overlap = support_overlap(reference, candidate)
+    assert overlap["intersection"] == 2
+    assert overlap["union"] == 4
+    assert overlap["jaccard"] == 0.5
+    matrix = cosine_matrix(
+        [torch.tensor([1.0, 0.0]), torch.tensor([0.0, 1.0]), torch.tensor([-1.0, 0.0])]
+    )
+    assert matrix == [[1.0, 0.0, -1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 1.0]]
 
 
 def test_feature_health_and_jaccard_filter_inactive_features() -> None:
