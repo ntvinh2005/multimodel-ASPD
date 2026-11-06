@@ -6,7 +6,9 @@ from pathlib import Path
 import pytest
 import torch
 from pydantic import ValidationError
+from torch import nn
 
+from aspd.multimodel.cli.train_aspd_v3_2b import _common_state_sha256
 from aspd.multimodel.v3.encoder import pack_cross_model_tokens
 from aspd.multimodel.v3.objective import matryoshka_activation_fvu
 from aspd.multimodel.v3.reconstruction import ActivationDecoder
@@ -95,3 +97,11 @@ def test_config_rejects_unapproved_dictionary_or_k_change() -> None:
             from aspd.multimodel.v3.two_model_config import TwoModelScalePilotConfig
 
             TwoModelScalePilotConfig.model_validate(changed)
+
+
+def test_common_state_hash_supports_scalar_integer_buffers() -> None:
+    module = nn.Module()
+    module.register_buffer("scalar", torch.tensor(7, dtype=torch.int64))
+    first = _common_state_sha256(module)
+    second = _common_state_sha256(module)
+    assert first == second and len(first) == 64

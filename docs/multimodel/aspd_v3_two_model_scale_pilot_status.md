@@ -64,6 +64,15 @@ GPU preflight/training/evaluation: `SUBMITTED`. Both pilot allocations began at
 `afterok` dependencies, and the final comparison waits for both evaluations. No 500M
 job, Qwen job, third-model job or dependent retraining job was submitted.
 
+### First preflight attempt
+
+Jobs 49975792 and 49975793 failed before any optimizer step. Baseline exposed a scalar
+buffer serialization bug in the newly added common-state hash; treatment also observed
+the documentation commit while checking worktree cleanliness. Dependent jobs 49975794,
+49975795 and 49975796 were cancelled because their dependencies could never be
+satisfied. The failure evidence and logs are retained; neither failure is a scientific
+pilot result.
+
 The GPU scripts run a three-step two-B200 optimizer/checkpoint/reload preflight before
 starting the corresponding short pilot. Held-out evaluation uses exactly 100,352
 validation anchors and cannot start unless the pilot checkpoint is complete. A final
