@@ -1,0 +1,24 @@
+schema_version: 1
+experiment_family: aspd_v3_2b_controlled_gate_retrain
+approval_status: RESEARCHER_APPROVED
+approval_note: >-
+  Researcher approved the controlled short retrain in chat on 2026-11-05;
+  this first stage is limited to 10,002,432 new accepted aligned-anchor exposures.
+source_config: configs/multimodel/aspd_v3/main_2b_v1.yaml
+source_config_sha256: 06545c2c813508f4d9a2b8c68d7dbeace7c9b3a611707d927f1840af3fdf4c73
+source_config_fingerprint: e5ab5dc092f1eabf9321d2a4ba06fe3105418949861c7bdd85ac8acb179c5e6a
+source_checkpoint: /blue/thai/vinhnguyen1/multimodel-ASPD/aspd-v3-2b-opt/out/multimodel/aspd_v3/main_2b_v1/runs/aspd_v3_qwen_gemma_smol_168targets_c8192_k32_500m_main_2b_v1_final/checkpoints/step-000061036
+source_checkpoint_step: 61036
+source_checkpoint_manifest_sha256: e45559e8b704b6516fbda62664b66bbee174379842736e028c815f310f7185e0
+source_accepted_exposures: 500006912
+arm: shared_control
+additional_optimizer_steps: 1221
+effective_batch_anchors: 8192
+additional_accepted_exposures: 10002432
+trainable_scope: [local_encoders, shared_encoders, activation_decoders]
+frozen_scope: [rank_one_matrix_factors]
+optimizer_state: fresh_for_both_arms
+data_start: exact_source_checkpoint_stream_continuation
+qwen_smol_group: [0, 2]
+gemma_owner_rank: 1
+output_root: /blue/thai/vinhnguyen1/multimodel-ASPD/work/out/multimodel/aspd_v3/controlled_retrain_10m_v1/shared_control

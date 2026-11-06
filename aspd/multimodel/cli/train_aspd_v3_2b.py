@@ -12,6 +12,7 @@ import itertools
 import json
 import math
 import os
+import shutil
 import signal
 import socket
 import subprocess
@@ -24,6 +25,11 @@ import torch
 import torch.distributed as dist
 from torch.nn import functional as F
 
+from aspd.multimodel.v3.controlled_retrain import (
+    configure_controlled_trainables,
+    load_controlled_retrain_contract,
+    reduce_controlled_shared_gradients_,
+)
 from aspd.multimodel.v3.data import (
     ExposureLedgerReceipt,
     HashSplitPolicy,
@@ -124,7 +130,9 @@ class _PoolPrefetcher:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=("benchmark", "preflight", "main"), required=True)
+    parser.add_argument(
+        "--mode", choices=("benchmark", "preflight", "main", "controlled"), required=True
+    )
     parser.add_argument(
         "--strategy", choices=("fsdp_baseline", "model_owned"), required=True
     )
@@ -145,6 +153,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--local-files-only", action="store_true")
     parser.add_argument("--skip-checkpoint", action="store_true")
+    parser.add_argument("--controlled-contract", type=Path)
     return parser.parse_args()
 
 
@@ -551,6 +560,59 @@ def _model_owned_backward(
     return result
 
 
+def _controlled_activation_backward(
+    model: ModelOwnedMain2B,
+    capture: LocalCaptureBatch,
+    config: V3Main2BV1Config,
+    *,
+    pool_scale: float,
+    activation_backward_chunk: int,
+) -> dict[str, float]:
+    """Activation-only continuation with frozen rank-one matrix factors."""
+
+    scores, sparse, continuous_support, _binary_support = model.encode(capture)
+    activation_values: list[torch.Tensor] = []
+    auxk_values: list[torch.Tensor] = []
+    details: dict[str, torch.Tensor] = {}
+    terms = list(
+        model.activation_loss_terms(
+            capture,
+            scores,
+            sparse,
+            continuous_support,
+            auxk_may_be_active=True,
+        )
+    )
+    chunks = list(_chunked(iter(terms), activation_backward_chunk))
+    for chunk_index, chunk in enumerate(chunks):
+        loss = sum(
+            coefficient * (activation + config.architecture.auxk_coefficient * auxk)
+            for _name, activation, auxk, coefficient in chunk
+        )
+        (loss * pool_scale).backward(retain_graph=chunk_index + 1 < len(chunks))
+        activation_values.extend(
+            (coefficient * value).detach().float()
+            for _, value, _, coefficient in chunk
+        )
+        auxk_values.extend(
+            (coefficient * value).detach().float()
+            for _, _, value, coefficient in chunk
+        )
+        for name, activation, auxk, _coefficient in chunk:
+            details[f"loss/activation/{name}"] = activation.detach().float()
+            details[f"loss/auxk/{name}"] = auxk.detach().float()
+    activation = torch.stack(activation_values).sum()
+    auxk = torch.stack(auxk_values).sum()
+    result = {
+        "activation": float(activation),
+        "auxk": float(auxk),
+        "internal": 0.0,
+        **{name: float(value) for name, value in details.items()},
+    }
+    result["total"] = result["activation"] + config.architecture.auxk_coefficient * result["auxk"]
+    return result
+
+
 def _fsdp_backward(model, capture: MainV1CaptureBatch, pool_index: int) -> dict[str, float]:
     model.set_requires_gradient_sync(pool_index == 3, recurse=True)
     scores, sparse, binary = model.encode(capture)
@@ -623,6 +685,32 @@ def main() -> None:
     git_sha = _require_clean_worktree()
     rank, world, device = _init_distributed()
     config = load_main_2b_v1_config(args.config)
+    controlled = None
+    controlled_sha = None
+    source_runtime = None
+    source_checkpoint_manifest = None
+    if args.mode == "controlled":
+        if args.controlled_contract is None:
+            raise ValueError("controlled mode requires --controlled-contract")
+        if args.strategy != "model_owned" or args.skip_checkpoint:
+            raise ValueError("controlled mode requires checkpointed model-owned execution")
+        controlled = load_controlled_retrain_contract(args.controlled_contract)
+        controlled_sha = _sha256(args.controlled_contract)
+        if args.max_steps != controlled.additional_optimizer_steps:
+            raise ValueError("controlled mode must run the frozen 1,221-step first stage")
+        if _sha256(Path(controlled.source_config)) != controlled.source_config_sha256:
+            raise ValueError("controlled source configuration checksum mismatch")
+        if config.fingerprint() != controlled.source_config_fingerprint:
+            raise ValueError("controlled source configuration fingerprint mismatch")
+        source_manifest_path = Path(controlled.source_checkpoint) / "manifest.json"
+        if _sha256(source_manifest_path) != controlled.source_checkpoint_manifest_sha256:
+            raise ValueError("controlled source checkpoint manifest checksum mismatch")
+        if args.run_dir.parent != Path(controlled.output_root) or not args.run_dir.name.startswith(
+            "job_"
+        ):
+            raise ValueError("controlled run directory must be job-specific under output_root")
+    elif args.controlled_contract is not None:
+        raise ValueError("--controlled-contract is valid only in controlled mode")
     if world != 3:
         raise RuntimeError("main-2b-v1 requires exactly three ranks")
     if args.mode == "main":
@@ -676,6 +764,8 @@ def main() -> None:
     ).hexdigest()
     registry = build_model_registry_2b(config)
     config_sha = _sha256(args.config)
+    if controlled is not None and config_sha != controlled.source_config_sha256:
+        raise ValueError("controlled --config is not the frozen source configuration")
     dataset_manifest = _read_manifest(
         Path(config.runtime.dataset_manifest), "ASPD_V3_ON_THE_FLY_DATASET_MANIFEST"
     )
@@ -732,7 +822,7 @@ def main() -> None:
                 f"provenance={mismatch}, recovery={recovery_mismatch}"
             )
     if rank == 0:
-        args.run_dir.mkdir(parents=True, exist_ok=args.mode == "main")
+        args.run_dir.mkdir(parents=True, exist_ok=args.mode in {"main", "controlled"})
     dist.barrier()
 
     torch.manual_seed(config.optimization.seed)
@@ -760,11 +850,34 @@ def main() -> None:
             sparse_backend=sparse_backend,
         )
         model.synchronize_shared_state_()
-        optimizer = build_model_owned_adam(model, config)
         checkpoint_manager: Any = ModelOwnedCheckpoint(
             args.run_dir / "checkpoints",
             keep_complete=config.runtime.keep_complete_checkpoints,
         )
+        if controlled is not None:
+            source_runtime, source_checkpoint_manifest = checkpoint_manager.load_model_only(
+                path=controlled.source_checkpoint,
+                model=model,
+                config_fingerprint=config.fingerprint(),
+                config_file_sha256=config_sha,
+                dataset_manifest_sha256=dataset_manifest["manifest_sha256"],
+                expected_model_key=local_key,
+            )
+            if int(source_checkpoint_manifest["step"]) != controlled.source_checkpoint_step:
+                raise ValueError("controlled source checkpoint step mismatch")
+            if int(source_runtime["accepted_exposures"]) != controlled.source_accepted_exposures:
+                raise ValueError("controlled source exposure count mismatch")
+            groups = configure_controlled_trainables(model)
+            groups[0]["lr"] = config.optimization.activation_decoder_lr
+            groups[1]["lr"] = config.optimization.encoder_lr
+            groups[2]["lr"] = config.optimization.encoder_lr
+            optimizer = torch.optim.Adam(
+                groups,
+                betas=config.optimization.betas,
+                weight_decay=config.optimization.weight_decay,
+            )
+        else:
+            optimizer = build_model_owned_adam(model, config)
     else:
         native_biases: dict[str, torch.Tensor | None] = {}
         for key in MODEL_ORDER_2B:
@@ -791,10 +904,25 @@ def main() -> None:
         )
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda _step: 1.0)
     optimizer.zero_grad(set_to_none=True)
+    qwen_smol_group = None
+    if controlled is not None:
+        # All ranks must construct groups in the same order, including Gemma rank 1.
+        qwen_smol_group = dist.new_group(ranks=list(controlled.qwen_smol_group))
 
     stream = None
     ledger = None
     if rank == 0:
+        stream_dedup_path = args.run_dir / "stream_dedup.sqlite"
+        source_dedup_sha = None
+        if controlled is not None:
+            source_dedup = Path(controlled.source_checkpoint).parents[1] / "stream_dedup.sqlite"
+            if not source_dedup.is_file():
+                raise FileNotFoundError(f"missing source stream dedup snapshot: {source_dedup}")
+            source_dedup_sha = _sha256(source_dedup)
+            if not stream_dedup_path.exists():
+                shutil.copy2(source_dedup, stream_dedup_path)
+                if _sha256(stream_dedup_path) != source_dedup_sha:
+                    raise ValueError("controlled stream dedup copy differs from its source")
         dataset = load_pinned_pile_dataset(
             config.data.dataset_id, config.data.dataset_revision
         )
@@ -812,7 +940,7 @@ def main() -> None:
                 test_buckets=frozenset(config.data.test_buckets),
                 seed=config.data.split_seed,
             ),
-            dedup_path=args.run_dir / "stream_dedup.sqlite",
+            dedup_path=stream_dedup_path,
             sequence_length=config.data.sequence_length,
             model_order=MODEL_ORDER_2B,
         )
@@ -850,6 +978,23 @@ def main() -> None:
                 "runtime": runtime_payload,
                 "runtime_fingerprint": runtime_fingerprint,
             }
+        if controlled is not None:
+            run_manifest["controlled_retrain"] = {
+                "contract_path": str(args.controlled_contract),
+                "contract_file_sha256": controlled_sha,
+                "contract_fingerprint": controlled.fingerprint(),
+                "arm": controlled.arm,
+                "source_checkpoint": controlled.source_checkpoint,
+                "source_checkpoint_manifest_sha256": controlled.source_checkpoint_manifest_sha256,
+                "source_stream_dedup_sha256": source_dedup_sha,
+                "source_checkpoint_step": controlled.source_checkpoint_step,
+                "source_accepted_exposures": controlled.source_accepted_exposures,
+                "additional_optimizer_steps": controlled.additional_optimizer_steps,
+                "additional_accepted_exposures": controlled.additional_accepted_exposures,
+                "optimizer_state": controlled.optimizer_state,
+                "trainable_scope": list(controlled.trainable_scope),
+                "frozen_scope": list(controlled.frozen_scope),
+            }
         if run_manifest_path.is_file():
             existing_manifest = json.loads(run_manifest_path.read_text(encoding="utf-8"))
             for key in (
@@ -863,6 +1008,10 @@ def main() -> None:
             ):
                 if existing_manifest.get(key) != run_manifest[key]:
                     raise ValueError(f"existing run manifest changed at {key}")
+            if existing_manifest.get("controlled_retrain") != run_manifest.get(
+                "controlled_retrain"
+            ):
+                raise ValueError("existing controlled retrain manifest changed")
         else:
             write_json_immutable(run_manifest_path, run_manifest)
     dist.barrier()
@@ -894,6 +1043,19 @@ def main() -> None:
                 config_file_sha256=config_sha,
                 dataset_manifest_sha256=dataset_manifest["manifest_sha256"],
             )
+        if controlled is not None:
+            expected_resume = {
+                "source_completed_steps": controlled.source_checkpoint_step,
+                "source_accepted_exposures": controlled.source_accepted_exposures,
+                "controlled_contract_fingerprint": controlled.fingerprint(),
+            }
+            mismatch = {
+                key: {"expected": value, "observed": restored_runtime.get(key)}
+                for key, value in expected_resume.items()
+                if restored_runtime.get(key) != value
+            }
+            if mismatch:
+                raise ValueError(f"controlled checkpoint resume provenance mismatch: {mismatch}")
         completed_steps = int(restored_runtime["completed_steps"])
         if rank == 0:
             stream.load_state_dict(restored_runtime["stream"])
@@ -906,18 +1068,39 @@ def main() -> None:
             initial = json.loads(initial_runtime_path.read_text(encoding="utf-8"))
             if initial["config_fingerprint"] != config.fingerprint():
                 raise ValueError("initial runtime config fingerprint changed")
+            if controlled is not None and initial.get("controlled_contract_fingerprint") != (
+                controlled.fingerprint()
+            ):
+                raise ValueError("initial controlled retrain contract changed")
             stream.load_state_dict(initial["stream"])
             restored_prefetched_pool = initial.get("prefetched_pool")
             ledger.recover_to_receipt(
                 ExposureLedgerReceipt.from_payload(initial["ledger_receipt"])
             )
         else:
+            initial_stream = stream.state_dict()
+            if controlled is not None:
+                if source_runtime is None or source_runtime.get("prefetched_pool") is not None:
+                    raise ValueError(
+                        "controlled source checkpoint must expose an unbuffered exact stream state"
+                    )
+                initial_stream = source_runtime["stream"]
+                stream.load_state_dict(initial_stream)
             write_json_immutable(
                 initial_runtime_path,
                 {
                     "schema_version": 1,
                     "config_fingerprint": config.fingerprint(),
-                    "stream": stream.state_dict(),
+                    "controlled_contract_fingerprint": (
+                        None if controlled is None else controlled.fingerprint()
+                    ),
+                    "source_completed_steps": (
+                        None if controlled is None else controlled.source_checkpoint_step
+                    ),
+                    "source_accepted_exposures": (
+                        None if controlled is None else controlled.source_accepted_exposures
+                    ),
+                    "stream": initial_stream,
                     "prefetched_pool": None,
                     "ledger_receipt": ledger.checkpoint_receipt(
                         expected_optimizer_steps=0
@@ -1024,20 +1207,29 @@ def main() -> None:
                     with torch.autocast(
                         device_type="cuda", dtype=torch.bfloat16, enabled=True
                     ):
-                        losses = _model_owned_backward(
-                            model,
-                            capture,
-                            config,
-                            pool_scale=1 / 4,
-                            activation_backward_chunk=activation_backward_chunk,
-                            matrix_backward_chunk=matrix_backward_chunk,
-                            auxk_may_be_active=(
-                                completed_steps * config.architecture.pools_per_step
-                                + pool_index
-                                + 1
-                                >= ORIGINAL_ASPD_N_POOLS_TO_DEAD
-                            ),
-                        )
+                        if controlled is None:
+                            losses = _model_owned_backward(
+                                model,
+                                capture,
+                                config,
+                                pool_scale=1 / 4,
+                                activation_backward_chunk=activation_backward_chunk,
+                                matrix_backward_chunk=matrix_backward_chunk,
+                                auxk_may_be_active=(
+                                    completed_steps * config.architecture.pools_per_step
+                                    + pool_index
+                                    + 1
+                                    >= ORIGINAL_ASPD_N_POOLS_TO_DEAD
+                                ),
+                            )
+                        else:
+                            losses = _controlled_activation_backward(
+                                model,
+                                capture,
+                                config,
+                                pool_scale=1 / 4,
+                                activation_backward_chunk=activation_backward_chunk,
+                            )
                 else:
                     losses = _fsdp_backward(model, capture, pool_index)
             pool_losses.append(losses)
@@ -1045,14 +1237,25 @@ def main() -> None:
 
         with _timed(args.profile_stages, stage, "gradient_sync_validation_normalization"):
             if args.strategy == "model_owned":
-                model.all_reduce_shared_gradients_()
+                if controlled is None:
+                    model.all_reduce_shared_gradients_()
+                else:
+                    reduce_controlled_shared_gradients_(
+                        model,
+                        arm=controlled.arm,
+                        qwen_smol_group=qwen_smol_group,
+                    )
             gradient_report = _finite_gradients(model)
             reports = [None] * world
             dist.all_gather_object(reports, gradient_report)
             if any(report["status"] != "PASS" for report in reports):
                 raise FloatingPointError(f"missing/nonfinite gradients: {reports}")
             if args.strategy == "model_owned":
-                model.project_decoder_gradients_()
+                if controlled is None:
+                    model.project_decoder_gradients_()
+                else:
+                    for bank in model.activation_banks.values():
+                        bank.project_decoder_gradients_()
             else:
                 model.normalize_decoders_(project_gradients=True)
         global_loss_names = ("total", "activation", "auxk", "internal")
@@ -1085,7 +1288,11 @@ def main() -> None:
             raise FloatingPointError(f"non-finite global ASPD objective: {step_loss}")
         with _timed(args.profile_stages, stage, "adam_and_post_normalization"):
             optimizer.step()
-            model.normalize_decoders_(project_gradients=False)
+            if controlled is None:
+                model.normalize_decoders_(project_gradients=False)
+            else:
+                for bank in model.activation_banks.values():
+                    bank.normalize_decoders_(project_gradients=False)
             scheduler.step()
             optimizer.zero_grad(set_to_none=True)
         completed_steps += 1
@@ -1143,7 +1350,7 @@ def main() -> None:
         checkpoint_due = not args.skip_checkpoint and (
             preflight_reload_due
             or (
-                args.mode == "main"
+                args.mode in {"main", "controlled"}
                 and (
                     completed_steps % config.runtime.checkpoint_every_steps == 0
                     or completed_steps == args.max_steps
@@ -1167,6 +1374,15 @@ def main() -> None:
             runtime_state = {
                 "completed_steps": completed_steps,
                 "accepted_exposures": completed_steps * 8192,
+                "source_completed_steps": (
+                    None if controlled is None else controlled.source_checkpoint_step
+                ),
+                "source_accepted_exposures": (
+                    None if controlled is None else controlled.source_accepted_exposures
+                ),
+                "controlled_contract_fingerprint": (
+                    None if controlled is None else controlled.fingerprint()
+                ),
                 "ledger_receipt": receipt,
                 "stream": stream_state,
                 "prefetched_pool": prefetched_pool,
@@ -1260,7 +1476,7 @@ def main() -> None:
                     )
                 checkpoint_restore_probe = "PASS"
                 resumed = True
-            elif args.mode == "main":
+            elif args.mode in {"main", "controlled"}:
                 checkpoint_manager.prune_after_verified_replacement()
             torch.cuda.synchronize()
             checkpoint_seconds = time.perf_counter() - checkpoint_started
@@ -1352,6 +1568,22 @@ def main() -> None:
             "gpu_telemetry": _summarize_gpu_telemetry(telemetry_path),
             "gate_statistics_by_rank": gate_statistics,
         }
+        if controlled is not None:
+            report["controlled_retrain"] = {
+                "arm": controlled.arm,
+                "contract_file_sha256": controlled_sha,
+                "contract_fingerprint": controlled.fingerprint(),
+                "source_checkpoint": controlled.source_checkpoint,
+                "source_checkpoint_manifest_sha256": controlled.source_checkpoint_manifest_sha256,
+                "source_checkpoint_step": controlled.source_checkpoint_step,
+                "source_accepted_exposures": controlled.source_accepted_exposures,
+                "new_accepted_exposures": completed_steps * 8192,
+                "total_exposures_including_source": (
+                    controlled.source_accepted_exposures + completed_steps * 8192
+                ),
+                "rank_one_matrix_factors": "FROZEN",
+                "optimizer_state": controlled.optimizer_state,
+            }
         write_json_immutable(args.run_dir / "benchmark_report.json", report)
         if args.mode == "preflight":
             expected_preflight = Path(config.runtime.preflight_evidence)
