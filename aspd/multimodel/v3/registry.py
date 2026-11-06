@@ -8,7 +8,7 @@ from typing import Any, Literal
 from torch import nn
 
 from aspd.multimodel.v3.config import V3_LOGICAL_MATRICES, V3ApprovedConfig, V3ApprovedModel
-from aspd.multimodel.v3.main_2b_config import MODEL_ORDER_2B, V3Main2BV1Config
+from aspd.multimodel.v3.main_2b_config import V3Main2BV1Config
 
 GroundingKind = Literal["residual_pre", "residual_mid"]
 
