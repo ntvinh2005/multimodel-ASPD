@@ -73,6 +73,22 @@ the documentation commit while checking worktree cleanliness. Dependent jobs 499
 satisfied. The failure evidence and logs are retained; neither failure is a scientific
 pilot result.
 
+### Corrected submission
+
+Execution commit: `081da39bd31d17d343dde9a38fc74707b859584b`
+
+| Stage | Arm | Job ID | Initial state |
+|---|---|---:|---|
+| Preflight + short pilot | baseline | 49976302 | PENDING |
+| Preflight + short pilot | treatment | 49976303 | PENDING |
+| Checkpoint smoke + held-out | baseline | 49976304 | PENDING dependency |
+| Checkpoint smoke + held-out | treatment | 49976305 | PENDING dependency |
+| Paired comparison | both | 49976306 | PENDING dependency |
+
+The corrected chain was submitted only after the scalar-buffer regression test passed.
+The live execution worktree remains pinned and clean at the execution commit; this
+status update is published from a separate detached documentation worktree.
+
 The GPU scripts run a three-step two-B200 optimizer/checkpoint/reload preflight before
 starting the corresponding short pilot. Held-out evaluation uses exactly 100,352
 validation anchors and cannot start unless the pilot checkpoint is complete. A final
