@@ -1,6 +1,16 @@
 # ASPD v3 controlled 10M gate-retrain diagnostic
 
-Status: **CONTROLLED_DIAGNOSTIC_COMPLETE — ENGINEERING PASS, SCIENTIFICALLY NOT READY**
+Status: **EXPERIMENT RETIRED — ENGINEERING PASS, SCIENTIFICALLY NOT READY**
+
+Researcher disposition (2026-11-06): the Qwen3-1.7B member and this three-model
+experiment are retired. The shared 500M run/checkpoints, 500M diagnostic outputs,
+controlled 10M retrain/evaluation outputs, associated Slurm logs, and the exact
+`Qwen/Qwen3-1.7B` local model cache were deleted after the compact evidence in this
+report was published. No ASPD v3 job remained active at deletion time. Because the
+checkpoint is a joint three-model decomposition, removing the Qwen-containing runtime
+also removed the associated Gemma and SmolLM2 checkpoint state. The committed source,
+configuration history, and scientific reports remain available for audit, but the raw
+runtime artifacts are no longer locally recoverable.
 
 This read-only comparison tests whether the shared PRE/MID gate is the primary cause of
 Gemma's poor activation reconstruction in the completed 500M ASPD v3 run. It does not
