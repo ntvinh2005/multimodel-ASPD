@@ -47,8 +47,22 @@ objective or binary support.
 
 Implementation: `LOCAL_TESTS_PASSED`
 
-GPU preflight/training/evaluation: `NOT_SUBMITTED` (job IDs will be recorded after
-submission).
+Execution commit: `af3278585d25bcd33468b84568e9455846e2c0ef`
+
+Submitted: `2026-11-06T11:34:36-05:00`
+
+| Stage | Arm | Job ID | Submitted state | Resources |
+|---|---|---:|---|---|
+| Preflight + short pilot | baseline | 49975792 | RUNNING | 2 B200, 16 CPU, 128 GB, 3 h |
+| Preflight + short pilot | treatment | 49975793 | RUNNING | 2 B200, 16 CPU, 128 GB, 3 h |
+| Checkpoint smoke + held-out | baseline | 49975794 | PENDING dependency | 2 B200, 16 CPU, 128 GB, 4 h |
+| Checkpoint smoke + held-out | treatment | 49975795 | PENDING dependency | 2 B200, 16 CPU, 128 GB, 4 h |
+| Paired comparison | both | 49975796 | PENDING dependency | 2 CPU, 8 GB, 30 min |
+
+GPU preflight/training/evaluation: `SUBMITTED`. Both pilot allocations began at
+`2026-11-06T11:34:28-05:00` on the frozen commit above. The evaluation jobs use
+`afterok` dependencies, and the final comparison waits for both evaluations. No 500M
+job, Qwen job, third-model job or dependent retraining job was submitted.
 
 The GPU scripts run a three-step two-B200 optimizer/checkpoint/reload preflight before
 starting the corresponding short pilot. Held-out evaluation uses exactly 100,352
