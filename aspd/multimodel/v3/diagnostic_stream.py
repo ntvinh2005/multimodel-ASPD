@@ -46,11 +46,11 @@ class ValidationAlignedAnchorStream:
         split_policy: HashSplitPolicy,
         dedup_path: str | Path,
         sequence_length: int = 512,
-        model_order: tuple[str, str, str] = MODEL_ORDER_2B,
+        model_order: tuple[str, ...] = MODEL_ORDER_2B,
     ):
         self.model_order = tuple(model_order)
-        if self.model_order != MODEL_ORDER_2B:
-            raise ValueError(f"validation stream requires model order {MODEL_ORDER_2B}")
+        if len(self.model_order) < 2 or len(set(self.model_order)) != len(self.model_order):
+            raise ValueError("validation stream requires at least two unique model keys")
         if tuple(tokenizers) != self.model_order or tuple(tokenizer_revisions) != self.model_order:
             raise ValueError("validation stream tokenizer order mismatch")
         if not hasattr(dataset, "state_dict") or not hasattr(dataset, "load_state_dict"):
@@ -77,12 +77,10 @@ class ValidationAlignedAnchorStream:
                 "seed": split_policy.seed,
             },
             "sequence_length": sequence_length,
-            "canonical_text_policy": "identity_exact_three_way_prefix",
+            "canonical_text_policy": f"identity_exact_{len(self.model_order)}_way_prefix",
         }
         self.provenance_sha256 = _canonical_sha256(self.provenance)
-        self.dedup = SQLiteStreamDeduplicator(
-            dedup_path, provenance_sha256=self.provenance_sha256
-        )
+        self.dedup = SQLiteStreamDeduplicator(dedup_path, provenance_sha256=self.provenance_sha256)
         self._iterator = iter(dataset)
         self._pending: dict[str, Any] | None = None
         self.documents_read = 0

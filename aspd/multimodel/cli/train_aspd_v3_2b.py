@@ -23,6 +23,7 @@ from typing import Any
 
 import torch
 import torch.distributed as dist
+import yaml
 from torch.nn import functional as F
 
 from aspd.multimodel.v3.controlled_retrain import (
@@ -70,6 +71,7 @@ from aspd.multimodel.v3.training_capture import (
     broadcast_family_native_biases,
     capture_family_pool,
 )
+from aspd.multimodel.v3.two_model_config import load_two_model_scale_config
 
 SOURCE_RANK = {key: index for index, key in enumerate(MODEL_ORDER_2B)}
 
@@ -131,11 +133,11 @@ class _PoolPrefetcher:
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--mode", choices=("benchmark", "preflight", "main", "controlled"), required=True
+        "--mode",
+        choices=("benchmark", "preflight", "pilot", "main", "controlled"),
+        required=True,
     )
-    parser.add_argument(
-        "--strategy", choices=("fsdp_baseline", "model_owned"), required=True
-    )
+    parser.add_argument("--strategy", choices=("fsdp_baseline", "model_owned"), required=True)
     parser.add_argument(
         "--config",
         type=Path,
@@ -148,9 +150,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--torch-profiler", action="store_true")
     parser.add_argument("--activation-backward-chunk", type=int)
     parser.add_argument("--matrix-backward-chunk", type=int)
-    parser.add_argument(
-        "--sparse-backend", choices=("indexed", "csr", "dense")
-    )
+    parser.add_argument("--sparse-backend", choices=("indexed", "csr", "dense"))
     parser.add_argument("--local-files-only", action="store_true")
     parser.add_argument("--skip-checkpoint", action="store_true")
     parser.add_argument("--controlled-contract", type=Path)
@@ -163,6 +163,30 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _common_state_sha256(module: torch.nn.Module) -> str:
+    """Hash all baseline/treatment-common tensors without perturbing RNG state."""
+
+    digest = hashlib.sha256()
+    for name, value in sorted(module.state_dict().items()):
+        if name == "reconstruction_log_scale":
+            continue
+        digest.update(name.encode("utf-8"))
+        tensor = value.detach().cpu().contiguous()
+        digest.update(str(tensor.dtype).encode("ascii"))
+        digest.update(str(tuple(tensor.shape)).encode("ascii"))
+        digest.update(tensor.view(torch.uint8).numpy().tobytes())
+    return digest.hexdigest()
+
+
+def _load_training_config(path: Path) -> Any:
+    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("ASPD v3 training config must be a mapping")
+    if payload.get("experiment_family") == "aspd_v3_gemma_smol_scale_pilot":
+        return load_two_model_scale_config(path)
+    return load_main_2b_v1_config(path)
 
 
 def _git_sha() -> str:
@@ -296,19 +320,24 @@ def _pad_id(tokenizer: Any) -> int:
     return int(value)
 
 
-def _load_sources(rank: int, registry, device, local_files_only: bool):
-    local_key = MODEL_ORDER_2B[rank]
+def _load_sources(
+    rank: int,
+    registry: Any,
+    device: torch.device,
+    local_files_only: bool,
+    *,
+    model_order: tuple[str, ...],
+):
+    local_key = model_order[rank]
     tokenizer = load_v3_tokenizer(registry[local_key], local_files_only=local_files_only)
-    loaded = load_frozen_v3_model(
-        registry[local_key], device, local_files_only=local_files_only
-    )
+    loaded = load_frozen_v3_model(registry[local_key], device, local_files_only=local_files_only)
     alignment_tokenizers = None
     if rank == 0:
         alignment_tokenizers = {
             key: tokenizer
             if key == local_key
             else load_v3_tokenizer(registry[key], local_files_only=local_files_only)
-            for key in MODEL_ORDER_2B
+            for key in model_order
         }
     return local_key, tokenizer, loaded, alignment_tokenizers
 
@@ -502,24 +531,18 @@ def _model_owned_backward(
         continuous_support,
         auxk_may_be_active=auxk_may_be_active,
     )
-    for chunk_index, chunk in enumerate(
-        _chunked(terms, activation_backward_chunk)
-    ):
+    for chunk_index, chunk in enumerate(_chunked(terms, activation_backward_chunk)):
         with torch.profiler.record_function("aspd/activation_chunk_forward_backward"):
             loss = sum(
                 coefficient * (activation + config.architecture.auxk_coefficient * auxk)
                 for _name, activation, auxk, coefficient in chunk
             )
-            (loss * pool_scale).backward(
-                retain_graph=chunk_index + 1 < activation_chunks
-            )
+            (loss * pool_scale).backward(retain_graph=chunk_index + 1 < activation_chunks)
         activation_values.extend(
-            (coefficient * value).detach().float()
-            for _, value, _, coefficient in chunk
+            (coefficient * value).detach().float() for _, value, _, coefficient in chunk
         )
         auxk_values.extend(
-            (coefficient * value).detach().float()
-            for _, _, value, coefficient in chunk
+            (coefficient * value).detach().float() for _, _, value, coefficient in chunk
         )
         for name, activation, auxk, _coefficient in chunk:
             details[f"loss/activation/{name}"] = activation.detach().float()
@@ -538,8 +561,7 @@ def _model_owned_backward(
             loss = sum(coefficient * value for _key, _site, value, coefficient in chunk)
             (loss * pool_scale).backward()
         internal_values.extend(
-            (coefficient * value).detach().float()
-            for _, _, value, coefficient in chunk
+            (coefficient * value).detach().float() for _, _, value, coefficient in chunk
         )
         for name, _site, value, _coefficient in chunk:
             details[f"loss/internal/{name}"] = value.detach().float()
@@ -591,12 +613,10 @@ def _controlled_activation_backward(
         )
         (loss * pool_scale).backward(retain_graph=chunk_index + 1 < len(chunks))
         activation_values.extend(
-            (coefficient * value).detach().float()
-            for _, value, _, coefficient in chunk
+            (coefficient * value).detach().float() for _, value, _, coefficient in chunk
         )
         auxk_values.extend(
-            (coefficient * value).detach().float()
-            for _, _, value, coefficient in chunk
+            (coefficient * value).detach().float() for _, _, value, coefficient in chunk
         )
         for name, activation, auxk, _coefficient in chunk:
             details[f"loss/activation/{name}"] = activation.detach().float()
@@ -621,9 +641,7 @@ def _fsdp_backward(model, capture: MainV1CaptureBatch, pool_index: int) -> dict[
     for index, (_prefix, value, auxiliary, coefficient) in enumerate(
         model.activation_loss_terms(capture, scores, sparse)
     ):
-        ((coefficient * (value + 0.03125 * auxiliary)) / 4).backward(
-            retain_graph=index + 1 < 48
-        )
+        ((coefficient * (value + 0.03125 * auxiliary)) / 4).backward(retain_graph=index + 1 < 48)
         activation += float((coefficient * value).detach().float())
         auxk += float((coefficient * auxiliary).detach().float())
     internal = 0.0
@@ -659,7 +677,11 @@ def _finite_gradients(model: torch.nn.Module) -> dict[str, Any]:
     inverse_scale = torch.ones((), device=found_inf.device)
     if gradients:
         torch._amp_foreach_non_finite_check_and_unscale_(gradients, found_inf, inverse_scale)
-    return {"status": "PASS" if not missing and not bool(found_inf.item()) else "FAIL", "missing": missing, "nonfinite": bool(found_inf.item())}
+    return {
+        "status": "PASS" if not missing and not bool(found_inf.item()) else "FAIL",
+        "missing": missing,
+        "nonfinite": bool(found_inf.item()),
+    }
 
 
 def _timed(profile: bool, values: dict[str, float], name: str):
@@ -684,7 +706,9 @@ def main() -> None:
     args = _parse_args()
     git_sha = _require_clean_worktree()
     rank, world, device = _init_distributed()
-    config = load_main_2b_v1_config(args.config)
+    config = _load_training_config(args.config)
+    model_order = tuple(config.architecture.model_order)
+    logical_target_count = len(model_order) * 8 * 7
     controlled = None
     controlled_sha = None
     source_runtime = None
@@ -711,8 +735,10 @@ def main() -> None:
             raise ValueError("controlled run directory must be job-specific under output_root")
     elif args.controlled_contract is not None:
         raise ValueError("--controlled-contract is valid only in controlled mode")
-    if world != 3:
-        raise RuntimeError("main-2b-v1 requires exactly three ranks")
+    if world != len(model_order) or world != config.runtime.world_size:
+        raise RuntimeError(f"training contract requires exactly {len(model_order)} ranks")
+    if len(model_order) == 2 and args.strategy != "model_owned":
+        raise RuntimeError("two-model pilots require model-owned execution")
     if args.mode == "main":
         if not config.full_training_authorized:
             raise RuntimeError("full 500M training is not authorized by main_2b_v1.yaml")
@@ -720,6 +746,17 @@ def main() -> None:
             raise RuntimeError("main mode cannot disable recoverable checkpoints")
         if args.max_steps != config.data.minimum_optimizer_steps:
             raise RuntimeError("main mode cannot reduce the frozen 61,036-step budget")
+    if args.mode == "pilot":
+        if not getattr(config, "short_pilot_authorized", False):
+            raise RuntimeError("short pilot is not authorized by this config")
+        if args.skip_checkpoint:
+            raise RuntimeError("pilot mode cannot disable recoverable checkpoints")
+        if args.max_steps != config.data.optimizer_steps:
+            raise RuntimeError("pilot mode must run the frozen short-pilot step budget")
+        if args.run_dir.parent != Path(
+            config.runtime.output_root
+        ) or not args.run_dir.name.startswith("job_"):
+            raise ValueError("pilot run directory must be job-specific under output_root")
     if args.mode == "preflight" and not 3 <= args.max_steps <= config.runtime.max_preflight_steps:
         raise ValueError("preflight requires 3..20 optimizer steps")
     if args.warmup_steps < 0 or args.warmup_steps >= args.max_steps:
@@ -739,9 +776,7 @@ def main() -> None:
     if not 1 <= matrix_backward_chunk <= 56:
         raise ValueError("matrix backward chunk must be in 1..56")
     sparse_backend = (
-        config.runtime.sparse_backend
-        if args.sparse_backend is None
-        else args.sparse_backend
+        config.runtime.sparse_backend if args.sparse_backend is None else args.sparse_backend
     )
     if args.mode != "benchmark" and (
         args.activation_backward_chunk is not None
@@ -774,9 +809,9 @@ def main() -> None:
     )
     if dataset_manifest["resolved_revision"] != config.data.dataset_revision:
         raise ValueError("dataset manifest does not resolve to the pinned revision")
-    if alignment_manifest["model_order"] != list(MODEL_ORDER_2B):
+    if alignment_manifest["model_order"] != list(model_order):
         raise ValueError("alignment manifest model order differs from main-2b-v1")
-    if args.mode == "main":
+    if args.mode in {"main", "pilot"}:
         preflight_path = Path(config.runtime.preflight_evidence)
         if not preflight_path.is_file():
             raise RuntimeError("main-2b-v1 requires immutable distributed preflight evidence")
@@ -790,8 +825,8 @@ def main() -> None:
             "config_fingerprint": config.fingerprint(),
             "dataset_manifest_sha256": dataset_manifest["manifest_sha256"],
             "alignment_manifest_sha256": alignment_manifest["manifest_sha256"],
-            "world_size": 3,
-            "logical_target_count": 168,
+            "world_size": len(model_order),
+            "logical_target_count": logical_target_count,
             "dcp_save_reload_resume_update": "PASS",
             "checkpoint_parameter_and_adam_restore_probe": "PASS",
             "runtime_fingerprint": runtime_fingerprint,
@@ -806,7 +841,7 @@ def main() -> None:
         if not isinstance(checkpoint_manifest, dict):
             recovery_mismatch["checkpoint_manifest"] = "missing"
         else:
-            for key, expected in (("status", "COMPLETE"), ("world_size", 3)):
+            for key, expected in (("status", "COMPLETE"), ("world_size", len(model_order))):
                 if checkpoint_manifest.get(key) != expected:
                     recovery_mismatch[f"checkpoint_manifest.{key}"] = {
                         "expected": expected,
@@ -822,13 +857,17 @@ def main() -> None:
                 f"provenance={mismatch}, recovery={recovery_mismatch}"
             )
     if rank == 0:
-        args.run_dir.mkdir(parents=True, exist_ok=args.mode in {"main", "controlled"})
+        args.run_dir.mkdir(parents=True, exist_ok=args.mode in {"main", "controlled", "pilot"})
     dist.barrier()
 
     torch.manual_seed(config.optimization.seed)
     torch.cuda.manual_seed_all(config.optimization.seed)
     local_key, tokenizer, loaded, alignment_tokenizers = _load_sources(
-        rank, registry, device, args.local_files_only
+        rank,
+        registry,
+        device,
+        args.local_files_only,
+        model_order=model_order,
     )
     local_source_smoke = _real_source_correctness_smoke(
         local_key, tokenizer, loaded, registry, device
@@ -837,9 +876,7 @@ def main() -> None:
     dist.all_gather_object(source_smokes, local_source_smoke)
 
     if args.strategy == "model_owned":
-        native_biases = {
-            target.key: None for target in registry[local_key].targets()
-        }
+        native_biases = {target.key: None for target in registry[local_key].targets()}
         model: Any = ModelOwnedMain2B(
             config,
             registry,
@@ -880,12 +917,13 @@ def main() -> None:
             optimizer = build_model_owned_adam(model, config)
     else:
         native_biases: dict[str, torch.Tensor | None] = {}
-        for key in MODEL_ORDER_2B:
+        source_rank = {key: index for index, key in enumerate(model_order)}
+        for key in model_order:
             native_biases.update(
                 broadcast_family_native_biases(
-                    loaded.forward_model if rank == SOURCE_RANK[key] else None,
+                    loaded.forward_model if rank == source_rank[key] else None,
                     registry[key],
-                    source_rank=SOURCE_RANK[key],
+                    source_rank=source_rank[key],
                     device=device,
                 )
             )
@@ -904,6 +942,13 @@ def main() -> None:
         )
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda _step: 1.0)
     optimizer.zero_grad(set_to_none=True)
+    initial_common_state = {
+        "rank": rank,
+        "model": local_key,
+        "sha256": _common_state_sha256(model),
+    }
+    initial_common_states = [None] * world
+    dist.all_gather_object(initial_common_states, initial_common_state)
     qwen_smol_group = None
     if controlled is not None:
         # All ranks must construct groups in the same order, including Gemma rank 1.
@@ -923,17 +968,13 @@ def main() -> None:
                 shutil.copy2(source_dedup, stream_dedup_path)
                 if _sha256(stream_dedup_path) != source_dedup_sha:
                     raise ValueError("controlled stream dedup copy differs from its source")
-        dataset = load_pinned_pile_dataset(
-            config.data.dataset_id, config.data.dataset_revision
-        )
+        dataset = load_pinned_pile_dataset(config.data.dataset_id, config.data.dataset_revision)
         stream = PileAlignedAnchorStream(
             dataset=dataset,
             dataset_id=config.data.dataset_id,
             dataset_revision=config.data.dataset_revision,
             tokenizers=alignment_tokenizers,
-            tokenizer_revisions={
-                key: registry[key].tokenizer_revision for key in MODEL_ORDER_2B
-            },
+            tokenizer_revisions={key: registry[key].tokenizer_revision for key in model_order},
             split_policy=HashSplitPolicy(
                 modulus=config.data.split_modulus,
                 validation_buckets=frozenset(config.data.validation_buckets),
@@ -942,42 +983,41 @@ def main() -> None:
             ),
             dedup_path=stream_dedup_path,
             sequence_length=config.data.sequence_length,
-            model_order=MODEL_ORDER_2B,
+            model_order=model_order,
         )
         ledger = SQLiteExposureLedger(
             args.run_dir / "exposure_ledger.sqlite",
             dataset_manifest_sha256=dataset_manifest["manifest_sha256"],
             world_size=world,
-            model_order=MODEL_ORDER_2B,
+            model_order=model_order,
             compact_anchor_ids=True,
         )
         run_manifest_path = args.run_dir / "run_manifest.json"
         run_manifest = {
-                "schema_version": 1,
-                "mode": args.mode,
-                "strategy": args.strategy,
-                "git_sha": git_sha,
-                "config_path": str(args.config),
-                "config_file_sha256": config_sha,
-                "config_fingerprint": config.fingerprint(),
-                "dataset_manifest_sha256": dataset_manifest["manifest_sha256"],
-                "alignment_manifest_sha256": alignment_manifest["manifest_sha256"],
-                "model_order": list(MODEL_ORDER_2B),
-                "model_revisions": {model.key: model.revision for model in config.models},
-                "selected_layers": {
-                    model.key: list(model.selected_layers) for model in config.models
-                },
-                "logical_target_count": 168,
-                "hardware": torch.cuda.get_device_name(device),
-                "hostname": socket.gethostname(),
-                "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
-                "torch": torch.__version__,
-                "cuda": torch.version.cuda,
-                "parameter_analysis": model_owned_parameter_counts(config, registry),
-                "source_correctness": source_smokes,
-                "runtime": runtime_payload,
-                "runtime_fingerprint": runtime_fingerprint,
-            }
+            "schema_version": 1,
+            "mode": args.mode,
+            "strategy": args.strategy,
+            "git_sha": git_sha,
+            "config_path": str(args.config),
+            "config_file_sha256": config_sha,
+            "config_fingerprint": config.fingerprint(),
+            "dataset_manifest_sha256": dataset_manifest["manifest_sha256"],
+            "alignment_manifest_sha256": alignment_manifest["manifest_sha256"],
+            "model_order": list(model_order),
+            "model_revisions": {model.key: model.revision for model in config.models},
+            "selected_layers": {model.key: list(model.selected_layers) for model in config.models},
+            "logical_target_count": logical_target_count,
+            "hardware": torch.cuda.get_device_name(device),
+            "hostname": socket.gethostname(),
+            "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
+            "torch": torch.__version__,
+            "cuda": torch.version.cuda,
+            "parameter_analysis": model_owned_parameter_counts(config, registry),
+            "source_correctness": source_smokes,
+            "initial_common_state_by_rank": initial_common_states,
+            "runtime": runtime_payload,
+            "runtime_fingerprint": runtime_fingerprint,
+        }
         if controlled is not None:
             run_manifest["controlled_retrain"] = {
                 "contract_path": str(args.controlled_contract),
@@ -1074,9 +1114,7 @@ def main() -> None:
                 raise ValueError("initial controlled retrain contract changed")
             stream.load_state_dict(initial["stream"])
             restored_prefetched_pool = initial.get("prefetched_pool")
-            ledger.recover_to_receipt(
-                ExposureLedgerReceipt.from_payload(initial["ledger_receipt"])
-            )
+            ledger.recover_to_receipt(ExposureLedgerReceipt.from_payload(initial["ledger_receipt"]))
         else:
             initial_stream = stream.state_dict()
             if controlled is not None:
@@ -1163,9 +1201,7 @@ def main() -> None:
                         completed_steps + 1 >= args.max_steps
                         and pool_index + 1 >= config.architecture.pools_per_step
                     )
-                    payload = prefetcher.next_payload(
-                        schedule_next=not final_planned_pool
-                    )
+                    payload = prefetcher.next_payload(schedule_next=not final_planned_pool)
                     pool = AlignedAnchorPool.from_payload(payload)
                     for observation in pool.source_observations:
                         ledger.observe_raw_tokens(
@@ -1178,7 +1214,7 @@ def main() -> None:
                 pool.validate(
                     expected_anchors=config.architecture.pool_tokens,
                     sequence_length=config.data.sequence_length,
-                    model_order=MODEL_ORDER_2B,
+                    model_order=model_order,
                 )
                 step_anchor_ids.extend(pool.anchor_ids)
             with _timed(args.profile_stages, stage, "frozen_backbone_and_capture"):
@@ -1204,9 +1240,7 @@ def main() -> None:
                     )
             with _timed(args.profile_stages, stage, "trainable_forward_backward"):
                 if args.strategy == "model_owned":
-                    with torch.autocast(
-                        device_type="cuda", dtype=torch.bfloat16, enabled=True
-                    ):
+                    with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=True):
                         if controlled is None:
                             losses = _model_owned_backward(
                                 model,
@@ -1258,12 +1292,18 @@ def main() -> None:
                         bank.project_decoder_gradients_()
             else:
                 model.normalize_decoders_(project_gradients=True)
+        local_scale_gradient = None
+        if (
+            args.strategy == "model_owned"
+            and model.reconstruction_log_scale is not None
+            and model.reconstruction_log_scale.grad is not None
+        ):
+            local_scale_gradient = model.reconstruction_log_scale.grad.detach().cpu().tolist()
+        scale_gradients = [None] * world
+        dist.all_gather_object(scale_gradients, local_scale_gradient)
         global_loss_names = ("total", "activation", "auxk", "internal")
         step_loss_tensor = torch.tensor(
-            [
-                sum(value[name] for value in pool_losses) / 4
-                for name in global_loss_names
-            ],
+            [sum(value[name] for value in pool_losses) / 4 for name in global_loss_names],
             dtype=torch.float64,
             device=device,
         )
@@ -1324,7 +1364,17 @@ def main() -> None:
         }
         memories = [None] * world
         dist.all_gather_object(memories, local_memory)
+        local_scales = (
+            model.reconstruction_scale_report() if args.strategy == "model_owned" else None
+        )
+        scales_by_rank = [None] * world
+        dist.all_gather_object(scales_by_rank, local_scales)
         if rank == 0:
+            ordered_anchor_digest = hashlib.sha256()
+            for anchor_id in step_anchor_ids:
+                encoded = anchor_id.encode("utf-8")
+                ordered_anchor_digest.update(len(encoded).to_bytes(8, "big"))
+                ordered_anchor_digest.update(encoded)
             _append_jsonl(
                 metrics_path,
                 {
@@ -1335,22 +1385,23 @@ def main() -> None:
                     "accepted_exposures": counter_payload["accepted"],
                     "unique_anchors": counter_payload["unique"],
                     "repeated_exposures": counter_payload["repeated"],
+                    "ordered_anchor_ids_sha256": ordered_anchor_digest.hexdigest(),
                     "loss": {
                         **step_loss,
                         **detailed_losses,
                     },
                     "stage_seconds": stage,
                     "gpu_memory": memories,
+                    "reconstruction_scales_by_rank": scales_by_rank,
+                    "reconstruction_log_scale_gradients_by_rank": scale_gradients,
                 },
             )
 
-        preflight_reload_due = (
-            args.mode == "preflight" and completed_steps == args.max_steps - 1
-        )
+        preflight_reload_due = args.mode == "preflight" and completed_steps == args.max_steps - 1
         checkpoint_due = not args.skip_checkpoint and (
             preflight_reload_due
             or (
-                args.mode in {"main", "controlled"}
+                args.mode in {"main", "controlled", "pilot"}
                 and (
                     completed_steps % config.runtime.checkpoint_every_steps == 0
                     or completed_steps == args.max_steps
@@ -1457,18 +1508,14 @@ def main() -> None:
                     stream.load_state_dict(restored_runtime["stream"])
                     prefetcher.restore(restored_runtime.get("prefetched_pool"))
                     ledger.recover_to_receipt(
-                        ExposureLedgerReceipt.from_payload(
-                            restored_runtime["ledger_receipt"]
-                        )
+                        ExposureLedgerReceipt.from_payload(restored_runtime["ledger_receipt"])
                     )
                 dist.barrier()
                 checkpoint_reload_seconds = time.perf_counter() - reload_started
                 if not torch.equal(
                     probe_parameter.detach().reshape(-1)[0], probe_parameter_value
                 ) or not torch.equal(
-                    optimizer.state[probe_parameter][probe_optimizer_key]
-                    .detach()
-                    .reshape(-1)[0],
+                    optimizer.state[probe_parameter][probe_optimizer_key].detach().reshape(-1)[0],
                     probe_optimizer_value,
                 ):
                     raise RuntimeError(
@@ -1476,7 +1523,7 @@ def main() -> None:
                     )
                 checkpoint_restore_probe = "PASS"
                 resumed = True
-            elif args.mode in {"main", "controlled"}:
+            elif args.mode in {"main", "controlled", "pilot"}:
                 checkpoint_manager.prune_after_verified_replacement()
             torch.cuda.synchronize()
             checkpoint_seconds = time.perf_counter() - checkpoint_started
@@ -1487,9 +1534,7 @@ def main() -> None:
 
     if profiler is not None:
         profiler.__exit__(None, None, None)
-        profiler.export_chrome_trace(
-            str(args.run_dir / f"torch_profile_rank{rank:02d}.json")
-        )
+        profiler.export_chrome_trace(str(args.run_dir / f"torch_profile_rank{rank:02d}.json"))
 
     if telemetry is not None:
         _stop_gpu_telemetry(*telemetry)
@@ -1534,7 +1579,7 @@ def main() -> None:
             "dataset_manifest_sha256": dataset_manifest["manifest_sha256"],
             "alignment_manifest_sha256": alignment_manifest["manifest_sha256"],
             "world_size": world,
-            "logical_target_count": 168,
+            "logical_target_count": logical_target_count,
             "model_revisions": {model.key: model.revision for model in config.models},
             "source_correctness": source_smokes,
             "runtime": runtime_payload,
@@ -1559,14 +1604,13 @@ def main() -> None:
             ),
             "peak_gpu_memory_by_rank": rows[-1]["gpu_memory"],
             "stage_seconds_mean": {
-                name: sum(row["stage_seconds"].get(name, 0.0) for row in measured)
-                / len(measured)
-                for name in sorted(
-                    {name for row in measured for name in row["stage_seconds"]}
-                )
+                name: sum(row["stage_seconds"].get(name, 0.0) for row in measured) / len(measured)
+                for name in sorted({name for row in measured for name in row["stage_seconds"]})
             },
             "gpu_telemetry": _summarize_gpu_telemetry(telemetry_path),
             "gate_statistics_by_rank": gate_statistics,
+            "initial_common_state_by_rank": initial_common_states,
+            "final_reconstruction_scales_by_rank": rows[-1]["reconstruction_scales_by_rank"],
         }
         if controlled is not None:
             report["controlled_retrain"] = {

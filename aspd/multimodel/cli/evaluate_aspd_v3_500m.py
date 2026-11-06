@@ -51,9 +51,7 @@ def _args() -> argparse.Namespace:
     parser.add_argument("--checkpoint-smoke-report", type=Path)
     parser.add_argument("--derived-checkpoint", type=Path)
     parser.add_argument("--derived-checkpoint-manifest-sha256")
-    parser.add_argument(
-        "--controlled-arm", choices=("shared_control", "gemma_specific")
-    )
+    parser.add_argument("--controlled-arm", choices=("shared_control", "gemma_specific"))
     parser.add_argument("--controlled-run-manifest", type=Path)
     parser.add_argument("--local-files-only", action="store_true")
     return parser.parse_args()
@@ -150,15 +148,11 @@ def _validate_controlled_checkpoint(
         "config_file_sha256": manifest.get("config_file_sha256"),
         "config_fingerprint": manifest.get("config_fingerprint"),
         "dataset_manifest_sha256": manifest.get("dataset_manifest_sha256"),
-        "source_checkpoint_manifest_sha256": controlled.get(
-            "source_checkpoint_manifest_sha256"
-        ),
+        "source_checkpoint_manifest_sha256": controlled.get("source_checkpoint_manifest_sha256"),
         "source_checkpoint_step": controlled.get("source_checkpoint_step"),
         "source_accepted_exposures": controlled.get("source_accepted_exposures"),
         "additional_optimizer_steps": controlled.get("additional_optimizer_steps"),
-        "additional_accepted_exposures": controlled.get(
-            "additional_accepted_exposures"
-        ),
+        "additional_accepted_exposures": controlled.get("additional_accepted_exposures"),
         "frozen_scope": controlled.get("frozen_scope"),
         "optimizer_state": controlled.get("optimizer_state"),
         "training_git_sha": run_manifest.get("git_sha"),
@@ -218,7 +212,10 @@ def _capture(
 
 
 def _accumulate(
-    values: dict[str, TensorMetricAccumulator], key: str, prediction: torch.Tensor, target: torch.Tensor
+    values: dict[str, TensorMetricAccumulator],
+    key: str,
+    prediction: torch.Tensor,
+    target: torch.Tensor,
 ) -> None:
     width = target.shape[-1]
     values.setdefault(key, TensorMetricAccumulator(width)).update(
@@ -227,7 +224,12 @@ def _accumulate(
 
 
 def _jaccard_report(
-    chunks: list[torch.Tensor], counts: torch.Tensor, *, top: int, minimum: int, device: torch.device
+    chunks: list[torch.Tensor],
+    counts: torch.Tensor,
+    *,
+    top: int,
+    minimum: int,
+    device: torch.device,
 ) -> dict[str, Any]:
     eligible = (counts >= minimum).nonzero(as_tuple=True)[0]
     selected = eligible[counts[eligible].argsort(descending=True)][:top]
@@ -266,7 +268,12 @@ def _jaccard_report(
 def _aggregate_ratio(rows: list[dict[str, Any]]) -> dict[str, float]:
     sse = sum(float(row["sse"]) for row in rows)
     denominator = sum(float(row["centered_target_ss"]) for row in rows)
-    return {"sse": sse, "centered_target_ss": denominator, "fvu": sse / denominator, "r2": 1 - sse / denominator}
+    return {
+        "sse": sse,
+        "centered_target_ss": denominator,
+        "fvu": sse / denominator,
+        "r2": 1 - sse / denominator,
+    }
 
 
 def _local_evaluation(
@@ -288,12 +295,22 @@ def _local_evaluation(
     first_counts = {site: torch.zeros(n_features, dtype=torch.int64) for site in ("pre", "mid")}
     second_counts = {site: torch.zeros(n_features, dtype=torch.int64) for site in ("pre", "mid")}
     magnitude_sum = {site: torch.zeros(n_features, dtype=torch.float64) for site in ("pre", "mid")}
-    magnitude_square = {site: torch.zeros(n_features, dtype=torch.float64) for site in ("pre", "mid")}
+    magnitude_square = {
+        site: torch.zeros(n_features, dtype=torch.float64) for site in ("pre", "mid")
+    }
     magnitude_max = {site: torch.zeros(n_features, dtype=torch.float64) for site in ("pre", "mid")}
-    contribution_sum = {site: torch.zeros(n_features, dtype=torch.float64) for site in ("pre", "mid")}
-    contribution_square = {site: torch.zeros(n_features, dtype=torch.float64) for site in ("pre", "mid")}
-    contribution_count = {site: torch.zeros(n_features, dtype=torch.int64) for site in ("pre", "mid")}
-    conditional_error_sum = {site: torch.zeros(n_features, dtype=torch.float64) for site in ("pre", "mid")}
+    contribution_sum = {
+        site: torch.zeros(n_features, dtype=torch.float64) for site in ("pre", "mid")
+    }
+    contribution_square = {
+        site: torch.zeros(n_features, dtype=torch.float64) for site in ("pre", "mid")
+    }
+    contribution_count = {
+        site: torch.zeros(n_features, dtype=torch.int64) for site in ("pre", "mid")
+    }
+    conditional_error_sum = {
+        site: torch.zeros(n_features, dtype=torch.float64) for site in ("pre", "mid")
+    }
     firing_chunks: dict[str, list[torch.Tensor]] = {"pre": [], "mid": []}
     active_histogram: dict[str, Counter[int]] = {"pre": Counter(), "mid": Counter()}
     boundaries = matryoshka_boundaries(n_features, (0.0625, 0.0625, 0.125, 0.25, 0.5))
@@ -314,8 +331,9 @@ def _local_evaluation(
         # Reproduce the model-owned trainer's forward precision. ASPD master
         # parameters are restored in FP32 while frozen captures are BF16; the
         # production trainer therefore executes this path under CUDA autocast.
-        with torch.no_grad(), torch.autocast(
-            device_type="cuda", dtype=torch.bfloat16, enabled=True
+        with (
+            torch.no_grad(),
+            torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=True),
         ):
             scores, sparse, continuous, binary = model.encode(capture, update_statistics=False)
         del scores
@@ -347,6 +365,17 @@ def _local_evaluation(
                     code, boundaries=boundaries, include_bias=True
                 )
                 assert isinstance(decoded, tuple) and len(decoded) == 6
+                scale = model.activation_scale(site, layer_offset)
+                if scale is not None:
+                    bias = (
+                        decoder.bias.float().expand_as(target)
+                        if decoder.bias is not None
+                        else torch.zeros_like(target, dtype=torch.float32)
+                    )
+                    decoded = tuple(
+                        prediction.float() + (scale.float() - 1.0) * (prediction.float() - bias)
+                        for prediction in decoded
+                    )
                 layer = registry[local_key].layers[layer_offset]
                 for prefix_index, prediction in enumerate(decoded):
                     key = f"activation/{local_key}/{site}/L{layer:02d}/prefix_{prefix_index}"
@@ -354,9 +383,7 @@ def _local_evaluation(
                 full_key = f"activation/{local_key}/{site}/L{layer:02d}/prefix_5"
                 document_metrics.setdefault(
                     full_key, SequentialDocumentFVU(target.shape[-1])
-                ).update(
-                    decoded[-1], target, document_index, pool.document_ids
-                )
+                ).update(decoded[-1], target, document_index, pool.document_ids)
 
         for key, target_spec in model.targets.items():
             site = "pre" if target_spec.grounding_kind == "residual_pre" else "mid"
@@ -374,9 +401,9 @@ def _local_evaluation(
             target = capture.matrix_outputs[key]
             metric_key = f"internal/{key}"
             _accumulate(metrics, metric_key, prediction, target)
-            document_metrics.setdefault(
-                metric_key, SequentialDocumentFVU(target.shape[-1])
-            ).update(prediction, target, document_index, pool.document_ids)
+            document_metrics.setdefault(metric_key, SequentialDocumentFVU(target.shape[-1])).update(
+                prediction, target, document_index, pool.document_ids
+            )
 
             support = binary[site]
             component = model.matrix_bank.components[key.replace(".", "__dot__")]
@@ -391,7 +418,9 @@ def _local_evaluation(
             contribution_count[site].index_add_(
                 0, feature_cpu, torch.ones_like(feature_cpu, dtype=torch.int64)
             )
-            residual_norm = (prediction.float() - target.float()).reshape(-1, target_spec.d_out).norm(dim=-1)
+            residual_norm = (
+                (prediction.float() - target.float()).reshape(-1, target_spec.d_out).norm(dim=-1)
+            )
             conditional_error_sum[site].index_add_(
                 0, feature_cpu, residual_norm[positions].double().cpu()
             )
@@ -404,6 +433,7 @@ def _local_evaluation(
         if document_metric is not None:
             cluster_report = document_metric.finalize()
             clusters = cluster_report.pop("values")
+            value["document_fvu_by_id"] = cluster_report.pop("values_by_document")
             offset = int(hashlib.sha256(key.encode()).hexdigest()[:8], 16)
             value["document_mean_fvu_bootstrap"] = cluster_bootstrap_mean_ci(
                 clusters,
@@ -435,9 +465,7 @@ def _local_evaluation(
 
         contribution_shares = {
             fraction: (
-                float(
-                    contribution_ordered[: max(1, math.ceil(n_features * fraction))].sum()
-                )
+                float(contribution_ordered[: max(1, math.ceil(n_features * fraction))].sum())
                 / contribution_total
                 if contribution_total > 0
                 else 0.0
@@ -461,11 +489,15 @@ def _local_evaluation(
             {
                 "site": site,
                 "subset_log1p_frequency_correlation": stability,
-                "active_features_per_anchor_histogram": dict(sorted(active_histogram[site].items())),
+                "active_features_per_anchor_histogram": dict(
+                    sorted(active_histogram[site].items())
+                ),
                 "training_used_features": int(
                     (model.gates[site].feature_fire_counts > 0).sum().item()
                 ),
-                "training_recently_dead_features": int(model.gates[site].dead_features.sum().item()),
+                "training_recently_dead_features": int(
+                    model.gates[site].dead_features.sum().item()
+                ),
                 "training_dead_window_pools": 320,
                 "training_dead_window_anchors": 320 * 2048,
                 "effective_dictionary_size_contribution_entropy": (
@@ -574,9 +606,27 @@ def _render_outputs(
         writer.writeheader()
         writer.writerows(feature_rows)
 
-    qwen = sum(activation_summary["qwen"][site]["full_reconstruction"]["fvu"] for site in ("pre", "mid")) / 2
-    gemma = sum(activation_summary["gemma"][site]["full_reconstruction"]["fvu"] for site in ("pre", "mid")) / 2
-    smol = sum(activation_summary["smol"][site]["full_reconstruction"]["fvu"] for site in ("pre", "mid")) / 2
+    qwen = (
+        sum(
+            activation_summary["qwen"][site]["full_reconstruction"]["fvu"]
+            for site in ("pre", "mid")
+        )
+        / 2
+    )
+    gemma = (
+        sum(
+            activation_summary["gemma"][site]["full_reconstruction"]["fvu"]
+            for site in ("pre", "mid")
+        )
+        / 2
+    )
+    smol = (
+        sum(
+            activation_summary["smol"][site]["full_reconstruction"]["fvu"]
+            for site in ("pre", "mid")
+        )
+        / 2
+    )
     concentration = max(
         dictionary[model][site]["top_10_percent_event_share"]
         for model in MODEL_ORDER_2B
@@ -607,7 +657,7 @@ No shared/exclusive mechanism or causal claim follows from this evaluation.
 Status: **HELDOUT_RECONSTRUCTION_COMPLETE — SCIENTIFIC REVIEW REQUIRED**
 
 The final checkpoint restored read-only before this run. Evaluation used the frozen
-validation document buckets and `{reports[0]['accepted_anchors']}` aligned anchors.
+validation document buckets and `{reports[0]["accepted_anchors"]}` aligned anchors.
 
 ## Required decisions
 
@@ -646,7 +696,9 @@ This run does not implement taxonomy, motif discovery, or causal intervention.
 
     figure, axis = plt.subplots(figsize=(14, 5), constrained_layout=True)
     axis.bar(range(len(matrix_rows)), [row["fvu"] for row in matrix_rows])
-    axis.set(title="Held-out internal reconstruction FVU", ylabel="FVU", xlabel="168 logical targets")
+    axis.set(
+        title="Held-out internal reconstruction FVU", ylabel="FVU", xlabel="168 logical targets"
+    )
     axis.set_xticks([])
     figure.savefig(output / "per_matrix_fvu.png", dpi=160)
     plt.close(figure)
@@ -659,7 +711,12 @@ This run does not implement taxonomy, motif discovery, or causal intervention.
                 reverse=True,
             )
             axes[site_index].plot(range(1, len(counts) + 1), counts, label=report["model"])
-        axes[site_index].set(xscale="log", yscale="symlog", title=f"{site.upper()} firing frequency", xlabel="feature rank")
+        axes[site_index].set(
+            xscale="log",
+            yscale="symlog",
+            title=f"{site.upper()} firing frequency",
+            xlabel="feature rank",
+        )
         axes[site_index].legend()
     figure.savefig(output / "feature_firing_distribution.png", dpi=160)
     plt.close(figure)
@@ -681,9 +738,7 @@ This run does not implement taxonomy, motif discovery, or causal intervention.
             for value in contributions:
                 running += value
                 cumulative.append(running / total if total else 0.0)
-            axes[site_index].plot(
-                range(1, len(cumulative) + 1), cumulative, label=report["model"]
-            )
+            axes[site_index].plot(range(1, len(cumulative) + 1), cumulative, label=report["model"])
         axes[site_index].set(
             xscale="log",
             title=f"{site.upper()} contribution concentration",
@@ -824,7 +879,9 @@ def main() -> None:
         )
 
     def next_pool() -> AlignedAnchorPool:
-        payload = None if rank else stream.next_pool(pool_anchors=contract.pool_anchors).to_payload()
+        payload = (
+            None if rank else stream.next_pool(pool_anchors=contract.pool_anchors).to_payload()
+        )
         return AlignedAnchorPool.from_payload(_broadcast(payload))
 
     if args.mode == "checkpoint-smoke":
@@ -837,13 +894,16 @@ def main() -> None:
             registry=registry,
             device=device,
         )
-        with torch.no_grad(), torch.autocast(
-            device_type="cuda", dtype=torch.bfloat16, enabled=True
+        with (
+            torch.no_grad(),
+            torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=True),
         ):
             first = model.encode(capture, update_statistics=False)
             second = model.encode(capture, update_statistics=False)
         for site in ("pre", "mid"):
-            torch.testing.assert_close(first[1][site].values, second[1][site].values, rtol=0, atol=0)
+            torch.testing.assert_close(
+                first[1][site].values, second[1][site].values, rtol=0, atol=0
+            )
             if not torch.isfinite(first[1][site].values).all():
                 raise FloatingPointError("checkpoint smoke produced non-finite gate values")
         local_report = {

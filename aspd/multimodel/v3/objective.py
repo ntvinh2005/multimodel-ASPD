@@ -73,6 +73,7 @@ def matryoshka_activation_fvu(
     group_fracs: Sequence[float] = MATRYOSHKA_GROUP_FRACS,
     support: SparseSupport | None = None,
     sparse_backend: Literal["indexed", "csr", "dense"] = "indexed",
+    reconstruction_scale: Tensor | None = None,
 ) -> tuple[Tensor, Tensor]:
     """Official-style empty+nested-prefix MSE normalized into FVU units."""
 
@@ -84,17 +85,13 @@ def matryoshka_activation_fvu(
     boundaries = matryoshka_boundaries(decoder.in_features, group_fracs)
     if isinstance(decoder, ActivationDecoder):
         decoded = (
-            decoder(
-                flat_code.to(decoder.weight.dtype), boundaries=boundaries, include_bias=True
-            )
+            decoder(flat_code.to(decoder.weight.dtype), boundaries=boundaries, include_bias=True)
             if support is None
             else (
                 decoder.forward_sparse(support, boundaries=boundaries, include_bias=True)
                 if sparse_backend == "indexed"
                 else (
-                    decoder.forward_sparse_csr(
-                        support, boundaries=boundaries, include_bias=True
-                    )
+                    decoder.forward_sparse_csr(support, boundaries=boundaries, include_bias=True)
                     if sparse_backend == "csr"
                     else decoder.forward_dense_grouped(
                         code * valid_anchors[..., None].to(code.dtype),
@@ -106,8 +103,7 @@ def matryoshka_activation_fvu(
         )
         assert isinstance(decoded, tuple)
         reconstructions = tuple(
-            (value if support is None else value[valid_anchors]).float()
-            for value in decoded
+            (value if support is None else value[valid_anchors]).float() for value in decoded
         )
     else:
         bias = (
@@ -122,6 +118,20 @@ def matryoshka_activation_fvu(
             reconstruction = reconstruction + flat_code[:, lower:upper] @ directions[lower:upper]
             values.append(reconstruction)
         reconstructions = tuple(values)
+    if reconstruction_scale is not None:
+        if reconstruction_scale.numel() != 1 or not bool(
+            torch.isfinite(reconstruction_scale).all()
+        ):
+            raise FloatingPointError("activation reconstruction scale must be one finite scalar")
+        bias = (
+            decoder.bias.float().expand_as(truth)
+            if decoder.bias is not None
+            else torch.zeros_like(truth)
+        )
+        scale = reconstruction_scale.float()
+        # This residual form is bitwise identical to the baseline at scale=1 while
+        # retaining the correct nonzero derivative with respect to the scale.
+        reconstructions = tuple(value + (scale - 1.0) * (value - bias) for value in reconstructions)
     terms = [(reconstruction - truth).square().mean() for reconstruction in reconstructions]
     loss = torch.stack(terms).mean() / denominator_mean
     if loss.device.type == "cpu" and not torch.isfinite(loss):
@@ -144,6 +154,7 @@ def auxk_dead_feature_loss(
     top_k_aux: int = 2048,
     known_dead_feature_count: int | None = None,
     sparse_backend: Literal["indexed", "csr", "dense"] = "indexed",
+    reconstruction_scale: Tensor | None = None,
 ) -> Tensor:
     """Official AuxK residual reconstruction restricted to currently dead features."""
 
@@ -179,13 +190,18 @@ def auxk_dead_feature_loss(
                 acts.shape[0], decoder.in_features, device=acts.device, dtype=acts.dtype
             )
             full_sparse.scatter_(-1, selected_features, top.values)
-            decoded = decoder(
-                full_sparse.to(decoder.weight.dtype), include_bias=False
-            )
+            decoded = decoder(full_sparse.to(decoder.weight.dtype), include_bias=False)
             assert isinstance(decoded, Tensor)
             auxiliary = decoded.float()
     else:
         auxiliary = sparse @ decoder.weight.float().T[dead_features]
+    if reconstruction_scale is not None:
+        if reconstruction_scale.numel() != 1 or not bool(
+            torch.isfinite(reconstruction_scale).all()
+        ):
+            raise FloatingPointError("AuxK reconstruction scale must be one finite scalar")
+        scale = reconstruction_scale.float()
+        auxiliary = auxiliary.float() + (scale - 1.0) * auxiliary.float()
     if auxiliary.device.type == "cpu" and float(auxiliary.detach().abs().sum()) == 0.0:
         return auxiliary.sum() * 0.0
     variance_mean = _variance_denominator(truth) / truth.numel()
@@ -217,7 +233,10 @@ def balanced_main_loss(
     """Average PRE/MID independently before combining the three approved objectives."""
 
     expected = {"pre", "mid"}
-    if any(set(values) != expected for values in (internal_by_group, activation_by_group, auxk_by_group)):
+    if any(
+        set(values) != expected
+        for values in (internal_by_group, activation_by_group, auxk_by_group)
+    ):
         raise ValueError("balanced ASPD v3 losses require exactly PRE and MID groups")
 
     def group_mean(values: Mapping[str, Sequence[Tensor]]) -> Tensor:

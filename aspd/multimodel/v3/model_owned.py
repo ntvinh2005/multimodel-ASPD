@@ -25,7 +25,6 @@ from aspd.multimodel.v3.encoder import (
     pack_cross_model_tokens,
 )
 from aspd.multimodel.v3.gating import V3BatchTopK
-from aspd.multimodel.v3.main_2b_config import MODEL_ORDER_2B, V3Main2BV1Config
 from aspd.multimodel.v3.objective import (
     auxk_dead_feature_loss,
     masked_fvu,
@@ -72,7 +71,7 @@ class LocalSiteEncoder(nn.Module):
     def __init__(
         self,
         hidden_size: int,
-        config: V3Main2BV1Config,
+        config: Any,
         *,
         device: torch.device | str | None,
         dtype: torch.dtype,
@@ -101,14 +100,16 @@ class LocalSiteEncoder(nn.Module):
 class SharedSiteEncoder(nn.Module):
     def __init__(
         self,
-        config: V3Main2BV1Config,
+        config: Any,
         *,
+        model_order: tuple[str, ...],
         device: torch.device | str | None,
         dtype: torch.dtype,
     ):
         super().__init__()
         architecture = config.architecture
-        packed_width = architecture.packed_token_width + len(MODEL_ORDER_2B) + 2
+        self.model_order = model_order
+        packed_width = architecture.packed_token_width + 2 * len(self.model_order) - 1
         self.input_adapter = nn.Linear(
             packed_width, architecture.cross_model_width, device=device, dtype=dtype
         )
@@ -128,15 +129,17 @@ class SharedSiteEncoder(nn.Module):
         )
 
     def forward(self, tokens: Mapping[str, Tensor], valid_anchors: Tensor) -> Tensor:
-        packed = pack_cross_model_tokens(tokens, model_order=MODEL_ORDER_2B)
+        packed = pack_cross_model_tokens(tokens, model_order=self.model_order)
         return self.readout(self.cross(self.input_adapter(packed.values)), valid_anchors)
 
 
-def _differentiable_all_gather(local_tokens: Tensor) -> tuple[Tensor, ...]:
+def _differentiable_all_gather(
+    local_tokens: Tensor, *, expected_world_size: int
+) -> tuple[Tensor, ...]:
     if not dist.is_available() or not dist.is_initialized():
         raise RuntimeError("model-owned cross-model encoding requires initialized distributed")
-    if dist.get_world_size() != len(MODEL_ORDER_2B):
-        raise RuntimeError("model-owned ASPD v3 requires exactly three ranks")
+    if dist.get_world_size() != expected_world_size:
+        raise RuntimeError(f"model-owned ASPD v3 requires exactly {expected_world_size} ranks")
     from torch.distributed.nn.functional import all_gather
 
     gathered = all_gather(local_tokens)
@@ -148,7 +151,7 @@ class ModelOwnedMain2B(nn.Module):
 
     def __init__(
         self,
-        config: V3Main2BV1Config,
+        config: Any,
         registry: Mapping[str, ModelFamilyLayout],
         local_model_key: str,
         *,
@@ -158,11 +161,12 @@ class ModelOwnedMain2B(nn.Module):
         sparse_backend: str = "indexed",
     ):
         super().__init__()
-        if tuple(registry) != MODEL_ORDER_2B or local_model_key not in registry:
+        model_order = tuple(getattr(config.architecture, "model_order", tuple(registry)))
+        if tuple(registry) != model_order or local_model_key not in registry:
             raise ValueError("model-owned registry/local rank assignment is invalid")
         self.config_fingerprint = config.fingerprint()
         self.local_model_key = local_model_key
-        self.model_order = MODEL_ORDER_2B
+        self.model_order = model_order
         self.layout = registry[local_model_key]
         if sparse_backend not in {"indexed", "csr", "dense"}:
             raise ValueError(f"unknown model-owned sparse backend: {sparse_backend}")
@@ -172,15 +176,13 @@ class ModelOwnedMain2B(nn.Module):
             raise ValueError("each model-owned rank must own exactly 56 matrix targets")
         self.local_encoders = nn.ModuleDict(
             {
-                site: LocalSiteEncoder(
-                    self.layout.hidden_size, config, device=device, dtype=dtype
-                )
+                site: LocalSiteEncoder(self.layout.hidden_size, config, device=device, dtype=dtype)
                 for site in SITE_ORDER
             }
         )
         self.shared_encoders = nn.ModuleDict(
             {
-                site: SharedSiteEncoder(config, device=device, dtype=dtype)
+                site: SharedSiteEncoder(config, model_order=model_order, device=device, dtype=dtype)
                 for site in SITE_ORDER
             }
         )
@@ -222,6 +224,40 @@ class ModelOwnedMain2B(nn.Module):
             device=device,
             dtype=dtype,
         )
+        scale_mode = getattr(
+            getattr(config, "objective", None),
+            "activation_reconstruction_scale",
+            "none",
+        )
+        self.activation_reconstruction_scale_mode = scale_mode
+        if scale_mode == "two_model_geomean_log_scale":
+            if self.model_order != ("gemma", "smol"):
+                raise ValueError("geometric-mean scale is frozen to Gemma/SmolLM2 order")
+            self.reconstruction_log_scale = nn.Parameter(
+                torch.zeros(len(SITE_ORDER), 8, device=device, dtype=torch.float32)
+            )
+        elif scale_mode == "none":
+            self.register_parameter("reconstruction_log_scale", None)
+        else:
+            raise ValueError(f"unknown activation reconstruction scale mode: {scale_mode}")
+        self.config_top_k_aux = int(getattr(config.architecture, "top_k_aux", 2048))
+
+    def activation_scale(self, site: str, layer_offset: int) -> Tensor | None:
+        """Return the positive, geometric-mean-constrained local reconstruction gain."""
+
+        if self.reconstruction_log_scale is None:
+            return None
+        site_index = SITE_ORDER.index(site)
+        sign = 1.0 if self.local_model_key == "gemma" else -1.0
+        return torch.exp(sign * self.reconstruction_log_scale[site_index, layer_offset])
+
+    def reconstruction_scale_report(self) -> dict[str, list[float]]:
+        if self.reconstruction_log_scale is None:
+            return {site: [1.0] * 8 for site in SITE_ORDER}
+        return {
+            site: [float(self.activation_scale(site, layer).detach().cpu()) for layer in range(8)]
+            for site in SITE_ORDER
+        }
 
     @torch.no_grad()
     def synchronize_shared_state_(self, source_rank: int = 0) -> None:
@@ -229,10 +265,14 @@ class ModelOwnedMain2B(nn.Module):
             raise RuntimeError("shared-state synchronization requires distributed")
         for value in self.shared_encoders.state_dict().values():
             dist.broadcast(value, source_rank)
+        if self.reconstruction_log_scale is not None:
+            dist.broadcast(self.reconstruction_log_scale, source_rank)
 
     def encode(
         self, batch: LocalCaptureBatch, *, update_statistics: bool = True
-    ) -> tuple[dict[str, Tensor], dict[str, Any], dict[str, SparseSupport], dict[str, SparseSupport]]:
+    ) -> tuple[
+        dict[str, Tensor], dict[str, Any], dict[str, SparseSupport], dict[str, SparseSupport]
+    ]:
         batch.validate(self.layout)
         scores: dict[str, Tensor] = {}
         sparse: dict[str, Any] = {}
@@ -242,7 +282,9 @@ class ModelOwnedMain2B(nn.Module):
             with torch.profiler.record_function(f"aspd/{site}/local_packing_intra"):
                 local_tokens = self.local_encoders[site](batch.activations[site])
             with torch.profiler.record_function(f"aspd/{site}/latent_all_gather"):
-                gathered = _differentiable_all_gather(local_tokens)
+                gathered = _differentiable_all_gather(
+                    local_tokens, expected_world_size=len(self.model_order)
+                )
             tokens = {key: gathered[index] for index, key in enumerate(self.model_order)}
             with torch.profiler.record_function(f"aspd/{site}/cross_encoder_readout"):
                 scores[site] = self.shared_encoders[site](tokens, batch.valid_anchors)
@@ -274,13 +316,12 @@ class ModelOwnedMain2B(nn.Module):
             # pool 320. Avoid a device synchronization on every site during that exact
             # warm-up interval; zero dead features is guaranteed, not approximated.
             dead_feature_count = (
-                int(self.gates[site].dead_features.sum().item())
-                if auxk_may_be_active
-                else 0
+                int(self.gates[site].dead_features.sum().item()) if auxk_may_be_active else 0
             )
             for layer_offset, (decoder, target) in enumerate(
                 zip(decoders, batch.activations[site], strict=True)
             ):
+                reconstruction_scale = self.activation_scale(site, layer_offset)
                 activation, full = matryoshka_activation_fvu(
                     sparse[site].values,
                     decoder,
@@ -288,6 +329,7 @@ class ModelOwnedMain2B(nn.Module):
                     batch.valid_anchors,
                     support=support[site],
                     sparse_backend=self.sparse_backend,
+                    reconstruction_scale=reconstruction_scale,
                 )
                 auxk = auxk_dead_feature_loss(
                     scores[site],
@@ -299,12 +341,14 @@ class ModelOwnedMain2B(nn.Module):
                     top_k_aux=self.config_top_k_aux,
                     known_dead_feature_count=dead_feature_count,
                     sparse_backend=self.sparse_backend,
+                    reconstruction_scale=reconstruction_scale,
                 )
-                yield f"{site}/{self.local_model_key}/window_{layer_offset}", activation, auxk, coefficient
-
-    @property
-    def config_top_k_aux(self) -> int:
-        return 2048
+                yield (
+                    f"{site}/{self.local_model_key}/window_{layer_offset}",
+                    activation,
+                    auxk,
+                    coefficient,
+                )
 
     def internal_loss_terms(
         self,
@@ -312,7 +356,10 @@ class ModelOwnedMain2B(nn.Module):
         support: Mapping[str, SparseSupport],
         dense_code: Mapping[str, Tensor] | None = None,
     ) -> Iterator[tuple[str, str, Tensor, float]]:
-        global_counts = {"pre": 3 * 8 * 3, "mid": 3 * 8 * 4}
+        global_counts = {
+            "pre": len(self.model_order) * 8 * 3,
+            "mid": len(self.model_order) * 8 * 4,
+        }
         dummy_code = batch.valid_anchors.new_zeros(
             *batch.valid_anchors.shape, support["pre"].n_features, dtype=torch.bfloat16
         )
@@ -341,6 +388,8 @@ class ModelOwnedMain2B(nn.Module):
 
     def shared_parameters(self) -> Iterator[nn.Parameter]:
         yield from self.shared_encoders.parameters()
+        if self.reconstruction_log_scale is not None:
+            yield self.reconstruction_log_scale
 
     @torch.no_grad()
     def all_reduce_shared_gradients_(self) -> None:
@@ -364,11 +413,11 @@ class ModelOwnedMain2B(nn.Module):
             bank.project_decoder_gradients_()
 
 
-def build_model_owned_adam(
-    model: ModelOwnedMain2B, config: V3Main2BV1Config
-) -> torch.optim.Adam:
+def build_model_owned_adam(model: ModelOwnedMain2B, config: Any) -> torch.optim.Adam:
     rank_one = list(model.matrix_bank.parameters())
     activation = list(model.activation_banks.parameters())
+    if model.reconstruction_log_scale is not None:
+        activation.append(model.reconstruction_log_scale)
     encoder = list(model.local_encoders.parameters()) + list(model.shared_encoders.parameters())
     groups = (rank_one, activation, encoder)
     ids = [id(parameter) for group in groups for parameter in group]
@@ -388,21 +437,18 @@ def build_model_owned_adam(
 
 
 def model_owned_parameter_counts(
-    config: V3Main2BV1Config, registry: Mapping[str, ModelFamilyLayout]
+    config: Any, registry: Mapping[str, ModelFamilyLayout]
 ) -> dict[str, Any]:
     """Analytical counts used before allocating the multi-billion-parameter banks."""
 
     c = config.architecture.dictionary_size
     width = config.architecture.packed_token_width
     feedforward = 4 * width
-    transformer_layer = (
-        4 * width * width + 2 * width * feedforward + 9 * width + feedforward
-    )
-    intra_all_sites = (
-        2 * config.architecture.intra_model_layers * transformer_layer
-    )
+    transformer_layer = 4 * width * width + 2 * width * feedforward + 9 * width + feedforward
+    intra_all_sites = 2 * config.architecture.intra_model_layers * transformer_layer
     cross_per_site = config.architecture.cross_model_layers * transformer_layer
-    adapter_per_site = (width + len(MODEL_ORDER_2B) + 2) * width + width
+    model_order = tuple(getattr(config.architecture, "model_order", tuple(registry)))
+    adapter_per_site = (width + 2 * len(model_order) - 1) * width + width
     readout_per_site = width * c + c
     shared_replicated = 2 * (cross_per_site + adapter_per_site + readout_per_site)
     per_model: dict[str, dict[str, int]] = {}
@@ -416,14 +462,38 @@ def model_owned_parameter_counts(
             "local_packers": packer,
             "local_intra_transformers": intra_all_sites,
             "shared_encoder_replica": shared_replicated,
+            "relative_reconstruction_scale": (
+                16
+                if getattr(
+                    getattr(config, "objective", None),
+                    "activation_reconstruction_scale",
+                    "none",
+                )
+                == "two_model_geomean_log_scale"
+                else 0
+            ),
         }
-    unique_total = sum(
-        value["rank_one"]
-        + value["activation_decoders"]
-        + value["local_packers"]
-        + value["local_intra_transformers"]
-        for value in per_model.values()
-    ) + shared_replicated
+    relative_scale = (
+        16
+        if getattr(
+            getattr(config, "objective", None),
+            "activation_reconstruction_scale",
+            "none",
+        )
+        == "two_model_geomean_log_scale"
+        else 0
+    )
+    unique_total = (
+        sum(
+            value["rank_one"]
+            + value["activation_decoders"]
+            + value["local_packers"]
+            + value["local_intra_transformers"]
+            for value in per_model.values()
+        )
+        + shared_replicated
+        + relative_scale
+    )
     allocated_total = sum(sum(value.values()) for value in per_model.values())
     return {
         "per_model": per_model,
@@ -432,7 +502,7 @@ def model_owned_parameter_counts(
             value["activation_decoders"] for value in per_model.values()
         ),
         "unique_scientific_trainable_parameters": unique_total,
-        "allocated_parameters_including_three_shared_replicas": allocated_total,
+        "allocated_parameters_including_shared_replicas": allocated_total,
         "maximum_owner_parameters": max(sum(value.values()) for value in per_model.values()),
         "estimated_runtime_param_grad_adam_bytes_fp32": {
             key: sum(value.values()) * 16 for key, value in per_model.items()

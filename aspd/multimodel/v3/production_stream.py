@@ -38,7 +38,10 @@ class ModelPoolInputs:
     def validate(self, anchor_count: int, sequence_length: int) -> None:
         if len(self.input_ids) != len(self.attention_masks) or not self.input_ids:
             raise ValueError("model pool must contain matching non-empty document arrays")
-        if len(self.anchor_document_indices) != anchor_count or len(self.anchor_token_indices) != anchor_count:
+        if (
+            len(self.anchor_document_indices) != anchor_count
+            or len(self.anchor_token_indices) != anchor_count
+        ):
             raise ValueError("model pool gather maps do not match accepted anchors")
         for ids, mask in zip(self.input_ids, self.attention_masks, strict=True):
             if len(ids) != len(mask) or not ids or len(ids) > sequence_length:
@@ -70,7 +73,7 @@ class AlignedAnchorPool:
         *,
         expected_anchors: int,
         sequence_length: int,
-        model_order: tuple[str, str, str] = MODEL_ORDER,
+        model_order: tuple[str, ...] = MODEL_ORDER,
     ) -> None:
         if self.anchor_count != expected_anchors:
             raise ValueError(
@@ -118,9 +121,7 @@ class AlignedAnchorPool:
                 attention_masks=tuple(
                     tuple(int(v) for v in row) for row in value["attention_masks"]
                 ),
-                anchor_document_indices=tuple(
-                    int(v) for v in value["anchor_document_indices"]
-                ),
+                anchor_document_indices=tuple(int(v) for v in value["anchor_document_indices"]),
                 anchor_token_indices=tuple(int(v) for v in value["anchor_token_indices"]),
             )
             for key in model_order
@@ -215,11 +216,11 @@ class PileAlignedAnchorStream:
         split_policy: HashSplitPolicy,
         dedup_path: str | Path,
         sequence_length: int = 512,
-        model_order: tuple[str, str, str] = MODEL_ORDER,
+        model_order: tuple[str, ...] = MODEL_ORDER,
     ):
         self.model_order = tuple(model_order)
-        if len(self.model_order) != 3:
-            raise ValueError("production stream requires exactly three tokenizer families")
+        if len(self.model_order) < 2:
+            raise ValueError("production stream requires at least two tokenizer families")
         if tuple(tokenizers) != self.model_order or tuple(tokenizer_revisions) != self.model_order:
             raise ValueError(f"production stream requires ordered {self.model_order} tokenizers")
         if not hasattr(dataset, "state_dict") or not hasattr(dataset, "load_state_dict"):
@@ -231,6 +232,12 @@ class PileAlignedAnchorStream:
         self.tokenizer_revisions = dict(tokenizer_revisions)
         self.split_policy = split_policy
         self.sequence_length = sequence_length
+        canonical_policy = {
+            2: "identity_exact_two_way_prefix",
+            3: "identity_exact_three_way_prefix",
+        }.get(len(self.model_order))
+        if canonical_policy is None:
+            raise ValueError("production stream has no approved alignment policy for model count")
         self.provenance = {
             "schema_version": self.STATE_SCHEMA,
             "dataset_id": dataset_id,
@@ -244,12 +251,10 @@ class PileAlignedAnchorStream:
                 "seed": split_policy.seed,
             },
             "sequence_length": sequence_length,
-            "canonical_text_policy": "identity_exact_three_way_prefix",
+            "canonical_text_policy": canonical_policy,
         }
         self.provenance_sha256 = _canonical_sha256(self.provenance)
-        self.dedup = SQLiteStreamDeduplicator(
-            dedup_path, provenance_sha256=self.provenance_sha256
-        )
+        self.dedup = SQLiteStreamDeduplicator(dedup_path, provenance_sha256=self.provenance_sha256)
         self._iterator = iter(self.dataset)
         self._pending: dict[str, Any] | None = None
         self.documents_read = 0
@@ -266,7 +271,9 @@ class PileAlignedAnchorStream:
             try:
                 row = next(self._iterator)
             except StopIteration as error:
-                raise RuntimeError("pinned Pile stream exhausted before the exposure budget") from error
+                raise RuntimeError(
+                    "pinned Pile stream exhausted before the exposure budget"
+                ) from error
             self.documents_read += 1
             text = row.get("text")
             meta = row.get("meta") or {}

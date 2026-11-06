@@ -49,9 +49,7 @@ class ChannelSlicePacker:
     def __call__(self, concatenated: Tensor) -> Tensor:
         if concatenated.shape[-1] != self.concatenated_width:
             raise ValueError("channel_slice input width differs from the registered model width")
-        return concatenated.reshape(
-            *concatenated.shape[:2], self.latent_tokens, self.token_width
-        )
+        return concatenated.reshape(*concatenated.shape[:2], self.latent_tokens, self.token_width)
 
 
 class LearnedProjectionPacker(nn.Module):
@@ -117,7 +115,7 @@ class IntraModelTransformer(nn.Module):
 class CrossModelTokens:
     values: Tensor
     identity_indices: tuple[int, ...]
-    separator_positions: tuple[int, int]
+    separator_positions: tuple[int, ...]
 
 
 def pack_cross_model_tokens(
@@ -125,10 +123,12 @@ def pack_cross_model_tokens(
     *,
     model_order: Sequence[str] = MODEL_ORDER,
 ) -> CrossModelTokens:
-    """Build ``A_Qwen, SEP, A_Gemma, SEP, A_Phi`` with parameter-free identities."""
+    """Pack ordered model tokens with one parameter-free identity per model/separator."""
 
     if tuple(tokens) != tuple(model_order):
-        raise ValueError("intra-model tokens must use deterministic qwen/gemma/phi order")
+        raise ValueError("intra-model tokens must use the configured deterministic order")
+    if len(model_order) < 2:
+        raise ValueError("cross-model packing requires at least two models")
     shapes = [tokens[key].shape for key in model_order]
     if any(len(shape) != 4 for shape in shapes):
         raise ValueError("cross-model inputs must have shape [B,A,a,d]")
@@ -137,7 +137,7 @@ def pack_cross_model_tokens(
         raise ValueError("all models must share batch, anchor, and latent-token axes")
     batch, anchors, latent_tokens = shapes[0][:3]
     max_width = max(shape[-1] for shape in shapes)
-    identity_width = len(model_order) + 2
+    identity_width = 2 * len(model_order) - 1
 
     pieces: list[Tensor] = []
     identity_indices: list[int] = []
@@ -182,7 +182,7 @@ def pack_cross_model_tokens(
     return CrossModelTokens(
         packed,
         tuple(identity_indices),
-        (separator_positions[0], separator_positions[1]),
+        tuple(separator_positions),
     )
 
 
@@ -215,7 +215,7 @@ class CrossModelTransformer(nn.Module):
 
     def forward(self, tokens: Tensor) -> Tensor:
         if tokens.ndim != 4:
-            raise ValueError("cross-model tokens must have shape [B,A,3a+2,d]")
+            raise ValueError("cross-model inputs must have model and separator token axes")
         batch, anchors, count, width = tokens.shape
         output = self.encoder(tokens.reshape(batch * anchors, count, width))
         return output.reshape(batch, anchors, count, width)
@@ -235,7 +235,9 @@ class FeatureReadout(nn.Module):
     ):
         super().__init__()
         if method != "mean":
-            raise NotImplementedError("only the explicitly labeled experimental mean readout exists")
+            raise NotImplementedError(
+                "only the explicitly labeled experimental mean readout exists"
+            )
         self.method = method
         self.output = nn.Linear(width, n_features, device=device, dtype=dtype)
 
@@ -267,31 +269,28 @@ class HierarchicalV3Encoder(nn.Module):
     ):
         super().__init__()
         self.model_order = tuple(model_order)
-        if len(self.model_order) != 3 or tuple(packers) != self.model_order:
-            raise ValueError(
-                f"v3 encoder packers must contain three ordered models: {self.model_order}"
-            )
+        if len(self.model_order) < 2 or tuple(packers) != self.model_order:
+            raise ValueError(f"v3 encoder packers must match model order: {self.model_order}")
         widths = {key: int(value.token_width) for key, value in packers.items()}
-        incompatible_intra = {
-            key: width for key, width in widths.items() if width % intra_heads
-        }
+        incompatible_intra = {key: width for key, width in widths.items() if width % intra_heads}
         if incompatible_intra:
             raise ValueError(
                 "intra-model token widths must be divisible by attention heads before "
                 f"module allocation: heads={intra_heads}, widths={incompatible_intra}"
             )
-        packed_cross_width = max(widths.values()) + len(self.model_order) + 2
+        identity_width = 2 * len(self.model_order) - 1
+        packed_cross_width = max(widths.values()) + identity_width
         cross_width = packed_cross_width if cross_width is None else cross_width
         if cross_width % cross_heads:
             raise ValueError(
                 "cross-model token width must be divisible by attention heads before "
                 f"module allocation: content_width={max(widths.values())}, "
-                f"identity_width={len(self.model_order) + 2}, cross_width={cross_width}, "
+                f"identity_width={identity_width}, cross_width={cross_width}, "
                 f"heads={cross_heads}"
             )
         latent_tokens = {key: int(value.latent_tokens) for key, value in packers.items()}
         if len(set(latent_tokens.values())) != 1:
-            raise ValueError("all three v3 models must use the same latent-token count a")
+            raise ValueError("all v3 models must use the same latent-token count a")
         self.packer_modules = nn.ModuleDict(
             {key: value for key, value in packers.items() if isinstance(value, nn.Module)}
         )
@@ -322,9 +321,7 @@ class HierarchicalV3Encoder(nn.Module):
             device=device,
             dtype=dtype,
         )
-        self.readout = FeatureReadout(
-            cross_width, n_features, readout, device=device, dtype=dtype
-        )
+        self.readout = FeatureReadout(cross_width, n_features, readout, device=device, dtype=dtype)
         self.latent_tokens = latent_tokens
 
     def forward(

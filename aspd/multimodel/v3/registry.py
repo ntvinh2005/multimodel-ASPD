@@ -281,8 +281,8 @@ def build_model_registry(approved: V3ApprovedConfig) -> dict[str, ModelFamilyLay
     return registry
 
 
-def build_model_registry_2b(config: V3Main2BV1Config) -> dict[str, ModelFamilyLayout]:
-    """Build the incompatible 2B registry entirely from its pinned versioned contract."""
+def build_model_registry_2b(config: V3Main2BV1Config | Any) -> dict[str, ModelFamilyLayout]:
+    """Build a 2B registry entirely from a pinned versioned contract."""
 
     registry = {
         model.key: ModelFamilyLayout(
@@ -309,11 +309,13 @@ def build_model_registry_2b(config: V3Main2BV1Config) -> dict[str, ModelFamilyLa
         )
         for model in config.models
     }
-    if tuple(registry) != MODEL_ORDER_2B:
-        raise ValueError(f"2B registry order must be {MODEL_ORDER_2B}")
+    model_order = tuple(config.architecture.model_order)
+    if tuple(registry) != model_order:
+        raise ValueError(f"2B registry order must be {model_order}")
     targets = [target for layout in registry.values() for target in layout.targets()]
-    if len(targets) != 168 or len({target.key for target in targets}) != 168:
-        raise ValueError("2B registry must contain 168 unique logical matrix targets")
+    expected_targets = len(model_order) * 8 * 7
+    if len(targets) != expected_targets or len({target.key for target in targets}) != expected_targets:
+        raise ValueError(f"2B registry must contain {expected_targets} unique targets")
     if {target.logical_name for target in targets} != set(V3_LOGICAL_MATRICES):
         raise ValueError("2B registry lost a required logical matrix type")
     return registry

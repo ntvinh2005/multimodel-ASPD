@@ -14,6 +14,7 @@ from aspd.multimodel.v3.config import load_v3_config_bundle
 from aspd.multimodel.v3.data import write_json_immutable
 from aspd.multimodel.v3.main_2b_config import load_main_2b_v1_config
 from aspd.multimodel.v3.main_config import load_main_v1_config
+from aspd.multimodel.v3.two_model_config import load_two_model_scale_config
 
 
 def _fingerprint(payload: dict[str, Any]) -> str:
@@ -28,6 +29,11 @@ def _parse_args() -> argparse.Namespace:
         "--main-config",
         type=Path,
         default=Path("configs/multimodel/aspd_v3/main_v1.yaml"),
+    )
+    parser.add_argument(
+        "--two-model-scale",
+        action="store_true",
+        help="prepare the Gemma/SmolLM2 short-pilot manifests",
     )
     parser.add_argument(
         "--main-2b",
@@ -55,7 +61,13 @@ def _parse_args() -> argparse.Namespace:
 def main() -> None:
     args = _parse_args()
     bundle = None
-    if args.main_2b:
+    if args.two_model_scale:
+        main_config = load_two_model_scale_config(args.main_config)
+        dataset = main_config.data
+        dataset_id = dataset.dataset_id
+        dataset_revision = dataset.dataset_revision
+        models = main_config.models
+    elif args.main_2b:
         main_config = load_main_2b_v1_config(args.main_config)
         dataset = main_config.data
         dataset_id = dataset.dataset_id
@@ -74,9 +86,7 @@ def main() -> None:
         files_metadata=True,
     )
     if info.sha != dataset_revision:
-        raise RuntimeError(
-            f"pinned dataset revision resolved to a different commit: {info.sha}"
-        )
+        raise RuntimeError(f"pinned dataset revision resolved to a different commit: {info.sha}")
     files = []
     for sibling in info.siblings or []:
         name = sibling.rfilename
@@ -116,6 +126,16 @@ def main() -> None:
         }
         for model in models
     ]
+    if args.two_model_scale:
+        alignment_name = main_config.data.canonical_text_policy
+        distributed_source = "rank_zero_stream_broadcast_to_two_model_owner_ranks"
+    else:
+        alignment_name = "exact_three_way_canonical_prefix"
+        distributed_source = (
+            "rank_zero_stream_broadcast_to_three_model_owner_ranks"
+            if args.main_2b
+            else "rank_zero_stream_broadcast_to_three_fsdp_ranks"
+        )
     alignment = {
         "schema_version": 2,
         "kind": "ASPD_V3_ON_THE_FLY_ALIGNMENT_MANIFEST",
@@ -123,7 +143,7 @@ def main() -> None:
         "model_order": list(main_config.architecture.model_order),
         "tokenizers": tokenizer_rows,
         "canonical_text": "identity",
-        "alignment": "exact_three_way_canonical_prefix",
+        "alignment": alignment_name,
         "sequence_length_native_tokens_per_model": main_config.data.sequence_length,
         "split": {
             "unit": main_config.data.split_unit,
@@ -132,11 +152,7 @@ def main() -> None:
             "validation_buckets": list(main_config.data.validation_buckets),
             "test_buckets": list(main_config.data.test_buckets),
         },
-        "distributed_source": (
-            "rank_zero_stream_broadcast_to_three_model_owner_ranks"
-            if args.main_2b
-            else "rank_zero_stream_broadcast_to_three_fsdp_ranks"
-        ),
+        "distributed_source": distributed_source,
         "exact_deduplication": "sqlite_content_sha256_with_checkpoint_high_water",
     }
     alignment["manifest_sha256"] = _fingerprint(alignment)

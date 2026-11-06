@@ -146,9 +146,7 @@ def validate_frozen_provenance(
     if missing:
         raise FileNotFoundError(f"frozen diagnostic input is missing: {missing}")
     run_manifest = json.loads(run_manifest_path.read_text(encoding="utf-8"))
-    checkpoint_manifest = json.loads(
-        (checkpoint / "manifest.json").read_text(encoding="utf-8")
-    )
+    checkpoint_manifest = json.loads((checkpoint / "manifest.json").read_text(encoding="utf-8"))
     marker = json.loads((checkpoint / "COMPLETE").read_text(encoding="utf-8"))
     observed = {
         "source_git_sha": run_manifest.get("git_sha"),
@@ -269,7 +267,9 @@ def compact_metric_row(row: Mapping[str, Any]) -> dict[str, Any]:
             prefix = f"loss/internal/{model}."
             suffix = f".{matrix}"
             values = [
-                value for key, value in loss.items() if key.startswith(prefix) and key.endswith(suffix)
+                value
+                for key, value in loss.items()
+                if key.startswith(prefix) and key.endswith(suffix)
             ]
             if len(values) != 8:
                 raise ValueError(f"missing internal layer metrics for {model}/{matrix}")
@@ -303,9 +303,7 @@ def summarize_training_trajectory(rows: Sequence[dict[str, Any]]) -> dict[str, A
         "middle_1000": rows[len(rows) // 2 - 500 : len(rows) // 2 + 500],
         "last_1000": rows[-1000:],
     }
-    summaries = {
-        name: _window_mean(values, all_loss_keys) for name, values in windows.items()
-    }
+    summaries = {name: _window_mean(values, all_loss_keys) for name, values in windows.items()}
     model_site: dict[str, dict[str, dict[str, float]]] = {}
     for name, summary in summaries.items():
         for model in ("qwen", "gemma", "smol"):
@@ -450,6 +448,7 @@ class SequentialDocumentFVU:
     pending_document_id: str | None = None
     pending: TensorMetricAccumulator | None = None
     values: list[float] = field(default_factory=list)
+    value_document_ids: list[str] = field(default_factory=list)
     completed_document_ids: set[str] = field(default_factory=set)
     excluded_zero_variance: int = 0
     _finalized: bool = False
@@ -466,6 +465,7 @@ class SequentialDocumentFVU:
         else:
             assert isinstance(value, float)
             self.values.append(value)
+            self.value_document_ids.append(self.pending_document_id)
         self.completed_document_ids.add(self.pending_document_id)
         self.pending_document_id = None
         self.pending = None
@@ -481,9 +481,7 @@ class SequentialDocumentFVU:
             raise RuntimeError("cannot update a finalized document accumulator")
         prediction = prediction.reshape(-1, self.width)
         target = target.reshape(-1, self.width)
-        if prediction.shape != target.shape or prediction.shape[0] != len(
-            anchor_document_indices
-        ):
+        if prediction.shape != target.shape or prediction.shape[0] != len(anchor_document_indices):
             raise ValueError("document-cluster tensors and anchor indices differ")
         if not anchor_document_indices:
             raise ValueError("document-cluster update cannot be empty")
@@ -518,6 +516,7 @@ class SequentialDocumentFVU:
             raise ValueError("no eligible source-document FVU clusters")
         return {
             "values": list(self.values),
+            "values_by_document": dict(zip(self.value_document_ids, self.values, strict=True)),
             "unique_source_documents": len(self.completed_document_ids),
             "eligible_source_documents": len(self.values),
             "excluded_zero_variance_documents": self.excluded_zero_variance,
@@ -536,8 +535,7 @@ def cluster_bootstrap_mean_ci(
     rng = random.Random(seed)
     count = len(values)
     samples = sorted(
-        sum(values[rng.randrange(count)] for _ in range(count)) / count
-        for _ in range(replicates)
+        sum(values[rng.randrange(count)] for _ in range(count)) / count for _ in range(replicates)
     )
     lower_index = max(0, math.floor((alpha / 2) * replicates))
     upper_index = min(replicates - 1, math.ceil((1 - alpha / 2) * replicates) - 1)
