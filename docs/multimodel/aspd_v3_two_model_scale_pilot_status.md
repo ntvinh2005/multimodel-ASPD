@@ -101,3 +101,24 @@ starting the corresponding short pilot. Held-out evaluation uses exactly 100,352
 validation anchors and cannot start unless the pilot checkpoint is complete. A final
 CPU comparison verifies paired batches and common initialization before calculating
 document-cluster bootstrap differences.
+
+### Third submission after ledger compatibility fix
+
+Execution commit: `9263f6d80a5b6e5767d242cf65364844de7b968d`
+
+Submitted: `2026-11-06T11:50:59-05:00`
+
+| Stage | Arm | Job ID | Initial state |
+|---|---|---:|---|
+| Preflight + short pilot | baseline | 49977094 | RUNNING on `c0907a-s5` |
+| Preflight + short pilot | treatment | 49977095 | RUNNING on `c0910a-s25` |
+| Checkpoint smoke + held-out | baseline | 49977096 | PENDING dependency |
+| Checkpoint smoke + held-out | treatment | 49977097 | PENDING dependency |
+| Paired comparison | both | 49977098 | PENDING dependency |
+
+Before this submission, Ruff and Python compilation passed, 29 bounded CPU tests
+passed, and the separated distributed gradient/optimizer/checkpoint regression passed
+(`1 passed in 129.28 s`). Both pilot jobs remained running beyond the timestamps of
+the two earlier preflight failures and reached checkpoint-save/reload activity. This
+is execution evidence only; no training or scientific result is claimed until the
+jobs and their dependent held-out evaluations complete successfully.
