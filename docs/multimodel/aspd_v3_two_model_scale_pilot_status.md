@@ -89,6 +89,13 @@ The corrected chain was submitted only after the scalar-buffer regression test p
 The live execution worktree remains pinned and clean at the execution commit; this
 status update is published from a separate detached documentation worktree.
 
+Jobs 49976302 and 49976303 then exposed a second preflight-only blocker: the historical
+exposure-ledger constructor required exactly three model keys. No optimizer step ran.
+Jobs 49976304--49976306 were cancelled. The compatibility fix retains the historical
+three positional raw-token slots, binds their scientific names through the immutable
+two-model order, and holds the unused third slot at zero. Two-model and historical
+three-model ledger/accounting regression tests pass.
+
 The GPU scripts run a three-step two-B200 optimizer/checkpoint/reload preflight before
 starting the corresponding short pilot. Held-out evaluation uses exactly 100,352
 validation anchors and cannot start unless the pilot checkpoint is complete. A final

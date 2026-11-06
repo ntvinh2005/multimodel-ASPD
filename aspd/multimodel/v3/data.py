@@ -297,7 +297,7 @@ class SQLiteExposureLedger:
         dataset_manifest_sha256: str,
         world_size: int = 1,
         writer_rank: int = 0,
-        model_order: tuple[str, str, str] = ("qwen", "gemma", "phi"),
+        model_order: tuple[str, ...] = ("qwen", "gemma", "phi"),
         compact_anchor_ids: bool = False,
     ):
         if len(dataset_manifest_sha256) != 64 or any(
@@ -313,8 +313,8 @@ class SQLiteExposureLedger:
         self.dataset_manifest_sha256 = dataset_manifest_sha256
         self.world_size = world_size
         self.writer_rank = writer_rank
-        if len(model_order) != 3 or len(set(model_order)) != 3:
-            raise ValueError("exposure ledger requires three distinct model keys")
+        if len(model_order) not in {2, 3} or len(set(model_order)) != len(model_order):
+            raise ValueError("exposure ledger requires two or three distinct model keys")
         self.model_order = tuple(model_order)
         self.compact_anchor_ids = compact_anchor_ids
         self.schema_version = 4 if compact_anchor_ids else self.SCHEMA_VERSION
@@ -749,6 +749,11 @@ class SQLiteExposureLedger:
             raise ValueError("raw-token observations cannot be negative")
         payload = json.dumps(counts, sort_keys=True, separators=(",", ":"))
         payload_sha256 = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        # Schema v3/v4 retains three positional raw-token slots for historical
+        # checkpoint compatibility. Two-model contracts use slots 0/1 and keep slot 2
+        # exactly zero; ``model_order_json`` provides their scientific names.
+        positional_counts = [counts[key] for key in self.model_order]
+        positional_counts.extend([0] * (3 - len(positional_counts)))
         self.connection.execute("BEGIN IMMEDIATE")
         try:
             existing = self.connection.execute(
@@ -765,9 +770,9 @@ class SQLiteExposureLedger:
                 (
                     observation_id,
                     payload_sha256,
-                    counts[self.model_order[0]],
-                    counts[self.model_order[1]],
-                    counts[self.model_order[2]],
+                    positional_counts[0],
+                    positional_counts[1],
+                    positional_counts[2],
                     before_optimizer_step,
                 ),
             )
@@ -776,9 +781,9 @@ class SQLiteExposureLedger:
                 "raw_tokens_gemma=raw_tokens_gemma+?, raw_tokens_phi=raw_tokens_phi+? "
                 "WHERE singleton=1",
                 (
-                    counts[self.model_order[0]],
-                    counts[self.model_order[1]],
-                    counts[self.model_order[2]],
+                    positional_counts[0],
+                    positional_counts[1],
+                    positional_counts[2],
                 ),
             )
             self.connection.commit()
@@ -799,17 +804,12 @@ class SQLiteExposureLedger:
         """Return named raw-token slots according to this ledger's immutable model order."""
 
         counters = self.snapshot()
-        return dict(
-            zip(
-                self.model_order,
-                (
-                    counters.raw_tokens_qwen,
-                    counters.raw_tokens_gemma,
-                    counters.raw_tokens_phi,
-                ),
-                strict=True,
-            )
+        positional_counts = (
+            counters.raw_tokens_qwen,
+            counters.raw_tokens_gemma,
+            counters.raw_tokens_phi,
         )
+        return dict(zip(self.model_order, positional_counts[: len(self.model_order)], strict=True))
 
     def observe_optimizer_step(self, step_id: int, anchor_ids: Sequence[str]) -> ExposureCounters:
         return self.observe_global_optimizer_step(step_id, {0: anchor_ids})

@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from torch import nn
 
 from aspd.multimodel.cli.train_aspd_v3_2b import _common_state_sha256
+from aspd.multimodel.v3.data import SQLiteExposureLedger
 from aspd.multimodel.v3.encoder import pack_cross_model_tokens
 from aspd.multimodel.v3.objective import matryoshka_activation_fvu
 from aspd.multimodel.v3.reconstruction import ActivationDecoder
@@ -105,3 +106,19 @@ def test_common_state_hash_supports_scalar_integer_buffers() -> None:
     first = _common_state_sha256(module)
     second = _common_state_sha256(module)
     assert first == second and len(first) == 64
+
+
+def test_two_model_exposure_ledger_preserves_named_raw_token_counts(tmp_path: Path) -> None:
+    ledger = SQLiteExposureLedger(
+        tmp_path / "ledger.sqlite",
+        dataset_manifest_sha256="a" * 64,
+        world_size=2,
+        model_order=("gemma", "smol"),
+        compact_anchor_ids=True,
+    )
+    ledger.observe_raw_tokens("document", {"gemma": 11, "smol": 13})
+    assert ledger.raw_token_counts() == {"gemma": 11, "smol": 13}
+    ledger.observe_replicated_optimizer_step(0, ("anchor-a", "anchor-b"))
+    assert ledger.checkpoint_receipt(expected_optimizer_steps=1).world_size == 2
+    assert ledger.audit_full_consistency()["status"] == "PASS"
+    ledger.close()
