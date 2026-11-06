@@ -7,6 +7,9 @@ from pathlib import Path
 
 import torch
 
+from aspd.multimodel.cli.evaluate_aspd_v3_500m import (
+    _validate_controlled_checkpoint,
+)
 from aspd.multimodel.cli.probe_aspd_v3_500m import cosine_matrix, support_overlap
 from aspd.multimodel.v3.alignment import (
     AlignedAnchor,
@@ -63,6 +66,71 @@ def test_diagnostic_contract_freezes_validation_and_complete_pools() -> None:
     assert contract.main_anchors == 100_352
     assert contract.main_anchors % contract.pool_anchors == 0
     assert len(contract.fingerprint()) == 64
+
+
+def test_controlled_checkpoint_provenance_is_bound_to_frozen_source(
+    tmp_path: Path,
+) -> None:
+    contract = DiagnosticContract.load(
+        ROOT / "configs/multimodel/aspd_v3/diagnostic_500m_v1.yaml"
+    )
+    checkpoint = tmp_path / "checkpoint"
+    checkpoint.mkdir()
+    manifest = {
+        "status": "COMPLETE",
+        "step": 1221,
+        "world_size": 3,
+        "config_file_sha256": contract.source_config_sha256,
+        "config_fingerprint": contract.source_config_fingerprint,
+        "dataset_manifest_sha256": contract.dataset_manifest_sha256,
+    }
+    manifest_path = checkpoint / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    (checkpoint / "COMPLETE").write_text(
+        json.dumps({"manifest_sha256": digest}), encoding="utf-8"
+    )
+    run_manifest = tmp_path / "run_manifest.json"
+    run_manifest.write_text(
+        json.dumps(
+            {
+                "git_sha": "training-commit",
+                "controlled_retrain": {
+                    "arm": "gemma_specific",
+                    "source_checkpoint_manifest_sha256": contract.checkpoint_manifest_sha256,
+                    "source_checkpoint_step": 61036,
+                    "source_accepted_exposures": 500006912,
+                    "additional_optimizer_steps": 1221,
+                    "additional_accepted_exposures": 10002432,
+                    "frozen_scope": ["rank_one_matrix_factors"],
+                    "optimizer_state": "fresh_for_both_arms",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = _validate_controlled_checkpoint(
+        checkpoint=checkpoint,
+        expected_manifest_sha256=digest,
+        run_manifest_path=run_manifest,
+        arm="gemma_specific",
+        contract=contract,
+    )
+    assert result["status"] == "PASS"
+    assert result["checkpoint_step"] == 1221
+
+    try:
+        _validate_controlled_checkpoint(
+            checkpoint=checkpoint,
+            expected_manifest_sha256=digest,
+            run_manifest_path=run_manifest,
+            arm="shared_control",
+            contract=contract,
+        )
+    except ValueError as error:
+        assert "arm" in str(error)
+    else:
+        raise AssertionError("controlled arm mismatch was not rejected")
 
 
 def test_canonical_metrics_keep_last_replayed_step() -> None:

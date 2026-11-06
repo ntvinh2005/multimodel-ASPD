@@ -49,6 +49,12 @@ def _args() -> argparse.Namespace:
     parser.add_argument("--source-root", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--checkpoint-smoke-report", type=Path)
+    parser.add_argument("--derived-checkpoint", type=Path)
+    parser.add_argument("--derived-checkpoint-manifest-sha256")
+    parser.add_argument(
+        "--controlled-arm", choices=("shared_control", "gemma_specific")
+    )
+    parser.add_argument("--controlled-run-manifest", type=Path)
     parser.add_argument("--local-files-only", action="store_true")
     return parser.parse_args()
 
@@ -109,6 +115,80 @@ def _shared_digest(model: ModelOwnedMain2B) -> str:
         digest.update(name.encode())
         digest.update(tensor.detach().cpu().contiguous().numpy().tobytes())
     return digest.hexdigest()
+
+
+def _validate_controlled_checkpoint(
+    *,
+    checkpoint: Path,
+    expected_manifest_sha256: str,
+    run_manifest_path: Path,
+    arm: str,
+    contract: DiagnosticContract,
+) -> dict[str, Any]:
+    """Bind a derived controlled checkpoint to the immutable 500M source."""
+
+    required = (
+        checkpoint / "manifest.json",
+        checkpoint / "COMPLETE",
+        run_manifest_path,
+    )
+    missing = [str(path) for path in required if not path.is_file()]
+    if missing:
+        raise FileNotFoundError(f"controlled evaluation input is missing: {missing}")
+    observed_sha = sha256_file(checkpoint / "manifest.json")
+    manifest = json.loads((checkpoint / "manifest.json").read_text(encoding="utf-8"))
+    marker = json.loads((checkpoint / "COMPLETE").read_text(encoding="utf-8"))
+    run_manifest = json.loads(run_manifest_path.read_text(encoding="utf-8"))
+    controlled = run_manifest.get("controlled_retrain") or {}
+    observed = {
+        "arm": controlled.get("arm"),
+        "checkpoint_manifest_sha256": observed_sha,
+        "checkpoint_marker_sha256": marker.get("manifest_sha256"),
+        "checkpoint_step": manifest.get("step"),
+        "checkpoint_status": manifest.get("status"),
+        "checkpoint_world_size": manifest.get("world_size"),
+        "config_file_sha256": manifest.get("config_file_sha256"),
+        "config_fingerprint": manifest.get("config_fingerprint"),
+        "dataset_manifest_sha256": manifest.get("dataset_manifest_sha256"),
+        "source_checkpoint_manifest_sha256": controlled.get(
+            "source_checkpoint_manifest_sha256"
+        ),
+        "source_checkpoint_step": controlled.get("source_checkpoint_step"),
+        "source_accepted_exposures": controlled.get("source_accepted_exposures"),
+        "additional_optimizer_steps": controlled.get("additional_optimizer_steps"),
+        "additional_accepted_exposures": controlled.get(
+            "additional_accepted_exposures"
+        ),
+        "frozen_scope": controlled.get("frozen_scope"),
+        "optimizer_state": controlled.get("optimizer_state"),
+        "training_git_sha": run_manifest.get("git_sha"),
+    }
+    expected = {
+        "arm": arm,
+        "checkpoint_manifest_sha256": expected_manifest_sha256,
+        "checkpoint_marker_sha256": expected_manifest_sha256,
+        "checkpoint_step": 1221,
+        "checkpoint_status": "COMPLETE",
+        "checkpoint_world_size": 3,
+        "config_file_sha256": contract.source_config_sha256,
+        "config_fingerprint": contract.source_config_fingerprint,
+        "dataset_manifest_sha256": contract.dataset_manifest_sha256,
+        "source_checkpoint_manifest_sha256": contract.checkpoint_manifest_sha256,
+        "source_checkpoint_step": 61036,
+        "source_accepted_exposures": 500006912,
+        "additional_optimizer_steps": 1221,
+        "additional_accepted_exposures": 10002432,
+        "frozen_scope": ["rank_one_matrix_factors"],
+        "optimizer_state": "fresh_for_both_arms",
+    }
+    mismatch = {
+        key: {"expected": value, "observed": observed.get(key)}
+        for key, value in expected.items()
+        if observed.get(key) != value
+    }
+    if mismatch:
+        raise ValueError(f"controlled checkpoint provenance mismatch: {mismatch}")
+    return {"status": "PASS", **observed}
 
 
 def _capture(
@@ -628,6 +708,31 @@ def main() -> None:
     started = time.perf_counter()
     contract = DiagnosticContract.load(args.contract)
     provenance = validate_frozen_provenance(contract, source_root=args.source_root)
+    controlled_values = (
+        args.derived_checkpoint,
+        args.derived_checkpoint_manifest_sha256,
+        args.controlled_arm,
+        args.controlled_run_manifest,
+    )
+    if any(value is not None for value in controlled_values) and not all(
+        value is not None for value in controlled_values
+    ):
+        raise ValueError("controlled evaluation requires all four derived-checkpoint arguments")
+    controlled_provenance = None
+    checkpoint = args.source_root / contract.checkpoint
+    expected_checkpoint_sha = contract.checkpoint_manifest_sha256
+    expected_checkpoint_step = 61036
+    if args.derived_checkpoint is not None:
+        checkpoint = args.derived_checkpoint
+        expected_checkpoint_sha = str(args.derived_checkpoint_manifest_sha256)
+        expected_checkpoint_step = 1221
+        controlled_provenance = _validate_controlled_checkpoint(
+            checkpoint=checkpoint,
+            expected_manifest_sha256=expected_checkpoint_sha,
+            run_manifest_path=args.controlled_run_manifest,
+            arm=str(args.controlled_arm),
+            contract=contract,
+        )
     config_path = args.source_root / contract.source_config
     config = load_main_2b_v1_config(config_path)
     registry = build_model_registry_2b(config)
@@ -639,8 +744,10 @@ def main() -> None:
         smoke = json.loads(args.checkpoint_smoke_report.read_text(encoding="utf-8"))
         if smoke.get("status") != "E0_CHECKPOINT_RESTORE_PASS":
             raise ValueError("held-out evaluation blocked by checkpoint smoke status")
-        if smoke.get("checkpoint_manifest_sha256") != contract.checkpoint_manifest_sha256:
+        if smoke.get("checkpoint_manifest_sha256") != expected_checkpoint_sha:
             raise ValueError("checkpoint smoke evaluated a different checkpoint")
+        if smoke.get("controlled_arm") != args.controlled_arm:
+            raise ValueError("checkpoint smoke evaluated a different controlled arm")
 
     if rank == 0:
         if args.output_dir.exists():
@@ -667,7 +774,6 @@ def main() -> None:
         dtype=torch.float32,
         sparse_backend="dense",
     )
-    checkpoint = args.source_root / contract.checkpoint
     manager = ModelOwnedCheckpoint(checkpoint.parent, keep_complete=2)
     runtime_state, checkpoint_manifest = manager.load_model_only(
         path=checkpoint,
@@ -682,8 +788,14 @@ def main() -> None:
     digest = _shared_digest(model)
     digests: list[str | None] = [None] * world
     dist.all_gather_object(digests, digest)
-    if len(set(digests)) != 1:
-        raise ValueError("replicated shared encoders differ across checkpoint ranks")
+    if args.controlled_arm == "gemma_specific":
+        if digests[0] != digests[2] or digests[1] in {digests[0], digests[2]}:
+            raise ValueError("Gemma-specific checkpoint shared-encoder topology is invalid")
+        shared_topology = "QWEN_SMOL_SHARED_GEMMA_SPECIFIC_PASS"
+    else:
+        if len(set(digests)) != 1:
+            raise ValueError("replicated shared encoders differ across checkpoint ranks")
+        shared_topology = "ALL_THREE_SHARED_PASS"
 
     alignment_tokenizers = None
     stream = None
@@ -754,8 +866,11 @@ def main() -> None:
                 {
                     "schema_version": 1,
                     "status": "E0_CHECKPOINT_RESTORE_PASS",
-                    "checkpoint_manifest_sha256": contract.checkpoint_manifest_sha256,
-                    "checkpoint_step": 61036,
+                    "checkpoint_manifest_sha256": expected_checkpoint_sha,
+                    "checkpoint_step": expected_checkpoint_step,
+                    "controlled_arm": args.controlled_arm,
+                    "controlled_provenance": controlled_provenance,
+                    "shared_encoder_topology": shared_topology,
                     "model_order": list(MODEL_ORDER_2B),
                     "deterministic_repeat": "PASS",
                     "source_weights_unchanged": "PASS",
@@ -795,6 +910,11 @@ def main() -> None:
                 "source_git_sha": contract.source_git_sha,
                 "contract_sha256": contract.fingerprint(),
                 "checkpoint_manifest_sha256": contract.checkpoint_manifest_sha256,
+                "evaluated_checkpoint_manifest_sha256": expected_checkpoint_sha,
+                "evaluated_checkpoint_step": expected_checkpoint_step,
+                "controlled_arm": args.controlled_arm,
+                "controlled_provenance": controlled_provenance,
+                "shared_encoder_topology": shared_topology,
                 "dataset_manifest_sha256": contract.dataset_manifest_sha256,
                 "alignment_manifest_sha256": contract.alignment_manifest_sha256,
                 "split": "validation",
