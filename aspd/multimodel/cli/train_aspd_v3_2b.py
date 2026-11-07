@@ -722,6 +722,11 @@ def main() -> None:
             raise RuntimeError("Granite normalized-target family is approved only for preflight")
         if args.strategy != config.runtime.strategy:
             raise RuntimeError("Granite normalized-target runtime strategy changed")
+        if (
+            config.preflight_authorization is None
+            or args.max_steps != config.preflight_authorization.optimizer_steps
+        ):
+            raise RuntimeError("Granite normalized-target preflight must run exactly three steps")
     model_order = tuple(config.architecture.model_order)
     logical_target_count = len(model_order) * 8 * 7
     controlled = None

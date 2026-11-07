@@ -37,6 +37,12 @@ from aspd.multimodel.v3.registry import build_model_registry_2b
 ROOT = Path(__file__).parents[1]
 BASELINE = ROOT / "configs/multimodel/aspd_v3/granite_normalized_target_baseline_v1.yaml"
 TREATMENT = ROOT / "configs/multimodel/aspd_v3/granite_normalized_target_treatment_v1.yaml"
+BASELINE_PREFLIGHT = (
+    ROOT / "configs/multimodel/aspd_v3/granite_normalized_target_baseline_preflight_v1.yaml"
+)
+TREATMENT_PREFLIGHT = (
+    ROOT / "configs/multimodel/aspd_v3/granite_normalized_target_treatment_preflight_v1.yaml"
+)
 
 
 def _configs():
@@ -70,6 +76,42 @@ def test_granite_configs_are_fail_closed_complete_and_isolated() -> None:
         left["runtime"].pop(key)
         right["runtime"].pop(key)
     assert left == right
+
+
+def test_preflight_overlays_authorize_only_three_steps_and_preserve_science() -> None:
+    review_baseline, review_treatment = _configs()
+    preflight_baseline = load_granite_normalized_target_config(BASELINE_PREFLIGHT)
+    preflight_treatment = load_granite_normalized_target_config(TREATMENT_PREFLIGHT)
+    for review, preflight in (
+        (review_baseline, preflight_baseline),
+        (review_treatment, preflight_treatment),
+    ):
+        assert preflight.gpu_preflight_authorized is True
+        assert preflight.full_training_authorized is False
+        assert preflight.short_pilot_authorized is False
+        assert preflight.preflight_authorization is not None
+        assert preflight.preflight_authorization.optimizer_steps == 3
+        assert preflight.preflight_authorization.gpu_count == 3
+        left = review.payload()
+        right = preflight.payload()
+        for payload in (left, right):
+            payload.pop("scientific_status")
+            payload.pop("gpu_preflight_authorized")
+            payload.pop("preflight_authorization")
+            payload["runtime"].pop("status")
+            payload["runtime"].pop("preflight_evidence")
+        assert left == right
+
+
+def test_preflight_overlay_rejects_scientific_or_runtime_override(tmp_path: Path) -> None:
+    bad = tmp_path / "bad.yaml"
+    bad.write_text(
+        "extends: granite_normalized_target_baseline_v1.yaml\n"
+        "architecture: {dictionary_size: 4096}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="forbidden fields"):
+        load_granite_normalized_target_config(bad)
 
 
 def test_config_rejects_roster_revision_and_authorization_changes() -> None:
