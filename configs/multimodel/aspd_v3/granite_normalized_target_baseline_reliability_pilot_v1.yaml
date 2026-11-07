@@ -1,0 +1,32 @@
+extends: granite_normalized_target_baseline_v1.yaml
+scientific_status: MATCHED_BASELINE_RELIABILITY_PILOT_AUTHORIZED_BY_RESEARCHER
+short_pilot_authorized: true
+pilot_authorization:
+  authorized_by: researcher
+  authorized_on: '2026-11-07'
+  scope: matched_baseline_reliability_1221_steps
+  arm: baseline
+  optimizer_steps: 1221
+  accepted_anchor_exposures: 10002432
+  gpu_count: 3
+  gpu_type: b200
+  preflight_report_sha256: a28b22b8cd233e8d15a86c2ab4e38ea0ae13a97adbe7bda9660da12d5542ba3e
+  preflight_config_fingerprint: 642ce56a1fa83ec552f53d777d73bce6533fb8d9c8f7cb392840f27a0cc705dc
+  gate_evidence:
+    - {name: baseline_reconstruction, path: /orange/thai/vinhnguyen1/aspd_v3/granite_normalized_target_v1/evaluation/baseline/job_50066002/heldout/heldout_reconstruction.json, sha256: d9d0699cfe90c5aaef7f1ec19b3c517a1f6dcafbe0c72988c05192846aacf7ad}
+    - {name: baseline_dictionary, path: /orange/thai/vinhnguyen1/aspd_v3/granite_normalized_target_v1/evaluation/baseline/job_50066002/heldout/dictionary_health.json, sha256: b356c701d0b79a712693779030a59da298b762e791bf2f9a976448f076fdf47e}
+    - {name: treatment_reconstruction, path: /orange/thai/vinhnguyen1/aspd_v3/granite_normalized_target_v1/evaluation/normalized_target/job_50066003/heldout/heldout_reconstruction.json, sha256: a14adea8eb2b721cb95fb5bfc338f82867e389152e5de3812bd7c01c1d54fdb0}
+    - {name: treatment_dictionary, path: /orange/thai/vinhnguyen1/aspd_v3/granite_normalized_target_v1/evaluation/normalized_target/job_50066003/heldout/dictionary_health.json, sha256: c761776b7f613615f4b8351f2b49ebb633eb0893b0e686cf7565cec289ce3672}
+  full_training_authorized: false
+optimization:
+  status: INHERITED_SETTINGS_RELIABILITY_PILOT_AUTHORIZED
+data:
+  training_budget_status: RESEARCHER_AUTHORIZED_RELIABILITY_PILOT
+  approved_optimizer_steps: 1221
+  approved_accepted_anchor_exposures: 10002432
+runtime:
+  status: MATCHED_BASELINE_RELIABILITY_PILOT_AUTHORIZED
+  output_root: /orange/thai/vinhnguyen1/aspd_v3/granite_normalized_target_v1/reliability/baseline/runs
+  checkpoint_root: /orange/thai/vinhnguyen1/aspd_v3/granite_normalized_target_v1/reliability/baseline/checkpoints
+  preflight_evidence: out/multimodel/aspd_v3/granite_normalized_target_v1/preflight/baseline/preflight_report.json
+evaluation_status: HELDOUT_GATE_PASSED_RELIABILITY_PILOT_AUTHORIZED

@@ -765,7 +765,7 @@ def main() -> None:
             if not config.short_pilot_authorized or authorization is None:
                 raise RuntimeError("Granite normalized-target pilot is not authorized")
             if args.max_steps != authorization.optimizer_steps:
-                raise RuntimeError("Granite stabilization pilot must run exactly 128 steps")
+                raise RuntimeError("Granite pilot step budget differs from its authorization")
             preflight_path = Path(config.runtime.preflight_evidence)
             if _sha256(preflight_path) != authorization.preflight_report_sha256:
                 raise RuntimeError("Granite pilot preflight evidence checksum mismatch")
@@ -776,6 +776,12 @@ def main() -> None:
                 != authorization.preflight_config_fingerprint
             ):
                 raise RuntimeError("Granite pilot preflight evidence is not the authorized PASS")
+            for artifact in authorization.gate_evidence:
+                path = Path(artifact["path"])
+                if not path.is_file() or _sha256(path) != artifact["sha256"]:
+                    raise RuntimeError(
+                        f"Granite pilot gate evidence checksum mismatch: {artifact['name']}"
+                    )
         else:
             raise RuntimeError(
                 "Granite normalized-target family is authorized only for bounded preflight/pilot"

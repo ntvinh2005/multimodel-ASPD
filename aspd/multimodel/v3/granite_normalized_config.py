@@ -143,6 +143,7 @@ class GraniteExperimentOptimization(BaseModel):
     status: Literal[
         "PROPOSED_INHERITED_NOT_EXECUTION_APPROVED",
         "INHERITED_SETTINGS_STABILIZATION_PILOT_AUTHORIZED",
+        "INHERITED_SETTINGS_RELIABILITY_PILOT_AUTHORIZED",
     ]
     optimizer: Literal["Adam"]
     betas: tuple[Literal[0.9], Literal[0.99]]
@@ -172,7 +173,9 @@ class GraniteExperimentData(BaseModel):
     alignment_roster: tuple[Literal["gemma"], Literal["smol"], Literal["granite"]]
     alignment_acceptance_rate_status: Literal["UNMEASURED_REQUIRES_GPU_PREFLIGHT"]
     training_budget_status: Literal[
-        "UNAPPROVED", "RESEARCHER_AUTHORIZED_STABILIZATION_PILOT"
+        "UNAPPROVED",
+        "RESEARCHER_AUTHORIZED_STABILIZATION_PILOT",
+        "RESEARCHER_AUTHORIZED_RELIABILITY_PILOT",
     ]
     approved_optimizer_steps: int | None
     approved_accepted_anchor_exposures: int | None
@@ -196,6 +199,8 @@ class GraniteExperimentRuntime(BaseModel):
         "THREE_STEP_GPU_PREFLIGHT_AUTHORIZED",
         "TREATMENT_STABILIZATION_PILOT_AUTHORIZED",
         "MATCHED_BASELINE_PILOT_AUTHORIZED",
+        "TREATMENT_RELIABILITY_PILOT_AUTHORIZED",
+        "MATCHED_BASELINE_RELIABILITY_PILOT_AUTHORIZED",
     ]
     strategy: Literal["model_owned"]
     world_size: Literal[3]
@@ -247,11 +252,16 @@ class GranitePilotAuthorization(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     authorized_by: Literal["researcher"]
-    authorized_on: Literal["2026-11-06"]
-    scope: Literal["treatment_stabilization_128_steps", "matched_baseline_128_steps"]
+    authorized_on: Literal["2026-11-06", "2026-11-07"]
+    scope: Literal[
+        "treatment_stabilization_128_steps",
+        "matched_baseline_128_steps",
+        "treatment_reliability_1221_steps",
+        "matched_baseline_reliability_1221_steps",
+    ]
     arm: Literal["baseline", "normalized_target"]
-    optimizer_steps: Literal[128]
-    accepted_anchor_exposures: Literal[1_048_576]
+    optimizer_steps: Literal[128, 1221]
+    accepted_anchor_exposures: Literal[1_048_576, 10_002_432]
     gpu_count: Literal[3]
     gpu_type: Literal["b200"]
     preflight_report_sha256: Literal[
@@ -262,6 +272,7 @@ class GranitePilotAuthorization(BaseModel):
         "37c5c902e69503c362db37ee5031c0d83be2aa50e6e16fb97d5adb7bbbb93acc",
         "642ce56a1fa83ec552f53d777d73bce6533fb8d9c8f7cb392840f27a0cc705dc",
     ]
+    gate_evidence: tuple[dict[str, str], ...] = ()
     full_training_authorized: Literal[False]
 
 
@@ -275,6 +286,8 @@ class GraniteNormalizedTargetConfig(BaseModel):
         "THREE_STEP_GPU_PREFLIGHT_AUTHORIZED_BY_RESEARCHER",
         "TREATMENT_STABILIZATION_PILOT_AUTHORIZED_BY_RESEARCHER",
         "MATCHED_BASELINE_PILOT_AUTHORIZED_BY_RESEARCHER",
+        "TREATMENT_RELIABILITY_PILOT_AUTHORIZED_BY_RESEARCHER",
+        "MATCHED_BASELINE_RELIABILITY_PILOT_AUTHORIZED_BY_RESEARCHER",
     ]
     full_training_authorized: Literal[False]
     short_pilot_authorized: bool
@@ -292,6 +305,7 @@ class GraniteNormalizedTargetConfig(BaseModel):
         "SYNTHETIC_IMPLEMENTATION_ONLY_GPU_NOT_RUN",
         "GPU_PREFLIGHT_PASSED_STABILIZATION_PILOT_AUTHORIZED",
         "GPU_PREFLIGHT_PASSED_MATCHED_BASELINE_PILOT_AUTHORIZED",
+        "HELDOUT_GATE_PASSED_RELIABILITY_PILOT_AUTHORIZED",
     ]
 
     @model_validator(mode="after")
@@ -360,7 +374,7 @@ class GraniteNormalizedTargetConfig(BaseModel):
                 raise ValueError("pilot authorization must not reuse preflight authorization")
             if self.pilot_authorization is None:
                 raise ValueError("stabilization pilot requires a bounded authorization record")
-            authorized = {
+            stabilization = {
                 "normalized_target": {
                     "scope": "treatment_stabilization_128_steps",
                     "scientific_status": (
@@ -376,6 +390,8 @@ class GraniteNormalizedTargetConfig(BaseModel):
                     "preflight_fingerprint": (
                         "37c5c902e69503c362db37ee5031c0d83be2aa50e6e16fb97d5adb7bbbb93acc"
                     ),
+                    "steps": 128,
+                    "exposures": 1_048_576,
                 },
                 "baseline": {
                     "scope": "matched_baseline_128_steps",
@@ -390,8 +406,52 @@ class GraniteNormalizedTargetConfig(BaseModel):
                     "preflight_fingerprint": (
                         "642ce56a1fa83ec552f53d777d73bce6533fb8d9c8f7cb392840f27a0cc705dc"
                     ),
+                    "steps": 128,
+                    "exposures": 1_048_576,
                 },
-            }[self.arm]
+            }
+            reliability = {
+                "normalized_target": {
+                    "scope": "treatment_reliability_1221_steps",
+                    "scientific_status": (
+                        "TREATMENT_RELIABILITY_PILOT_AUTHORIZED_BY_RESEARCHER"
+                    ),
+                    "runtime_status": "TREATMENT_RELIABILITY_PILOT_AUTHORIZED",
+                    "evaluation_status": "HELDOUT_GATE_PASSED_RELIABILITY_PILOT_AUTHORIZED",
+                    "optimization_status": "INHERITED_SETTINGS_RELIABILITY_PILOT_AUTHORIZED",
+                    "budget_status": "RESEARCHER_AUTHORIZED_RELIABILITY_PILOT",
+                    "steps": 1221,
+                    "exposures": 10_002_432,
+                    "output_segment": "reliability/normalized_target",
+                    "preflight_sha256": (
+                        "00500532a7c4e5e3dae33d7472028cf6717edebfd23d697d5318df491cdde454"
+                    ),
+                    "preflight_fingerprint": (
+                        "37c5c902e69503c362db37ee5031c0d83be2aa50e6e16fb97d5adb7bbbb93acc"
+                    ),
+                },
+                "baseline": {
+                    "scope": "matched_baseline_reliability_1221_steps",
+                    "scientific_status": (
+                        "MATCHED_BASELINE_RELIABILITY_PILOT_AUTHORIZED_BY_RESEARCHER"
+                    ),
+                    "runtime_status": "MATCHED_BASELINE_RELIABILITY_PILOT_AUTHORIZED",
+                    "evaluation_status": "HELDOUT_GATE_PASSED_RELIABILITY_PILOT_AUTHORIZED",
+                    "optimization_status": "INHERITED_SETTINGS_RELIABILITY_PILOT_AUTHORIZED",
+                    "budget_status": "RESEARCHER_AUTHORIZED_RELIABILITY_PILOT",
+                    "steps": 1221,
+                    "exposures": 10_002_432,
+                    "output_segment": "reliability/baseline",
+                    "preflight_sha256": (
+                        "a28b22b8cd233e8d15a86c2ab4e38ea0ae13a97adbe7bda9660da12d5542ba3e"
+                    ),
+                    "preflight_fingerprint": (
+                        "642ce56a1fa83ec552f53d777d73bce6533fb8d9c8f7cb392840f27a0cc705dc"
+                    ),
+                },
+            }
+            is_reliability = self.pilot_authorization.optimizer_steps == 1221
+            authorized = (reliability if is_reliability else stabilization)[self.arm]
             observed = {
                 "scope": self.pilot_authorization.scope,
                 "scientific_status": self.scientific_status,
@@ -401,15 +461,27 @@ class GraniteNormalizedTargetConfig(BaseModel):
                 "preflight_fingerprint": self.pilot_authorization.preflight_config_fingerprint,
             }
             if observed != authorized:
-                raise ValueError(f"{self.arm} pilot authorization mismatch: {observed}")
+                expected_subset = {key: authorized[key] for key in observed}
+                if observed != expected_subset:
+                    raise ValueError(f"{self.arm} pilot authorization mismatch: {observed}")
             if self.pilot_authorization.arm != self.arm:
                 raise ValueError("pilot authorization arm differs from experiment arm")
-            if self.optimization.status != "INHERITED_SETTINGS_STABILIZATION_PILOT_AUTHORIZED":
-                raise ValueError("stabilization pilot must explicitly authorize inherited settings")
-            if self.data.training_budget_status != (
-                "RESEARCHER_AUTHORIZED_STABILIZATION_PILOT"
+            expected_optimization = authorized.get(
+                "optimization_status", "INHERITED_SETTINGS_STABILIZATION_PILOT_AUTHORIZED"
+            )
+            expected_budget = authorized.get(
+                "budget_status", "RESEARCHER_AUTHORIZED_STABILIZATION_PILOT"
+            )
+            if self.optimization.status != expected_optimization:
+                raise ValueError("pilot optimization authorization status changed")
+            if self.data.training_budget_status != expected_budget:
+                raise ValueError("pilot budget authorization status changed")
+            if (
+                self.pilot_authorization.optimizer_steps != authorized["steps"]
+                or self.pilot_authorization.accepted_anchor_exposures
+                != authorized["exposures"]
             ):
-                raise ValueError("stabilization pilot requires its approved budget status")
+                raise ValueError("pilot authorization budget changed")
             if (
                 self.data.approved_optimizer_steps
                 != self.pilot_authorization.optimizer_steps
@@ -417,18 +489,50 @@ class GraniteNormalizedTargetConfig(BaseModel):
                 != self.pilot_authorization.accepted_anchor_exposures
             ):
                 raise ValueError("stabilization pilot budget differs from its authorization")
+            if is_reliability:
+                expected_artifacts = {
+                    "baseline_reconstruction": (
+                        "/orange/thai/vinhnguyen1/aspd_v3/granite_normalized_target_v1/"
+                        "evaluation/baseline/job_50066002/heldout/heldout_reconstruction.json",
+                        "d9d0699cfe90c5aaef7f1ec19b3c517a1f6dcafbe0c72988c05192846aacf7ad",
+                    ),
+                    "baseline_dictionary": (
+                        "/orange/thai/vinhnguyen1/aspd_v3/granite_normalized_target_v1/"
+                        "evaluation/baseline/job_50066002/heldout/dictionary_health.json",
+                        "b356c701d0b79a712693779030a59da298b762e791bf2f9a976448f076fdf47e",
+                    ),
+                    "treatment_reconstruction": (
+                        "/orange/thai/vinhnguyen1/aspd_v3/granite_normalized_target_v1/"
+                        "evaluation/normalized_target/job_50066003/heldout/heldout_reconstruction.json",
+                        "a14adea8eb2b721cb95fb5bfc338f82867e389152e5de3812bd7c01c1d54fdb0",
+                    ),
+                    "treatment_dictionary": (
+                        "/orange/thai/vinhnguyen1/aspd_v3/granite_normalized_target_v1/"
+                        "evaluation/normalized_target/job_50066003/heldout/dictionary_health.json",
+                        "c761776b7f613615f4b8351f2b49ebb633eb0893b0e686cf7565cec289ce3672",
+                    ),
+                }
+                observed_artifacts = {
+                    row.get("name"): (row.get("path"), row.get("sha256"))
+                    for row in self.pilot_authorization.gate_evidence
+                }
+                if observed_artifacts != expected_artifacts:
+                    raise ValueError("reliability pilot held-out gate evidence changed")
+            elif self.pilot_authorization.gate_evidence:
+                raise ValueError("stabilization pilot cannot claim later gate evidence")
             expected_evidence = f"/preflight/{self.arm}/preflight_report.json"
             if self.runtime.preflight_evidence is None or not self.runtime.preflight_evidence.endswith(
                 expected_evidence
             ):
                 raise ValueError("pilot must pin arm-matched preflight evidence")
+            output_segment = authorized.get("output_segment", f"stabilization/{self.arm}")
             expected_output = (
                 "/orange/thai/vinhnguyen1/aspd_v3/granite_normalized_target_v1/"
-                f"stabilization/{self.arm}/runs"
+                f"{output_segment}/runs"
             )
             expected_checkpoint = (
                 "/orange/thai/vinhnguyen1/aspd_v3/granite_normalized_target_v1/"
-                f"stabilization/{self.arm}/checkpoints"
+                f"{output_segment}/checkpoints"
             )
             if (
                 self.runtime.output_root != expected_output

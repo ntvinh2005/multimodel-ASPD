@@ -62,6 +62,12 @@ BASELINE_STABILIZATION = (
 EVALUATION_CONTRACT = (
     ROOT / "configs/multimodel/aspd_v3/granite_normalized_target_evaluation_v1.yaml"
 )
+BASELINE_RELIABILITY = (
+    ROOT / "configs/multimodel/aspd_v3/granite_normalized_target_baseline_reliability_pilot_v1.yaml"
+)
+TREATMENT_RELIABILITY = (
+    ROOT / "configs/multimodel/aspd_v3/granite_normalized_target_treatment_reliability_pilot_v1.yaml"
+)
 
 
 def _configs():
@@ -202,6 +208,26 @@ def test_baseline_stabilization_pilot_is_bounded_and_scientifically_matched() ->
             payload["runtime"].pop(key)
         payload.pop("evaluation_status")
     assert left == right
+
+
+@pytest.mark.parametrize(
+    ("path", "arm"),
+    ((BASELINE_RELIABILITY, "baseline"), (TREATMENT_RELIABILITY, "normalized_target")),
+)
+def test_reliability_pilot_is_fresh_matched_10m_and_pins_heldout_gate(
+    path: Path, arm: str
+) -> None:
+    config = load_granite_normalized_target_config(path)
+    assert config.arm == arm
+    assert config.short_pilot_authorized is True
+    assert config.full_training_authorized is False
+    assert config.pilot_authorization is not None
+    assert config.pilot_authorization.optimizer_steps == 1221
+    assert config.pilot_authorization.accepted_anchor_exposures == 10_002_432
+    assert len(config.pilot_authorization.gate_evidence) == 4
+    assert config.data.approved_optimizer_steps == 1221
+    assert config.runtime.output_root.endswith(f"/reliability/{arm}/runs")
+    assert _load_training_config(path).fingerprint() == config.fingerprint()
 
 
 def test_review_config_rejects_hidden_pilot_budget() -> None:
