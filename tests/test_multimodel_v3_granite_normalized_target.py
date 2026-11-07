@@ -607,7 +607,7 @@ def test_corrected_decoder_config_is_isolated_and_full_training_blocked() -> Non
             "approved_accepted_anchor_exposures",
         ):
             payload["data"].pop(key)
-        for key in ("status", "output_root", "checkpoint_root"):
+        for key in ("status", "output_root", "checkpoint_root", "preflight_evidence"):
             payload["runtime"].pop(key)
     assert left == right
 

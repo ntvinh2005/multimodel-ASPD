@@ -285,10 +285,12 @@ class GranitePilotAuthorization(BaseModel):
     preflight_report_sha256: Literal[
         "00500532a7c4e5e3dae33d7472028cf6717edebfd23d697d5318df491cdde454",
         "a28b22b8cd233e8d15a86c2ab4e38ea0ae13a97adbe7bda9660da12d5542ba3e",
+        "8d3e58ef981401e2a03d9b88e60f69ce26f27377fbbbf214ca9d80e063597c8b",
     ]
     preflight_config_fingerprint: Literal[
         "37c5c902e69503c362db37ee5031c0d83be2aa50e6e16fb97d5adb7bbbb93acc",
         "642ce56a1fa83ec552f53d777d73bce6533fb8d9c8f7cb392840f27a0cc705dc",
+        "a6cf17a7cc48f66076043f2f22fa47e4cd45024775804c3f4a478d894ea0d9b7",
     ]
     gate_evidence: tuple[dict[str, str], ...] = ()
     full_training_authorized: Literal[False]
@@ -472,8 +474,10 @@ class GraniteNormalizedTargetConfig(BaseModel):
                 self.runtime.checkpoint_root != f"{namespace}/checkpoints"
             ):
                 raise ValueError("corrected pilot output namespace changed")
-            if self.runtime.preflight_evidence is None or not self.runtime.preflight_evidence.endswith(
-                "/preflight/normalized_target/preflight_report.json"
+            if self.runtime.preflight_evidence != (
+                "out/multimodel/aspd_v3/"
+                "granite_normalized_target_unconstrained_decoder_v1/preflight/"
+                "normalized_target/preflight_report.json"
             ):
                 raise ValueError("corrected pilot must retain treatment preflight evidence")
             if self.gpu_preflight_authorized or self.preflight_authorization is not None:
