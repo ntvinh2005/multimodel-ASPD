@@ -133,6 +133,14 @@ class SharedSiteEncoder(nn.Module):
         packed = pack_cross_model_tokens(tokens, model_order=self.model_order)
         return self.readout(self.cross(self.input_adapter(packed.values)), valid_anchors)
 
+    def forward_with_logits(
+        self, tokens: Mapping[str, Tensor], valid_anchors: Tensor
+    ) -> tuple[Tensor, Tensor]:
+        packed = pack_cross_model_tokens(tokens, model_order=self.model_order)
+        return self.readout.forward_with_logits(
+            self.cross(self.input_adapter(packed.values)), valid_anchors
+        )
+
 
 def _differentiable_all_gather(
     local_tokens: Tensor, *, expected_world_size: int
@@ -212,6 +220,11 @@ class ModelOwnedMain2B(nn.Module):
                 site: ActivationReconstructionBank(
                     {local_model_key: [self.layout.hidden_size] * 8},
                     config.architecture.dictionary_size,
+                    normalization_mode=getattr(
+                        getattr(config, "objective", None),
+                        "activation_decoder_normalization",
+                        "unit_row_norm_with_radial_gradient_projection",
+                    ),
                     device=device,
                     dtype=dtype,
                 )
@@ -267,6 +280,11 @@ class ModelOwnedMain2B(nn.Module):
             for site in SITE_ORDER
         }
 
+    def activation_decoder_norm_report(self) -> dict[str, dict[str, float | int | str]]:
+        """Return read-only per-site activation-decoder norm diagnostics."""
+
+        return {site: self.activation_banks[site].decoder_norm_report() for site in SITE_ORDER}
+
     @torch.no_grad()
     def synchronize_shared_state_(self, source_rank: int = 0) -> None:
         if not dist.is_initialized():
@@ -277,7 +295,11 @@ class ModelOwnedMain2B(nn.Module):
             dist.broadcast(self.reconstruction_log_scale, source_rank)
 
     def encode(
-        self, batch: LocalCaptureBatch, *, update_statistics: bool = True
+        self,
+        batch: LocalCaptureBatch,
+        *,
+        update_statistics: bool = True,
+        collect_diagnostics: bool = False,
     ) -> tuple[
         dict[str, Tensor], dict[str, Any], dict[str, SparseSupport], dict[str, SparseSupport]
     ]:
@@ -286,6 +308,7 @@ class ModelOwnedMain2B(nn.Module):
         sparse: dict[str, Any] = {}
         continuous_support: dict[str, SparseSupport] = {}
         binary_support: dict[str, SparseSupport] = {}
+        self.latest_gate_diagnostics: dict[str, dict[str, float | int]] = {}
         for site in SITE_ORDER:
             with torch.profiler.record_function(f"aspd/{site}/local_packing_intra"):
                 local_tokens = self.local_encoders[site](batch.activations[site])
@@ -295,7 +318,12 @@ class ModelOwnedMain2B(nn.Module):
                 )
             tokens = {key: gathered[index] for index, key in enumerate(self.model_order)}
             with torch.profiler.record_function(f"aspd/{site}/cross_encoder_readout"):
-                scores[site] = self.shared_encoders[site](tokens, batch.valid_anchors)
+                if collect_diagnostics:
+                    scores[site], logits = self.shared_encoders[site].forward_with_logits(
+                        tokens, batch.valid_anchors
+                    )
+                else:
+                    scores[site] = self.shared_encoders[site](tokens, batch.valid_anchors)
             with torch.profiler.record_function(f"aspd/{site}/batch_topk"):
                 sparse[site] = self.gates[site](
                     scores[site], batch.valid_anchors, update_statistics=update_statistics
@@ -306,6 +334,60 @@ class ModelOwnedMain2B(nn.Module):
                 binary_support[site] = prepare_sparse_support(
                     sparse[site].values.detach(), batch.valid_anchors, binary=True
                 )
+            if collect_diagnostics:
+                with torch.no_grad():
+                    valid_logits = logits[batch.valid_anchors].detach().float()
+                    valid_scores = scores[site][batch.valid_anchors].detach().float()
+                    selected = sparse[site].values[batch.valid_anchors].detach().float()
+                    sampled_logits = valid_logits.reshape(-1)[::4096]
+                    positive_score_values = valid_scores[valid_scores > 0]
+                    sampled_scores = positive_score_values[::4096]
+                    logit_q = torch.quantile(
+                        sampled_logits,
+                        torch.tensor([0.01, 0.1, 0.5, 0.9, 0.99], device=logits.device),
+                    )
+                    score_q = (
+                        torch.quantile(
+                            sampled_scores,
+                            torch.tensor([0.5, 0.9, 0.99], device=logits.device),
+                        )
+                        if sampled_scores.numel()
+                        else torch.zeros(3, device=logits.device)
+                    )
+                    positive_selected = selected > 0
+                    positive_scores = valid_scores > 0
+                    self.latest_gate_diagnostics[site] = {
+                        "raw_logit_mean": float(valid_logits.mean()),
+                        "raw_logit_std": float(valid_logits.std(unbiased=False)),
+                        "raw_logit_negative_fraction": float((valid_logits < 0).float().mean()),
+                        "raw_logit_zero_fraction": float((valid_logits == 0).float().mean()),
+                        "raw_logit_positive_fraction": float((valid_logits > 0).float().mean()),
+                        "raw_logit_q01_sampled": float(logit_q[0]),
+                        "raw_logit_q10_sampled": float(logit_q[1]),
+                        "raw_logit_median_sampled": float(logit_q[2]),
+                        "raw_logit_q90_sampled": float(logit_q[3]),
+                        "raw_logit_q99_sampled": float(logit_q[4]),
+                        "positive_scores_per_anchor": float(positive_scores.sum(-1).float().mean()),
+                        "all_zero_score_anchor_fraction": float(
+                            (positive_scores.sum(-1) == 0).float().mean()
+                        ),
+                        "positive_score_median_sampled": float(score_q[0]),
+                        "positive_score_q90_sampled": float(score_q[1]),
+                        "positive_score_q99_sampled": float(score_q[2]),
+                        "selected_topk_positions": int(
+                            self.gates[site].spec.top_k * batch.valid_anchors.sum()
+                        ),
+                        "positive_firings_per_anchor": float(
+                            positive_selected.sum(-1).float().mean()
+                        ),
+                        "positive_gate_amplitude_mean": float(
+                            selected[positive_selected].mean()
+                            if positive_selected.any()
+                            else selected.new_zeros(())
+                        ),
+                        "active_features_in_pool": int(positive_selected.any(dim=0).sum()),
+                        "dead_features": int(self.gates[site].dead_features.sum()),
+                    }
         return scores, sparse, continuous_support, binary_support
 
     def activation_loss_terms(
@@ -316,6 +398,7 @@ class ModelOwnedMain2B(nn.Module):
         support: Mapping[str, SparseSupport],
         *,
         auxk_may_be_active: bool = True,
+        diagnostics: dict[str, float] | None = None,
     ) -> Iterator[tuple[str, Tensor, Tensor, float]]:
         coefficient = 0.5 / (len(self.model_order) * 8)
         for site in SITE_ORDER:
@@ -358,6 +441,39 @@ class ModelOwnedMain2B(nn.Module):
                     sparse_backend=self.sparse_backend,
                     reconstruction_scale=reconstruction_scale,
                 )
+                if diagnostics is not None:
+                    with torch.no_grad():
+                        valid = batch.valid_anchors
+                        target_rows = loss_target[valid].detach().float()
+                        prediction_rows = full[valid].detach().float()
+                        bias = decoder.bias.detach().float()
+                        contribution_rows = prediction_rows - bias
+                        target_norm = target_rows.norm(dim=-1)
+                        prediction_norm = prediction_rows.norm(dim=-1)
+                        contribution_norm = contribution_rows.norm(dim=-1)
+                        tiny = torch.finfo(target_norm.dtype).tiny
+                        prefix = f"{site}/{self.local_model_key}/window_{layer_offset}"
+                        diagnostics[f"{prefix}/target_norm_mean"] = float(target_norm.mean())
+                        diagnostics[f"{prefix}/prediction_norm_mean"] = float(
+                            prediction_norm.mean()
+                        )
+                        diagnostics[f"{prefix}/contribution_norm_mean"] = float(
+                            contribution_norm.mean()
+                        )
+                        diagnostics[f"{prefix}/prediction_target_ratio_mean"] = float(
+                            (prediction_norm / target_norm.clamp_min(tiny)).mean()
+                        )
+                        diagnostics[f"{prefix}/contribution_target_ratio_mean"] = float(
+                            (contribution_norm / target_norm.clamp_min(tiny)).mean()
+                        )
+                        diagnostics[f"{prefix}/cosine_mean"] = float(
+                            torch.nn.functional.cosine_similarity(
+                                prediction_rows, target_rows, dim=-1
+                            ).mean()
+                        )
+                        diagnostics[f"{prefix}/full_fvu"] = float(
+                            masked_fvu(full.detach(), loss_target, valid)
+                        )
                 yield (
                     f"{site}/{self.local_model_key}/window_{layer_offset}",
                     activation,

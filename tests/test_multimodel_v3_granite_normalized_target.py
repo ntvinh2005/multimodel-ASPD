@@ -68,8 +68,18 @@ BASELINE_RELIABILITY = (
 TREATMENT_RELIABILITY = (
     ROOT / "configs/multimodel/aspd_v3/granite_normalized_target_treatment_reliability_pilot_v1.yaml"
 )
+CORRECTED_DECODER_RELIABILITY = (
+    ROOT
+    / "configs/multimodel/aspd_v3/"
+    "granite_normalized_target_unconstrained_decoder_reliability_pilot_v1.yaml"
+)
 RELIABILITY_EVALUATION_CONTRACT = (
     ROOT / "configs/multimodel/aspd_v3/granite_normalized_target_reliability_evaluation_v1.yaml"
+)
+CORRECTED_DECODER_EVALUATION_CONTRACT = (
+    ROOT
+    / "configs/multimodel/aspd_v3/"
+    "granite_normalized_target_unconstrained_decoder_evaluation_v1.yaml"
 )
 
 
@@ -403,6 +413,10 @@ def test_heldout_contract_is_read_only_document_bootstrap_and_exact_budget() -> 
     reliability = _load_contract(RELIABILITY_EVALUATION_CONTRACT)
     assert reliability["checkpoint_steps"] == 1221
     assert reliability["status"] == "RESEARCHER_AUTHORIZED_HELDOUT_RELIABILITY_GATE"
+    corrected = _load_contract(CORRECTED_DECODER_EVALUATION_CONTRACT)
+    assert corrected["checkpoint_steps"] == 1221
+    assert corrected["arms"] == ["normalized_target"]
+    assert corrected["experiment_family"].endswith("unconstrained_decoder_v1")
 
 
 def test_heldout_summary_keeps_normalized_and_oracle_spaces_explicit() -> None:
@@ -500,6 +514,99 @@ def test_decoder_directions_remain_individually_unit_norm_after_update() -> None
             )
 
 
+def test_unconstrained_activation_decoder_norm_is_trainable_and_never_projected() -> None:
+    torch.manual_seed(31)
+    bank = ActivationReconstructionBank(
+        {"gemma": [5] * 8}, 16, normalization_mode="none"
+    )
+    decoder = bank.decoders["gemma"][0]
+    with torch.no_grad():
+        decoder.weight.mul_(2.5)
+    before = torch.linalg.vector_norm(decoder.weight.T, dim=-1).clone()
+    assert not torch.allclose(before, torch.ones_like(before))
+    code = torch.rand(1, 4, 16)
+    target = torch.randn(1, 4, 5)
+    valid = torch.ones(1, 4, dtype=torch.bool)
+    optimizer = torch.optim.Adam(bank.parameters(), lr=3e-4, betas=(0.9, 0.99))
+    loss, _ = matryoshka_activation_fvu(code, decoder, target, valid)
+    loss.backward()
+    gradient = decoder.weight.grad.detach().clone()
+    bank.project_decoder_gradients_()
+    torch.testing.assert_close(decoder.weight.grad, gradient, rtol=0, atol=0)
+    optimizer.step()
+    after_step = torch.linalg.vector_norm(decoder.weight.T, dim=-1).clone()
+    bank.normalize_decoders_(project_gradients=False)
+    after_hook = torch.linalg.vector_norm(decoder.weight.T, dim=-1)
+    torch.testing.assert_close(after_hook, after_step, rtol=0, atol=0)
+    assert not torch.allclose(after_step, before)
+    assert not torch.allclose(after_step, torch.ones_like(after_step))
+    report = bank.decoder_norm_report()
+    assert report["normalization_mode"] == "none"
+    assert report["count"] == 128
+    assert report["min"] > 0
+
+
+def test_unconstrained_decoder_checkpoint_state_preserves_nonunit_norms() -> None:
+    source = ActivationReconstructionBank(
+        {"granite": [7] * 8}, 16, normalization_mode="none"
+    )
+    with torch.no_grad():
+        source.decoders["granite"][0].weight.mul_(3.0)
+    expected = torch.linalg.vector_norm(
+        source.decoders["granite"][0].weight.T, dim=-1
+    ).clone()
+    restored = ActivationReconstructionBank(
+        {"granite": [7] * 8}, 16, normalization_mode="none"
+    )
+    restored.load_state_dict(source.state_dict())
+    observed = torch.linalg.vector_norm(
+        restored.decoders["granite"][0].weight.T, dim=-1
+    )
+    torch.testing.assert_close(observed, expected, rtol=0, atol=0)
+    restored.normalize_decoders_(project_gradients=False)
+    torch.testing.assert_close(
+        torch.linalg.vector_norm(restored.decoders["granite"][0].weight.T, dim=-1),
+        expected,
+        rtol=0,
+        atol=0,
+    )
+
+
+def test_corrected_decoder_config_is_isolated_and_full_training_blocked() -> None:
+    historical = load_granite_normalized_target_config(TREATMENT_RELIABILITY)
+    corrected = load_granite_normalized_target_config(CORRECTED_DECODER_RELIABILITY)
+    assert corrected.experiment_family.endswith("unconstrained_decoder_v1")
+    assert corrected.objective.activation_decoder_normalization == "none"
+    assert corrected.objective.activation_target_normalization == "per_anchor_l2"
+    assert corrected.full_training_authorized is False
+    assert corrected.short_pilot_authorized is True
+    assert corrected.data.approved_optimizer_steps == 1221
+    assert corrected.fingerprint() != historical.fingerprint()
+    assert corrected.runtime.output_root != historical.runtime.output_root
+    left = historical.payload()
+    right = corrected.payload()
+    for payload in (left, right):
+        for key in (
+            "experiment_family",
+            "scientific_status",
+            "short_pilot_authorized",
+            "pilot_authorization",
+            "evaluation_status",
+        ):
+            payload.pop(key)
+        payload["objective"].pop("activation_decoder_normalization")
+        payload["optimization"].pop("status")
+        for key in (
+            "training_budget_status",
+            "approved_optimizer_steps",
+            "approved_accepted_anchor_exposures",
+        ):
+            payload["data"].pop(key)
+        for key in ("status", "output_root", "checkpoint_root"):
+            payload["runtime"].pop(key)
+    assert left == right
+
+
 def test_one_continuous_shared_gate_drives_all_three_model_losses() -> None:
     torch.manual_seed(29)
     architecture = SimpleNamespace(
@@ -521,6 +628,9 @@ def test_one_continuous_shared_gate_drives_all_three_model_losses() -> None:
     }
     valid = torch.ones(1, 4, dtype=torch.bool)
     scores = encoder(tokens, valid)
+    diagnostic_scores, raw_logits = encoder.forward_with_logits(tokens, valid)
+    torch.testing.assert_close(diagnostic_scores, scores, rtol=0, atol=0)
+    torch.testing.assert_close(diagnostic_scores, torch.relu(raw_logits), rtol=0, atol=0)
     gate = V3BatchTopK(16, 2, pool_anchors=4)(scores, valid, update_statistics=False)
     assert gate.values.shape == (1, 4, 16)
     assert torch.all(gate.values >= 0)

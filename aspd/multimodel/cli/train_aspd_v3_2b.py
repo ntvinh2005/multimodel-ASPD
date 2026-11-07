@@ -560,18 +560,23 @@ def _model_owned_backward(
     activation_backward_chunk: int,
     matrix_backward_chunk: int,
     auxk_may_be_active: bool,
+    collect_diagnostics: bool = False,
 ) -> dict[str, float]:
-    scores, sparse, continuous_support, binary_support = model.encode(capture)
+    scores, sparse, continuous_support, binary_support = model.encode(
+        capture, collect_diagnostics=collect_diagnostics
+    )
     activation_values: list[torch.Tensor] = []
     auxk_values: list[torch.Tensor] = []
     details: dict[str, torch.Tensor] = {}
     activation_chunks = math.ceil(16 / activation_backward_chunk)
+    activation_diagnostics: dict[str, float] | None = {} if collect_diagnostics else None
     terms = model.activation_loss_terms(
         capture,
         scores,
         sparse,
         continuous_support,
         auxk_may_be_active=auxk_may_be_active,
+        diagnostics=activation_diagnostics,
     )
     for chunk_index, chunk in enumerate(_chunked(terms, activation_backward_chunk)):
         with torch.profiler.record_function("aspd/activation_chunk_forward_backward"):
@@ -616,6 +621,17 @@ def _model_owned_backward(
     names = tuple(tensors)
     values = torch.stack(tuple(tensors.values())).tolist()
     result = dict(zip(names, values, strict=True))
+    if collect_diagnostics:
+        for site, values_by_name in model.latest_gate_diagnostics.items():
+            for name, value in values_by_name.items():
+                result[f"diagnostic/gate/{site}/{model.local_model_key}/{name}"] = float(value)
+        assert activation_diagnostics is not None
+        result.update(
+            {
+                f"diagnostic/activation/{name}": value
+                for name, value in activation_diagnostics.items()
+            }
+        )
     result["total"] = (
         result["activation"]
         + config.architecture.auxk_coefficient * result["auxk"]
@@ -1256,6 +1272,13 @@ def main() -> None:
     checkpoint_path: Path | None = None
     checkpoint_manifest = None
     resumed = False
+    diagnostic_steps = {1, 2, 10, 50, 128, 256, 300, 500, 800, 1000, 1221}
+    initial_decoder_norms_by_rank = None
+    if args.strategy == "model_owned":
+        initial_decoder_norms_by_rank = [None] * world
+        dist.all_gather_object(
+            initial_decoder_norms_by_rank, model.activation_decoder_norm_report()
+        )
     started = time.perf_counter()
     telemetry_path = args.run_dir / "gpu_telemetry.csv"
     telemetry = _start_gpu_telemetry(telemetry_path) if rank == 0 else None
@@ -1278,6 +1301,7 @@ def main() -> None:
         stage: dict[str, float] = {}
         step_anchor_ids: list[str] = []
         pool_losses: list[dict[str, float]] = []
+        collect_step_diagnostics = completed_steps + 1 in diagnostic_steps
         for pool_index in range(config.architecture.pools_per_step):
             with _timed(args.profile_stages, stage, "data_alignment_and_broadcast"):
                 payload = None
@@ -1340,6 +1364,7 @@ def main() -> None:
                                     + 1
                                     >= ORIGINAL_ASPD_N_POOLS_TO_DEAD
                                 ),
+                                collect_diagnostics=collect_step_diagnostics,
                             )
                         else:
                             losses = _controlled_activation_backward(
@@ -1398,7 +1423,7 @@ def main() -> None:
             local_details = {
                 name: sum(pool[name] for pool in pool_losses) / 4
                 for name in pool_losses[0]
-                if name.startswith("loss/")
+                if name.startswith(("loss/", "diagnostic/"))
             }
             gathered_details = [None] * world
             dist.all_gather_object(gathered_details, local_details)
@@ -1454,6 +1479,12 @@ def main() -> None:
         )
         scales_by_rank = [None] * world
         dist.all_gather_object(scales_by_rank, local_scales)
+        decoder_norms_by_rank = None
+        if args.strategy == "model_owned" and collect_step_diagnostics:
+            decoder_norms_by_rank = [None] * world
+            dist.all_gather_object(
+                decoder_norms_by_rank, model.activation_decoder_norm_report()
+            )
         if rank == 0:
             ordered_anchor_digest = hashlib.sha256()
             for anchor_id in step_anchor_ids:
@@ -1479,6 +1510,7 @@ def main() -> None:
                     "gpu_memory": memories,
                     "reconstruction_scales_by_rank": scales_by_rank,
                     "reconstruction_log_scale_gradients_by_rank": scale_gradients,
+                    "activation_decoder_norms_by_rank": decoder_norms_by_rank,
                 },
             )
 
@@ -1641,6 +1673,7 @@ def main() -> None:
         _stop_gpu_telemetry(*telemetry)
 
     gate_statistics = None
+    final_decoder_norms_by_rank = None
     if args.strategy == "model_owned":
         local_gate_statistics: dict[str, dict[str, float | int]] = {}
         for site in ("pre", "mid"):
@@ -1653,6 +1686,10 @@ def main() -> None:
             }
         gate_statistics = [None] * world
         dist.all_gather_object(gate_statistics, local_gate_statistics)
+        final_decoder_norms_by_rank = [None] * world
+        dist.all_gather_object(
+            final_decoder_norms_by_rank, model.activation_decoder_norm_report()
+        )
 
     if rank == 0:
         rows = [json.loads(line) for line in metrics_path.read_text().splitlines()]
@@ -1711,7 +1748,9 @@ def main() -> None:
             "gpu_telemetry": _summarize_gpu_telemetry(telemetry_path),
             "gate_statistics_by_rank": gate_statistics,
             "initial_common_state_by_rank": initial_common_states,
+            "initial_activation_decoder_norms_by_rank": initial_decoder_norms_by_rank,
             "final_reconstruction_scales_by_rank": rows[-1]["reconstruction_scales_by_rank"],
+            "final_activation_decoder_norms_by_rank": final_decoder_norms_by_rank,
         }
         if controlled is not None:
             report["controlled_retrain"] = {

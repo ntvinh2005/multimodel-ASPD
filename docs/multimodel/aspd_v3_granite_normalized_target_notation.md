@@ -1,6 +1,6 @@
 # Multimodel ASPD v3 — Revised Mathematical Notation
 
-Draft v4.1 — researcher-review and code-mapping specification
+Draft v4.2 — corrected researcher-review and code-mapping specification
 
 Scope: Gemma-2-2B-IT + SmolLM2-1.7B-Instruct + Granite-3.3-2B-Instruct
 
@@ -82,12 +82,15 @@ inputs remain raw activations in both experimental arms.
 
 ## 3. Activation and rank-one reconstruction
 
-For every model/site/layer/feature, the activation decoder direction is normalized
-independently:
+For every model/site/layer/feature, the activation decoder vector is an unconstrained
+trainable parameter:
 
 \[
-\boxed{\|d_{n,s,\ell,c}\|_2=1}. \tag{8}
+\boxed{d_{n,s,\ell,c}\in\mathbb R^{d_n}\quad\text{with no imposed norm constraint}.} \tag{8}
 \]
+
+Its norm may be measured after training, but it is neither projected to one nor included
+as a regularization term in the approved objective.
 
 The raw baseline prediction is
 
@@ -227,11 +230,18 @@ Model-owned ranks sum-reduce shared-encoder gradients.  The detached support gua
 
 ## 6. Gauge and proposed post-hoc analysis
 
-Unit activation-decoder norms make the legacy relative decoder norm degenerate:
+The shared continuous coefficient and free activation decoders retain a common positive
+scale gauge.  Decoder magnitudes remain legitimate post-hoc measurements.  When the
+denominator is positive, define
 
 \[
-\boxed{\rho_{n,s,\ell,c}^{D}=1/N=1/3}. \tag{30}
+\boxed{\rho_{n,s,\ell,c}^{D}=
+\frac{\|d_{n,s,\ell,c}\|_2}
+{\sum_{m=1}^{N}\|d_{m,s,\ell,c}\|_2}}. \tag{30}
 \]
+
+This quantity characterizes relative activation-decoder mass; it is not a training loss,
+a normalization rule, or by itself proof of a shared mechanism.
 
 The following definitions remain post-hoc proposals and are not executed by training:
 
@@ -299,7 +309,7 @@ Status vocabulary is exact: `EXACT_MATCH`, `SEMANTICALLY_EQUIVALENT`, `PARTIAL_M
 | 5 | `v3/encoder.py:pack_cross_model_tokens` 121–186; `SharedSiteEncoder.forward` 132–134 | 517→512 adapter | exact shape/identity test | `SEMANTICALLY_EQUIVALENT` |
 | 6 | `v3/gating.py:V3BatchTopK.forward` 90–106 | C=8192, K=32, pool=2048 | continuous shared-gate test | `EXACT_MATCH` |
 | 7 | `v3/model_owned.py:encode` 303–308; `objective.detached_binary_support` | binary internal code | detached-gradient test | `EXACT_MATCH` |
-| 8 | `v3/reconstruction.py:ActivationReconstructionBank.normalize_decoders_` 216–242 | individual unit row norm | post-update unit-norm test | `EXACT_MATCH` |
+| 8 | `v3/reconstruction.py:ActivationReconstructionBank.normalize_decoders_` 216–242 | config currently says unit row norm | current post-update unit-norm test | `MISMATCH` — unapproved projection must be removed from the activation-decoder training path |
 | 9 | `v3/objective.py:matryoshka_activation_fvu` 67–143 | baseline normalization=`none` | bitwise raw-path test | `EXACT_MATCH` |
 | 10 | `components.py:RankOneComponents` | unit-norm write factors | rank-one gradient tests | `EXACT_MATCH` |
 | 11 | `components.py:RankOneComponents.forward_sparse`; `reconstruction.py:RankOneMatrixBank.reconstruct` | binary support | detached internal test | `SEMANTICALLY_EQUIVALENT` |
@@ -321,7 +331,7 @@ Status vocabulary is exact: `EXACT_MATCH`, `SEMANTICALLY_EQUIVALENT`, `PARTIAL_M
 | 27 | `cli/train_aspd_v3_2b.py:_model_owned_backward` | λ=1/32 | existing trainer tests | `SEMANTICALLY_EQUIVALENT` |
 | 28 | trainer lines 1211–1284, `pool_scale=1/4` | four pools | source audit only; GPU not run | `EXACT_MATCH` |
 | 29 | binary support detach lines 306–307 | rank-one-only internal route | detached-gradient test | `EXACT_MATCH` |
-| 30 | mathematical consequence of Eq. 8 | N=3 | analytic identity | `THEORETICAL_ONLY` |
+| 30 | `multimodel/analysis.py:relative_decoder_norm`-style post-hoc norm calculation; Granite evaluator integration pending | N=3 | analytic definition; no training gradient | `PARTIAL_MATCH` |
 | 31 | no executed analysis utility | none | not run | `NOT_IMPLEMENTED` |
 | 32 | no executed analysis utility | none | not run | `NOT_IMPLEMENTED` |
 | 33 | no executed analysis utility | none | not run | `NOT_IMPLEMENTED` |
@@ -345,7 +355,8 @@ partial because a full three-model parameter allocation was intentionally forbid
 | Layer concatenation, learned packing, intra transformer | 2–4 |
 | Model/separator packing, cross transformer, readout | 5–6 |
 | BatchTopK continuous values and detached support preparation | 6–7, 29 |
-| Activation decoder initialization, radial gradient projection, post-step normalization | 8 |
+| Current activation-decoder initialization, radial gradient projection, post-step normalization | no approved equation; `MISMATCH` with Eq. 8 |
+| Read-only activation-decoder norm measurement | 30 |
 | Dense/indexed/CSR cumulative activation decode | 9, 14, 17–18 |
 | Per-target preparation once per model/site/layer | 15–16 |
 | Normalized Matryoshka and normalized AuxK routing | 17–18, 22–23 |

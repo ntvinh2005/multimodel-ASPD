@@ -74,12 +74,20 @@ def _broadcast(value: Any) -> Any:
 
 def _load_contract(path: Path) -> dict[str, Any]:
     payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    corrected = (
+        payload.get("experiment_family")
+        == "aspd_v3_granite_normalized_target_unconstrained_decoder_v1"
+    )
     expected = {
         "schema_version": 1,
         "status": "RESEARCHER_AUTHORIZED_HELDOUT_GATE",
         "authorized_by": "researcher",
         "authorized_on": "2026-11-07",
-        "experiment_family": "aspd_v3_granite_normalized_target_v1",
+        "experiment_family": (
+            "aspd_v3_granite_normalized_target_unconstrained_decoder_v1"
+            if corrected
+            else "aspd_v3_granite_normalized_target_v1"
+        ),
         "split": "validation",
         "split_unit": "document",
         "accepted_anchors": 100_352,
@@ -91,7 +99,7 @@ def _load_contract(path: Path) -> dict[str, Any]:
         "jaccard_top_features": 256,
         "jaccard_min_fires": 4,
         "checkpoint_steps": payload.get("checkpoint_steps"),
-        "arms": ["baseline", "normalized_target"],
+        "arms": ["normalized_target"] if corrected else ["baseline", "normalized_target"],
         "model_order": list(MODEL_ORDER_GRANITE),
         "gpu_count": 3,
         "gpu_type": "b200",
@@ -209,8 +217,10 @@ def _render(reports: list[dict[str, Any]], output: Path, manifest: dict[str, Any
     matrix_rows: list[dict[str, Any]] = []
     all_metrics: dict[str, Any] = {}
     target_norms: dict[str, Any] = {}
+    decoder_norms: dict[str, Any] = {}
     for report in reports:
         model = report["model"]
+        decoder_norms[model] = report["activation_decoder_norms"]
         all_metrics.update(report["metrics"])
         target_norms.update(report["activation_target_norms"])
         if arm == "baseline":
@@ -235,6 +245,7 @@ def _render(reports: list[dict[str, Any]], output: Path, manifest: dict[str, Any
             "original_space_uses_oracle_target_norm": arm == "normalized_target",
             "activation_summary": activation_summary,
             "activation_target_norms": target_norms,
+            "activation_decoder_norms": decoder_norms,
             "metrics": all_metrics,
         },
     )
@@ -257,6 +268,7 @@ def _render(reports: list[dict[str, Any]], output: Path, manifest: dict[str, Any
             "status": "SCIENTIFIC_REVIEW_REQUIRED",
             "arm": arm,
             "activation_summary": activation_summary,
+            "activation_decoder_norms": decoder_norms,
             "dictionary": dictionary,
             "comparison_warning": (
                 "Treatment original-space FVU uses the target-derived oracle norm; raw baseline "
@@ -383,6 +395,7 @@ def main() -> None:
             "model": local_key,
             "finite_state": finite,
             "shared_encoder_sha256": digest,
+            "activation_decoder_norms": model.activation_decoder_norm_report(),
         }
         reports: list[Any] = [None] * world
         dist.all_gather_object(reports, local)
@@ -423,6 +436,7 @@ def main() -> None:
             activation_target_normalization=config.objective.activation_target_normalization,
             activation_target_epsilon=config.objective.activation_target_epsilon,
         )
+        report["activation_decoder_norms"] = model.activation_decoder_norm_report()
         if report["accepted_anchors"] != contract["accepted_anchors"]:
             raise ValueError("held-out stream returned a different accepted-anchor budget")
         if _parameter_signature(loaded.forward_model) != source_before:

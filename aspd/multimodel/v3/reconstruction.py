@@ -189,10 +189,17 @@ class ActivationReconstructionBank(nn.Module):
         activation_dims: Mapping[str, Sequence[int]],
         n_features: int,
         *,
+        normalization_mode: str = "unit_row_norm_with_radial_gradient_projection",
         device: torch.device | str | None = None,
         dtype: torch.dtype | None = None,
     ):
         super().__init__()
+        if normalization_mode not in {
+            "none",
+            "unit_row_norm_with_radial_gradient_projection",
+        }:
+            raise ValueError(f"unknown activation decoder normalization: {normalization_mode}")
+        self.normalization_mode = normalization_mode
         self.model_order = tuple(activation_dims)
         self.decoders = nn.ModuleDict()
         for model_key, dimensions in activation_dims.items():
@@ -206,7 +213,8 @@ class ActivationReconstructionBank(nn.Module):
                     for width in dimensions
                 ]
             )
-        self.normalize_decoders_()
+        if self.normalization_mode != "none":
+            self.normalize_decoders_()
 
     def reconstruct(self, model_key: str, code: Tensor) -> tuple[Tensor, ...]:
         if model_key not in self.decoders:
@@ -215,7 +223,10 @@ class ActivationReconstructionBank(nn.Module):
 
     @torch.no_grad()
     def normalize_decoders_(self, *, project_gradients: bool = True) -> None:
-        """Keep every feature write direction unit norm, including radial-gradient removal."""
+        """Apply the explicitly configured training constraint, if any."""
+
+        if self.normalization_mode == "none":
+            return
 
         for decoders in self.decoders.values():
             for decoder in decoders:
@@ -229,6 +240,8 @@ class ActivationReconstructionBank(nn.Module):
 
     @torch.no_grad()
     def project_decoder_gradients_(self) -> None:
+        if self.normalization_mode == "none":
+            return
         for decoders in self.decoders.values():
             for decoder in decoders:
                 if decoder.weight.grad is None:
@@ -240,6 +253,36 @@ class ActivationReconstructionBank(nn.Module):
                 )
                 gradient = decoder.weight.grad.T
                 gradient.sub_((gradient * normalized).sum(-1, keepdim=True) * normalized)
+
+    @torch.no_grad()
+    def decoder_norm_report(self) -> dict[str, float | int | str]:
+        """Measure decoder-column norms without changing parameters or gradients."""
+
+        values = torch.cat(
+            [
+                decoder.weight.detach().float().T.norm(dim=-1).cpu()
+                for decoders in self.decoders.values()
+                for decoder in decoders
+            ]
+        )
+        quantiles = torch.quantile(
+            values, torch.tensor([0.01, 0.1, 0.25, 0.5, 0.75, 0.9, 0.99])
+        )
+        return {
+            "normalization_mode": self.normalization_mode,
+            "count": int(values.numel()),
+            "mean": float(values.mean()),
+            "std": float(values.std(unbiased=False)),
+            "min": float(values.min()),
+            "q01": float(quantiles[0]),
+            "q10": float(quantiles[1]),
+            "q25": float(quantiles[2]),
+            "median": float(quantiles[3]),
+            "q75": float(quantiles[4]),
+            "q90": float(quantiles[5]),
+            "q99": float(quantiles[6]),
+            "max": float(values.max()),
+        }
 
 
 class RankOneMatrixBank(nn.Module):

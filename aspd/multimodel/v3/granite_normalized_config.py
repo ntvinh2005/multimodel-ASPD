@@ -129,7 +129,9 @@ class GraniteExperimentObjective(BaseModel):
     internal_coefficient: Literal[1.0]
     activation_coefficient: Literal[1.0]
     fvu_reduction_dtype: Literal["float32"]
-    activation_decoder_normalization: Literal["unit_row_norm_with_radial_gradient_projection"]
+    activation_decoder_normalization: Literal[
+        "none", "unit_row_norm_with_radial_gradient_projection"
+    ]
     activation_target_normalization: Literal["none", "per_anchor_l2"]
     activation_target_epsilon: Literal[1e-6]
     activation_reconstruction_scale: Literal["none"]
@@ -144,6 +146,7 @@ class GraniteExperimentOptimization(BaseModel):
         "PROPOSED_INHERITED_NOT_EXECUTION_APPROVED",
         "INHERITED_SETTINGS_STABILIZATION_PILOT_AUTHORIZED",
         "INHERITED_SETTINGS_RELIABILITY_PILOT_AUTHORIZED",
+        "DECODER_NORM_CORRECTION_RELIABILITY_PILOT_AUTHORIZED",
     ]
     optimizer: Literal["Adam"]
     betas: tuple[Literal[0.9], Literal[0.99]]
@@ -176,6 +179,7 @@ class GraniteExperimentData(BaseModel):
         "UNAPPROVED",
         "RESEARCHER_AUTHORIZED_STABILIZATION_PILOT",
         "RESEARCHER_AUTHORIZED_RELIABILITY_PILOT",
+        "RESEARCHER_AUTHORIZED_DECODER_NORM_CORRECTION_PILOT",
     ]
     approved_optimizer_steps: int | None
     approved_accepted_anchor_exposures: int | None
@@ -201,6 +205,7 @@ class GraniteExperimentRuntime(BaseModel):
         "MATCHED_BASELINE_PILOT_AUTHORIZED",
         "TREATMENT_RELIABILITY_PILOT_AUTHORIZED",
         "MATCHED_BASELINE_RELIABILITY_PILOT_AUTHORIZED",
+        "DECODER_NORM_CORRECTION_RELIABILITY_PILOT_AUTHORIZED",
     ]
     strategy: Literal["model_owned"]
     world_size: Literal[3]
@@ -222,14 +227,26 @@ class GraniteExperimentRuntime(BaseModel):
 
     @model_validator(mode="after")
     def validate_namespace(self) -> GraniteExperimentRuntime:
+        output_namespaces = (
+            "aspd_v3/granite_normalized_target_v1",
+            "aspd_v3/granite_normalized_target_unconstrained_decoder_v1",
+        )
+        if not all(
+            any(namespace in value for namespace in output_namespaces)
+            for value in (self.output_root, self.checkpoint_root)
+        ):
+            raise ValueError("Granite outputs must use a recognized isolated namespace")
+        if any(
+            "aspd_v3/granite_normalized_target_v1" not in value
+            for value in (self.dataset_manifest, self.alignment_manifest)
+        ):
+            raise ValueError("corrected pilot must reuse the approved immutable data manifests")
         values = (
             self.output_root,
             self.checkpoint_root,
             self.dataset_manifest,
             self.alignment_manifest,
         )
-        if any("aspd_v3/granite_normalized_target_v1" not in value for value in values):
-            raise ValueError("Granite experiment paths must use their isolated v1 namespace")
         if "qwen" in " ".join(values).lower():
             raise ValueError("Granite experiment runtime paths must not mention Qwen")
         return self
@@ -258,6 +275,7 @@ class GranitePilotAuthorization(BaseModel):
         "matched_baseline_128_steps",
         "treatment_reliability_1221_steps",
         "matched_baseline_reliability_1221_steps",
+        "normalized_target_decoder_norm_correction_1221_steps",
     ]
     arm: Literal["baseline", "normalized_target"]
     optimizer_steps: Literal[128, 1221]
@@ -280,7 +298,10 @@ class GraniteNormalizedTargetConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal[1]
-    experiment_family: Literal["aspd_v3_granite_normalized_target_v1"]
+    experiment_family: Literal[
+        "aspd_v3_granite_normalized_target_v1",
+        "aspd_v3_granite_normalized_target_unconstrained_decoder_v1",
+    ]
     scientific_status: Literal[
         "IMPLEMENTATION_ONLY_RESEARCHER_REVIEW_REQUIRED",
         "THREE_STEP_GPU_PREFLIGHT_AUTHORIZED_BY_RESEARCHER",
@@ -288,6 +309,7 @@ class GraniteNormalizedTargetConfig(BaseModel):
         "MATCHED_BASELINE_PILOT_AUTHORIZED_BY_RESEARCHER",
         "TREATMENT_RELIABILITY_PILOT_AUTHORIZED_BY_RESEARCHER",
         "MATCHED_BASELINE_RELIABILITY_PILOT_AUTHORIZED_BY_RESEARCHER",
+        "DECODER_NORM_CORRECTION_RELIABILITY_PILOT_AUTHORIZED_BY_RESEARCHER",
     ]
     full_training_authorized: Literal[False]
     short_pilot_authorized: bool
@@ -306,6 +328,7 @@ class GraniteNormalizedTargetConfig(BaseModel):
         "GPU_PREFLIGHT_PASSED_STABILIZATION_PILOT_AUTHORIZED",
         "GPU_PREFLIGHT_PASSED_MATCHED_BASELINE_PILOT_AUTHORIZED",
         "HELDOUT_GATE_PASSED_RELIABILITY_PILOT_AUTHORIZED",
+        "DECODER_NORM_CORRECTION_PILOT_AUTHORIZED",
     ]
 
     @model_validator(mode="after")
@@ -369,6 +392,72 @@ class GraniteNormalizedTargetConfig(BaseModel):
         expected_mode = "none" if self.arm == "baseline" else "per_anchor_l2"
         if self.objective.activation_target_normalization != expected_mode:
             raise ValueError(f"{self.arm} requires activation_target_normalization={expected_mode}")
+        corrected_decoder = (
+            self.experiment_family
+            == "aspd_v3_granite_normalized_target_unconstrained_decoder_v1"
+        )
+        expected_decoder_mode = (
+            "none" if corrected_decoder else "unit_row_norm_with_radial_gradient_projection"
+        )
+        if self.objective.activation_decoder_normalization != expected_decoder_mode:
+            raise ValueError(
+                f"{self.experiment_family} requires "
+                f"activation_decoder_normalization={expected_decoder_mode}"
+            )
+        if corrected_decoder:
+            if self.arm != "normalized_target":
+                raise ValueError("decoder-norm correction pilot is normalized-target only")
+            if not self.short_pilot_authorized or self.pilot_authorization is None:
+                raise ValueError("corrected decoder pilot requires bounded researcher authorization")
+            observed = {
+                "scientific_status": self.scientific_status,
+                "runtime_status": self.runtime.status,
+                "evaluation_status": self.evaluation_status,
+                "scope": self.pilot_authorization.scope,
+                "steps": self.pilot_authorization.optimizer_steps,
+                "exposures": self.pilot_authorization.accepted_anchor_exposures,
+                "optimization_status": self.optimization.status,
+                "budget_status": self.data.training_budget_status,
+                "approved_steps": self.data.approved_optimizer_steps,
+                "approved_exposures": self.data.approved_accepted_anchor_exposures,
+                "full_training_authorized": self.pilot_authorization.full_training_authorized,
+            }
+            expected_corrected = {
+                "scientific_status": (
+                    "DECODER_NORM_CORRECTION_RELIABILITY_PILOT_AUTHORIZED_BY_RESEARCHER"
+                ),
+                "runtime_status": "DECODER_NORM_CORRECTION_RELIABILITY_PILOT_AUTHORIZED",
+                "evaluation_status": "DECODER_NORM_CORRECTION_PILOT_AUTHORIZED",
+                "scope": "normalized_target_decoder_norm_correction_1221_steps",
+                "steps": 1221,
+                "exposures": 10_002_432,
+                "optimization_status": (
+                    "DECODER_NORM_CORRECTION_RELIABILITY_PILOT_AUTHORIZED"
+                ),
+                "budget_status": "RESEARCHER_AUTHORIZED_DECODER_NORM_CORRECTION_PILOT",
+                "approved_steps": 1221,
+                "approved_exposures": 10_002_432,
+                "full_training_authorized": False,
+            }
+            if observed != expected_corrected:
+                raise ValueError(f"decoder-norm correction authorization mismatch: {observed}")
+            namespace = (
+                "/orange/thai/vinhnguyen1/aspd_v3/"
+                "granite_normalized_target_unconstrained_decoder_v1/reliability/normalized_target"
+            )
+            if self.runtime.output_root != f"{namespace}/runs" or (
+                self.runtime.checkpoint_root != f"{namespace}/checkpoints"
+            ):
+                raise ValueError("corrected pilot output namespace changed")
+            if self.runtime.preflight_evidence is None or not self.runtime.preflight_evidence.endswith(
+                "/preflight/normalized_target/preflight_report.json"
+            ):
+                raise ValueError("corrected pilot must retain treatment preflight evidence")
+            if self.gpu_preflight_authorized or self.preflight_authorization is not None:
+                raise ValueError("corrected pilot cannot reuse preflight authorization")
+            if self.pilot_authorization.gate_evidence:
+                raise ValueError("corrected pilot cannot claim post-correction gate evidence")
+            return self
         if self.short_pilot_authorized:
             if self.gpu_preflight_authorized or self.preflight_authorization is not None:
                 raise ValueError("pilot authorization must not reuse preflight authorization")
@@ -613,9 +702,11 @@ def load_granite_normalized_target_config(path: str | Path) -> GraniteNormalized
         allowed_overlay = (
             {
                 "extends",
+                "experiment_family",
                 "scientific_status",
                 "short_pilot_authorized",
                 "pilot_authorization",
+                "objective",
                 "optimization",
                 "data",
                 "runtime",
@@ -649,6 +740,8 @@ def load_granite_normalized_target_config(path: str | Path) -> GraniteNormalized
         if not isinstance(base, dict) or "extends" in base:
             raise ValueError("preflight overlay base must be one complete config")
         merged = json.loads(json.dumps(base))
+        if "experiment_family" in payload:
+            merged["experiment_family"] = payload["experiment_family"]
         merged["scientific_status"] = payload["scientific_status"]
         if pilot_overlay:
             optimization_overlay = payload.get("optimization")
@@ -663,6 +756,10 @@ def load_granite_normalized_target_config(path: str | Path) -> GraniteNormalized
                 raise ValueError("pilot overlay may change only approved data budget fields")
             merged["short_pilot_authorized"] = payload["short_pilot_authorized"]
             merged["pilot_authorization"] = payload["pilot_authorization"]
+            objective_overlay = payload.get("objective", {})
+            if set(objective_overlay) - {"activation_decoder_normalization"}:
+                raise ValueError("pilot overlay changes forbidden objective fields")
+            merged["objective"].update(objective_overlay)
             merged["optimization"].update(optimization_overlay)
             merged["data"].update(data_overlay)
             merged["evaluation_status"] = payload["evaluation_status"]

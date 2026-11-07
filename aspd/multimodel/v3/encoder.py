@@ -242,11 +242,18 @@ class FeatureReadout(nn.Module):
         self.output = nn.Linear(width, n_features, device=device, dtype=dtype)
 
     def forward(self, tokens: Tensor, valid_anchors: Tensor) -> Tensor:
+        scores, _logits = self.forward_with_logits(tokens, valid_anchors)
+        return scores
+
+    def forward_with_logits(
+        self, tokens: Tensor, valid_anchors: Tensor
+    ) -> tuple[Tensor, Tensor]:
         if valid_anchors.shape != tokens.shape[:2]:
             raise ValueError("valid_anchors must match the [B,A] aligned-anchor grid")
         pooled = tokens.mean(dim=2)
-        scores = torch.relu(self.output(pooled))
-        return scores * valid_anchors[..., None].to(scores.dtype)
+        logits = self.output(pooled)
+        mask = valid_anchors[..., None].to(logits.dtype)
+        return torch.relu(logits) * mask, logits * mask
 
 
 class HierarchicalV3Encoder(nn.Module):
