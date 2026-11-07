@@ -44,6 +44,10 @@ BASELINE_PREFLIGHT = (
 TREATMENT_PREFLIGHT = (
     ROOT / "configs/multimodel/aspd_v3/granite_normalized_target_treatment_preflight_v1.yaml"
 )
+TREATMENT_STABILIZATION = (
+    ROOT
+    / "configs/multimodel/aspd_v3/granite_normalized_target_treatment_stabilization_pilot_v1.yaml"
+)
 
 
 def _configs():
@@ -119,6 +123,48 @@ def test_preflight_overlay_rejects_scientific_or_runtime_override(tmp_path: Path
     )
     with pytest.raises(ValueError, match="forbidden fields"):
         load_granite_normalized_target_config(bad)
+
+
+def test_treatment_stabilization_pilot_is_bounded_and_scientifically_matched() -> None:
+    _baseline, treatment = _configs()
+    pilot = load_granite_normalized_target_config(TREATMENT_STABILIZATION)
+    assert pilot.arm == "normalized_target"
+    assert pilot.short_pilot_authorized is True
+    assert pilot.full_training_authorized is False
+    assert pilot.gpu_preflight_authorized is False
+    assert pilot.pilot_authorization is not None
+    assert pilot.pilot_authorization.optimizer_steps == 128
+    assert pilot.pilot_authorization.accepted_anchor_exposures == 1_048_576
+    assert pilot.data.approved_optimizer_steps == 128
+    assert pilot.data.approved_accepted_anchor_exposures == 1_048_576
+    assert pilot.runtime.output_root.startswith("/orange/thai/")
+
+    left = treatment.payload()
+    right = pilot.payload()
+    for payload in (left, right):
+        payload.pop("scientific_status")
+        payload.pop("short_pilot_authorized")
+        payload.pop("pilot_authorization")
+        payload["optimization"].pop("status")
+        for key in (
+            "training_budget_status",
+            "approved_optimizer_steps",
+            "approved_accepted_anchor_exposures",
+        ):
+            payload["data"].pop(key)
+        for key in ("status", "output_root", "checkpoint_root", "preflight_evidence"):
+            payload["runtime"].pop(key)
+        payload.pop("evaluation_status")
+    assert left == right
+
+
+def test_review_config_rejects_hidden_pilot_budget() -> None:
+    payload = yaml.safe_load(TREATMENT.read_text(encoding="utf-8"))
+    payload["data"]["training_budget_status"] = "RESEARCHER_AUTHORIZED_STABILIZATION_PILOT"
+    payload["data"]["approved_optimizer_steps"] = 128
+    payload["data"]["approved_accepted_anchor_exposures"] = 1_048_576
+    with pytest.raises(ValidationError, match="cannot carry a training budget"):
+        GraniteNormalizedTargetConfig.model_validate(payload)
 
 
 def test_config_rejects_roster_revision_and_authorization_changes() -> None:

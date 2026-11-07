@@ -140,7 +140,10 @@ class GraniteExperimentObjective(BaseModel):
 class GraniteExperimentOptimization(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    status: Literal["PROPOSED_INHERITED_NOT_EXECUTION_APPROVED"]
+    status: Literal[
+        "PROPOSED_INHERITED_NOT_EXECUTION_APPROVED",
+        "INHERITED_SETTINGS_STABILIZATION_PILOT_AUTHORIZED",
+    ]
     optimizer: Literal["Adam"]
     betas: tuple[Literal[0.9], Literal[0.99]]
     weight_decay: Literal[0]
@@ -168,9 +171,11 @@ class GraniteExperimentData(BaseModel):
     canonical_text_policy: Literal["identity_exact_three_way_prefix"]
     alignment_roster: tuple[Literal["gemma"], Literal["smol"], Literal["granite"]]
     alignment_acceptance_rate_status: Literal["UNMEASURED_REQUIRES_GPU_PREFLIGHT"]
-    training_budget_status: Literal["UNAPPROVED"]
-    approved_optimizer_steps: None
-    approved_accepted_anchor_exposures: None
+    training_budget_status: Literal[
+        "UNAPPROVED", "RESEARCHER_AUTHORIZED_STABILIZATION_PILOT"
+    ]
+    approved_optimizer_steps: int | None
+    approved_accepted_anchor_exposures: int | None
 
     @model_validator(mode="after")
     def validate_splits(self) -> GraniteExperimentData:
@@ -186,7 +191,11 @@ class GraniteExperimentData(BaseModel):
 class GraniteExperimentRuntime(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    status: Literal["STRUCTURAL_ONLY_GPU_NOT_AUTHORIZED", "THREE_STEP_GPU_PREFLIGHT_AUTHORIZED"]
+    status: Literal[
+        "STRUCTURAL_ONLY_GPU_NOT_AUTHORIZED",
+        "THREE_STEP_GPU_PREFLIGHT_AUTHORIZED",
+        "TREATMENT_STABILIZATION_PILOT_AUTHORIZED",
+    ]
     strategy: Literal["model_owned"]
     world_size: Literal[3]
     checkpoint_every_steps: Literal[1000]
@@ -233,6 +242,26 @@ class GranitePreflightAuthorization(BaseModel):
     full_training_authorized: Literal[False]
 
 
+class GranitePilotAuthorization(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    authorized_by: Literal["researcher"]
+    authorized_on: Literal["2026-11-06"]
+    scope: Literal["treatment_stabilization_128_steps"]
+    arm: Literal["normalized_target"]
+    optimizer_steps: Literal[128]
+    accepted_anchor_exposures: Literal[1_048_576]
+    gpu_count: Literal[3]
+    gpu_type: Literal["b200"]
+    preflight_report_sha256: Literal[
+        "00500532a7c4e5e3dae33d7472028cf6717edebfd23d697d5318df491cdde454"
+    ]
+    preflight_config_fingerprint: Literal[
+        "37c5c902e69503c362db37ee5031c0d83be2aa50e6e16fb97d5adb7bbbb93acc"
+    ]
+    full_training_authorized: Literal[False]
+
+
 class GraniteNormalizedTargetConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -241,11 +270,13 @@ class GraniteNormalizedTargetConfig(BaseModel):
     scientific_status: Literal[
         "IMPLEMENTATION_ONLY_RESEARCHER_REVIEW_REQUIRED",
         "THREE_STEP_GPU_PREFLIGHT_AUTHORIZED_BY_RESEARCHER",
+        "TREATMENT_STABILIZATION_PILOT_AUTHORIZED_BY_RESEARCHER",
     ]
     full_training_authorized: Literal[False]
-    short_pilot_authorized: Literal[False]
+    short_pilot_authorized: bool
     gpu_preflight_authorized: bool
     preflight_authorization: GranitePreflightAuthorization | None = None
+    pilot_authorization: GranitePilotAuthorization | None = None
     arm: Literal["baseline", "normalized_target"]
     models: tuple[GraniteExperimentSource, GraniteExperimentSource, GraniteExperimentSource]
     architecture: GraniteExperimentArchitecture
@@ -253,7 +284,10 @@ class GraniteNormalizedTargetConfig(BaseModel):
     optimization: GraniteExperimentOptimization
     data: GraniteExperimentData
     runtime: GraniteExperimentRuntime
-    evaluation_status: Literal["SYNTHETIC_IMPLEMENTATION_ONLY_GPU_NOT_RUN"]
+    evaluation_status: Literal[
+        "SYNTHETIC_IMPLEMENTATION_ONLY_GPU_NOT_RUN",
+        "GPU_PREFLIGHT_PASSED_STABILIZATION_PILOT_AUTHORIZED",
+    ]
 
     @model_validator(mode="after")
     def validate_contract(self) -> GraniteNormalizedTargetConfig:
@@ -316,11 +350,60 @@ class GraniteNormalizedTargetConfig(BaseModel):
         expected_mode = "none" if self.arm == "baseline" else "per_anchor_l2"
         if self.objective.activation_target_normalization != expected_mode:
             raise ValueError(f"{self.arm} requires activation_target_normalization={expected_mode}")
-        if self.gpu_preflight_authorized:
+        if self.short_pilot_authorized:
+            if self.arm != "normalized_target":
+                raise ValueError("the first stabilization pilot is treatment-only")
+            if self.gpu_preflight_authorized or self.preflight_authorization is not None:
+                raise ValueError("pilot authorization must not reuse preflight authorization")
+            if self.scientific_status != (
+                "TREATMENT_STABILIZATION_PILOT_AUTHORIZED_BY_RESEARCHER"
+            ):
+                raise ValueError("stabilization pilot requires its explicit scientific status")
+            if self.pilot_authorization is None:
+                raise ValueError("stabilization pilot requires a bounded authorization record")
+            if self.runtime.status != "TREATMENT_STABILIZATION_PILOT_AUTHORIZED":
+                raise ValueError("stabilization pilot requires its bounded runtime status")
+            if self.optimization.status != "INHERITED_SETTINGS_STABILIZATION_PILOT_AUTHORIZED":
+                raise ValueError("stabilization pilot must explicitly authorize inherited settings")
+            if self.data.training_budget_status != (
+                "RESEARCHER_AUTHORIZED_STABILIZATION_PILOT"
+            ):
+                raise ValueError("stabilization pilot requires its approved budget status")
+            if (
+                self.data.approved_optimizer_steps
+                != self.pilot_authorization.optimizer_steps
+                or self.data.approved_accepted_anchor_exposures
+                != self.pilot_authorization.accepted_anchor_exposures
+            ):
+                raise ValueError("stabilization pilot budget differs from its authorization")
+            if self.runtime.preflight_evidence is None or not self.runtime.preflight_evidence.endswith(
+                "/preflight/normalized_target/preflight_report.json"
+            ):
+                raise ValueError("stabilization pilot must pin treatment preflight evidence")
+            if self.evaluation_status != (
+                "GPU_PREFLIGHT_PASSED_STABILIZATION_PILOT_AUTHORIZED"
+            ):
+                raise ValueError("stabilization pilot has the wrong evaluation status")
+            expected_output = (
+                "/orange/thai/vinhnguyen1/aspd_v3/granite_normalized_target_v1/"
+                "stabilization/normalized_target/runs"
+            )
+            expected_checkpoint = (
+                "/orange/thai/vinhnguyen1/aspd_v3/granite_normalized_target_v1/"
+                "stabilization/normalized_target/checkpoints"
+            )
+            if (
+                self.runtime.output_root != expected_output
+                or self.runtime.checkpoint_root != expected_checkpoint
+            ):
+                raise ValueError("stabilization pilot output namespace changed")
+        elif self.gpu_preflight_authorized:
             if self.scientific_status != "THREE_STEP_GPU_PREFLIGHT_AUTHORIZED_BY_RESEARCHER":
                 raise ValueError("authorized preflight requires the explicit scientific status")
             if self.preflight_authorization is None:
                 raise ValueError("authorized preflight requires a bounded authorization record")
+            if self.pilot_authorization is not None:
+                raise ValueError("authorized preflight cannot carry pilot authorization")
             if self.runtime.status != "THREE_STEP_GPU_PREFLIGHT_AUTHORIZED":
                 raise ValueError("authorized preflight requires the bounded runtime status")
             expected_suffix = f"/preflight/{self.arm}/preflight_report.json"
@@ -328,15 +411,33 @@ class GraniteNormalizedTargetConfig(BaseModel):
                 expected_suffix
             ):
                 raise ValueError("authorized preflight evidence path is not arm-isolated")
+            if (
+                self.optimization.status != "PROPOSED_INHERITED_NOT_EXECUTION_APPROVED"
+                or self.data.training_budget_status != "UNAPPROVED"
+                or self.data.approved_optimizer_steps is not None
+                or self.data.approved_accepted_anchor_exposures is not None
+                or self.evaluation_status != "SYNTHETIC_IMPLEMENTATION_ONLY_GPU_NOT_RUN"
+            ):
+                raise ValueError("preflight config cannot carry a training budget")
         else:
             if self.scientific_status != "IMPLEMENTATION_ONLY_RESEARCHER_REVIEW_REQUIRED":
                 raise ValueError("review-only config has the wrong scientific status")
             if self.preflight_authorization is not None:
                 raise ValueError("review-only config cannot carry execution authorization")
+            if self.pilot_authorization is not None:
+                raise ValueError("review-only config cannot carry pilot authorization")
             if self.runtime.status != "STRUCTURAL_ONLY_GPU_NOT_AUTHORIZED":
                 raise ValueError("review-only config has an executable runtime status")
             if self.runtime.preflight_evidence is not None:
                 raise ValueError("review-only config cannot name preflight evidence")
+            if (
+                self.optimization.status != "PROPOSED_INHERITED_NOT_EXECUTION_APPROVED"
+                or self.data.training_budget_status != "UNAPPROVED"
+                or self.data.approved_optimizer_steps is not None
+                or self.data.approved_accepted_anchor_exposures is not None
+                or self.evaluation_status != "SYNTHETIC_IMPLEMENTATION_ONLY_GPU_NOT_RUN"
+            ):
+                raise ValueError("review-only config cannot carry a training budget")
         return self
 
     def payload(self) -> dict[str, Any]:
@@ -366,22 +467,38 @@ def load_granite_normalized_target_config(path: str | Path) -> GraniteNormalized
     if not isinstance(payload, dict):
         raise ValueError("Granite normalized-target config must be a mapping")
     if "extends" in payload:
-        allowed_overlay = {
-            "extends",
-            "scientific_status",
-            "gpu_preflight_authorized",
-            "preflight_authorization",
-            "runtime",
-        }
+        pilot_overlay = "pilot_authorization" in payload
+        allowed_overlay = (
+            {
+                "extends",
+                "scientific_status",
+                "short_pilot_authorized",
+                "pilot_authorization",
+                "optimization",
+                "data",
+                "runtime",
+                "evaluation_status",
+            }
+            if pilot_overlay
+            else {
+                "extends",
+                "scientific_status",
+                "gpu_preflight_authorized",
+                "preflight_authorization",
+                "runtime",
+            }
+        )
         extra = set(payload) - allowed_overlay
         if extra:
             raise ValueError(f"preflight overlay changes forbidden fields: {sorted(extra)}")
         runtime_overlay = payload.get("runtime")
-        if not isinstance(runtime_overlay, dict) or set(runtime_overlay) != {
-            "status",
-            "preflight_evidence",
-        }:
-            raise ValueError("preflight overlay may change only runtime status/evidence")
+        expected_runtime_fields = (
+            {"status", "output_root", "checkpoint_root", "preflight_evidence"}
+            if pilot_overlay
+            else {"status", "preflight_evidence"}
+        )
+        if not isinstance(runtime_overlay, dict) or set(runtime_overlay) != expected_runtime_fields:
+            raise ValueError("execution overlay changes forbidden runtime fields")
         base_name = payload["extends"]
         if not isinstance(base_name, str) or Path(base_name).name != base_name:
             raise ValueError("preflight overlay must extend a sibling config filename")
@@ -391,8 +508,25 @@ def load_granite_normalized_target_config(path: str | Path) -> GraniteNormalized
             raise ValueError("preflight overlay base must be one complete config")
         merged = json.loads(json.dumps(base))
         merged["scientific_status"] = payload["scientific_status"]
-        merged["gpu_preflight_authorized"] = payload["gpu_preflight_authorized"]
-        merged["preflight_authorization"] = payload["preflight_authorization"]
+        if pilot_overlay:
+            optimization_overlay = payload.get("optimization")
+            data_overlay = payload.get("data")
+            if not isinstance(optimization_overlay, dict) or set(optimization_overlay) != {"status"}:
+                raise ValueError("pilot overlay may change only optimization status")
+            if not isinstance(data_overlay, dict) or set(data_overlay) != {
+                "training_budget_status",
+                "approved_optimizer_steps",
+                "approved_accepted_anchor_exposures",
+            }:
+                raise ValueError("pilot overlay may change only approved data budget fields")
+            merged["short_pilot_authorized"] = payload["short_pilot_authorized"]
+            merged["pilot_authorization"] = payload["pilot_authorization"]
+            merged["optimization"].update(optimization_overlay)
+            merged["data"].update(data_overlay)
+            merged["evaluation_status"] = payload["evaluation_status"]
+        else:
+            merged["gpu_preflight_authorized"] = payload["gpu_preflight_authorized"]
+            merged["preflight_authorization"] = payload["preflight_authorization"]
         merged["runtime"].update(runtime_overlay)
         payload = merged
     return GraniteNormalizedTargetConfig.model_validate(payload)

@@ -720,20 +720,36 @@ def main() -> None:
     rank, world, device = _init_distributed()
     config = _load_training_config(args.config)
     if config.experiment_family == "aspd_v3_granite_normalized_target_v1":
-        if not config.gpu_preflight_authorized:
-            raise RuntimeError(
-                "Granite normalized-target GPU execution is not authorized; "
-                "researcher approval must update an immutable execution contract"
-            )
-        if args.mode != "preflight":
-            raise RuntimeError("Granite normalized-target family is approved only for preflight")
         if args.strategy != config.runtime.strategy:
             raise RuntimeError("Granite normalized-target runtime strategy changed")
-        if (
-            config.preflight_authorization is None
-            or args.max_steps != config.preflight_authorization.optimizer_steps
-        ):
-            raise RuntimeError("Granite normalized-target preflight must run exactly three steps")
+        if args.mode == "preflight":
+            if not config.gpu_preflight_authorized:
+                raise RuntimeError("Granite normalized-target preflight is not authorized")
+            if (
+                config.preflight_authorization is None
+                or args.max_steps != config.preflight_authorization.optimizer_steps
+            ):
+                raise RuntimeError("Granite normalized-target preflight must run exactly three steps")
+        elif args.mode == "pilot":
+            authorization = config.pilot_authorization
+            if not config.short_pilot_authorized or authorization is None:
+                raise RuntimeError("Granite normalized-target pilot is not authorized")
+            if args.max_steps != authorization.optimizer_steps:
+                raise RuntimeError("Granite stabilization pilot must run exactly 128 steps")
+            preflight_path = Path(config.runtime.preflight_evidence)
+            if _sha256(preflight_path) != authorization.preflight_report_sha256:
+                raise RuntimeError("Granite pilot preflight evidence checksum mismatch")
+            preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
+            if (
+                preflight.get("status") != "PASS"
+                or preflight.get("config_fingerprint")
+                != authorization.preflight_config_fingerprint
+            ):
+                raise RuntimeError("Granite pilot preflight evidence is not the authorized PASS")
+        else:
+            raise RuntimeError(
+                "Granite normalized-target family is authorized only for bounded preflight/pilot"
+            )
     model_order = tuple(config.architecture.model_order)
     logical_target_count = len(model_order) * 8 * 7
     controlled = None
@@ -778,7 +794,10 @@ def main() -> None:
             raise RuntimeError("short pilot is not authorized by this config")
         if args.skip_checkpoint:
             raise RuntimeError("pilot mode cannot disable recoverable checkpoints")
-        if args.max_steps != config.data.optimizer_steps:
+        expected_pilot_steps = getattr(config.data, "optimizer_steps", None)
+        if expected_pilot_steps is None:
+            expected_pilot_steps = getattr(config.data, "approved_optimizer_steps", None)
+        if args.max_steps != expected_pilot_steps:
             raise RuntimeError("pilot mode must run the frozen short-pilot step budget")
         if args.run_dir.parent != Path(
             config.runtime.output_root
