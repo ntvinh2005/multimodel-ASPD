@@ -9,6 +9,10 @@ import torch
 import yaml
 from pydantic import ValidationError
 
+from aspd.multimodel.cli.evaluate_aspd_v3_granite_normalized_target import (
+    _load_contract,
+    _space_summary,
+)
 from aspd.multimodel.cli.train_aspd_v3_2b import (
     _load_training_config,
     _preflight_identity_requirements,
@@ -54,6 +58,9 @@ TREATMENT_STABILIZATION = (
 BASELINE_STABILIZATION = (
     ROOT
     / "configs/multimodel/aspd_v3/granite_normalized_target_baseline_stabilization_pilot_v1.yaml"
+)
+EVALUATION_CONTRACT = (
+    ROOT / "configs/multimodel/aspd_v3/granite_normalized_target_evaluation_v1.yaml"
 )
 
 
@@ -354,6 +361,36 @@ def test_oracle_denormalization_and_spaces_are_not_conflated() -> None:
     assert metrics["original_space_uses_oracle_target_norm"] is True
     assert metrics["normalized_fvu"] != pytest.approx(metrics["original_oracle_fvu"])
     assert tuple(metrics["matryoshka_prefixes"]) == ("0", "8192")
+
+
+def test_heldout_contract_is_read_only_document_bootstrap_and_exact_budget() -> None:
+    contract = _load_contract(EVALUATION_CONTRACT)
+    assert contract["read_only"] is True
+    assert contract["training_authorized_by_this_contract"] is False
+    assert contract["bootstrap_unit"] == "source_document"
+    assert contract["accepted_anchors"] == 100_352
+    assert contract["accepted_anchors"] == contract["pool_count"] * contract["pool_anchors"]
+    assert contract["model_order"] == ["gemma", "smol", "granite"]
+
+
+def test_heldout_summary_keeps_normalized_and_oracle_spaces_explicit() -> None:
+    metrics = {}
+    for space, scale in (("activation_normalized", 1.0), ("activation_original_oracle", 2.0)):
+        for site in ("pre", "mid"):
+            for layer in range(9, 17):
+                for prefix in range(6):
+                    denominator = 10.0 + layer
+                    metrics[f"{space}/gemma/{site}/L{layer:02d}/prefix_{prefix}"] = {
+                        "sse": scale * denominator,
+                        "centered_target_ss": denominator,
+                    }
+    report = {"model": "gemma", "metrics": metrics}
+    normalized = _space_summary(report, "activation_normalized")
+    oracle = _space_summary(report, "activation_original_oracle")
+    assert normalized["pre"]["full_reconstruction"]["fvu"] == pytest.approx(1.0)
+    assert oracle["pre"]["full_reconstruction"]["fvu"] == pytest.approx(2.0)
+    assert normalized["mid"]["matryoshka_mean_fvu"] == pytest.approx(1.0)
+    assert oracle["mid"]["matryoshka_mean_fvu"] == pytest.approx(2.0)
 
 
 def test_matryoshka_and_auxk_share_normalized_target_and_gradients_are_finite() -> None:

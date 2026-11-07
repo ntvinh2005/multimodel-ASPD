@@ -20,6 +20,11 @@ from typing import Any
 import torch
 import torch.distributed as dist
 
+from aspd.multimodel.v3.activation_targets import (
+    ActivationTargetNormalization,
+    oracle_denormalize,
+    prepare_activation_target,
+)
 from aspd.multimodel.v3.data import HashSplitPolicy
 from aspd.multimodel.v3.diagnostic import (
     DiagnosticContract,
@@ -287,9 +292,12 @@ def _local_evaluation(
     device: torch.device,
     next_pool,
     contract: DiagnosticContract,
+    activation_target_normalization: ActivationTargetNormalization = "none",
+    activation_target_epsilon: float = 1e-6,
 ) -> dict[str, Any]:
     metrics: dict[str, TensorMetricAccumulator] = {}
     document_metrics: dict[str, SequentialDocumentFVU] = {}
+    target_norm_stats: dict[str, dict[str, float | int]] = {}
     n_features = 8192
     fire_counts = {site: torch.zeros(n_features, dtype=torch.int64) for site in ("pre", "mid")}
     first_counts = {site: torch.zeros(n_features, dtype=torch.int64) for site in ("pre", "mid")}
@@ -361,6 +369,34 @@ def _local_evaluation(
             for layer_offset, (decoder, target) in enumerate(
                 zip(decoders, capture.activations[site], strict=True)
             ):
+                prepared = prepare_activation_target(
+                    target,
+                    capture.valid_anchors,
+                    mode=activation_target_normalization,
+                    epsilon=activation_target_epsilon,
+                )
+                layer = registry[local_key].layers[layer_offset]
+                norm_key = f"{local_key}/{site}/L{layer:02d}"
+                valid_norms = prepared.oracle_norm[capture.valid_anchors].double().cpu().flatten()
+                norm_state = target_norm_stats.setdefault(
+                    norm_key,
+                    {
+                        "count": 0,
+                        "sum": 0.0,
+                        "square_sum": 0.0,
+                        "minimum": math.inf,
+                        "maximum": -math.inf,
+                    },
+                )
+                norm_state["count"] += int(valid_norms.numel())
+                norm_state["sum"] += float(valid_norms.sum())
+                norm_state["square_sum"] += float(valid_norms.square().sum())
+                norm_state["minimum"] = min(
+                    float(norm_state["minimum"]), float(valid_norms.min())
+                )
+                norm_state["maximum"] = max(
+                    float(norm_state["maximum"]), float(valid_norms.max())
+                )
                 decoded = decoder.forward_dense_grouped(
                     code, boundaries=boundaries, include_bias=True
                 )
@@ -376,14 +412,52 @@ def _local_evaluation(
                         prediction.float() + (scale.float() - 1.0) * (prediction.float() - bias)
                         for prediction in decoded
                     )
-                layer = registry[local_key].layers[layer_offset]
                 for prefix_index, prediction in enumerate(decoded):
-                    key = f"activation/{local_key}/{site}/L{layer:02d}/prefix_{prefix_index}"
-                    _accumulate(metrics, key, prediction, target)
-                full_key = f"activation/{local_key}/{site}/L{layer:02d}/prefix_5"
-                document_metrics.setdefault(
-                    full_key, SequentialDocumentFVU(target.shape[-1])
-                ).update(decoded[-1], target, document_index, pool.document_ids)
+                    if activation_target_normalization == "none":
+                        key = (
+                            f"activation/{local_key}/{site}/L{layer:02d}/"
+                            f"prefix_{prefix_index}"
+                        )
+                        _accumulate(metrics, key, prediction, prepared.target)
+                    else:
+                        normalized_key = (
+                            f"activation_normalized/{local_key}/{site}/L{layer:02d}/"
+                            f"prefix_{prefix_index}"
+                        )
+                        oracle_key = (
+                            f"activation_original_oracle/{local_key}/{site}/L{layer:02d}/"
+                            f"prefix_{prefix_index}"
+                        )
+                        _accumulate(metrics, normalized_key, prediction, prepared.target)
+                        _accumulate(
+                            metrics,
+                            oracle_key,
+                            oracle_denormalize(prediction, prepared.oracle_norm),
+                            target,
+                        )
+                if activation_target_normalization == "none":
+                    full = f"activation/{local_key}/{site}/L{layer:02d}/prefix_5"
+                    document_metrics.setdefault(
+                        full, SequentialDocumentFVU(target.shape[-1])
+                    ).update(decoded[-1], target, document_index, pool.document_ids)
+                else:
+                    normalized_full = (
+                        f"activation_normalized/{local_key}/{site}/L{layer:02d}/prefix_5"
+                    )
+                    oracle_full = (
+                        f"activation_original_oracle/{local_key}/{site}/L{layer:02d}/prefix_5"
+                    )
+                    document_metrics.setdefault(
+                        normalized_full, SequentialDocumentFVU(target.shape[-1])
+                    ).update(decoded[-1], prepared.target, document_index, pool.document_ids)
+                    document_metrics.setdefault(
+                        oracle_full, SequentialDocumentFVU(target.shape[-1])
+                    ).update(
+                        oracle_denormalize(decoded[-1], prepared.oracle_norm),
+                        target,
+                        document_index,
+                        pool.document_ids,
+                    )
 
         for key, target_spec in model.targets.items():
             site = "pre" if target_spec.grounding_kind == "residual_pre" else "mid"
@@ -442,6 +516,17 @@ def _local_evaluation(
             )
             value["document_cluster_accounting"] = cluster_report
         finalized[key] = value
+
+    finalized_norms = {}
+    for key, value in target_norm_stats.items():
+        count = int(value["count"])
+        finalized_norms[key] = {
+            "count": count,
+            "minimum": float(value["minimum"]),
+            "mean": float(value["sum"]) / count,
+            "rms": math.sqrt(float(value["square_sum"]) / count),
+            "maximum": float(value["maximum"]),
+        }
 
     dictionary = {}
     feature_rows = []
@@ -552,6 +637,9 @@ def _local_evaluation(
         "metrics": finalized,
         "dictionary": dictionary,
         "feature_rows": feature_rows,
+        "activation_target_normalization": activation_target_normalization,
+        "activation_target_epsilon": activation_target_epsilon,
+        "activation_target_norms": finalized_norms,
     }
 
 
