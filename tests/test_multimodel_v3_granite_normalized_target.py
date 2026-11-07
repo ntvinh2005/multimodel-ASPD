@@ -51,6 +51,10 @@ TREATMENT_STABILIZATION = (
     ROOT
     / "configs/multimodel/aspd_v3/granite_normalized_target_treatment_stabilization_pilot_v1.yaml"
 )
+BASELINE_STABILIZATION = (
+    ROOT
+    / "configs/multimodel/aspd_v3/granite_normalized_target_baseline_stabilization_pilot_v1.yaml"
+)
 
 
 def _configs():
@@ -143,6 +147,38 @@ def test_treatment_stabilization_pilot_is_bounded_and_scientifically_matched() -
     assert pilot.runtime.output_root.startswith("/orange/thai/")
 
     left = treatment.payload()
+    right = pilot.payload()
+    for payload in (left, right):
+        payload.pop("scientific_status")
+        payload.pop("short_pilot_authorized")
+        payload.pop("pilot_authorization")
+        payload["optimization"].pop("status")
+        for key in (
+            "training_budget_status",
+            "approved_optimizer_steps",
+            "approved_accepted_anchor_exposures",
+        ):
+            payload["data"].pop(key)
+        for key in ("status", "output_root", "checkpoint_root", "preflight_evidence"):
+            payload["runtime"].pop(key)
+        payload.pop("evaluation_status")
+    assert left == right
+
+
+def test_baseline_stabilization_pilot_is_bounded_and_scientifically_matched() -> None:
+    baseline, _treatment = _configs()
+    pilot = load_granite_normalized_target_config(BASELINE_STABILIZATION)
+    assert pilot.arm == "baseline"
+    assert pilot.short_pilot_authorized is True
+    assert pilot.full_training_authorized is False
+    assert pilot.gpu_preflight_authorized is False
+    assert pilot.pilot_authorization is not None
+    assert pilot.pilot_authorization.scope == "matched_baseline_128_steps"
+    assert pilot.pilot_authorization.optimizer_steps == 128
+    assert pilot.data.approved_accepted_anchor_exposures == 1_048_576
+    assert pilot.runtime.output_root.endswith("/stabilization/baseline/runs")
+
+    left = baseline.payload()
     right = pilot.payload()
     for payload in (left, right):
         payload.pop("scientific_status")

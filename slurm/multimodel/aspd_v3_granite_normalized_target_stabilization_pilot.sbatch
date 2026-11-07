@@ -15,7 +15,19 @@ cd "${SLURM_SUBMIT_DIR:?submit from the Granite normalized-target worktree}"
 module load conda
 source ../env.sh
 
-CONFIG=configs/multimodel/aspd_v3/granite_normalized_target_treatment_stabilization_pilot_v1.yaml
+: "${ARM:=treatment}"
+case "${ARM}" in
+  treatment)
+    CONFIG=configs/multimodel/aspd_v3/granite_normalized_target_treatment_stabilization_pilot_v1.yaml
+    ;;
+  baseline)
+    CONFIG=configs/multimodel/aspd_v3/granite_normalized_target_baseline_stabilization_pilot_v1.yaml
+    ;;
+  *)
+    echo "ARM must be treatment or baseline" >&2
+    exit 2
+    ;;
+esac
 PYTHON=../repo/.venv/bin/python
 TORCHRUN=../repo/.venv/bin/torchrun
 
@@ -34,6 +46,7 @@ test ! -e "${RUN_DIR}"
 mkdir -p "${OUTPUT_ROOT}" slurm/logs
 
 echo "git_sha=${GIT_SHA}"
+echo "arm=${ARM}"
 echo "config=${CONFIG}"
 echo "run_dir=${RUN_DIR}"
 date --iso-8601=seconds

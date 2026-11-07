@@ -195,6 +195,7 @@ class GraniteExperimentRuntime(BaseModel):
         "STRUCTURAL_ONLY_GPU_NOT_AUTHORIZED",
         "THREE_STEP_GPU_PREFLIGHT_AUTHORIZED",
         "TREATMENT_STABILIZATION_PILOT_AUTHORIZED",
+        "MATCHED_BASELINE_PILOT_AUTHORIZED",
     ]
     strategy: Literal["model_owned"]
     world_size: Literal[3]
@@ -247,17 +248,19 @@ class GranitePilotAuthorization(BaseModel):
 
     authorized_by: Literal["researcher"]
     authorized_on: Literal["2026-11-06"]
-    scope: Literal["treatment_stabilization_128_steps"]
-    arm: Literal["normalized_target"]
+    scope: Literal["treatment_stabilization_128_steps", "matched_baseline_128_steps"]
+    arm: Literal["baseline", "normalized_target"]
     optimizer_steps: Literal[128]
     accepted_anchor_exposures: Literal[1_048_576]
     gpu_count: Literal[3]
     gpu_type: Literal["b200"]
     preflight_report_sha256: Literal[
-        "00500532a7c4e5e3dae33d7472028cf6717edebfd23d697d5318df491cdde454"
+        "00500532a7c4e5e3dae33d7472028cf6717edebfd23d697d5318df491cdde454",
+        "a28b22b8cd233e8d15a86c2ab4e38ea0ae13a97adbe7bda9660da12d5542ba3e",
     ]
     preflight_config_fingerprint: Literal[
-        "37c5c902e69503c362db37ee5031c0d83be2aa50e6e16fb97d5adb7bbbb93acc"
+        "37c5c902e69503c362db37ee5031c0d83be2aa50e6e16fb97d5adb7bbbb93acc",
+        "642ce56a1fa83ec552f53d777d73bce6533fb8d9c8f7cb392840f27a0cc705dc",
     ]
     full_training_authorized: Literal[False]
 
@@ -271,6 +274,7 @@ class GraniteNormalizedTargetConfig(BaseModel):
         "IMPLEMENTATION_ONLY_RESEARCHER_REVIEW_REQUIRED",
         "THREE_STEP_GPU_PREFLIGHT_AUTHORIZED_BY_RESEARCHER",
         "TREATMENT_STABILIZATION_PILOT_AUTHORIZED_BY_RESEARCHER",
+        "MATCHED_BASELINE_PILOT_AUTHORIZED_BY_RESEARCHER",
     ]
     full_training_authorized: Literal[False]
     short_pilot_authorized: bool
@@ -287,6 +291,7 @@ class GraniteNormalizedTargetConfig(BaseModel):
     evaluation_status: Literal[
         "SYNTHETIC_IMPLEMENTATION_ONLY_GPU_NOT_RUN",
         "GPU_PREFLIGHT_PASSED_STABILIZATION_PILOT_AUTHORIZED",
+        "GPU_PREFLIGHT_PASSED_MATCHED_BASELINE_PILOT_AUTHORIZED",
     ]
 
     @model_validator(mode="after")
@@ -351,18 +356,54 @@ class GraniteNormalizedTargetConfig(BaseModel):
         if self.objective.activation_target_normalization != expected_mode:
             raise ValueError(f"{self.arm} requires activation_target_normalization={expected_mode}")
         if self.short_pilot_authorized:
-            if self.arm != "normalized_target":
-                raise ValueError("the first stabilization pilot is treatment-only")
             if self.gpu_preflight_authorized or self.preflight_authorization is not None:
                 raise ValueError("pilot authorization must not reuse preflight authorization")
-            if self.scientific_status != (
-                "TREATMENT_STABILIZATION_PILOT_AUTHORIZED_BY_RESEARCHER"
-            ):
-                raise ValueError("stabilization pilot requires its explicit scientific status")
             if self.pilot_authorization is None:
                 raise ValueError("stabilization pilot requires a bounded authorization record")
-            if self.runtime.status != "TREATMENT_STABILIZATION_PILOT_AUTHORIZED":
-                raise ValueError("stabilization pilot requires its bounded runtime status")
+            authorized = {
+                "normalized_target": {
+                    "scope": "treatment_stabilization_128_steps",
+                    "scientific_status": (
+                        "TREATMENT_STABILIZATION_PILOT_AUTHORIZED_BY_RESEARCHER"
+                    ),
+                    "runtime_status": "TREATMENT_STABILIZATION_PILOT_AUTHORIZED",
+                    "evaluation_status": (
+                        "GPU_PREFLIGHT_PASSED_STABILIZATION_PILOT_AUTHORIZED"
+                    ),
+                    "preflight_sha256": (
+                        "00500532a7c4e5e3dae33d7472028cf6717edebfd23d697d5318df491cdde454"
+                    ),
+                    "preflight_fingerprint": (
+                        "37c5c902e69503c362db37ee5031c0d83be2aa50e6e16fb97d5adb7bbbb93acc"
+                    ),
+                },
+                "baseline": {
+                    "scope": "matched_baseline_128_steps",
+                    "scientific_status": "MATCHED_BASELINE_PILOT_AUTHORIZED_BY_RESEARCHER",
+                    "runtime_status": "MATCHED_BASELINE_PILOT_AUTHORIZED",
+                    "evaluation_status": (
+                        "GPU_PREFLIGHT_PASSED_MATCHED_BASELINE_PILOT_AUTHORIZED"
+                    ),
+                    "preflight_sha256": (
+                        "a28b22b8cd233e8d15a86c2ab4e38ea0ae13a97adbe7bda9660da12d5542ba3e"
+                    ),
+                    "preflight_fingerprint": (
+                        "642ce56a1fa83ec552f53d777d73bce6533fb8d9c8f7cb392840f27a0cc705dc"
+                    ),
+                },
+            }[self.arm]
+            observed = {
+                "scope": self.pilot_authorization.scope,
+                "scientific_status": self.scientific_status,
+                "runtime_status": self.runtime.status,
+                "evaluation_status": self.evaluation_status,
+                "preflight_sha256": self.pilot_authorization.preflight_report_sha256,
+                "preflight_fingerprint": self.pilot_authorization.preflight_config_fingerprint,
+            }
+            if observed != authorized:
+                raise ValueError(f"{self.arm} pilot authorization mismatch: {observed}")
+            if self.pilot_authorization.arm != self.arm:
+                raise ValueError("pilot authorization arm differs from experiment arm")
             if self.optimization.status != "INHERITED_SETTINGS_STABILIZATION_PILOT_AUTHORIZED":
                 raise ValueError("stabilization pilot must explicitly authorize inherited settings")
             if self.data.training_budget_status != (
@@ -376,21 +417,18 @@ class GraniteNormalizedTargetConfig(BaseModel):
                 != self.pilot_authorization.accepted_anchor_exposures
             ):
                 raise ValueError("stabilization pilot budget differs from its authorization")
+            expected_evidence = f"/preflight/{self.arm}/preflight_report.json"
             if self.runtime.preflight_evidence is None or not self.runtime.preflight_evidence.endswith(
-                "/preflight/normalized_target/preflight_report.json"
+                expected_evidence
             ):
-                raise ValueError("stabilization pilot must pin treatment preflight evidence")
-            if self.evaluation_status != (
-                "GPU_PREFLIGHT_PASSED_STABILIZATION_PILOT_AUTHORIZED"
-            ):
-                raise ValueError("stabilization pilot has the wrong evaluation status")
+                raise ValueError("pilot must pin arm-matched preflight evidence")
             expected_output = (
                 "/orange/thai/vinhnguyen1/aspd_v3/granite_normalized_target_v1/"
-                "stabilization/normalized_target/runs"
+                f"stabilization/{self.arm}/runs"
             )
             expected_checkpoint = (
                 "/orange/thai/vinhnguyen1/aspd_v3/granite_normalized_target_v1/"
-                "stabilization/normalized_target/checkpoints"
+                f"stabilization/{self.arm}/checkpoints"
             )
             if (
                 self.runtime.output_root != expected_output

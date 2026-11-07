@@ -1,0 +1,27 @@
+extends: granite_normalized_target_baseline_v1.yaml
+scientific_status: MATCHED_BASELINE_PILOT_AUTHORIZED_BY_RESEARCHER
+short_pilot_authorized: true
+pilot_authorization:
+  authorized_by: researcher
+  authorized_on: "2026-11-06"
+  scope: matched_baseline_128_steps
+  arm: baseline
+  optimizer_steps: 128
+  accepted_anchor_exposures: 1048576
+  gpu_count: 3
+  gpu_type: b200
+  preflight_report_sha256: a28b22b8cd233e8d15a86c2ab4e38ea0ae13a97adbe7bda9660da12d5542ba3e
+  preflight_config_fingerprint: 642ce56a1fa83ec552f53d777d73bce6533fb8d9c8f7cb392840f27a0cc705dc
+  full_training_authorized: false
+optimization:
+  status: INHERITED_SETTINGS_STABILIZATION_PILOT_AUTHORIZED
+data:
+  training_budget_status: RESEARCHER_AUTHORIZED_STABILIZATION_PILOT
+  approved_optimizer_steps: 128
+  approved_accepted_anchor_exposures: 1048576
+runtime:
+  status: MATCHED_BASELINE_PILOT_AUTHORIZED
+  output_root: /orange/thai/vinhnguyen1/aspd_v3/granite_normalized_target_v1/stabilization/baseline/runs
+  checkpoint_root: /orange/thai/vinhnguyen1/aspd_v3/granite_normalized_target_v1/stabilization/baseline/checkpoints
+  preflight_evidence: out/multimodel/aspd_v3/granite_normalized_target_v1/preflight/baseline/preflight_report.json
+evaluation_status: GPU_PREFLIGHT_PASSED_MATCHED_BASELINE_PILOT_AUTHORIZED
