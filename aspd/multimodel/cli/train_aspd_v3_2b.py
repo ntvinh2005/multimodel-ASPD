@@ -189,7 +189,14 @@ def _load_training_config(path: Path) -> Any:
         raise ValueError("ASPD v3 training config must be a mapping")
     if payload.get("experiment_family") == "aspd_v3_gemma_smol_scale_pilot":
         return load_two_model_scale_config(path)
-    if payload.get("experiment_family") == "aspd_v3_granite_normalized_target_v1":
+    granite_overlay_bases = {
+        "granite_normalized_target_baseline_v1.yaml",
+        "granite_normalized_target_treatment_v1.yaml",
+    }
+    if (
+        payload.get("experiment_family") == "aspd_v3_granite_normalized_target_v1"
+        or payload.get("extends") in granite_overlay_bases
+    ):
         return load_granite_normalized_target_config(path)
     return load_main_2b_v1_config(path)
 

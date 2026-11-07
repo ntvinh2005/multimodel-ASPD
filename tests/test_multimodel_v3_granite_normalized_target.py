@@ -9,6 +9,7 @@ import torch
 import yaml
 from pydantic import ValidationError
 
+from aspd.multimodel.cli.train_aspd_v3_2b import _load_training_config
 from aspd.multimodel.components import RankOneComponents
 from aspd.multimodel.v3.activation_evaluation import activation_reconstruction_metrics
 from aspd.multimodel.v3.activation_targets import (
@@ -101,6 +102,12 @@ def test_preflight_overlays_authorize_only_three_steps_and_preserve_science() ->
             payload["runtime"].pop("status")
             payload["runtime"].pop("preflight_evidence")
         assert left == right
+    assert _load_training_config(BASELINE_PREFLIGHT).fingerprint() == (
+        preflight_baseline.fingerprint()
+    )
+    assert _load_training_config(TREATMENT_PREFLIGHT).fingerprint() == (
+        preflight_treatment.fingerprint()
+    )
 
 
 def test_preflight_overlay_rejects_scientific_or_runtime_override(tmp_path: Path) -> None:
