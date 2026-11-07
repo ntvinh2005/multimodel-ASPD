@@ -68,6 +68,9 @@ BASELINE_RELIABILITY = (
 TREATMENT_RELIABILITY = (
     ROOT / "configs/multimodel/aspd_v3/granite_normalized_target_treatment_reliability_pilot_v1.yaml"
 )
+RELIABILITY_EVALUATION_CONTRACT = (
+    ROOT / "configs/multimodel/aspd_v3/granite_normalized_target_reliability_evaluation_v1.yaml"
+)
 
 
 def _configs():
@@ -397,6 +400,9 @@ def test_heldout_contract_is_read_only_document_bootstrap_and_exact_budget() -> 
     assert contract["accepted_anchors"] == 100_352
     assert contract["accepted_anchors"] == contract["pool_count"] * contract["pool_anchors"]
     assert contract["model_order"] == ["gemma", "smol", "granite"]
+    reliability = _load_contract(RELIABILITY_EVALUATION_CONTRACT)
+    assert reliability["checkpoint_steps"] == 1221
+    assert reliability["status"] == "RESEARCHER_AUTHORIZED_HELDOUT_RELIABILITY_GATE"
 
 
 def test_heldout_summary_keeps_normalized_and_oracle_spaces_explicit() -> None:

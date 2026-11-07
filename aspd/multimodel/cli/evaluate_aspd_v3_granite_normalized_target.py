@@ -90,7 +90,7 @@ def _load_contract(path: Path) -> dict[str, Any]:
         "bootstrap_seed": 0,
         "jaccard_top_features": 256,
         "jaccard_min_fires": 4,
-        "checkpoint_steps": 128,
+        "checkpoint_steps": payload.get("checkpoint_steps"),
         "arms": ["baseline", "normalized_target"],
         "model_order": list(MODEL_ORDER_GRANITE),
         "gpu_count": 3,
@@ -98,6 +98,11 @@ def _load_contract(path: Path) -> dict[str, Any]:
         "read_only": True,
         "training_authorized_by_this_contract": False,
     }
+    if payload.get("checkpoint_steps") == 1221:
+        expected["status"] = "RESEARCHER_AUTHORIZED_HELDOUT_RELIABILITY_GATE"
+        expected["authorized_on"] = "2026-11-07"
+    elif payload.get("checkpoint_steps") != 128:
+        raise ValueError("Granite held-out evaluation checkpoint step is not authorized")
     if payload != expected:
         raise ValueError("Granite held-out evaluation contract changed from the approved gate")
     if payload["accepted_anchors"] != payload["pool_anchors"] * payload["pool_count"]:
@@ -132,7 +137,7 @@ def _validate_inputs(args: argparse.Namespace, config: Any) -> dict[str, Any]:
         "run.model_order": list(MODEL_ORDER_GRANITE),
         "run.logical_target_count": 168,
         "checkpoint.status": "COMPLETE",
-        "checkpoint.step": 128,
+        "checkpoint.step": config.data.approved_optimizer_steps,
         "checkpoint.world_size": 3,
         "checkpoint.config_fingerprint": config.fingerprint(),
         "checkpoint.config_file_sha256": sha256_file(args.config),
