@@ -9,7 +9,10 @@ import torch
 import yaml
 from pydantic import ValidationError
 
-from aspd.multimodel.cli.train_aspd_v3_2b import _load_training_config
+from aspd.multimodel.cli.train_aspd_v3_2b import (
+    _load_training_config,
+    _preflight_identity_requirements,
+)
 from aspd.multimodel.components import RankOneComponents
 from aspd.multimodel.v3.activation_evaluation import activation_reconstruction_metrics
 from aspd.multimodel.v3.activation_targets import (
@@ -165,6 +168,22 @@ def test_review_config_rejects_hidden_pilot_budget() -> None:
     payload["data"]["approved_accepted_anchor_exposures"] = 1_048_576
     with pytest.raises(ValidationError, match="cannot carry a training budget"):
         GraniteNormalizedTargetConfig.model_validate(payload)
+
+
+def test_stabilization_pilot_pins_prerequisite_preflight_not_current_overlay() -> None:
+    pilot = load_granite_normalized_target_config(TREATMENT_STABILIZATION)
+    expected = _preflight_identity_requirements(
+        pilot,
+        mode="pilot",
+        git_sha="new-pilot-commit",
+        config_file_sha256="new-pilot-config-sha",
+    )
+    assert expected == {
+        "config_fingerprint": (
+            "37c5c902e69503c362db37ee5031c0d83be2aa50e6e16fb97d5adb7bbbb93acc"
+        )
+    }
+    assert expected["config_fingerprint"] != pilot.fingerprint()
 
 
 def test_config_rejects_roster_revision_and_authorization_changes() -> None:

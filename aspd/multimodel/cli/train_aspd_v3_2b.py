@@ -201,6 +201,36 @@ def _load_training_config(path: Path) -> Any:
     return load_main_2b_v1_config(path)
 
 
+def _preflight_identity_requirements(
+    config: Any,
+    *,
+    mode: str,
+    git_sha: str,
+    config_file_sha256: str,
+) -> dict[str, str]:
+    """Return the immutable identity expected from prerequisite preflight evidence.
+
+    Historical main/pilot contracts require the exact execution config and commit to have
+    produced their preflight.  The Granite stabilization pilot is intentionally a new bounded
+    overlay and later commit; its authorization instead pins the complete preflight artifact SHA
+    plus the approved preflight config fingerprint.
+    """
+
+    if (
+        config.experiment_family == "aspd_v3_granite_normalized_target_v1"
+        and mode == "pilot"
+    ):
+        authorization = config.pilot_authorization
+        if authorization is None:
+            raise RuntimeError("Granite pilot is missing its authorization record")
+        return {"config_fingerprint": authorization.preflight_config_fingerprint}
+    return {
+        "git_sha": git_sha,
+        "config_file_sha256": config_file_sha256,
+        "config_fingerprint": config.fingerprint(),
+    }
+
+
 def _git_sha() -> str:
     return subprocess.run(
         ["git", "rev-parse", "HEAD"], check=True, text=True, capture_output=True
@@ -866,9 +896,12 @@ def main() -> None:
             "status": "PASS",
             "mode": "preflight",
             "strategy": "model_owned",
-            "git_sha": git_sha,
-            "config_file_sha256": config_sha,
-            "config_fingerprint": config.fingerprint(),
+            **_preflight_identity_requirements(
+                config,
+                mode=args.mode,
+                git_sha=git_sha,
+                config_file_sha256=config_sha,
+            ),
             "dataset_manifest_sha256": dataset_manifest["manifest_sha256"],
             "alignment_manifest_sha256": alignment_manifest["manifest_sha256"],
             "world_size": len(model_order),
