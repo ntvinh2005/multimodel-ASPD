@@ -73,6 +73,11 @@ CORRECTED_DECODER_RELIABILITY = (
     / "configs/multimodel/aspd_v3/"
     "granite_normalized_target_unconstrained_decoder_reliability_pilot_v1.yaml"
 )
+CORRECTED_DECODER_PREFLIGHT = (
+    ROOT
+    / "configs/multimodel/aspd_v3/"
+    "granite_normalized_target_unconstrained_decoder_preflight_v1.yaml"
+)
 RELIABILITY_EVALUATION_CONTRACT = (
     ROOT / "configs/multimodel/aspd_v3/granite_normalized_target_reliability_evaluation_v1.yaml"
 )
@@ -605,6 +610,26 @@ def test_corrected_decoder_config_is_isolated_and_full_training_blocked() -> Non
         for key in ("status", "output_root", "checkpoint_root"):
             payload["runtime"].pop(key)
     assert left == right
+
+
+def test_corrected_decoder_preflight_is_bounded_and_pilot_pins_its_fingerprint() -> None:
+    preflight = load_granite_normalized_target_config(CORRECTED_DECODER_PREFLIGHT)
+    pilot = load_granite_normalized_target_config(CORRECTED_DECODER_RELIABILITY)
+    assert preflight.gpu_preflight_authorized is True
+    assert preflight.short_pilot_authorized is False
+    assert preflight.preflight_authorization is not None
+    assert preflight.preflight_authorization.optimizer_steps == 3
+    assert preflight.full_training_authorized is False
+    assert preflight.objective.activation_decoder_normalization == "none"
+    requirement = _preflight_identity_requirements(
+        pilot,
+        mode="pilot",
+        git_sha="ignored-for-authorized-overlay",
+        config_file_sha256="ignored-for-authorized-overlay",
+    )
+    assert requirement == {
+        "config_fingerprint": pilot.pilot_authorization.preflight_config_fingerprint
+    }
 
 
 def test_one_continuous_shared_gate_drives_all_three_model_losses() -> None:

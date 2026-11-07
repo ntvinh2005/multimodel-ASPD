@@ -256,7 +256,7 @@ class GranitePreflightAuthorization(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     authorized_by: Literal["researcher"]
-    authorized_on: Literal["2026-11-06"]
+    authorized_on: Literal["2026-11-06", "2026-11-07"]
     scope: Literal["three_step_gpu_preflight_only"]
     optimizer_steps: Literal[3]
     gpu_count: Literal[3]
@@ -404,6 +404,29 @@ class GraniteNormalizedTargetConfig(BaseModel):
                 f"{self.experiment_family} requires "
                 f"activation_decoder_normalization={expected_decoder_mode}"
             )
+        if corrected_decoder and self.gpu_preflight_authorized:
+            if self.short_pilot_authorized or self.pilot_authorization is not None:
+                raise ValueError("corrected preflight cannot carry pilot authorization")
+            if self.scientific_status != "THREE_STEP_GPU_PREFLIGHT_AUTHORIZED_BY_RESEARCHER":
+                raise ValueError("corrected preflight scientific status changed")
+            if self.preflight_authorization is None:
+                raise ValueError("corrected preflight requires bounded authorization")
+            if self.runtime.status != "THREE_STEP_GPU_PREFLIGHT_AUTHORIZED":
+                raise ValueError("corrected preflight runtime status changed")
+            if self.runtime.preflight_evidence is None or not self.runtime.preflight_evidence.endswith(
+                "granite_normalized_target_unconstrained_decoder_v1/preflight/"
+                "normalized_target/preflight_report.json"
+            ):
+                raise ValueError("corrected preflight evidence namespace changed")
+            if (
+                self.optimization.status != "PROPOSED_INHERITED_NOT_EXECUTION_APPROVED"
+                or self.data.training_budget_status != "UNAPPROVED"
+                or self.data.approved_optimizer_steps is not None
+                or self.data.approved_accepted_anchor_exposures is not None
+                or self.evaluation_status != "SYNTHETIC_IMPLEMENTATION_ONLY_GPU_NOT_RUN"
+            ):
+                raise ValueError("corrected preflight cannot carry a training budget")
+            return self
         if corrected_decoder:
             if self.arm != "normalized_target":
                 raise ValueError("decoder-norm correction pilot is normalized-target only")
@@ -715,9 +738,11 @@ def load_granite_normalized_target_config(path: str | Path) -> GraniteNormalized
             if pilot_overlay
             else {
                 "extends",
+                "experiment_family",
                 "scientific_status",
                 "gpu_preflight_authorized",
                 "preflight_authorization",
+                "objective",
                 "runtime",
             }
         )
@@ -766,6 +791,10 @@ def load_granite_normalized_target_config(path: str | Path) -> GraniteNormalized
         else:
             merged["gpu_preflight_authorized"] = payload["gpu_preflight_authorized"]
             merged["preflight_authorization"] = payload["preflight_authorization"]
+            objective_overlay = payload.get("objective", {})
+            if set(objective_overlay) - {"activation_decoder_normalization"}:
+                raise ValueError("preflight overlay changes forbidden objective fields")
+            merged["objective"].update(objective_overlay)
         merged["runtime"].update(runtime_overlay)
         payload = merged
     return GraniteNormalizedTargetConfig.model_validate(payload)

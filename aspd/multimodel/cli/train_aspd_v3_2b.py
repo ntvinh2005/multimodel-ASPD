@@ -217,7 +217,11 @@ def _preflight_identity_requirements(
     """
 
     if (
-        config.experiment_family == "aspd_v3_granite_normalized_target_v1"
+        config.experiment_family
+        in {
+            "aspd_v3_granite_normalized_target_v1",
+            "aspd_v3_granite_normalized_target_unconstrained_decoder_v1",
+        }
         and mode == "pilot"
     ):
         authorization = config.pilot_authorization
@@ -765,7 +769,10 @@ def main() -> None:
     git_sha = _require_clean_worktree()
     rank, world, device = _init_distributed()
     config = _load_training_config(args.config)
-    if config.experiment_family == "aspd_v3_granite_normalized_target_v1":
+    if config.experiment_family in {
+        "aspd_v3_granite_normalized_target_v1",
+        "aspd_v3_granite_normalized_target_unconstrained_decoder_v1",
+    }:
         if args.strategy != config.runtime.strategy:
             raise RuntimeError("Granite normalized-target runtime strategy changed")
         if args.mode == "preflight":
