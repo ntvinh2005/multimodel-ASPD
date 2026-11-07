@@ -39,6 +39,9 @@ from aspd.multimodel.v3.data import (
 )
 from aspd.multimodel.v3.distributed_checkpoint import MainV1DistributedCheckpoint
 from aspd.multimodel.v3.gating import ORIGINAL_ASPD_N_POOLS_TO_DEAD
+from aspd.multimodel.v3.granite_normalized_config import (
+    load_granite_normalized_target_config,
+)
 from aspd.multimodel.v3.hooks import assert_frozen_backbone, logical_weight_bias
 from aspd.multimodel.v3.main_2b_config import (
     MODEL_ORDER_2B,
@@ -186,6 +189,8 @@ def _load_training_config(path: Path) -> Any:
         raise ValueError("ASPD v3 training config must be a mapping")
     if payload.get("experiment_family") == "aspd_v3_gemma_smol_scale_pilot":
         return load_two_model_scale_config(path)
+    if payload.get("experiment_family") == "aspd_v3_granite_normalized_target_v1":
+        return load_granite_normalized_target_config(path)
     return load_main_2b_v1_config(path)
 
 
@@ -707,6 +712,16 @@ def main() -> None:
     git_sha = _require_clean_worktree()
     rank, world, device = _init_distributed()
     config = _load_training_config(args.config)
+    if config.experiment_family == "aspd_v3_granite_normalized_target_v1":
+        if not config.gpu_preflight_authorized:
+            raise RuntimeError(
+                "Granite normalized-target GPU execution is not authorized; "
+                "researcher approval must update an immutable execution contract"
+            )
+        if args.mode != "preflight":
+            raise RuntimeError("Granite normalized-target family is approved only for preflight")
+        if args.strategy != config.runtime.strategy:
+            raise RuntimeError("Granite normalized-target runtime strategy changed")
     model_order = tuple(config.architecture.model_order)
     logical_target_count = len(model_order) * 8 * 7
     controlled = None
@@ -1450,6 +1465,22 @@ def main() -> None:
                     config_file_sha256=config_sha,
                     dataset_manifest_sha256=dataset_manifest["manifest_sha256"],
                     model_key=local_key,
+                    experiment_metadata={
+                        "experiment_family": config.experiment_family,
+                        "model_order": list(model_order),
+                        "activation_target_normalization": getattr(
+                            config.objective, "activation_target_normalization", "none"
+                        ),
+                        "activation_target_epsilon": float(
+                            getattr(config.objective, "activation_target_epsilon", 1e-6)
+                        ),
+                        "activation_reconstruction_scale": getattr(
+                            config.objective, "activation_reconstruction_scale", "none"
+                        ),
+                        "oracle_norm_evaluation": bool(
+                            getattr(config.objective, "oracle_norm_evaluation", False)
+                        ),
+                    },
                 )
             else:
                 checkpoint_manifest = checkpoint_manager.save(

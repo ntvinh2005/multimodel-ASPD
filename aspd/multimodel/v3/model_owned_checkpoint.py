@@ -62,6 +62,7 @@ class ModelOwnedCheckpoint:
         config_file_sha256: str,
         dataset_manifest_sha256: str,
         model_key: str,
+        experiment_metadata: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         rank, world = self._rank_world()
         incomplete, complete = self._paths(step)
@@ -98,6 +99,7 @@ class ModelOwnedCheckpoint:
             "config_fingerprint": config_fingerprint,
             "config_file_sha256": config_file_sha256,
             "dataset_manifest_sha256": dataset_manifest_sha256,
+            "experiment_metadata": dict(experiment_metadata or {}),
             "rng": capture_rng_state(),
             "scheduler_state": scheduler.state_dict(),
             "runtime_state": dict(runtime_state),
@@ -123,6 +125,7 @@ class ModelOwnedCheckpoint:
                 "config_fingerprint": config_fingerprint,
                 "config_file_sha256": config_file_sha256,
                 "dataset_manifest_sha256": dataset_manifest_sha256,
+                "experiment_metadata": dict(experiment_metadata or {}),
                 "rank_sidecar_sha256": {
                     path.name: _sha256(path / "sidecar.json") for path in rank_roots
                 },

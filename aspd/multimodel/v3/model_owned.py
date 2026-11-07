@@ -16,6 +16,7 @@ import torch
 import torch.distributed as dist
 from torch import Tensor, nn
 
+from aspd.multimodel.v3.activation_targets import prepare_activation_target
 from aspd.multimodel.v3.encoder import (
     CrossModelTransformer,
     FeatureReadout,
@@ -241,6 +242,13 @@ class ModelOwnedMain2B(nn.Module):
         else:
             raise ValueError(f"unknown activation reconstruction scale mode: {scale_mode}")
         self.config_top_k_aux = int(getattr(config.architecture, "top_k_aux", 2048))
+        objective = getattr(config, "objective", None)
+        self.activation_target_normalization = getattr(
+            objective, "activation_target_normalization", "none"
+        )
+        self.activation_target_epsilon = float(
+            getattr(objective, "activation_target_epsilon", 1e-6)
+        )
 
     def activation_scale(self, site: str, layer_offset: int) -> Tensor | None:
         """Return the positive, geometric-mean-constrained local reconstruction gain."""
@@ -321,11 +329,18 @@ class ModelOwnedMain2B(nn.Module):
             for layer_offset, (decoder, target) in enumerate(
                 zip(decoders, batch.activations[site], strict=True)
             ):
+                prepared = prepare_activation_target(
+                    target,
+                    batch.valid_anchors,
+                    mode=self.activation_target_normalization,
+                    epsilon=self.activation_target_epsilon,
+                )
+                loss_target = prepared.target
                 reconstruction_scale = self.activation_scale(site, layer_offset)
                 activation, full = matryoshka_activation_fvu(
                     sparse[site].values,
                     decoder,
-                    target,
+                    loss_target,
                     batch.valid_anchors,
                     support=support[site],
                     sparse_backend=self.sparse_backend,
@@ -334,7 +349,7 @@ class ModelOwnedMain2B(nn.Module):
                 auxk = auxk_dead_feature_loss(
                     scores[site],
                     decoder,
-                    target,
+                    loss_target,
                     full,
                     batch.valid_anchors,
                     self.gates[site].dead_features,

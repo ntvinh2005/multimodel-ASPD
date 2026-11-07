@@ -680,6 +680,7 @@ def _distributed_model_owned_worker(
         config_file_sha256="a" * 64,
         dataset_manifest_sha256="b" * 64,
         model_key=key,
+        experiment_metadata={"activation_target_normalization": "none"},
     )
     with torch.no_grad():
         next(model.parameters()).add_(1)
@@ -696,6 +697,7 @@ def _distributed_model_owned_worker(
     torch.testing.assert_close(next(model.parameters()), saved_parameter)
     assert runtime["completed_steps"] == 1
     assert manifest["status"] == "COMPLETE"
+    assert manifest["experiment_metadata"]["activation_target_normalization"] == "none"
     with torch.no_grad():
         next(model.parameters()).sub_(2)
     runtime, manifest = manager.load_model_only(

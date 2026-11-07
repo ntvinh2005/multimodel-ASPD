@@ -12,6 +12,9 @@ from huggingface_hub import HfApi
 
 from aspd.multimodel.v3.config import load_v3_config_bundle
 from aspd.multimodel.v3.data import write_json_immutable
+from aspd.multimodel.v3.granite_normalized_config import (
+    load_granite_normalized_target_config,
+)
 from aspd.multimodel.v3.main_2b_config import load_main_2b_v1_config
 from aspd.multimodel.v3.main_config import load_main_v1_config
 from aspd.multimodel.v3.two_model_config import load_two_model_scale_config
@@ -25,6 +28,11 @@ def _fingerprint(payload: dict[str, Any]) -> str:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--granite-normalized-target",
+        action="store_true",
+        help="prepare the isolated Gemma/SmolLM2/Granite manifest family",
+    )
     parser.add_argument(
         "--main-config",
         type=Path,
@@ -60,8 +68,16 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = _parse_args()
+    if sum((args.two_model_scale, args.main_2b, args.granite_normalized_target)) > 1:
+        raise ValueError("manifest family flags are mutually exclusive")
     bundle = None
-    if args.two_model_scale:
+    if args.granite_normalized_target:
+        main_config = load_granite_normalized_target_config(args.main_config)
+        dataset = main_config.data
+        dataset_id = dataset.dataset_id
+        dataset_revision = dataset.dataset_revision
+        models = main_config.models
+    elif args.two_model_scale:
         main_config = load_two_model_scale_config(args.main_config)
         dataset = main_config.data
         dataset_id = dataset.dataset_id
@@ -126,9 +142,14 @@ def main() -> None:
         }
         for model in models
     ]
-    if args.two_model_scale:
+    if args.granite_normalized_target:
+        alignment_name = main_config.data.canonical_text_policy
+        distributed_source = "rank_zero_stream_broadcast_to_three_model_owner_ranks"
+        alignment_schema_version = 3
+    elif args.two_model_scale:
         alignment_name = main_config.data.canonical_text_policy
         distributed_source = "rank_zero_stream_broadcast_to_two_model_owner_ranks"
+        alignment_schema_version = 2
     else:
         alignment_name = "exact_three_way_canonical_prefix"
         distributed_source = (
@@ -136,8 +157,9 @@ def main() -> None:
             if args.main_2b
             else "rank_zero_stream_broadcast_to_three_fsdp_ranks"
         )
+        alignment_schema_version = 2
     alignment = {
-        "schema_version": 2,
+        "schema_version": alignment_schema_version,
         "kind": "ASPD_V3_ON_THE_FLY_ALIGNMENT_MANIFEST",
         "dataset_manifest_sha256": manifest["manifest_sha256"],
         "model_order": list(main_config.architecture.model_order),
