@@ -1,0 +1,145 @@
+schema_version: 1
+experiment_family: aspd_v3_gemma_smol_matryoshka_ablation_v1
+scientific_status: RESEARCHER_AUTHORIZED_1221_STEP_CONTROLLED_ABLATION
+authorized_by: researcher
+authorized_on: '2026-11-08'
+full_training_authorized: false
+short_pilot_authorized: true
+gpu_preflight_authorized: true
+arm_id: full_only
+
+models:
+  - key: gemma
+    model_id: google/gemma-2-2b-it
+    revision: 299a8560bedf22ed1c72a8a11e7dce4a7f9f51f8
+    tokenizer_id: google/gemma-2-2b-it
+    tokenizer_revision: 299a8560bedf22ed1c72a8a11e7dce4a7f9f51f8
+    family: gemma2
+    license: gemma
+    access: gated_account_scoped
+    checkpoint_parameter_count: 2614341888
+    selected_layers: [9, 10, 11, 12, 13, 14, 15, 16]
+    hidden_size: 2304
+    intermediate_size: 9216
+    num_hidden_layers: 26
+    num_attention_heads: 8
+    num_key_value_heads: 4
+    head_dim: 256
+    layer_prefix: model.layers
+    residual_pre_suffix: input_layernorm
+    residual_mid_suffix: pre_feedforward_layernorm
+    frozen: true
+  - key: smol
+    model_id: HuggingFaceTB/SmolLM2-1.7B-Instruct
+    revision: 31b70e2e869a7173562077fd711b654946d38674
+    tokenizer_id: HuggingFaceTB/SmolLM2-1.7B-Instruct
+    tokenizer_revision: 31b70e2e869a7173562077fd711b654946d38674
+    family: llama
+    license: apache-2.0
+    access: public
+    checkpoint_parameter_count: 1711376384
+    selected_layers: [8, 9, 10, 11, 12, 13, 14, 15]
+    hidden_size: 2048
+    intermediate_size: 8192
+    num_hidden_layers: 24
+    num_attention_heads: 32
+    num_key_value_heads: 32
+    head_dim: 64
+    layer_prefix: model.layers
+    residual_pre_suffix: input_layernorm
+    residual_mid_suffix: post_attention_layernorm
+    frozen: true
+
+architecture:
+  dictionary_size: 8192
+  batch_topk_k: 32
+  pool_tokens: 2048
+  pools_per_step: 4
+  top_k_aux: 2048
+  auxk_coefficient: 0.03125
+  matryoshka_group_fracs: [0.0625, 0.0625, 0.125, 0.25, 0.5]
+  gate_grouping: pre_mid
+  model_order: [gemma, smol]
+  logical_matrices: [q, k, v, o, mlp_gate, mlp_up, mlp_down]
+  latent_tokens_per_model: 8
+  packing_method: learned_projection
+  packed_token_width: 512
+  intra_model_layers: 2
+  intra_model_heads: 8
+  cross_model_layers: 2
+  cross_model_heads: 8
+  cross_model_width: 512
+  cross_input_adapter: linear_515_to_512
+  feature_readout: mean
+  dropout: 0
+  activation: GELU
+  encoder_mixer: hierarchical_transformer
+
+objective:
+  internal_code: binary_support
+  activation_code: continuous
+  internal_gradient_route: rank_one_only
+  activation_gradient_route: encoder_packing_adapter_readout_and_activation_decoder
+  internal_loss: balanced_pre_mid_mean_fvu
+  activation_loss: balanced_pre_mid_mean_full_fvu
+  activation_objective_mode: full_only
+  auxk_loss: balanced_pre_mid_dead_feature_revival
+  auxk_score_source: post_relu
+  auxk_softplus_temperature: null
+  internal_coefficient: 1.0
+  activation_coefficient: 1.0
+  fvu_reduction_dtype: float32
+  activation_target_normalization: per_anchor_l2
+  activation_target_epsilon: 1.0e-6
+  activation_decoder_normalization: none
+  activation_reconstruction_scale: none
+  native_bias: preserve
+
+optimization:
+  optimizer: Adam
+  betas: [0.9, 0.99]
+  weight_decay: 0
+  rank_one_lr: 0.0003
+  activation_decoder_lr: 0.0003
+  encoder_lr: 0.0001
+  schedule: constant
+  seed: 0
+  precision: bfloat16
+  fp32_master_parameters: true
+
+data:
+  dataset_id: monology/pile-uncopyrighted
+  dataset_revision: 3be90335b66f24456a5d6659d9c8d208c0357119
+  sequence_length: 512
+  effective_batch_anchors: 8192
+  accepted_anchor_exposures: 10002432
+  optimizer_steps: 1221
+  split_unit: document
+  split_seed: 0
+  split_modulus: 1000
+  validation_buckets: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  test_buckets: [10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+  canonical_text_policy: identity_exact_two_way_prefix
+  heldout_target_anchors: 100352
+
+runtime:
+  strategy: model_owned
+  world_size: 2
+  checkpoint_every_steps: 1000
+  keep_complete_checkpoints: 2
+  activation_backward_chunk: 8
+  matrix_backward_chunk: 28
+  sparse_backend: dense
+  early_exit_after_selected_layers: true
+  data_prefetch_depth: 1
+  ledger_anchor_storage: exact_compact_v1
+  output_root: /orange/thai/vinhnguyen1/aspd_v3/gemma_smol_matryoshka_ablation_v1/full_only/pilot/runs
+  checkpoint_root: /orange/thai/vinhnguyen1/aspd_v3/gemma_smol_matryoshka_ablation_v1/full_only/pilot/checkpoints
+  dataset_manifest: out/multimodel/aspd_v3/two_model_scale_v1/data/pile_uncopyrighted/manifest.json
+  alignment_manifest: out/multimodel/aspd_v3/two_model_scale_v1/data/pile_uncopyrighted/alignment_manifest.json
+  preflight_evidence: /orange/thai/vinhnguyen1/aspd_v3/gemma_smol_matryoshka_ablation_v1/full_only/preflight/preflight_report.json
+  max_preflight_steps: 3
+  max_preflight_minutes: 45
+  diagnostic_parameter_steps: [0, 64, 128, 256, 512, 768]
+
+evaluation_status: RESEARCHER_AUTHORIZED_MATCHED_HELDOUT_EVALUATION

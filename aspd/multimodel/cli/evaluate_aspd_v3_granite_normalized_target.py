@@ -45,6 +45,12 @@ from aspd.multimodel.v3.model_owned_checkpoint import ModelOwnedCheckpoint
 from aspd.multimodel.v3.models import load_frozen_v3_model, load_v3_tokenizer
 from aspd.multimodel.v3.production_stream import AlignedAnchorPool, load_pinned_pile_dataset
 from aspd.multimodel.v3.registry import build_model_registry_2b
+from aspd.multimodel.v3.two_model_matryoshka_config import (
+    EXPERIMENT_FAMILY as TWO_MODEL_MATRYOSHKA_FAMILY,
+)
+from aspd.multimodel.v3.two_model_matryoshka_config import (
+    load_two_model_matryoshka_config,
+)
 
 
 def _args() -> argparse.Namespace:
@@ -80,6 +86,34 @@ def _broadcast(value: Any) -> Any:
 
 def _load_contract(path: Path) -> dict[str, Any]:
     payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if payload.get("experiment_family") == TWO_MODEL_MATRYOSHKA_FAMILY:
+        expected = {
+            "schema_version": 1,
+            "status": "RESEARCHER_AUTHORIZED_TWO_MODEL_MATRYOSHKA_HELDOUT",
+            "authorized_by": "researcher",
+            "authorized_on": "2026-11-08",
+            "experiment_family": TWO_MODEL_MATRYOSHKA_FAMILY,
+            "split": "validation",
+            "split_unit": "document",
+            "accepted_anchors": 100_352,
+            "pool_anchors": 2_048,
+            "pool_count": 49,
+            "bootstrap_unit": "source_document",
+            "bootstrap_replicates": 1_000,
+            "bootstrap_seed": 0,
+            "jaccard_top_features": 256,
+            "jaccard_min_fires": 4,
+            "checkpoint_steps": 1221,
+            "arms": ["matryoshka", "full_only"],
+            "model_order": ["gemma", "smol"],
+            "gpu_count": 2,
+            "gpu_type": "b200",
+            "read_only": True,
+            "training_authorized_by_this_contract": False,
+        }
+        if payload != expected:
+            raise ValueError("two-model Matryoshka evaluation contract changed")
+        return payload
     if payload.get("experiment_family") == ENCODER_AUXK_FACTORIAL_FAMILY:
         if payload.get("status") == "RESEARCHER_AUTHORIZED_LINEAR_CONFIRMATION_HELDOUT":
             expected_confirmation = {
@@ -204,16 +238,20 @@ def _validate_inputs(args: argparse.Namespace, config: Any) -> dict[str, Any]:
     dataset = json.loads(Path(config.runtime.dataset_manifest).read_text(encoding="utf-8"))
     alignment = json.loads(Path(config.runtime.alignment_manifest).read_text(encoding="utf-8"))
     checkpoint_sha = sha256_file(args.checkpoint / "manifest.json")
+    model_order = list(config.architecture.model_order)
+    expected_steps = getattr(config.data, "optimizer_steps", None)
+    if expected_steps is None:
+        expected_steps = config.data.approved_optimizer_steps
     expected = {
         "run.config_fingerprint": config.fingerprint(),
         "run.config_file_sha256": sha256_file(args.config),
         "run.dataset_manifest_sha256": dataset["manifest_sha256"],
         "run.alignment_manifest_sha256": alignment["manifest_sha256"],
-        "run.model_order": list(MODEL_ORDER_GRANITE),
-        "run.logical_target_count": 168,
+        "run.model_order": model_order,
+        "run.logical_target_count": len(model_order) * 8 * 7,
         "checkpoint.status": "COMPLETE",
-        "checkpoint.step": config.data.approved_optimizer_steps,
-        "checkpoint.world_size": 3,
+        "checkpoint.step": expected_steps,
+        "checkpoint.world_size": len(model_order),
         "checkpoint.config_fingerprint": config.fingerprint(),
         "checkpoint.config_file_sha256": sha256_file(args.config),
         "checkpoint.dataset_manifest_sha256": dataset["manifest_sha256"],
@@ -240,7 +278,7 @@ def _validate_inputs(args: argparse.Namespace, config: Any) -> dict[str, Any]:
         if observed[key] != value
     }
     if mismatch:
-        raise ValueError(f"Granite pilot provenance mismatch: {mismatch}")
+        raise ValueError(f"normalized-target pilot provenance mismatch: {mismatch}")
     return {
         "status": "PASS",
         "arm": config.arm,
@@ -351,15 +389,23 @@ def main() -> None:
     local_rank = int(os.environ["LOCAL_RANK"])
     world = int(os.environ["WORLD_SIZE"])
     raw_config = yaml.safe_load(args.config.read_text(encoding="utf-8"))
-    config = (
-        load_encoder_auxk_factorial_config(args.config)
-        if raw_config.get("experiment_family") == ENCODER_AUXK_FACTORIAL_FAMILY
-        else load_granite_normalized_target_config(args.config)
-    )
+    if raw_config.get("experiment_family") == ENCODER_AUXK_FACTORIAL_FAMILY:
+        config = load_encoder_auxk_factorial_config(args.config)
+    elif raw_config.get("experiment_family") == TWO_MODEL_MATRYOSHKA_FAMILY:
+        config = load_two_model_matryoshka_config(args.config)
+    else:
+        config = load_granite_normalized_target_config(args.config)
     contract = _load_contract(args.contract)
     model_order = tuple(config.architecture.model_order)
-    if world != 3 or model_order != MODEL_ORDER_GRANITE:
-        raise RuntimeError("Granite evaluation requires gemma/smol/granite on exactly three ranks")
+    if world != len(model_order):
+        raise RuntimeError("evaluation world size differs from the configured model roster")
+    if config.experiment_family == TWO_MODEL_MATRYOSHKA_FAMILY:
+        if model_order != ("gemma", "smol") or any(
+            "qwen" in model.model_id.lower() for model in config.models
+        ):
+            raise RuntimeError("two-model evaluation must contain only Gemma and SmolLM2")
+    elif model_order != MODEL_ORDER_GRANITE:
+        raise RuntimeError("Granite evaluation requires gemma/smol/granite")
     device = torch.device("cuda", local_rank)
     torch.cuda.set_device(device)
     dist.init_process_group("nccl", device_id=device)
@@ -480,6 +526,7 @@ def main() -> None:
                     "schema_version": 1,
                     "status": "E0_CHECKPOINT_RESTORE_PASS",
                     "arm": config.arm,
+                    "experiment_arm_id": getattr(config, "arm_id", config.arm),
                     "checkpoint_manifest_sha256": provenance["checkpoint_manifest_sha256"],
                     "checkpoint_step": checkpoint_manifest["step"],
                     "model_order": list(model_order),
@@ -524,6 +571,10 @@ def main() -> None:
                 "schema_version": 1,
                 "status": "READ_ONLY_GRANITE_NORMALIZED_TARGET_DIAGNOSTIC_COMPLETE",
                 "arm": config.arm,
+                "experiment_arm_id": getattr(config, "arm_id", config.arm),
+                "activation_objective_mode": getattr(
+                    config.objective, "activation_objective_mode", "matryoshka"
+                ),
                 "factorial_arm_id": getattr(config, "arm_id", None),
                 "encoder_mixer": getattr(
                     config.architecture, "encoder_mixer", "hierarchical_transformer"
@@ -535,7 +586,9 @@ def main() -> None:
                     config.objective, "auxk_softplus_temperature", None
                 ),
                 "activation_target_normalization": config.objective.activation_target_normalization,
-                "original_space_uses_oracle_target_norm": config.arm == "normalized_target",
+                "original_space_uses_oracle_target_norm": (
+                    config.objective.activation_target_normalization == "per_anchor_l2"
+                ),
                 "diagnostic_git_sha": _git_sha(),
                 "training_git_sha": provenance["training_git_sha"],
                 "config_sha256": provenance["config_sha256"],

@@ -29,6 +29,7 @@ from aspd.multimodel.v3.gating import V3BatchTopK
 from aspd.multimodel.v3.objective import (
     auxk_activation_scores,
     auxk_dead_feature_loss,
+    full_activation_fvu,
     masked_fvu,
     matryoshka_activation_fvu,
 )
@@ -288,6 +289,13 @@ class ModelOwnedMain2B(nn.Module):
         self.auxk_softplus_temperature = getattr(
             objective, "auxk_softplus_temperature", None
         )
+        self.activation_objective_mode = getattr(
+            objective, "activation_objective_mode", "matryoshka"
+        )
+        if self.activation_objective_mode not in {"matryoshka", "full_only"}:
+            raise ValueError(
+                f"unknown activation objective mode: {self.activation_objective_mode}"
+            )
 
     def activation_scale(self, site: str, layer_offset: int) -> Tensor | None:
         """Return the positive, geometric-mean-constrained local reconstruction gain."""
@@ -381,6 +389,28 @@ class ModelOwnedMain2B(nn.Module):
                     )
                     positive_selected = selected > 0
                     positive_scores = valid_scores > 0
+                    candidate_counts = positive_scores.sum(-1).float()
+                    candidate_q = torch.quantile(
+                        candidate_counts,
+                        torch.tensor([0.01, 0.5, 0.9, 0.99], device=logits.device),
+                    )
+                    firing_counts = positive_selected.sum(dim=0).float()
+                    firing_total = firing_counts.sum()
+                    firing_probability = (
+                        firing_counts / firing_total
+                        if float(firing_total) > 0
+                        else firing_counts
+                    )
+                    positive_frequency = firing_probability > 0
+                    firing_entropy = -(
+                        firing_probability[positive_frequency]
+                        * firing_probability[positive_frequency].log()
+                    ).sum()
+                    ordered_firing = firing_counts.sort(descending=True).values
+                    readout_bias = (
+                        self.shared_encoders[site].readout.output.bias.detach().float()
+                    )
+                    boundaries = (0, 512, 1024, 2048, 4096, 8192)
                     self.latest_gate_diagnostics[site] = {
                         "raw_logit_mean": float(valid_logits.mean()),
                         "raw_logit_std": float(valid_logits.std(unbiased=False)),
@@ -393,6 +423,11 @@ class ModelOwnedMain2B(nn.Module):
                         "raw_logit_q90_sampled": float(logit_q[3]),
                         "raw_logit_q99_sampled": float(logit_q[4]),
                         "positive_scores_per_anchor": float(positive_scores.sum(-1).float().mean()),
+                        "positive_scores_per_anchor_std": float(candidate_counts.std(unbiased=False)),
+                        "positive_scores_per_anchor_q01": float(candidate_q[0]),
+                        "positive_scores_per_anchor_median": float(candidate_q[1]),
+                        "positive_scores_per_anchor_q90": float(candidate_q[2]),
+                        "positive_scores_per_anchor_q99": float(candidate_q[3]),
                         "all_zero_score_anchor_fraction": float(
                             (positive_scores.sum(-1) == 0).float().mean()
                         ),
@@ -411,6 +446,39 @@ class ModelOwnedMain2B(nn.Module):
                             else selected.new_zeros(())
                         ),
                         "active_features_in_pool": int(positive_selected.any(dim=0).sum()),
+                        "effective_dictionary_size_in_pool": float(firing_entropy.exp()),
+                        "top_1_percent_firing_share_in_pool": float(
+                            ordered_firing[:82].sum() / firing_total
+                            if float(firing_total) > 0
+                            else 0.0
+                        ),
+                        "top_5_percent_firing_share_in_pool": float(
+                            ordered_firing[:410].sum() / firing_total
+                            if float(firing_total) > 0
+                            else 0.0
+                        ),
+                        "top_10_percent_firing_share_in_pool": float(
+                            ordered_firing[:820].sum() / firing_total
+                            if float(firing_total) > 0
+                            else 0.0
+                        ),
+                        **{
+                            f"feature_band_{lower}_{upper}_firing_share_in_pool": float(
+                                firing_counts[lower:upper].sum() / firing_total
+                                if float(firing_total) > 0
+                                else 0.0
+                            )
+                            for lower, upper in zip(
+                                boundaries[:-1], boundaries[1:], strict=True
+                            )
+                        },
+                        "readout_bias_mean": float(readout_bias.mean()),
+                        "readout_bias_std": float(readout_bias.std(unbiased=False)),
+                        "readout_bias_negative_fraction": float(
+                            (readout_bias < 0).float().mean()
+                        ),
+                        "readout_bias_min": float(readout_bias.min()),
+                        "readout_bias_max": float(readout_bias.max()),
                         "dead_features": int(self.gates[site].dead_features.sum()),
                     }
         return scores, sparse, continuous_support, binary_support
@@ -454,7 +522,12 @@ class ModelOwnedMain2B(nn.Module):
                 )
                 loss_target = prepared.target
                 reconstruction_scale = self.activation_scale(site, layer_offset)
-                activation, full = matryoshka_activation_fvu(
+                activation_loss = (
+                    matryoshka_activation_fvu
+                    if self.activation_objective_mode == "matryoshka"
+                    else full_activation_fvu
+                )
+                activation, full = activation_loss(
                     sparse[site].values,
                     decoder,
                     loss_target,

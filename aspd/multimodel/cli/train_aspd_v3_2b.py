@@ -81,6 +81,12 @@ from aspd.multimodel.v3.training_capture import (
     capture_family_pool,
 )
 from aspd.multimodel.v3.two_model_config import load_two_model_scale_config
+from aspd.multimodel.v3.two_model_matryoshka_config import (
+    EXPERIMENT_FAMILY as TWO_MODEL_MATRYOSHKA_FAMILY,
+)
+from aspd.multimodel.v3.two_model_matryoshka_config import (
+    load_two_model_matryoshka_config,
+)
 
 SOURCE_RANK = {key: index for index, key in enumerate(MODEL_ORDER_2B)}
 
@@ -195,6 +201,8 @@ def _load_training_config(path: Path) -> Any:
         raise ValueError("ASPD v3 training config must be a mapping")
     if payload.get("experiment_family") == "aspd_v3_gemma_smol_scale_pilot":
         return load_two_model_scale_config(path)
+    if payload.get("experiment_family") == TWO_MODEL_MATRYOSHKA_FAMILY:
+        return load_two_model_matryoshka_config(path)
     if payload.get("experiment_family") == ENCODER_AUXK_FACTORIAL_FAMILY:
         return load_encoder_auxk_factorial_config(path)
     granite_overlay_bases = {
@@ -830,6 +838,43 @@ def main() -> None:
                 raise RuntimeError("factorial screen must run exactly 256 steps")
         else:
             raise RuntimeError("encoder/AuxK factorial is limited to benchmark and pilot modes")
+    elif config.experiment_family == TWO_MODEL_MATRYOSHKA_FAMILY:
+        if args.strategy != "model_owned":
+            raise RuntimeError("two-model Matryoshka ablation requires model-owned execution")
+        if tuple(config.architecture.model_order) != ("gemma", "smol"):
+            raise RuntimeError("two-model Matryoshka ablation model order changed")
+        if any("qwen" in model.model_id.lower() for model in config.models):
+            raise RuntimeError("Qwen is forbidden in the two-model Matryoshka ablation")
+        if args.mode == "preflight":
+            if args.max_steps != 3 or args.skip_checkpoint:
+                raise RuntimeError("Matryoshka preflight requires three checkpointed steps")
+        elif args.mode == "pilot":
+            if args.max_steps != 1221 or args.skip_checkpoint:
+                raise RuntimeError("Matryoshka pilot requires 1,221 checkpointed steps")
+            preflight_path = Path(config.runtime.preflight_evidence)
+            if not preflight_path.is_file():
+                raise RuntimeError("Matryoshka pilot requires arm-matched preflight evidence")
+            preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
+            expected_preflight = {
+                "status": "PASS",
+                "mode": "preflight",
+                "optimizer_steps": 3,
+                "world_size": 2,
+                "logical_target_count": 112,
+                "git_sha": git_sha,
+                "config_file_sha256": _sha256(args.config),
+                "config_fingerprint": config.fingerprint(),
+                "checkpoint_parameter_and_adam_restore_probe": "PASS",
+            }
+            mismatch = {
+                key: {"expected": value, "observed": preflight.get(key)}
+                for key, value in expected_preflight.items()
+                if preflight.get(key) != value
+            }
+            if mismatch:
+                raise RuntimeError(f"Matryoshka preflight evidence mismatch: {mismatch}")
+        else:
+            raise RuntimeError("Matryoshka ablation is limited to preflight and pilot modes")
     model_order = tuple(config.architecture.model_order)
     logical_target_count = len(model_order) * 8 * 7
     controlled = None
@@ -1330,6 +1375,9 @@ def main() -> None:
     checkpoint_manifest = None
     resumed = False
     diagnostic_steps = {1, 2, 10, 50, 128, 256, 300, 500, 800, 1000, 1221}
+    diagnostic_parameter_steps = set(
+        getattr(config.runtime, "diagnostic_parameter_steps", ())
+    )
     initial_decoder_norms_by_rank = None
     if args.strategy == "model_owned":
         initial_decoder_norms_by_rank = [None] * world
@@ -1358,7 +1406,14 @@ def main() -> None:
         stage: dict[str, float] = {}
         step_anchor_ids: list[str] = []
         pool_losses: list[dict[str, float]] = []
-        collect_step_diagnostics = completed_steps + 1 in diagnostic_steps
+        if diagnostic_parameter_steps:
+            collect_step_diagnostics = completed_steps in diagnostic_parameter_steps
+            diagnostic_parameter_step = completed_steps if collect_step_diagnostics else None
+        else:
+            collect_step_diagnostics = completed_steps + 1 in diagnostic_steps
+            diagnostic_parameter_step = (
+                completed_steps if collect_step_diagnostics else None
+            )
         for pool_index in range(config.architecture.pools_per_step):
             with _timed(args.profile_stages, stage, "data_alignment_and_broadcast"):
                 payload = None
@@ -1568,6 +1623,7 @@ def main() -> None:
                     "reconstruction_scales_by_rank": scales_by_rank,
                     "reconstruction_log_scale_gradients_by_rank": scale_gradients,
                     "activation_decoder_norms_by_rank": decoder_norms_by_rank,
+                    "diagnostic_parameter_step": diagnostic_parameter_step,
                 },
             )
 

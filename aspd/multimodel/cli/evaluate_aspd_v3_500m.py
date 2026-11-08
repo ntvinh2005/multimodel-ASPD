@@ -321,6 +321,18 @@ def _local_evaluation(
     }
     firing_chunks: dict[str, list[torch.Tensor]] = {"pre": [], "mid": []}
     active_histogram: dict[str, Counter[int]] = {"pre": Counter(), "mid": Counter()}
+    raw_logit_stats = {
+        site: {
+            "count": 0,
+            "negative": 0,
+            "zero": 0,
+            "positive": 0,
+            "sum": 0.0,
+            "square_sum": 0.0,
+        }
+        for site in ("pre", "mid")
+    }
+    positive_candidate_chunks: dict[str, list[torch.Tensor]] = {"pre": [], "mid": []}
     boundaries = matryoshka_boundaries(n_features, (0.0625, 0.0625, 0.125, 0.25, 0.5))
     accepted = 0
     documents: set[str] = set()
@@ -349,6 +361,17 @@ def _local_evaluation(
         document_index = pool.models[local_key].anchor_document_indices
 
         for site in ("pre", "mid"):
+            valid_logits = model.latest_raw_logits[site][capture.valid_anchors].detach().float()
+            logit_state = raw_logit_stats[site]
+            logit_state["count"] += int(valid_logits.numel())
+            logit_state["negative"] += int((valid_logits < 0).sum())
+            logit_state["zero"] += int((valid_logits == 0).sum())
+            logit_state["positive"] += int((valid_logits > 0).sum())
+            logit_state["sum"] += float(valid_logits.double().sum())
+            logit_state["square_sum"] += float(valid_logits.double().square().sum())
+            positive_candidate_chunks[site].append(
+                (valid_logits > 0).sum(dim=-1).cpu().to(torch.float32)
+            )
             code = sparse[site].values * capture.valid_anchors[..., None]
             gate = (code > 0).reshape(-1, n_features)
             counts = gate.sum(dim=0).cpu().to(torch.int64)
@@ -532,6 +555,18 @@ def _local_evaluation(
     feature_rows = []
     for site in ("pre", "mid"):
         health = feature_health_from_counts(fire_counts[site], accepted)
+        logit_state = raw_logit_stats[site]
+        logit_count = int(logit_state["count"])
+        logit_mean = float(logit_state["sum"]) / logit_count
+        logit_variance = max(
+            0.0,
+            float(logit_state["square_sum"]) / logit_count - logit_mean**2,
+        )
+        candidates = torch.cat(positive_candidate_chunks[site])
+        candidate_quantiles = torch.quantile(
+            candidates, torch.tensor([0.01, 0.5, 0.9, 0.99])
+        )
+        readout_bias = model.shared_encoders[site].readout.output.bias.detach().float().cpu()
         left = first_counts[site].float().log1p()
         right = second_counts[site].float().log1p()
         stability_value = float(torch.corrcoef(torch.stack((left, right)))[0, 1])
@@ -577,6 +612,22 @@ def _local_evaluation(
                 "active_features_per_anchor_histogram": dict(
                     sorted(active_histogram[site].items())
                 ),
+                "raw_logit_mean": logit_mean,
+                "raw_logit_std": math.sqrt(logit_variance),
+                "raw_logit_negative_fraction": int(logit_state["negative"]) / logit_count,
+                "raw_logit_zero_fraction": int(logit_state["zero"]) / logit_count,
+                "raw_logit_positive_fraction": int(logit_state["positive"]) / logit_count,
+                "positive_candidates_per_anchor_mean": float(candidates.mean()),
+                "positive_candidates_per_anchor_std": float(candidates.std(unbiased=False)),
+                "positive_candidates_per_anchor_q01": float(candidate_quantiles[0]),
+                "positive_candidates_per_anchor_median": float(candidate_quantiles[1]),
+                "positive_candidates_per_anchor_q90": float(candidate_quantiles[2]),
+                "positive_candidates_per_anchor_q99": float(candidate_quantiles[3]),
+                "readout_bias_mean": float(readout_bias.mean()),
+                "readout_bias_std": float(readout_bias.std(unbiased=False)),
+                "readout_bias_negative_fraction": float((readout_bias < 0).float().mean()),
+                "readout_bias_min": float(readout_bias.min()),
+                "readout_bias_max": float(readout_bias.max()),
                 "training_used_features": int(
                     (model.gates[site].feature_fire_counts > 0).sum().item()
                 ),

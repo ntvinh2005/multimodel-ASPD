@@ -144,6 +144,53 @@ def matryoshka_activation_fvu(
     return loss, full
 
 
+def full_activation_fvu(
+    code: Tensor,
+    decoder: nn.Linear,
+    target: Tensor,
+    valid_anchors: Tensor,
+    *,
+    support: SparseSupport | None = None,
+    sparse_backend: Literal["indexed", "csr", "dense"] = "indexed",
+    reconstruction_scale: Tensor | None = None,
+) -> tuple[Tensor, Tensor]:
+    """Full-dictionary activation FVU without materializing prefix reconstructions."""
+
+    if code.shape[:2] != target.shape[:2] or code.shape[-1] != decoder.in_features:
+        raise ValueError("activation code, target, and decoder shapes disagree")
+    if isinstance(decoder, ActivationDecoder):
+        if support is None:
+            reconstruction = decoder(code.to(decoder.weight.dtype), include_bias=True)
+        elif sparse_backend == "indexed":
+            reconstruction = decoder.forward_sparse(support, include_bias=True)
+        elif sparse_backend == "csr":
+            reconstruction = decoder.forward_sparse_csr(support, include_bias=True)
+        else:
+            reconstruction = decoder.forward_dense_grouped(
+                code * valid_anchors[..., None].to(code.dtype), include_bias=True
+            )
+        assert isinstance(reconstruction, Tensor)
+    else:
+        reconstruction = decoder(code.to(decoder.weight.dtype))
+    reconstruction = reconstruction.float()
+    if reconstruction_scale is not None:
+        if reconstruction_scale.numel() != 1 or not bool(
+            torch.isfinite(reconstruction_scale).all()
+        ):
+            raise FloatingPointError("activation reconstruction scale must be one finite scalar")
+        bias = (
+            decoder.bias.float().expand_as(reconstruction)
+            if decoder.bias is not None
+            else torch.zeros_like(reconstruction)
+        )
+        reconstruction = reconstruction + (reconstruction_scale.float() - 1.0) * (
+            reconstruction - bias
+        )
+    reconstruction = reconstruction * valid_anchors[..., None].to(reconstruction.dtype)
+    loss = masked_fvu(reconstruction, target, valid_anchors)
+    return loss, reconstruction
+
+
 def auxk_dead_feature_loss(
     preactivations: Tensor,
     decoder: nn.Linear,
