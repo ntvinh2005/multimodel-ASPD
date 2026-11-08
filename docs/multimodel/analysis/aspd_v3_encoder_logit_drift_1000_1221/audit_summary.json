@@ -1,0 +1,150 @@
+{
+  "checkpoint_ranks_verified_equal": [
+    0,
+    1,
+    2
+  ],
+  "evidence_boundary": "No fixed-anchor representations are stored. Bias and readout parameter drift are measured exactly, but W-versus-h responsibility requires GPU replay. Logged raw-logit means use different training anchors at the two steps.",
+  "schema_version": 1,
+  "sites": [
+    {
+      "bias_more_negative_fraction": 0.4835205078125,
+      "bias_negative_to_positive": 1,
+      "bias_positive_to_negative": 15,
+      "endpoints": [
+        {
+          "bias_mean": -0.007142912596464157,
+          "bias_negative_fraction": 0.578369140625,
+          "bias_quantiles": {
+            "median": -0.007339495234191418,
+            "q01": -0.05337224528193474,
+            "q10": -0.04206616431474686,
+            "q90": 0.027765261009335518,
+            "q99": 0.03859081491827965
+          },
+          "derived_inner_product_mean": -1.5442748852074146,
+          "raw_logit_mean": -1.5514177978038788,
+          "raw_logit_negative_fraction": 0.9953082352876663,
+          "step": 1000
+        },
+        {
+          "bias_mean": -0.007335546892136335,
+          "bias_negative_fraction": 0.580078125,
+          "bias_quantiles": {
+            "median": -0.007638174574822187,
+            "q01": -0.053760282695293427,
+            "q10": -0.04220014810562134,
+            "q90": 0.02757122926414013,
+            "q99": 0.03847447782754898
+          },
+          "derived_inner_product_mean": -1.2423211899586022,
+          "raw_logit_mean": -1.2496567368507385,
+          "raw_logit_negative_fraction": 0.9952058047056198,
+          "step": 1221
+        }
+      ],
+      "exactly_unchanged_bias_entries": 4016,
+      "exactly_unchanged_weight_rows": 2000,
+      "readout_row_cosine": {
+        "mean": 0.99997878074646,
+        "median": 0.9999999403953552,
+        "minimum": 0.9983140826225281,
+        "q01": 0.9996403455734253,
+        "q10": 0.9999418258666992,
+        "q90": 1.0000001192092896,
+        "q99": 1.000000238418579
+      },
+      "readout_row_norm_step_1000": {
+        "mean": 0.576469361782074,
+        "median": 0.5762471556663513,
+        "q01": 0.5491775870323181,
+        "q10": 0.5617746710777283,
+        "q90": 0.5909850597381592,
+        "q99": 0.604123592376709
+      },
+      "readout_row_norm_step_1221": {
+        "mean": 0.5764749646186829,
+        "median": 0.5762414336204529,
+        "q01": 0.549049973487854,
+        "q10": 0.561761736869812,
+        "q90": 0.5910267233848572,
+        "q99": 0.6041426658630371
+      },
+      "readout_weight_relative_frobenius_delta": 0.006529998034238815,
+      "site": "pre",
+      "spearman_log1p_heldout_fires_vs_abs_bias_delta": 0.42184181894491857,
+      "spearman_log1p_heldout_fires_vs_weight_delta_norm": 0.4007032457400168
+    },
+    {
+      "bias_more_negative_fraction": 0.791015625,
+      "bias_negative_to_positive": 1,
+      "bias_positive_to_negative": 49,
+      "endpoints": [
+        {
+          "bias_mean": -0.007736284751445055,
+          "bias_negative_fraction": 0.58935546875,
+          "bias_quantiles": {
+            "median": -0.007860701531171799,
+            "q01": -0.0550837405025959,
+            "q10": -0.041942011564970016,
+            "q90": 0.026512552052736282,
+            "q99": 0.03828267753124237
+          },
+          "derived_inner_product_mean": -0.7454533982090652,
+          "raw_logit_mean": -0.7531896829605103,
+          "raw_logit_negative_fraction": 0.9954020828008652,
+          "step": 1000
+        },
+        {
+          "bias_mean": -0.008256817236542702,
+          "bias_negative_fraction": 0.59521484375,
+          "bias_quantiles": {
+            "median": -0.008338017389178276,
+            "q01": -0.05570009723305702,
+            "q10": -0.042386285960674286,
+            "q90": 0.025976689532399178,
+            "q99": 0.038139406591653824
+          },
+          "derived_inner_product_mean": -0.7745508905500174,
+          "raw_logit_mean": -0.7828077077865601,
+          "raw_logit_negative_fraction": 0.995225265622139,
+          "step": 1221
+        }
+      ],
+      "exactly_unchanged_bias_entries": 1586,
+      "exactly_unchanged_weight_rows": 1004,
+      "readout_row_cosine": {
+        "mean": 0.9998961687088013,
+        "median": 0.9999797344207764,
+        "minimum": 0.9972193837165833,
+        "q01": 0.9990905523300171,
+        "q10": 0.9997023344039917,
+        "q90": 1.0,
+        "q99": 1.0000001192092896
+      },
+      "readout_row_norm_step_1000": {
+        "mean": 0.5763547420501709,
+        "median": 0.5763341188430786,
+        "q01": 0.5487948656082153,
+        "q10": 0.5617100596427917,
+        "q90": 0.5909711718559265,
+        "q99": 0.603549599647522
+      },
+      "readout_row_norm_step_1221": {
+        "mean": 0.5764171481132507,
+        "median": 0.576379120349884,
+        "q01": 0.5488161444664001,
+        "q10": 0.5617397427558899,
+        "q90": 0.5910329222679138,
+        "q99": 0.6035502552986145
+      },
+      "readout_weight_relative_frobenius_delta": 0.014425726607441902,
+      "site": "mid",
+      "spearman_log1p_heldout_fires_vs_abs_bias_delta": 0.22242291112886642,
+      "spearman_log1p_heldout_fires_vs_weight_delta_norm": 0.1675606628143141
+    }
+  ],
+  "status": "CHECKPOINT_ONLY_LOGIT_DRIFT_AUDIT_COMPLETE",
+  "step_0": 1000,
+  "step_1": 1221
+}
