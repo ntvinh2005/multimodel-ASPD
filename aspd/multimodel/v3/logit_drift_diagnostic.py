@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from math import factorial
 
 from torch import Tensor
 
@@ -15,6 +17,39 @@ class SymmetricLogitDrift:
     readout_weight: Tensor
     representation: Tensor
     total: Tensor
+
+
+def factorial_shapley(values: Mapping[tuple[int, ...], Tensor]) -> tuple[Tensor, ...]:
+    """Return exact Shapley attributions for a complete binary factor matrix."""
+
+    if not values:
+        raise ValueError("Shapley values require a non-empty factor matrix")
+    first_key = next(iter(values))
+    factors = len(first_key)
+    expected = {
+        tuple((mask >> index) & 1 for index in range(factors))
+        for mask in range(2**factors)
+    }
+    if set(values) != expected:
+        raise ValueError("Shapley values require every binary factor combination")
+    shape = values[first_key].shape
+    if any(value.shape != shape for value in values.values()):
+        raise ValueError("Shapley factor outcomes must share one tensor shape")
+
+    result = []
+    denominator = factorial(factors)
+    for factor in range(factors):
+        attribution = values[first_key].new_zeros(shape)
+        for key in expected:
+            if key[factor]:
+                continue
+            subset_size = sum(key)
+            weight = factorial(subset_size) * factorial(factors - subset_size - 1) / denominator
+            enabled = list(key)
+            enabled[factor] = 1
+            attribution = attribution + weight * (values[tuple(enabled)] - values[key])
+        result.append(attribution)
+    return tuple(result)
 
 
 def symmetric_logit_drift(
