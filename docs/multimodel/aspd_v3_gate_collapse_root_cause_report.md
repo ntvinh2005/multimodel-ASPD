@@ -49,7 +49,7 @@ The result supports changing the main gate formulation (recommendation 3), but o
 | Retired 500M run | Final reports only; runtime checkpoints deleted | Endpoint context only; no trajectory claim |
 | Encoder/AuxK factorial | Completed report and held-out artifacts | Rejects the tested linear mixer and Softplus-AuxK variants as solutions |
 | Matryoshka/full-only source array `50231651` | Complete step-1,000 checkpoints for both arms | Read-only fixed-anchor diagnostic source |
-| Recovery array `50276566` | Matryoshka held-out complete; full-only recovery task still running at 2026-11-08 15:30 ET | Not interrupted; not required for the matched new comparison |
+| Recovery array `50276566` | Both tasks completed `0:0`; final held-out artifacts available | Preserved and checked; not required for the matched new comparison |
 | Fixed-anchor diagnostic `50270783` | Complete, checksummed, read-only | Root-cause gradient and module attribution |
 | New matched pilot `50280055` | Both arms complete through training, checkpoint smoke, and held-out evaluation | Controlled recovery evidence |
 
@@ -146,6 +146,8 @@ The diagnostic resolves the temporal logic that a static “negative logits get 
 4. Once a feature becomes nonpositive on all relevant anchors, neither main reconstruction nor historical post-ReLU AuxK can directly restore it. The number of inactive features therefore grows, which further concentrates the next pool's gradient allocation.
 
 This is a positive-feedback system: sparse selection initiates unequal learning, multi-module drift increases the sign/rank gap, and ReLU/AuxK make that gap increasingly irreversible.
+
+The recovered final held-out results strengthen the H5 conclusion. Matryoshka versus full-only effective size was 48.65 versus 46.43 PRE and 51.21 versus 52.03 MID; positive candidates were 37.90/38.86 versus 37.41/40.87. Both objectives therefore reach the same concentrated endpoint. Full-only fires more held-out feature identities (2,482/2,923 versus 555/2,282), but those additional rare firings do not materially change entropy or top-1% dominance. Reconstruction numbers are reported in their native objectives and are not treated as numerically equivalent evidence across objectives.
 
 ### D.2 Module attribution
 

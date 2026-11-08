@@ -51,6 +51,27 @@
     "training_evaluation_gate_match": true,
     "semantic_change": "Changes cross-anchor score comparability in pool-wide BatchTopK and couples projection-logit gradients across the feature axis; component indices, natural support, continuous activation codes, detached binary internal support, and model-specific rank-one operators are preserved."
   },
+  "historical_matryoshka_full_only_recovery": {
+    "array_job_id": "50276566",
+    "status": "BOTH_TASKS_COMPLETED_0_0",
+    "matryoshka_heldout": {
+      "pre_effective_size": 48.6495,
+      "mid_effective_size": 51.2067,
+      "pre_positive_candidates": 37.9008,
+      "mid_positive_candidates": 38.8558,
+      "pre_used_features": 555,
+      "mid_used_features": 2282
+    },
+    "full_only_heldout": {
+      "pre_effective_size": 46.4329,
+      "mid_effective_size": 52.0350,
+      "pre_positive_candidates": 37.4109,
+      "mid_positive_candidates": 40.8705,
+      "pre_used_features": 2482,
+      "mid_used_features": 2923
+    },
+    "interpretation": "Both objectives reach approximately 40 positive candidates and effective size approximately 50; Matryoshka is not the sole cause. Objective-specific FVU values are not treated as equivalent."
+  },
   "matched_pilot": {
     "array_job_id": "50280055",
     "training_git_sha": "5b6365107a72f224bfa3c6a224a54f96372d546c",
