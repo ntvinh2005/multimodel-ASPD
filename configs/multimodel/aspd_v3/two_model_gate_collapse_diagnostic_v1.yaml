@@ -1,0 +1,27 @@
+schema_version: 1
+status: RESEARCHER_AUTHORIZED_READ_ONLY_GATE_COLLAPSE_DIAGNOSTIC
+authorized_by: researcher
+authorized_on: '2026-11-08'
+experiment_family: aspd_v3_1_gate_collapse_root_cause_v1
+source_experiment_family: aspd_v3_gemma_smol_matryoshka_ablation_v1
+source_array_job_id: '50231651'
+source_job_ids:
+  matryoshka: '50231730'
+  full_only: '50231651'
+source_git_sha: 75e1444718617d983aa20c6a1e0c39da637be2dd
+checkpoint_step: 1000
+arms: [matryoshka, full_only]
+model_order: [gemma, smol]
+split: validation
+split_unit: document
+pool_anchors: 2048
+pool_count: 1
+factor_order: [local_encoder, shared_cross_encoder, readout_weight, readout_bias]
+counterfactual_count: 16
+gradient_objectives: [main_activation, auxk]
+gpu_count: 2
+gpu_type: b200
+read_only: true
+optimizer_or_step_authorized: false
+checkpoint_creation_authorized: false
+source_weight_mutation_authorized: false
