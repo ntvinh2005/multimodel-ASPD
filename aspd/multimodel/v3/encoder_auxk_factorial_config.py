@@ -26,6 +26,7 @@ ARM_SETTINGS = {
     "linear_current_auxk": ("hierarchical_linear", "post_relu", None),
     "transformer_revival_auxk": ("hierarchical_transformer", "softplus_raw_logits", 1.0),
     "linear_revival_auxk": ("hierarchical_linear", "softplus_raw_logits", 1.0),
+    "linear_current_auxk_confirmation": ("hierarchical_linear", "post_relu", None),
 }
 
 
@@ -42,9 +43,12 @@ class FactorialConfigFile(BaseModel):
 
     schema_version: Literal[1]
     experiment_family: Literal["aspd_v3_granite_encoder_auxk_factorial_v1"]
-    scientific_status: Literal["RESEARCHER_AUTHORIZED_256_STEP_FACTORIAL_SCREEN"]
+    scientific_status: Literal[
+        "RESEARCHER_AUTHORIZED_256_STEP_FACTORIAL_SCREEN",
+        "RESEARCHER_AUTHORIZED_1221_STEP_LINEAR_CONFIRMATION",
+    ]
     authorized_by: Literal["researcher"]
-    authorized_on: Literal["2026-11-07"]
+    authorized_on: Literal["2026-11-07", "2026-11-08"]
     source_config: Literal[
         "granite_normalized_target_unconstrained_decoder_reliability_pilot_v1.yaml"
     ]
@@ -59,14 +63,15 @@ class FactorialConfigFile(BaseModel):
         "linear_current_auxk",
         "transformer_revival_auxk",
         "linear_revival_auxk",
+        "linear_current_auxk_confirmation",
     ]
     encoder_mixer: Literal["hierarchical_transformer", "hierarchical_linear"]
     auxk_score_source: Literal["post_relu", "softplus_raw_logits"]
     auxk_softplus_temperature: float | None
-    optimizer_steps: Literal[256]
-    accepted_anchor_exposures: Literal[2_097_152]
+    optimizer_steps: Literal[256, 1221]
+    accepted_anchor_exposures: Literal[2_097_152, 10_002_432]
     preflight_steps: Literal[3]
-    heldout_accepted_anchors: Literal[20_480]
+    heldout_accepted_anchors: Literal[20_480, 100_352]
     gpu_count: Literal[3]
     gpu_type: Literal["b200"]
     full_training_authorized: Literal[False]
@@ -82,13 +87,41 @@ class FactorialConfigFile(BaseModel):
         )
         if observed != expected:
             raise ValueError(f"factorial arm settings changed: {observed} != {expected}")
+        if self.arm_id == "linear_current_auxk_confirmation":
+            confirmation = (
+                self.scientific_status,
+                self.authorized_on,
+                self.optimizer_steps,
+                self.accepted_anchor_exposures,
+                self.heldout_accepted_anchors,
+            )
+            expected_confirmation = (
+                "RESEARCHER_AUTHORIZED_1221_STEP_LINEAR_CONFIRMATION",
+                "2026-11-08",
+                1221,
+                10_002_432,
+                100_352,
+            )
+            if confirmation != expected_confirmation:
+                raise ValueError("linear confirmation budget or authorization changed")
+        elif (
+            self.scientific_status != "RESEARCHER_AUTHORIZED_256_STEP_FACTORIAL_SCREEN"
+            or self.authorized_on != "2026-11-07"
+            or self.optimizer_steps != 256
+            or self.accepted_anchor_exposures != 2_097_152
+            or self.heldout_accepted_anchors != 20_480
+        ):
+            raise ValueError("factorial screening budget or authorization changed")
         namespace = (
             "/orange/thai/vinhnguyen1/aspd_v3/"
             f"granite_encoder_auxk_factorial_v1/{self.arm_id}"
         )
-        if self.runtime.output_root != f"{namespace}/pilot/runs":
+        run_stage = (
+            "reliability" if self.arm_id == "linear_current_auxk_confirmation" else "pilot"
+        )
+        if self.runtime.output_root != f"{namespace}/{run_stage}/runs":
             raise ValueError("factorial output namespace changed")
-        if self.runtime.checkpoint_root != f"{namespace}/pilot/checkpoints":
+        if self.runtime.checkpoint_root != f"{namespace}/{run_stage}/checkpoints":
             raise ValueError("factorial checkpoint namespace changed")
         if self.runtime.preflight_evidence != f"{namespace}/preflight/preflight_report.json":
             raise ValueError("factorial preflight namespace changed")

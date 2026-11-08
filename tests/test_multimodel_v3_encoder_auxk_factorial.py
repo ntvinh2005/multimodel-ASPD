@@ -131,7 +131,30 @@ def test_factorial_contract_is_bounded_and_read_only() -> None:
     contract = _load_contract(CONFIG_DIR / "encoder_auxk_factorial_evaluation_v1.yaml")
     assert contract["checkpoint_steps"] == 256
     assert contract["accepted_anchors"] == 20_480
-    assert contract["arms"] == list(ARM_SETTINGS)
+    assert contract["arms"] == [
+        "transformer_current_auxk",
+        "linear_current_auxk",
+        "transformer_revival_auxk",
+        "linear_revival_auxk",
+    ]
+    assert contract["training_authorized_by_this_contract"] is False
+
+
+def test_linear_confirmation_is_bounded_and_uses_full_reliability_budget() -> None:
+    path = CONFIG_DIR / "encoder_auxk_linear_current_confirmation_v1.yaml"
+    config = load_encoder_auxk_factorial_config(path)
+    assert config.arm_id == "linear_current_auxk_confirmation"
+    assert config.architecture.encoder_mixer == "hierarchical_linear"
+    assert config.objective.auxk_score_source == "post_relu"
+    assert config.data.approved_optimizer_steps == 1221
+    assert config.data.approved_accepted_anchor_exposures == 10_002_432
+    assert config.full_training_authorized is False
+    contract = _load_contract(
+        CONFIG_DIR / "encoder_auxk_linear_current_confirmation_evaluation_v1.yaml"
+    )
+    assert contract["checkpoint_steps"] == 1221
+    assert contract["accepted_anchors"] == 100_352
+    assert contract["arms"] == ["linear_current_auxk_confirmation"]
     assert contract["training_authorized_by_this_contract"] is False
 
 

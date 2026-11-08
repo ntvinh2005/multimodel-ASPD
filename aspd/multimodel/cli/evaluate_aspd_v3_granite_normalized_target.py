@@ -81,6 +81,34 @@ def _broadcast(value: Any) -> Any:
 def _load_contract(path: Path) -> dict[str, Any]:
     payload = yaml.safe_load(path.read_text(encoding="utf-8"))
     if payload.get("experiment_family") == ENCODER_AUXK_FACTORIAL_FAMILY:
+        if payload.get("status") == "RESEARCHER_AUTHORIZED_LINEAR_CONFIRMATION_HELDOUT":
+            expected_confirmation = {
+                "schema_version": 1,
+                "status": "RESEARCHER_AUTHORIZED_LINEAR_CONFIRMATION_HELDOUT",
+                "authorized_by": "researcher",
+                "authorized_on": "2026-11-08",
+                "experiment_family": ENCODER_AUXK_FACTORIAL_FAMILY,
+                "split": "validation",
+                "split_unit": "document",
+                "accepted_anchors": 100_352,
+                "pool_anchors": 2_048,
+                "pool_count": 49,
+                "bootstrap_unit": "source_document",
+                "bootstrap_replicates": 1_000,
+                "bootstrap_seed": 0,
+                "jaccard_top_features": 256,
+                "jaccard_min_fires": 4,
+                "checkpoint_steps": 1221,
+                "arms": ["linear_current_auxk_confirmation"],
+                "model_order": list(MODEL_ORDER_GRANITE),
+                "gpu_count": 3,
+                "gpu_type": "b200",
+                "read_only": True,
+                "training_authorized_by_this_contract": False,
+            }
+            if payload != expected_confirmation:
+                raise ValueError("linear confirmation evaluation contract changed")
+            return payload
         expected_factorial = {
             "schema_version": 1,
             "status": "RESEARCHER_AUTHORIZED_FACTORIAL_HELDOUT_SCREEN",
