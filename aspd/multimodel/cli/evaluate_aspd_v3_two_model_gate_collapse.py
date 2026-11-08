@@ -39,6 +39,7 @@ from aspd.multimodel.v3.gate_collapse_diagnostic import (
     cosine_similarity,
     feature_group_masks,
     masked_gradient_summary,
+    observable_relu_scores,
     summarize_feature_gradients,
 )
 from aspd.multimodel.v3.gating import V3BatchTopK
@@ -409,9 +410,19 @@ def _module_swap_replay(
             for shared_index in range(2):
                 hidden = representations[(local_index, shared_index, site)].float()
                 for weight_index in range(2):
-                    weight = states[weight_index].shared_encoders[site].readout.output.weight.float()
+                    weight = (
+                        states[weight_index]
+                        .shared_encoders[site]
+                        .readout.output.weight.detach()
+                        .float()
+                    )
                     for bias_index in range(2):
-                        bias = states[bias_index].shared_encoders[site].readout.output.bias.float()
+                        bias = (
+                            states[bias_index]
+                            .shared_encoders[site]
+                            .readout.output.bias.detach()
+                            .float()
+                        )
                         key = (local_index, shared_index, weight_index, bias_index)
                         logits = hidden @ weight.T + bias
                         serialized = "".join(str(value) for value in key)
@@ -529,7 +540,9 @@ def _forward_site(
     local = state.local_encoders[site](residuals[site])
     gathered = _differentiable_all_gather(local, expected_world_size=len(MODEL_ORDER_TWO))
     tokens = {key: gathered[index] for index, key in enumerate(MODEL_ORDER_TWO)}
-    scores, logits = state.shared_encoders[site].forward_with_logits(tokens, valid)
+    hidden = _hidden_representation(state.shared_encoders[site], tokens)
+    raw_logits = state.shared_encoders[site].readout.output(hidden)
+    scores, logits = observable_relu_scores(raw_logits, valid)
     logits.retain_grad()
     sparse = state.gates[site](scores, valid, update_statistics=False)
     support = prepare_sparse_support(sparse.values, valid, binary=False)

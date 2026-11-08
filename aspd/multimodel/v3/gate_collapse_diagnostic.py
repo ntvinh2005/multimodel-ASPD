@@ -6,6 +6,16 @@ from collections.abc import Mapping
 
 import torch
 from torch import Tensor
+from torch.nn import functional as F
+
+
+def observable_relu_scores(logits: Tensor, valid_anchors: Tensor) -> tuple[Tensor, Tensor]:
+    """Mask logits once so the returned tensor is the exact parent of ReLU scores."""
+
+    if logits.ndim != 3 or valid_anchors.shape != logits.shape[:2]:
+        raise ValueError("logits and valid anchors must share a [B,A] grid")
+    observable = logits * valid_anchors[..., None].to(logits.dtype)
+    return F.relu(observable), observable
 
 
 def masked_gradient_summary(values: Tensor, mask: Tensor) -> dict[str, float | int]:

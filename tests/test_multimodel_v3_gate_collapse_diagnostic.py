@@ -7,6 +7,7 @@ from aspd.multimodel.v3.gate_collapse_diagnostic import (
     cosine_similarity,
     feature_group_masks,
     masked_gradient_summary,
+    observable_relu_scores,
     summarize_feature_gradients,
 )
 
@@ -38,6 +39,18 @@ def test_masked_gradient_summary_reports_exact_zero_starvation() -> None:
     assert summary["count"] == 2
     assert summary["nonzero_fraction"] == 0.0
     assert summary["mean_absolute"] == 0.0
+
+
+def test_observable_logits_are_the_direct_parent_of_relu_scores() -> None:
+    raw = torch.tensor([[[-1.0, 2.0], [3.0, -4.0]]], requires_grad=True)
+    valid = torch.tensor([[True, False]])
+    scores, observable = observable_relu_scores(raw, valid)
+    observable.retain_grad()
+
+    scores.sum().backward()
+
+    torch.testing.assert_close(observable.grad, torch.tensor([[[0.0, 1.0], [0.0, 0.0]]]))
+    torch.testing.assert_close(raw.grad, torch.tensor([[[0.0, 1.0], [0.0, 0.0]]]))
 
 
 def test_feature_gradient_summary_rejects_shape_mismatch() -> None:
