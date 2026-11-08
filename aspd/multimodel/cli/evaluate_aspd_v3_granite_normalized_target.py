@@ -35,6 +35,12 @@ from aspd.multimodel.v3.encoder_auxk_factorial_config import (
 from aspd.multimodel.v3.encoder_auxk_factorial_config import (
     load_encoder_auxk_factorial_config,
 )
+from aspd.multimodel.v3.gate_collapse_recovery_config import (
+    EXPERIMENT_FAMILY as GATE_COLLAPSE_RECOVERY_FAMILY,
+)
+from aspd.multimodel.v3.gate_collapse_recovery_config import (
+    load_gate_collapse_recovery_config,
+)
 from aspd.multimodel.v3.granite_normalized_config import (
     MODEL_ORDER_GRANITE,
     load_granite_normalized_target_config,
@@ -86,6 +92,34 @@ def _broadcast(value: Any) -> Any:
 
 def _load_contract(path: Path) -> dict[str, Any]:
     payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if payload.get("experiment_family") == GATE_COLLAPSE_RECOVERY_FAMILY:
+        expected = {
+            "schema_version": 1,
+            "status": "RESEARCHER_AUTHORIZED_GATE_COLLAPSE_RECOVERY_HELDOUT",
+            "authorized_by": "researcher",
+            "authorized_on": "2026-11-08",
+            "experiment_family": GATE_COLLAPSE_RECOVERY_FAMILY,
+            "split": "validation",
+            "split_unit": "document",
+            "accepted_anchors": 100_352,
+            "pool_anchors": 2_048,
+            "pool_count": 49,
+            "bootstrap_unit": "source_document",
+            "bootstrap_replicates": 1_000,
+            "bootstrap_seed": 0,
+            "jaccard_top_features": 256,
+            "jaccard_min_fires": 4,
+            "checkpoint_steps": 1221,
+            "arms": ["full_only_control", "per_anchor_zscore"],
+            "model_order": ["gemma", "smol"],
+            "gpu_count": 2,
+            "gpu_type": "b200",
+            "read_only": True,
+            "training_authorized_by_this_contract": False,
+        }
+        if payload != expected:
+            raise ValueError("two-model gate-collapse recovery evaluation contract changed")
+        return payload
     if payload.get("experiment_family") == TWO_MODEL_MATRYOSHKA_FAMILY:
         expected = {
             "schema_version": 1,
@@ -391,15 +425,25 @@ def main() -> None:
     raw_config = yaml.safe_load(args.config.read_text(encoding="utf-8"))
     if raw_config.get("experiment_family") == ENCODER_AUXK_FACTORIAL_FAMILY:
         config = load_encoder_auxk_factorial_config(args.config)
+    elif raw_config.get("experiment_family") == GATE_COLLAPSE_RECOVERY_FAMILY:
+        config = load_gate_collapse_recovery_config(args.config)
     elif raw_config.get("experiment_family") == TWO_MODEL_MATRYOSHKA_FAMILY:
         config = load_two_model_matryoshka_config(args.config)
     else:
         config = load_granite_normalized_target_config(args.config)
     contract = _load_contract(args.contract)
+    if config.experiment_family == GATE_COLLAPSE_RECOVERY_FAMILY:
+        if contract["experiment_family"] != config.experiment_family:
+            raise ValueError("evaluation contract and training config families differ")
+        if config.arm_id not in contract["arms"]:
+            raise ValueError("evaluation contract does not authorize this experiment arm")
     model_order = tuple(config.architecture.model_order)
     if world != len(model_order):
         raise RuntimeError("evaluation world size differs from the configured model roster")
-    if config.experiment_family == TWO_MODEL_MATRYOSHKA_FAMILY:
+    if config.experiment_family in {
+        TWO_MODEL_MATRYOSHKA_FAMILY,
+        GATE_COLLAPSE_RECOVERY_FAMILY,
+    }:
         if model_order != ("gemma", "smol") or any(
             "qwen" in model.model_id.lower() for model in config.models
         ):

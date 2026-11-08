@@ -229,6 +229,8 @@ class FeatureReadout(nn.Module):
         width: int,
         n_features: int,
         method: Literal["mean"],
+        logit_normalization: Literal["none", "per_anchor_feature_zscore"] = "none",
+        logit_normalization_epsilon: float = 1e-5,
         *,
         device: torch.device | str | None = None,
         dtype: torch.dtype | None = None,
@@ -239,6 +241,13 @@ class FeatureReadout(nn.Module):
                 "only the explicitly labeled experimental mean readout exists"
             )
         self.method = method
+        if logit_normalization not in {"none", "per_anchor_feature_zscore"}:
+            raise ValueError(f"unknown feature-readout logit normalization: {logit_normalization}")
+        if logit_normalization_epsilon <= 0:
+            raise ValueError("feature-readout logit normalization epsilon must be positive")
+        self.logit_normalization = logit_normalization
+        self.logit_normalization_epsilon = float(logit_normalization_epsilon)
+        self.latest_projection_logits: Tensor | None = None
         self.output = nn.Linear(width, n_features, device=device, dtype=dtype)
 
     def forward(self, tokens: Tensor, valid_anchors: Tensor) -> Tensor:
@@ -251,7 +260,18 @@ class FeatureReadout(nn.Module):
         if valid_anchors.shape != tokens.shape[:2]:
             raise ValueError("valid_anchors must match the [B,A] aligned-anchor grid")
         pooled = tokens.mean(dim=2)
-        logits = self.output(pooled)
+        projection_logits = self.output(pooled)
+        self.latest_projection_logits = projection_logits
+        if self.logit_normalization == "per_anchor_feature_zscore":
+            logits = torch.nn.functional.layer_norm(
+                projection_logits,
+                (projection_logits.shape[-1],),
+                weight=None,
+                bias=None,
+                eps=self.logit_normalization_epsilon,
+            )
+        else:
+            logits = projection_logits
         mask = valid_anchors[..., None].to(logits.dtype)
         return torch.relu(logits) * mask, logits * mask
 

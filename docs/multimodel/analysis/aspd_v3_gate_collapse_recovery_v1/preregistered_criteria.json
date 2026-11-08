@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "status": "PREREGISTERED_BEFORE_GPU_PREFLIGHT",
+  "registered_on": "2026-11-08",
+  "experiment_family": "aspd_v3_gemma_smol_gate_collapse_recovery_v1",
+  "scientific_hypothesis": "Per-anchor feature-axis standardization before ReLU and BatchTopK will prevent global logit shift and provide normalization-mediated gradients to unselected logits while preserving within-anchor feature ranking and natural support.",
+  "control": "full_only_control",
+  "treatment": "per_anchor_zscore",
+  "isolated_intervention": {
+    "formula": "u_gate=(u_projection-mean_feature(u_projection))/sqrt(var_feature(u_projection)+1e-5)",
+    "location": "after shared feature readout and before ReLU",
+    "learned_parameters_added": 0,
+    "forced_support_events": 0,
+    "within_anchor_rank_preserved": true,
+    "evaluation_gate_matches_training_gate": true
+  },
+  "matched_factors": [
+    "parameter initialization seed and tensor values",
+    "ordered aligned-anchor batches",
+    "Gemma and SmolLM2 pinned revisions and layers",
+    "C=8192 and BatchTopK K=32",
+    "full-only activation reconstruction",
+    "post-ReLU original AuxK",
+    "unconstrained activation decoders",
+    "internal binary support and rank-one objective",
+    "optimizer and learning rates"
+  ],
+  "observable_predictions": {
+    "if_global_shift_starvation_is_material": [
+      "treatment gate logits retain a large positive-candidate population through step 1221",
+      "treatment late natural-support effective size materially exceeds control",
+      "treatment late top-feature event share is materially below control"
+    ],
+    "if_rank_competition_is_sufficient": [
+      "projection logits may drift while standardized gate candidate counts remain healthy",
+      "natural-support effective size still collapses by steps 768-1221"
+    ]
+  },
+  "promotion_thresholds": {
+    "both_sites_step_1221_natural_positive_firings_per_anchor_min": 31.9,
+    "both_sites_step_1221_effective_dictionary_size_min": 256,
+    "both_sites_step_1221_top_1_percent_event_share_max": 0.9,
+    "both_sites_step_1221_features_firing_heldout_min": 1000,
+    "maximum_equal_model_site_heldout_activation_fvu_regression": 0.02,
+    "maximum_each_model_site_heldout_activation_fvu_regression": 0.03,
+    "maximum_equal_model_site_internal_fvu_regression": 0.02,
+    "must_remain_above_diversity_threshold_at_or_after_step": 768,
+    "source_weight_immutability_required": true,
+    "deterministic_checkpoint_resume_required": true
+  },
+  "failure_outcomes": [
+    "candidate counts improve but natural-support diversity fails a threshold",
+    "diversity improvement is transient and collapses by step 1221",
+    "activation or internal reconstruction exceeds a regression threshold",
+    "source immutability, matched batches, or resume validation fails"
+  ],
+  "interpretation_boundary": "A single matched seed that passes is exploratory evidence for longer confirmation, not authorization for 500M training or proof of semantic interpretability."
+}

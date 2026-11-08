@@ -44,6 +44,12 @@ from aspd.multimodel.v3.encoder_auxk_factorial_config import (
 from aspd.multimodel.v3.encoder_auxk_factorial_config import (
     load_encoder_auxk_factorial_config,
 )
+from aspd.multimodel.v3.gate_collapse_recovery_config import (
+    EXPERIMENT_FAMILY as GATE_COLLAPSE_RECOVERY_FAMILY,
+)
+from aspd.multimodel.v3.gate_collapse_recovery_config import (
+    load_gate_collapse_recovery_config,
+)
 from aspd.multimodel.v3.gating import ORIGINAL_ASPD_N_POOLS_TO_DEAD
 from aspd.multimodel.v3.granite_normalized_config import (
     load_granite_normalized_target_config,
@@ -203,6 +209,8 @@ def _load_training_config(path: Path) -> Any:
         return load_two_model_scale_config(path)
     if payload.get("experiment_family") == TWO_MODEL_MATRYOSHKA_FAMILY:
         return load_two_model_matryoshka_config(path)
+    if payload.get("experiment_family") == GATE_COLLAPSE_RECOVERY_FAMILY:
+        return load_gate_collapse_recovery_config(path)
     if payload.get("experiment_family") == ENCODER_AUXK_FACTORIAL_FAMILY:
         return load_encoder_auxk_factorial_config(path)
     granite_overlay_bases = {
@@ -875,6 +883,43 @@ def main() -> None:
                 raise RuntimeError(f"Matryoshka preflight evidence mismatch: {mismatch}")
         else:
             raise RuntimeError("Matryoshka ablation is limited to preflight and pilot modes")
+    elif config.experiment_family == GATE_COLLAPSE_RECOVERY_FAMILY:
+        if args.strategy != "model_owned":
+            raise RuntimeError("gate-collapse recovery requires model-owned execution")
+        if tuple(config.architecture.model_order) != ("gemma", "smol"):
+            raise RuntimeError("gate-collapse recovery model order changed")
+        if any("qwen" in model.model_id.lower() for model in config.models):
+            raise RuntimeError("Qwen is forbidden in the gate-collapse recovery pilot")
+        if args.mode == "preflight":
+            if args.max_steps != 3 or args.skip_checkpoint:
+                raise RuntimeError("gate-collapse preflight requires three checkpointed steps")
+        elif args.mode == "pilot":
+            if args.max_steps != 1221 or args.skip_checkpoint:
+                raise RuntimeError("gate-collapse pilot requires 1,221 checkpointed steps")
+            preflight_path = Path(config.runtime.preflight_evidence)
+            if not preflight_path.is_file():
+                raise RuntimeError("gate-collapse pilot requires arm-matched preflight evidence")
+            preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
+            expected_preflight = {
+                "status": "PASS",
+                "mode": "preflight",
+                "optimizer_steps": 3,
+                "world_size": 2,
+                "logical_target_count": 112,
+                "git_sha": git_sha,
+                "config_file_sha256": _sha256(args.config),
+                "config_fingerprint": config.fingerprint(),
+                "checkpoint_parameter_and_adam_restore_probe": "PASS",
+            }
+            mismatch = {
+                key: {"expected": value, "observed": preflight.get(key)}
+                for key, value in expected_preflight.items()
+                if preflight.get(key) != value
+            }
+            if mismatch:
+                raise RuntimeError(f"gate-collapse preflight evidence mismatch: {mismatch}")
+        else:
+            raise RuntimeError("gate-collapse recovery is limited to preflight and pilot modes")
     model_order = tuple(config.architecture.model_order)
     logical_target_count = len(model_order) * 8 * 7
     controlled = None

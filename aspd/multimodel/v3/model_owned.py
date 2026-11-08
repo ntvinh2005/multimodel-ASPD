@@ -148,6 +148,14 @@ class SharedSiteEncoder(nn.Module):
             architecture.cross_model_width,
             architecture.dictionary_size,
             architecture.feature_readout,
+            logit_normalization=getattr(
+                getattr(config, "objective", None), "gate_logit_normalization", "none"
+            ),
+            logit_normalization_epsilon=getattr(
+                getattr(config, "objective", None),
+                "gate_logit_normalization_epsilon",
+                1e-5,
+            ),
             device=device,
             dtype=dtype,
         )
@@ -343,6 +351,7 @@ class ModelOwnedMain2B(nn.Module):
         continuous_support: dict[str, SparseSupport] = {}
         binary_support: dict[str, SparseSupport] = {}
         self.latest_raw_logits: dict[str, Tensor] = {}
+        self.latest_projection_logits: dict[str, Tensor] = {}
         self.latest_gate_diagnostics: dict[str, dict[str, float | int]] = {}
         for site in SITE_ORDER:
             with torch.profiler.record_function(f"aspd/{site}/local_packing_intra"):
@@ -357,6 +366,12 @@ class ModelOwnedMain2B(nn.Module):
                     tokens, batch.valid_anchors
                 )
                 self.latest_raw_logits[site] = logits
+                projection_logits = self.shared_encoders[site].readout.latest_projection_logits
+                if projection_logits is None:
+                    raise RuntimeError("feature readout did not retain projection logits")
+                self.latest_projection_logits[site] = projection_logits * batch.valid_anchors[
+                    ..., None
+                ].to(projection_logits.dtype)
             with torch.profiler.record_function(f"aspd/{site}/batch_topk"):
                 sparse[site] = self.gates[site](
                     scores[site], batch.valid_anchors, update_statistics=update_statistics
@@ -370,6 +385,9 @@ class ModelOwnedMain2B(nn.Module):
             if collect_diagnostics:
                 with torch.no_grad():
                     valid_logits = logits[batch.valid_anchors].detach().float()
+                    valid_projection_logits = self.latest_projection_logits[site][
+                        batch.valid_anchors
+                    ].detach().float()
                     valid_scores = scores[site][batch.valid_anchors].detach().float()
                     selected = sparse[site].values[batch.valid_anchors].detach().float()
                     sampled_logits = valid_logits.reshape(-1)[::4096]
@@ -414,6 +432,13 @@ class ModelOwnedMain2B(nn.Module):
                     self.latest_gate_diagnostics[site] = {
                         "raw_logit_mean": float(valid_logits.mean()),
                         "raw_logit_std": float(valid_logits.std(unbiased=False)),
+                        "projection_logit_mean": float(valid_projection_logits.mean()),
+                        "projection_logit_std": float(
+                            valid_projection_logits.std(unbiased=False)
+                        ),
+                        "projection_negative_logit_fraction": float(
+                            (valid_projection_logits < 0).float().mean()
+                        ),
                         "raw_logit_negative_fraction": float((valid_logits < 0).float().mean()),
                         "raw_logit_zero_fraction": float((valid_logits == 0).float().mean()),
                         "raw_logit_positive_fraction": float((valid_logits > 0).float().mean()),
