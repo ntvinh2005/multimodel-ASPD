@@ -27,6 +27,7 @@ from aspd.multimodel.v3.encoder import (
 )
 from aspd.multimodel.v3.gating import V3BatchTopK
 from aspd.multimodel.v3.objective import (
+    auxk_activation_scores,
     auxk_dead_feature_loss,
     masked_fvu,
     matryoshka_activation_fvu,
@@ -36,6 +37,15 @@ from aspd.multimodel.v3.registry import ModelFamilyLayout
 from aspd.multimodel.v3.sparse_support import SparseSupport, prepare_sparse_support
 
 SITE_ORDER = ("pre", "mid")
+
+
+class IdentityTokenMixer(nn.Module):
+    """Parameter-free token mixer used by the controlled linear-encoder arm."""
+
+    def forward(self, tokens: Tensor) -> Tensor:
+        if tokens.ndim != 4:
+            raise ValueError("linear token mixer requires [B,A,tokens,width]")
+        return tokens
 
 
 @dataclass(frozen=True)
@@ -86,13 +96,19 @@ class LocalSiteEncoder(nn.Module):
             device=device,
             dtype=dtype,
         )
-        self.intra = IntraModelTransformer(
-            architecture.packed_token_width,
-            layers=architecture.intra_model_layers,
-            heads=architecture.intra_model_heads,
-            device=device,
-            dtype=dtype,
-        )
+        mixer = getattr(architecture, "encoder_mixer", "hierarchical_transformer")
+        if mixer == "hierarchical_transformer":
+            self.intra = IntraModelTransformer(
+                architecture.packed_token_width,
+                layers=architecture.intra_model_layers,
+                heads=architecture.intra_model_heads,
+                device=device,
+                dtype=dtype,
+            )
+        elif mixer == "hierarchical_linear":
+            self.intra = IdentityTokenMixer()
+        else:
+            raise ValueError(f"unknown ASPD v3 encoder mixer: {mixer}")
 
     def forward(self, activations: Sequence[Tensor]) -> Tensor:
         return self.intra(self.packer(concatenate_layer_activations(activations)))
@@ -114,13 +130,19 @@ class SharedSiteEncoder(nn.Module):
         self.input_adapter = nn.Linear(
             packed_width, architecture.cross_model_width, device=device, dtype=dtype
         )
-        self.cross = CrossModelTransformer(
-            architecture.cross_model_width,
-            layers=architecture.cross_model_layers,
-            heads=architecture.cross_model_heads,
-            device=device,
-            dtype=dtype,
-        )
+        mixer = getattr(architecture, "encoder_mixer", "hierarchical_transformer")
+        if mixer == "hierarchical_transformer":
+            self.cross = CrossModelTransformer(
+                architecture.cross_model_width,
+                layers=architecture.cross_model_layers,
+                heads=architecture.cross_model_heads,
+                device=device,
+                dtype=dtype,
+            )
+        elif mixer == "hierarchical_linear":
+            self.cross = IdentityTokenMixer()
+        else:
+            raise ValueError(f"unknown ASPD v3 encoder mixer: {mixer}")
         self.readout = FeatureReadout(
             architecture.cross_model_width,
             architecture.dictionary_size,
@@ -262,6 +284,10 @@ class ModelOwnedMain2B(nn.Module):
         self.activation_target_epsilon = float(
             getattr(objective, "activation_target_epsilon", 1e-6)
         )
+        self.auxk_score_source = getattr(objective, "auxk_score_source", "post_relu")
+        self.auxk_softplus_temperature = getattr(
+            objective, "auxk_softplus_temperature", None
+        )
 
     def activation_scale(self, site: str, layer_offset: int) -> Tensor | None:
         """Return the positive, geometric-mean-constrained local reconstruction gain."""
@@ -308,6 +334,7 @@ class ModelOwnedMain2B(nn.Module):
         sparse: dict[str, Any] = {}
         continuous_support: dict[str, SparseSupport] = {}
         binary_support: dict[str, SparseSupport] = {}
+        self.latest_raw_logits: dict[str, Tensor] = {}
         self.latest_gate_diagnostics: dict[str, dict[str, float | int]] = {}
         for site in SITE_ORDER:
             with torch.profiler.record_function(f"aspd/{site}/local_packing_intra"):
@@ -318,12 +345,10 @@ class ModelOwnedMain2B(nn.Module):
                 )
             tokens = {key: gathered[index] for index, key in enumerate(self.model_order)}
             with torch.profiler.record_function(f"aspd/{site}/cross_encoder_readout"):
-                if collect_diagnostics:
-                    scores[site], logits = self.shared_encoders[site].forward_with_logits(
-                        tokens, batch.valid_anchors
-                    )
-                else:
-                    scores[site] = self.shared_encoders[site](tokens, batch.valid_anchors)
+                scores[site], logits = self.shared_encoders[site].forward_with_logits(
+                    tokens, batch.valid_anchors
+                )
+                self.latest_raw_logits[site] = logits
             with torch.profiler.record_function(f"aspd/{site}/batch_topk"):
                 sparse[site] = self.gates[site](
                     scores[site], batch.valid_anchors, update_statistics=update_statistics
@@ -403,6 +428,15 @@ class ModelOwnedMain2B(nn.Module):
         coefficient = 0.5 / (len(self.model_order) * 8)
         for site in SITE_ORDER:
             decoders = self.activation_banks[site].decoders[self.local_model_key]
+            if site not in self.latest_raw_logits:
+                raise RuntimeError("activation loss requires a preceding encoder forward")
+            auxiliary_scores = auxk_activation_scores(
+                scores[site],
+                self.latest_raw_logits[site],
+                batch.valid_anchors,
+                mode=self.auxk_score_source,
+                softplus_temperature=self.auxk_softplus_temperature,
+            )
             # A feature cannot satisfy the 320-consecutive-pool dead criterion before
             # pool 320. Avoid a device synchronization on every site during that exact
             # warm-up interval; zero dead features is guaranteed, not approximated.
@@ -430,7 +464,7 @@ class ModelOwnedMain2B(nn.Module):
                     reconstruction_scale=reconstruction_scale,
                 )
                 auxk = auxk_dead_feature_loss(
-                    scores[site],
+                    auxiliary_scores,
                     decoder,
                     loss_target,
                     full,
@@ -576,8 +610,16 @@ def model_owned_parameter_counts(
     width = config.architecture.packed_token_width
     feedforward = 4 * width
     transformer_layer = 4 * width * width + 2 * width * feedforward + 9 * width + feedforward
-    intra_all_sites = 2 * config.architecture.intra_model_layers * transformer_layer
-    cross_per_site = config.architecture.cross_model_layers * transformer_layer
+    linear_mixer = (
+        getattr(config.architecture, "encoder_mixer", "hierarchical_transformer")
+        == "hierarchical_linear"
+    )
+    intra_all_sites = (
+        0 if linear_mixer else 2 * config.architecture.intra_model_layers * transformer_layer
+    )
+    cross_per_site = (
+        0 if linear_mixer else config.architecture.cross_model_layers * transformer_layer
+    )
     model_order = tuple(getattr(config.architecture, "model_order", tuple(registry)))
     adapter_per_site = (width + 2 * len(model_order) - 1) * width + width
     readout_per_site = width * c + c

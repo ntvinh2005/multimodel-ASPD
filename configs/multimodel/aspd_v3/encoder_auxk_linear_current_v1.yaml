@@ -1,0 +1,23 @@
+schema_version: 1
+experiment_family: aspd_v3_granite_encoder_auxk_factorial_v1
+scientific_status: RESEARCHER_AUTHORIZED_256_STEP_FACTORIAL_SCREEN
+authorized_by: researcher
+authorized_on: '2026-11-07'
+source_config: granite_normalized_target_unconstrained_decoder_reliability_pilot_v1.yaml
+source_config_sha256: 6fbbace8188cb0267b36f8ef99f9b7b3345267f0f93b8ba6ff2077e5b0b631a4
+source_config_fingerprint: 04599059ec494ebe485d5e2a17780eb983a049404b2bac552f3b2c55e886dc6f
+arm_id: linear_current_auxk
+encoder_mixer: hierarchical_linear
+auxk_score_source: post_relu
+auxk_softplus_temperature: null
+optimizer_steps: 256
+accepted_anchor_exposures: 2097152
+preflight_steps: 3
+heldout_accepted_anchors: 20480
+gpu_count: 3
+gpu_type: b200
+full_training_authorized: false
+runtime:
+  output_root: /orange/thai/vinhnguyen1/aspd_v3/granite_encoder_auxk_factorial_v1/linear_current_auxk/pilot/runs
+  checkpoint_root: /orange/thai/vinhnguyen1/aspd_v3/granite_encoder_auxk_factorial_v1/linear_current_auxk/pilot/checkpoints
+  preflight_evidence: /orange/thai/vinhnguyen1/aspd_v3/granite_encoder_auxk_factorial_v1/linear_current_auxk/preflight/preflight_report.json

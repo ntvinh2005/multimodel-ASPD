@@ -38,6 +38,12 @@ from aspd.multimodel.v3.data import (
     write_json_immutable,
 )
 from aspd.multimodel.v3.distributed_checkpoint import MainV1DistributedCheckpoint
+from aspd.multimodel.v3.encoder_auxk_factorial_config import (
+    EXPERIMENT_FAMILY as ENCODER_AUXK_FACTORIAL_FAMILY,
+)
+from aspd.multimodel.v3.encoder_auxk_factorial_config import (
+    load_encoder_auxk_factorial_config,
+)
 from aspd.multimodel.v3.gating import ORIGINAL_ASPD_N_POOLS_TO_DEAD
 from aspd.multimodel.v3.granite_normalized_config import (
     load_granite_normalized_target_config,
@@ -189,6 +195,8 @@ def _load_training_config(path: Path) -> Any:
         raise ValueError("ASPD v3 training config must be a mapping")
     if payload.get("experiment_family") == "aspd_v3_gemma_smol_scale_pilot":
         return load_two_model_scale_config(path)
+    if payload.get("experiment_family") == ENCODER_AUXK_FACTORIAL_FAMILY:
+        return load_encoder_auxk_factorial_config(path)
     granite_overlay_bases = {
         "granite_normalized_target_baseline_v1.yaml",
         "granite_normalized_target_treatment_v1.yaml",
@@ -809,6 +817,19 @@ def main() -> None:
             raise RuntimeError(
                 "Granite normalized-target family is authorized only for bounded preflight/pilot"
             )
+    elif config.experiment_family == ENCODER_AUXK_FACTORIAL_FAMILY:
+        if args.strategy != "model_owned":
+            raise RuntimeError("encoder/AuxK factorial requires model-owned execution")
+        if args.mode == "benchmark":
+            if args.max_steps != config.preflight_authorization.optimizer_steps:
+                raise RuntimeError("factorial engineering smoke must run exactly three steps")
+            if not args.skip_checkpoint:
+                raise RuntimeError("factorial engineering smoke must skip checkpoint creation")
+        elif args.mode == "pilot":
+            if args.max_steps != config.pilot_authorization.optimizer_steps:
+                raise RuntimeError("factorial screen must run exactly 256 steps")
+        else:
+            raise RuntimeError("encoder/AuxK factorial is limited to benchmark and pilot modes")
     model_order = tuple(config.architecture.model_order)
     logical_target_count = len(model_order) * 8 * 7
     controlled = None
@@ -921,49 +942,78 @@ def main() -> None:
         if not preflight_path.is_file():
             raise RuntimeError("main-2b-v1 requires immutable distributed preflight evidence")
         preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
-        required = {
-            "status": "PASS",
-            "mode": "preflight",
-            "strategy": "model_owned",
-            **_preflight_identity_requirements(
-                config,
-                mode=args.mode,
-                git_sha=git_sha,
-                config_file_sha256=config_sha,
-            ),
-            "dataset_manifest_sha256": dataset_manifest["manifest_sha256"],
-            "alignment_manifest_sha256": alignment_manifest["manifest_sha256"],
-            "world_size": len(model_order),
-            "logical_target_count": logical_target_count,
-            "dcp_save_reload_resume_update": "PASS",
-            "checkpoint_parameter_and_adam_restore_probe": "PASS",
-            "runtime_fingerprint": runtime_fingerprint,
-        }
-        mismatch = {
-            key: {"expected": value, "observed": preflight.get(key)}
-            for key, value in required.items()
-            if preflight.get(key) != value
-        }
-        checkpoint_manifest = preflight.get("checkpoint_manifest")
-        recovery_mismatch: dict[str, Any] = {}
-        if not isinstance(checkpoint_manifest, dict):
-            recovery_mismatch["checkpoint_manifest"] = "missing"
+        if config.experiment_family == ENCODER_AUXK_FACTORIAL_FAMILY:
+            required_smoke = {
+                "status": "PASS",
+                "mode": "benchmark",
+                "strategy": "model_owned",
+                "git_sha": git_sha,
+                "config_file_sha256": config_sha,
+                "config_fingerprint": config.fingerprint(),
+                "dataset_manifest_sha256": dataset_manifest["manifest_sha256"],
+                "alignment_manifest_sha256": alignment_manifest["manifest_sha256"],
+                "world_size": len(model_order),
+                "logical_target_count": logical_target_count,
+                "runtime_fingerprint": runtime_fingerprint,
+                "optimizer_steps": config.preflight_authorization.optimizer_steps,
+                "checkpoint_path": None,
+                "checkpoint_bytes": 0,
+                "dcp_save_reload_resume_update": "NOT_RUN",
+            }
+            mismatch = {
+                key: {"expected": value, "observed": preflight.get(key)}
+                for key, value in required_smoke.items()
+                if preflight.get(key) != value
+            }
+            if mismatch:
+                raise RuntimeError(f"factorial engineering smoke mismatch: {mismatch}")
         else:
-            for key, expected in (("status", "COMPLETE"), ("world_size", len(model_order))):
-                if checkpoint_manifest.get(key) != expected:
-                    recovery_mismatch[f"checkpoint_manifest.{key}"] = {
-                        "expected": expected,
-                        "observed": checkpoint_manifest.get(key),
-                    }
-        if int(preflight.get("checkpoint_bytes", 0)) <= 0:
-            recovery_mismatch["checkpoint_bytes"] = "must be positive"
-        if int(preflight.get("optimizer_steps", 0)) < 3:
-            recovery_mismatch["optimizer_steps"] = "must be at least three"
-        if mismatch or recovery_mismatch:
-            raise RuntimeError(
-                "main-2b-v1 preflight evidence mismatch: "
-                f"provenance={mismatch}, recovery={recovery_mismatch}"
-            )
+            required = {
+                "status": "PASS",
+                "mode": "preflight",
+                "strategy": "model_owned",
+                **_preflight_identity_requirements(
+                    config,
+                    mode=args.mode,
+                    git_sha=git_sha,
+                    config_file_sha256=config_sha,
+                ),
+                "dataset_manifest_sha256": dataset_manifest["manifest_sha256"],
+                "alignment_manifest_sha256": alignment_manifest["manifest_sha256"],
+                "world_size": len(model_order),
+                "logical_target_count": logical_target_count,
+                "dcp_save_reload_resume_update": "PASS",
+                "checkpoint_parameter_and_adam_restore_probe": "PASS",
+                "runtime_fingerprint": runtime_fingerprint,
+            }
+            mismatch = {
+                key: {"expected": value, "observed": preflight.get(key)}
+                for key, value in required.items()
+                if preflight.get(key) != value
+            }
+            checkpoint_manifest = preflight.get("checkpoint_manifest")
+            recovery_mismatch: dict[str, Any] = {}
+            if not isinstance(checkpoint_manifest, dict):
+                recovery_mismatch["checkpoint_manifest"] = "missing"
+            else:
+                for key, expected in (
+                    ("status", "COMPLETE"),
+                    ("world_size", len(model_order)),
+                ):
+                    if checkpoint_manifest.get(key) != expected:
+                        recovery_mismatch[f"checkpoint_manifest.{key}"] = {
+                            "expected": expected,
+                            "observed": checkpoint_manifest.get(key),
+                        }
+            if int(preflight.get("checkpoint_bytes", 0)) <= 0:
+                recovery_mismatch["checkpoint_bytes"] = "must be positive"
+            if int(preflight.get("optimizer_steps", 0)) < 3:
+                recovery_mismatch["optimizer_steps"] = "must be at least three"
+            if mismatch or recovery_mismatch:
+                raise RuntimeError(
+                    "main-2b-v1 preflight evidence mismatch: "
+                    f"provenance={mismatch}, recovery={recovery_mismatch}"
+                )
     if rank == 0:
         args.run_dir.mkdir(parents=True, exist_ok=args.mode in {"main", "controlled", "pilot"})
     dist.barrier()
@@ -1588,6 +1638,16 @@ def main() -> None:
                         ),
                         "oracle_norm_evaluation": bool(
                             getattr(config.objective, "oracle_norm_evaluation", False)
+                        ),
+                        "factorial_arm_id": getattr(config, "arm_id", None),
+                        "encoder_mixer": getattr(
+                            config.architecture, "encoder_mixer", "hierarchical_transformer"
+                        ),
+                        "auxk_score_source": getattr(
+                            config.objective, "auxk_score_source", "post_relu"
+                        ),
+                        "auxk_softplus_temperature": getattr(
+                            config.objective, "auxk_softplus_temperature", None
                         ),
                     },
                 )

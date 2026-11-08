@@ -29,6 +29,12 @@ from aspd.multimodel.cli.evaluate_aspd_v3_500m import (
 from aspd.multimodel.v3.data import HashSplitPolicy
 from aspd.multimodel.v3.diagnostic import sha256_file
 from aspd.multimodel.v3.diagnostic_stream import ValidationAlignedAnchorStream
+from aspd.multimodel.v3.encoder_auxk_factorial_config import (
+    EXPERIMENT_FAMILY as ENCODER_AUXK_FACTORIAL_FAMILY,
+)
+from aspd.multimodel.v3.encoder_auxk_factorial_config import (
+    load_encoder_auxk_factorial_config,
+)
 from aspd.multimodel.v3.granite_normalized_config import (
     MODEL_ORDER_GRANITE,
     load_granite_normalized_target_config,
@@ -74,6 +80,39 @@ def _broadcast(value: Any) -> Any:
 
 def _load_contract(path: Path) -> dict[str, Any]:
     payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if payload.get("experiment_family") == ENCODER_AUXK_FACTORIAL_FAMILY:
+        expected_factorial = {
+            "schema_version": 1,
+            "status": "RESEARCHER_AUTHORIZED_FACTORIAL_HELDOUT_SCREEN",
+            "authorized_by": "researcher",
+            "authorized_on": "2026-11-07",
+            "experiment_family": ENCODER_AUXK_FACTORIAL_FAMILY,
+            "split": "validation",
+            "split_unit": "document",
+            "accepted_anchors": 20_480,
+            "pool_anchors": 2_048,
+            "pool_count": 10,
+            "bootstrap_unit": "source_document",
+            "bootstrap_replicates": 1_000,
+            "bootstrap_seed": 0,
+            "jaccard_top_features": 256,
+            "jaccard_min_fires": 4,
+            "checkpoint_steps": 256,
+            "arms": [
+                "transformer_current_auxk",
+                "linear_current_auxk",
+                "transformer_revival_auxk",
+                "linear_revival_auxk",
+            ],
+            "model_order": list(MODEL_ORDER_GRANITE),
+            "gpu_count": 3,
+            "gpu_type": "b200",
+            "read_only": True,
+            "training_authorized_by_this_contract": False,
+        }
+        if payload != expected_factorial:
+            raise ValueError("encoder/AuxK factorial evaluation contract changed")
+        return payload
     corrected = (
         payload.get("experiment_family")
         == "aspd_v3_granite_normalized_target_unconstrained_decoder_v1"
@@ -283,7 +322,12 @@ def main() -> None:
     rank = int(os.environ["RANK"])
     local_rank = int(os.environ["LOCAL_RANK"])
     world = int(os.environ["WORLD_SIZE"])
-    config = load_granite_normalized_target_config(args.config)
+    raw_config = yaml.safe_load(args.config.read_text(encoding="utf-8"))
+    config = (
+        load_encoder_auxk_factorial_config(args.config)
+        if raw_config.get("experiment_family") == ENCODER_AUXK_FACTORIAL_FAMILY
+        else load_granite_normalized_target_config(args.config)
+    )
     contract = _load_contract(args.contract)
     model_order = tuple(config.architecture.model_order)
     if world != 3 or model_order != MODEL_ORDER_GRANITE:
@@ -452,6 +496,16 @@ def main() -> None:
                 "schema_version": 1,
                 "status": "READ_ONLY_GRANITE_NORMALIZED_TARGET_DIAGNOSTIC_COMPLETE",
                 "arm": config.arm,
+                "factorial_arm_id": getattr(config, "arm_id", None),
+                "encoder_mixer": getattr(
+                    config.architecture, "encoder_mixer", "hierarchical_transformer"
+                ),
+                "auxk_score_source": getattr(
+                    config.objective, "auxk_score_source", "post_relu"
+                ),
+                "auxk_softplus_temperature": getattr(
+                    config.objective, "auxk_softplus_temperature", None
+                ),
                 "activation_target_normalization": config.objective.activation_target_normalization,
                 "original_space_uses_oracle_target_norm": config.arm == "normalized_target",
                 "diagnostic_git_sha": _git_sha(),

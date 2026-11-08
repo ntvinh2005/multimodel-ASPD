@@ -7,6 +7,7 @@ from typing import Literal
 
 import torch
 from torch import Tensor, nn
+from torch.nn import functional as F
 
 from aspd.multimodel.v3.reconstruction import ActivationDecoder
 from aspd.multimodel.v3.sparse_support import SparseSupport
@@ -215,6 +216,37 @@ def auxk_dead_feature_loss(
     if loss.device.type == "cpu" and not torch.isfinite(loss):
         raise FloatingPointError("non-finite ASPD v3 AuxK loss")
     return torch.where(torch.isfinite(loss), loss, torch.full_like(loss, float("nan")))
+
+
+def auxk_activation_scores(
+    main_scores: Tensor,
+    raw_logits: Tensor,
+    valid_anchors: Tensor,
+    *,
+    mode: Literal["post_relu", "softplus_raw_logits"] = "post_relu",
+    softplus_temperature: float | None = None,
+) -> Tensor:
+    """Return coefficients for AuxK without changing the main sparse gate.
+
+    ``post_relu`` is the historical path and returns the exact input tensor.
+    ``softplus_raw_logits`` is the controlled revival treatment: feature ranking
+    remains monotonic in the raw logit, while negative logits retain a finite
+    auxiliary gradient.  The main ReLU and BatchTopK path never uses this tensor.
+    """
+
+    if main_scores.shape != raw_logits.shape or valid_anchors.shape != raw_logits.shape[:2]:
+        raise ValueError("AuxK score tensors must share one [B,A,C] anchor grid")
+    if mode == "post_relu":
+        if softplus_temperature is not None:
+            raise ValueError("historical AuxK cannot set a Softplus temperature")
+        return main_scores
+    if mode != "softplus_raw_logits":
+        raise ValueError(f"unknown AuxK score source: {mode}")
+    if softplus_temperature is None or softplus_temperature <= 0:
+        raise ValueError("Softplus AuxK requires a positive fixed temperature")
+    temperature = float(softplus_temperature)
+    auxiliary = temperature * F.softplus(raw_logits.float() / temperature)
+    return auxiliary * valid_anchors[..., None].to(auxiliary.dtype)
 
 
 def detached_binary_support(code: Tensor) -> Tensor:
