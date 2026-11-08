@@ -60,7 +60,7 @@ def test_current_auxk_cannot_revive_all_negative_relu_logits() -> None:
     loss.backward()
 
     assert float(loss.detach()) == 0.0
-    assert float(scores.sum()) == 0.0
+    assert float(scores.detach().sum()) == 0.0
     torch.testing.assert_close(raw_logits.grad, torch.zeros_like(raw_logits))
 
 
@@ -117,6 +117,6 @@ def test_positive_dead_score_can_reenter_main_batch_topk_after_auxk_updates() ->
 
     gate = V3BatchTopK(4, 1, sync_statistics=False)
     code = gate(torch.relu(raw_logits), valid, update_statistics=False)
-    assert float(raw_logits[0, 0, 1]) > 0.5
+    assert float(raw_logits.detach()[0, 0, 1]) > 0.5
     assert bool(code.gate[0, 0, 1])
-    assert float(raw_logits[1, 0, 1]) == -1.0
+    assert float(raw_logits.detach()[1, 0, 1]) == -1.0

@@ -367,7 +367,7 @@ final report commit is recorded in the handoff.
 
 | Check | Result | Notes |
 |---|---|---|
-| Dictionary/AuxK + existing feature-band + normalized-target tests | PASS, 35 tests | CPU only; 20.36 s |
+| Dictionary/AuxK + existing feature-band, normalized-target and 2B objective tests | PASS, 37 tests; 13 deselected | CPU only; 27.47 s |
 | Ruff on three new Python files | PASS | `--no-cache`; cache redirected to `/tmp` |
 | Compileall on three new Python files | PASS | bytecode cache redirected to `/tmp` |
 | Audit CLI on production artifacts | PASS | rank-replica/checkpoint-provenance assertions passed |
