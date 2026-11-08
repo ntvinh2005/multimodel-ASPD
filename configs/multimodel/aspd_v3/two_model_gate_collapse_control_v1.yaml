@@ -128,7 +128,7 @@ runtime:
   strategy: model_owned
   world_size: 2
   checkpoint_every_steps: 1221
-  keep_complete_checkpoints: 1
+  keep_complete_checkpoints: 2
   activation_backward_chunk: 8
   matrix_backward_chunk: 28
   sparse_backend: dense
@@ -139,7 +139,7 @@ runtime:
   checkpoint_root: /orange/thai/vinhnguyen1/aspd_v3/gemma_smol_gate_collapse_recovery_v1/full_only_control/pilot/checkpoints
   dataset_manifest: out/multimodel/aspd_v3/two_model_scale_v1/data/pile_uncopyrighted/manifest.json
   alignment_manifest: out/multimodel/aspd_v3/two_model_scale_v1/data/pile_uncopyrighted/alignment_manifest.json
-  preflight_evidence: /orange/thai/vinhnguyen1/aspd_v3/gemma_smol_gate_collapse_recovery_v1/full_only_control/preflight/preflight_report.json
+  preflight_evidence: /orange/thai/vinhnguyen1/aspd_v3/gemma_smol_gate_collapse_recovery_v1/full_only_control/preflight_r1/preflight_report.json
   max_preflight_steps: 3
   max_preflight_minutes: 45
   diagnostic_parameter_steps: [0, 64, 128, 256, 512, 768, 1024, 1220]

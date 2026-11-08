@@ -34,7 +34,7 @@ def test_gate_collapse_configs_are_isolated_and_matched() -> None:
     assert control.data == treatment.data
     assert all("qwen" not in model.model_id.lower() for model in treatment.models)
     assert control.runtime.checkpoint_every_steps == 1221
-    assert treatment.runtime.keep_complete_checkpoints == 1
+    assert treatment.runtime.keep_complete_checkpoints == 2
     assert _load_training_config(CONTROL).fingerprint() == control.fingerprint()
     assert _load_training_config(TREATMENT).fingerprint() == treatment.fingerprint()
 

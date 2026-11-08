@@ -35,7 +35,7 @@ class GateCollapseObjective(MatryoshkaObjective):
 
 class GateCollapseRuntime(MatryoshkaRuntime):
     checkpoint_every_steps: Literal[1221]
-    keep_complete_checkpoints: Literal[1]
+    keep_complete_checkpoints: Literal[2]
     diagnostic_parameter_steps: tuple[
         Literal[0],
         Literal[64],
@@ -113,7 +113,7 @@ class GateCollapseRecoveryConfig(BaseModel):
             raise ValueError("pilot output namespace changed")
         if self.runtime.checkpoint_root != f"{namespace}/pilot/checkpoints":
             raise ValueError("checkpoint namespace changed")
-        if self.runtime.preflight_evidence != f"{namespace}/preflight/preflight_report.json":
+        if self.runtime.preflight_evidence != f"{namespace}/preflight_r1/preflight_report.json":
             raise ValueError("preflight namespace changed")
         if "two_model_scale_v1/data" not in self.runtime.dataset_manifest:
             raise ValueError("experiment must reuse the pinned two-model dataset manifest")
