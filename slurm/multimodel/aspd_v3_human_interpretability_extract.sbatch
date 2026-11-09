@@ -28,6 +28,12 @@ CHECKPOINTS=(
   /orange/thai/vinhnguyen1/aspd_v3/gemma_smol_gate_collapse_recovery_v1/per_anchor_zscore/pilot/runs/job_50280055_1/checkpoints/step-000001221
 )
 INDEX="${SLURM_ARRAY_TASK_ID:?array index required}"
+MODE="${MODE:-test}"
+case "${MODE}" in
+  validation-smoke) EXPECTED_ANCHORS=2048 ;;
+  test) EXPECTED_ANCHORS=100352 ;;
+  *) echo "unsupported MODE=${MODE}" >&2; exit 2 ;;
+esac
 CONFIG="${CONFIGS[${INDEX}]}"
 RUN_DIR="${RUN_DIRS[${INDEX}]}"
 CHECKPOINT="${CHECKPOINTS[${INDEX}]}"
@@ -48,7 +54,7 @@ test -s "${CHECKPOINT}/COMPLETE"
 test -s "${PROTOCOL}"
 test -s /orange/thai/vinhnguyen1/aspd_v3/human_interpretability_v1/provenance/excluded_documents.json
 ARM="$(${PYTHON} -c 'import sys; from aspd.multimodel.v3.gate_collapse_recovery_config import load_gate_collapse_recovery_config as load; print(load(sys.argv[1]).arm_id)' "${CONFIG}")"
-OUTPUT_ROOT=/orange/thai/vinhnguyen1/aspd_v3/human_interpretability_v1/extraction
+OUTPUT_ROOT="/orange/thai/vinhnguyen1/aspd_v3/human_interpretability_v1/extraction/${MODE}"
 OUTPUT_DIR="${OUTPUT_ROOT}/job_${SLURM_ARRAY_JOB_ID}_${INDEX}/${ARM}"
 test ! -e "${OUTPUT_DIR}"
 mkdir -p "$(dirname "${OUTPUT_DIR}")" slurm/logs
@@ -67,7 +73,7 @@ nvidia-smi
 
 ${TORCHRUN} --standalone --nnodes=1 --nproc-per-node=2 \
   -m aspd.multimodel.cli.extract_aspd_v3_mechanistic \
-  --mode test --config "${CONFIG}" --protocol "${PROTOCOL}" \
+  --mode "${MODE}" --config "${CONFIG}" --protocol "${PROTOCOL}" \
   --run-dir "${RUN_DIR}" --checkpoint "${CHECKPOINT}" \
   --output-dir "${OUTPUT_DIR}" --local-files-only
 
@@ -76,11 +82,11 @@ ${PYTHON} -c '
 import json,sys
 p=json.load(open(sys.argv[1]))
 assert p["arm"]==sys.argv[2]
-assert p["accepted_evaluation_anchors"]==100352
+assert p["accepted_evaluation_anchors"]==int(sys.argv[3])
 assert p["excluded_document_count"]==585
 assert p["excluded_documents_disjoint"] is True
 assert p["natural_gate_only"] is True and p["forced_activations"]==0
 assert all(r["source_weights_unchanged"]=="PASS" for r in p["rank_reports"])
-' "${OUTPUT_DIR}/experiment_manifest.json" "${ARM}"
+' "${OUTPUT_DIR}/experiment_manifest.json" "${ARM}" "${EXPECTED_ANCHORS}"
 
 echo "ASPD_V3_HUMAN_EXTRACTION_COMPLETE arm=${ARM} output=${OUTPUT_DIR}"
