@@ -17,7 +17,12 @@ import numpy as np
 import torch
 
 from aspd.multimodel.v3.diagnostic import sha256_file
-from aspd.multimodel.v3.mechanistic_validation import IntruderJudgeContract
+from aspd.multimodel.v3.mechanistic_validation import (
+    IntruderJudgeContract,
+    IntruderJudgeV2Contract,
+)
+
+JudgeContract = IntruderJudgeContract | IntruderJudgeV2Contract
 
 
 def _args() -> argparse.Namespace:
@@ -26,7 +31,24 @@ def _args() -> argparse.Namespace:
     parser.add_argument("--answer-key", type=Path, required=True)
     parser.add_argument("--contract", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument(
+        "--controls-only",
+        action="store_true",
+        help="Run only the synthetic controls for fail-closed judge preflight.",
+    )
     return parser.parse_args()
+
+
+def _load_contract(path: Path) -> JudgeContract:
+    import yaml
+
+    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    family = payload.get("experiment_family")
+    if family == "aspd_v3_zscore_intruder_judge_v1":
+        return IntruderJudgeContract.model_validate(payload)
+    if family == "aspd_v3_zscore_intruder_judge_v2":
+        return IntruderJudgeV2Contract.model_validate(payload)
+    raise ValueError(f"unsupported judge experiment_family: {family!r}")
 
 
 def _git_sha() -> str:
@@ -54,9 +76,12 @@ def _rotate_task(
         raise ValueError("Intruder cyclic rotation requires five examples")
     texts = [str(row["text"]) for row in examples]
     rotated = texts[rotation:] + texts[:rotation]
-    correct = int(answer["intruder_position"])
-    rotated_correct = ((correct - 1 - rotation) % 5) + 1
+    correct = answer["intruder_position"]
+    rotated_correct = (
+        None if correct is None else ((int(correct) - 1 - rotation) % 5) + 1
+    )
     trial_id = f"{task['trial_id']}-r{rotation}"
+    control_kind = task.get("control_kind")
     return (
         {
             "trial_id": trial_id,
@@ -66,7 +91,7 @@ def _rotate_task(
                 {"position": index + 1, "text": text}
                 for index, text in enumerate(rotated)
             ],
-            "control_kind": None,
+            "control_kind": control_kind,
         },
         {
             **answer,
@@ -74,7 +99,7 @@ def _rotate_task(
             "base_trial_id": task["trial_id"],
             "rotation": rotation,
             "intruder_position": rotated_correct,
-            "control_kind": None,
+            "control_kind": control_kind,
         },
     )
 
@@ -88,7 +113,63 @@ _CONTROL_THEMES = (
 )
 
 
-def _control_tasks(contract: IntruderJudgeContract) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+_NEGATIVE_CONTROL_PARAPHRASES = (
+    (
+        "astronomy",
+        (
+            "A planet follows an orbit around its star.",
+            "A planet travels along a path around the star it belongs to.",
+            "The planet revolves around its host star.",
+            "An orbit carries a planet around its star.",
+            "A planet circles the star in its planetary system.",
+        ),
+    ),
+    (
+        "botany",
+        (
+            "Leaves use chlorophyll to capture light for photosynthesis.",
+            "Chlorophyll in leaves absorbs light used in photosynthesis.",
+            "For photosynthesis, a leaf captures light with chlorophyll.",
+            "Leaf chlorophyll collects light energy for photosynthesis.",
+            "Photosynthesis uses light absorbed by chlorophyll in a leaf.",
+        ),
+    ),
+    (
+        "music",
+        (
+            "A chord combines multiple musical notes at the same time.",
+            "Several notes sounding together form a musical chord.",
+            "A musical chord consists of multiple simultaneous notes.",
+            "Multiple notes played together create a chord.",
+            "A chord is produced when several musical notes sound together.",
+        ),
+    ),
+    (
+        "mathematics",
+        (
+            "A prime number has exactly two positive divisors.",
+            "Exactly two positive factors divide a prime number.",
+            "A number is prime when it has two positive divisors.",
+            "Prime numbers are divisible by precisely two positive integers.",
+            "Having exactly two positive factors defines a prime number.",
+        ),
+    ),
+    (
+        "programming",
+        (
+            "A function receives input values through its parameters.",
+            "Parameters provide input values to a function.",
+            "Input values enter a function by way of parameters.",
+            "A function's parameters carry values into the function.",
+            "Values are passed into a function using parameters.",
+        ),
+    ),
+)
+
+
+def _control_tasks(
+    contract: JudgeContract,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     rng = np.random.default_rng(contract.control_seed)
     tasks = []
     answers = []
@@ -121,9 +202,15 @@ def _control_tasks(contract: IntruderJudgeContract) -> tuple[list[dict[str, Any]
             }
         )
     for index in range(contract.negative_controls):
-        theme, *phrases = _CONTROL_THEMES[index % len(_CONTROL_THEMES)]
-        examples = [f"{phrase} example {index}" for phrase in phrases[:4]]
-        examples.append(f"{theme} concept example {index}")
+        if isinstance(contract, IntruderJudgeV2Contract):
+            theme, paraphrases = _NEGATIVE_CONTROL_PARAPHRASES[
+                index % len(_NEGATIVE_CONTROL_PARAPHRASES)
+            ]
+            examples = list(paraphrases)
+        else:
+            theme, *phrases = _CONTROL_THEMES[index % len(_CONTROL_THEMES)]
+            examples = [f"{phrase} example {index}" for phrase in phrases[:4]]
+            examples.append(f"{theme} concept example {index}")
         rng.shuffle(examples)
         tasks.append(
             {
@@ -150,11 +237,17 @@ def _control_tasks(contract: IntruderJudgeContract) -> tuple[list[dict[str, Any]
     return tasks, answers
 
 
-def _prompt(task: dict[str, Any]) -> str:
+def _prompt(task: dict[str, Any], contract: JudgeContract) -> str:
     examples = "\n\n".join(
         f"EXCERPT {row['position']}:\n{row['text']}" for row in task["examples"]
     )
-    return f"""Four excerpts should share a specific semantic or structural pattern and one may be an intruder. Identify the intruder using content, not writing quality, length, language, formatting, or document source. If no defensible unique intruder exists, return null.
+    if isinstance(contract, IntruderJudgeV2Contract):
+        instructions = """Determine the narrowest content-based pattern that covers at least four excerpts. Select an intruder only when exactly one excerpt clearly violates that pattern.
+
+Do not manufacture an intruder from wording, length, formatting, specificity versus generality, named entities, or an arbitrary subgroup. If all five express the same underlying idea, if multiple answers are comparably plausible, or if the distinction is weak, return null. Confidence 3 requires a clear four-versus-one semantic separation; confidence 0 requires null."""
+    else:
+        instructions = """Four excerpts should share a specific semantic or structural pattern and one may be an intruder. Identify the intruder using content, not writing quality, length, language, formatting, or document source. If no defensible unique intruder exists, return null."""
+    return f"""{instructions}
 
 {examples}
 
@@ -190,14 +283,19 @@ def _parse_response(text: str) -> dict[str, Any]:
 
 
 def _generate(
-    tasks: list[dict[str, Any]], contract: IntruderJudgeContract
+    tasks: list[dict[str, Any]], contract: JudgeContract
 ) -> list[str]:
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
+    tokenizer_kwargs: dict[str, Any] = {
+        "revision": contract.judge_revision,
+        "local_files_only": True,
+    }
+    if contract.judge_model_id == "mistralai/Mistral-Nemo-Instruct-2407":
+        tokenizer_kwargs["fix_mistral_regex"] = True
     tokenizer = AutoTokenizer.from_pretrained(
         contract.judge_model_id,
-        revision=contract.judge_revision,
-        local_files_only=True,
+        **tokenizer_kwargs,
     )
     tokenizer.padding_side = "left"
     if tokenizer.pad_token_id is None:
@@ -220,7 +318,7 @@ def _generate(
                         "role": "system",
                         "content": "You are an independent evaluator following a fixed protocol.",
                     },
-                    {"role": "user", "content": _prompt(task)},
+                    {"role": "user", "content": _prompt(task, contract)},
                 ],
                 tokenize=False,
                 add_generation_prompt=True,
@@ -240,7 +338,13 @@ def _generate(
     return outputs
 
 
-def _summary(rows: list[dict[str, Any]], contract: IntruderJudgeContract) -> dict[str, Any]:
+def _canonical_position(position: int | None, rotation: int) -> int | None:
+    if position is None:
+        return None
+    return ((int(position) - 1 + rotation) % 5) + 1
+
+
+def _summary(rows: list[dict[str, Any]], contract: JudgeContract) -> dict[str, Any]:
     valid = [row for row in rows if row["parsed"]["valid"]]
     positive = [row for row in valid if row["control_kind"] == "positive"]
     negative = [row for row in valid if row["control_kind"] == "negative"]
@@ -268,6 +372,14 @@ def _summary(rows: list[dict[str, Any]], contract: IntruderJudgeContract) -> dic
         if row["parsed"]["intruder_position"] is not None
     )
     maximum_position_share = max(positions.values(), default=0) / max(1, sum(positions.values()))
+    positive_positions = Counter(
+        int(row["parsed"]["intruder_position"])
+        for row in positive
+        if row["parsed"]["intruder_position"] is not None
+    )
+    positive_maximum_position_share = max(
+        positive_positions.values(), default=0
+    ) / max(1, sum(positive_positions.values()))
     controls_pass = (
         positive_accuracy >= contract.minimum_positive_control_accuracy
         and negative_safe
@@ -275,13 +387,22 @@ def _summary(rows: list[dict[str, Any]], contract: IntruderJudgeContract) -> dic
         and invalid_rate <= contract.maximum_invalid_rate
         and maximum_position_share <= contract.maximum_position_share
     )
-    return {
+    if isinstance(contract, IntruderJudgeV2Contract):
+        controls_pass = (
+            controls_pass
+            and positive_maximum_position_share <= contract.maximum_position_share
+        )
+    summary: dict[str, Any] = {
         "status": "JUDGE_VALIDATED" if controls_pass else "JUDGE_VALIDATION_FAILED_EXPLORATORY_ONLY",
         "rows": len(rows),
         "valid_rows": len(valid),
         "invalid_rate": invalid_rate,
         "positive_control_accuracy": positive_accuracy,
         "negative_control_abstain_or_low_confidence_rate": negative_safe,
+        "positive_control_position_histogram": dict(
+            sorted(positive_positions.items())
+        ),
+        "positive_control_maximum_position_share": positive_maximum_position_share,
         "scientific_position_histogram": dict(sorted(positions.items())),
         "scientific_maximum_position_share": maximum_position_share,
         "thresholds": {
@@ -291,28 +412,80 @@ def _summary(rows: list[dict[str, Any]], contract: IntruderJudgeContract) -> dic
             "maximum_position_share": contract.maximum_position_share,
         },
     }
+    if isinstance(contract, IntruderJudgeV2Contract) and scientific:
+        parent_predictions: dict[str, list[int]] = {}
+        parent_correct: dict[str, int] = {}
+        for row in scientific:
+            base_trial_id = str(row["base_trial_id"])
+            rotation = int(row["rotation"])
+            predicted = _canonical_position(
+                row["parsed"]["intruder_position"], rotation
+            )
+            correct = _canonical_position(row["correct_position"], rotation)
+            if predicted is not None:
+                parent_predictions.setdefault(base_trial_id, []).append(predicted)
+            if correct is not None:
+                parent_correct[base_trial_id] = correct
+        consensus_eligible = 0
+        consensus_correct = 0
+        unanimous = 0
+        strengths: list[int] = []
+        for base_trial_id, predictions in parent_predictions.items():
+            counts = Counter(predictions)
+            top_count = max(counts.values(), default=0)
+            strengths.append(top_count)
+            if top_count == contract.cyclic_rotations:
+                unanimous += 1
+            winners = [position for position, count in counts.items() if count == top_count]
+            if top_count < contract.minimum_rotation_consensus or len(winners) != 1:
+                continue
+            consensus_eligible += 1
+            if winners[0] == parent_correct[base_trial_id]:
+                consensus_correct += 1
+        parent_count = len(parent_correct)
+        summary["rotation_consensus"] = {
+            "parent_count": parent_count,
+            "eligible_parent_count": consensus_eligible,
+            "eligible_parent_fraction": consensus_eligible / max(1, parent_count),
+            "eligible_parent_accuracy": consensus_correct
+            / max(1, consensus_eligible),
+            "unanimous_parent_count": unanimous,
+            "mean_maximum_agreement": sum(strengths) / max(1, len(strengths)),
+            "minimum_votes": contract.minimum_rotation_consensus,
+        }
+    return summary
 
 
 def main() -> None:
     args = _args()
-    contract = IntruderJudgeContract.load(args.contract)
+    contract = _load_contract(args.contract)
     if "qwen" in contract.judge_model_id.lower() or contract.paid_api:
         raise RuntimeError("judge contract violates the non-Qwen/local-only restriction")
+    if args.controls_only and not isinstance(contract, IntruderJudgeV2Contract):
+        raise ValueError("controls-only preflight requires the v2 judge contract")
     tasks = _jsonl(args.tasks)
     answers = {row["trial_id"]: row for row in _jsonl(args.answer_key)}
     if {row["trial_id"] for row in tasks} != set(answers):
         raise ValueError("Intruder tasks and answer key differ")
     expanded_tasks = []
     expanded_answers = []
-    for task in tasks:
-        answer = answers[task["trial_id"]]
-        for rotation in range(contract.cyclic_rotations):
-            rotated_task, rotated_answer = _rotate_task(task, answer, rotation)
-            expanded_tasks.append(rotated_task)
-            expanded_answers.append(rotated_answer)
+    if not args.controls_only:
+        for task in tasks:
+            answer = answers[task["trial_id"]]
+            for rotation in range(contract.cyclic_rotations):
+                rotated_task, rotated_answer = _rotate_task(task, answer, rotation)
+                expanded_tasks.append(rotated_task)
+                expanded_answers.append(rotated_answer)
     control_tasks, control_answers = _control_tasks(contract)
-    expanded_tasks.extend(control_tasks)
-    expanded_answers.extend(control_answers)
+    if isinstance(contract, IntruderJudgeV2Contract):
+        for task, answer in zip(control_tasks, control_answers, strict=True):
+            for rotation in range(contract.control_rotations):
+                rotated_task, rotated_answer = _rotate_task(task, answer, rotation)
+                expanded_tasks.append(rotated_task)
+                expanded_answers.append(rotated_answer)
+    else:
+        expanded_tasks.extend(control_tasks)
+        expanded_answers.extend(control_answers)
     started = time.perf_counter()
     raw_outputs = _generate(expanded_tasks, contract)
     rows = []
@@ -343,6 +516,7 @@ def main() -> None:
             "schema_version": 1,
             "status": "LOCAL_INTRUDER_JUDGING_COMPLETE",
             "scientific_interpretation_status": summary["status"],
+            "execution_mode": "controls_only" if args.controls_only else "full",
             "judge_model_id": contract.judge_model_id,
             "judge_revision": contract.judge_revision,
             "local_files_only": True,
@@ -350,6 +524,9 @@ def main() -> None:
             "dtype": contract.dtype,
             "decoding": contract.decoding,
             "cyclic_rotations": contract.cyclic_rotations,
+            "control_rotations": getattr(contract, "control_rotations", 1),
+            "prompt_version": getattr(contract, "prompt_version", "legacy_v1"),
+            "control_version": getattr(contract, "control_version", "legacy_v1"),
             "contract_sha256": sha256_file(args.contract),
             "contract_fingerprint": contract.fingerprint(),
             "tasks_sha256": sha256_file(args.tasks),

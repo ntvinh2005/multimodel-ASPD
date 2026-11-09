@@ -21,6 +21,7 @@ from aspd.multimodel.cli.judge_aspd_v3_intruder import (
 )
 from aspd.multimodel.v3.mechanistic_validation import (
     IntruderJudgeContract,
+    IntruderJudgeV2Contract,
     MechanisticValidationContract,
     norm_matched_random_rank_one,
     pairwise_firing_statistic,
@@ -70,6 +71,13 @@ def test_contract_is_frozen_to_untouched_test_split() -> None:
     assert judge.paid_api is False
     assert "qwen" not in judge.judge_model_id.lower()
     assert judge.cyclic_rotations == 5
+
+    judge_v2 = IntruderJudgeV2Contract.load(
+        ROOT / "configs/multimodel/aspd_v3/zscore_intruder_judge_v2_mistral.yaml"
+    )
+    assert judge_v2.prompt_version == "abstention_calibrated_v2"
+    assert judge_v2.control_rotations == 5
+    assert "qwen" not in judge_v2.judge_model_id.lower()
 
 
 def test_pairwise_firing_statistic_uses_marginal_independence_reference() -> None:
@@ -268,6 +276,86 @@ def test_judge_parser_and_controls_fail_closed() -> None:
         for answer in answers
         if answer["control_kind"] == "negative"
     )
+
+
+def test_judge_v2_controls_are_semantically_matched_and_rotatable() -> None:
+    contract = IntruderJudgeV2Contract.load(
+        ROOT / "configs/multimodel/aspd_v3/zscore_intruder_judge_v2_mistral.yaml"
+    )
+    tasks, answers = _control_tasks(contract)
+    negative_pairs = [
+        (task, answer)
+        for task, answer in zip(tasks, answers, strict=True)
+        if task["control_kind"] == "negative"
+    ]
+    assert len(negative_pairs) == 20
+    assert all(answer["intruder_position"] is None for _, answer in negative_pairs)
+    assert all(
+        " concept example " not in example["text"]
+        for task, _ in negative_pairs
+        for example in task["examples"]
+    )
+    rotated = [
+        _rotate_task(negative_pairs[0][0], negative_pairs[0][1], rotation)
+        for rotation in range(contract.control_rotations)
+    ]
+    assert all(answer["intruder_position"] is None for _, answer in rotated)
+    assert all(task["control_kind"] == "negative" for task, _ in rotated)
+
+
+def test_judge_v2_summary_uses_rotation_consensus_as_parent_unit() -> None:
+    contract = IntruderJudgeV2Contract.load(
+        ROOT / "configs/multimodel/aspd_v3/zscore_intruder_judge_v2_mistral.yaml"
+    )
+    rows = []
+    for index in range(20):
+        for rotation in range(5):
+            correct = ((index % 5 - rotation) % 5) + 1
+            rows.append(
+                {
+                    "base_trial_id": f"positive-{index}",
+                    "rotation": rotation,
+                    "control_kind": "positive",
+                    "correct_position": correct,
+                    "parsed": {
+                        "valid": True,
+                        "intruder_position": correct,
+                        "confidence": 3,
+                    },
+                }
+            )
+            rows.append(
+                {
+                    "base_trial_id": f"negative-{index}",
+                    "rotation": rotation,
+                    "control_kind": "negative",
+                    "correct_position": None,
+                    "parsed": {
+                        "valid": True,
+                        "intruder_position": None,
+                        "confidence": 0,
+                    },
+                }
+            )
+    for rotation in range(5):
+        displayed = ((2 - 1 - rotation) % 5) + 1
+        rows.append(
+            {
+                "base_trial_id": "scientific-parent",
+                "rotation": rotation,
+                "control_kind": None,
+                "correct_position": displayed,
+                "parsed": {
+                    "valid": True,
+                    "intruder_position": displayed,
+                    "confidence": 3,
+                },
+            }
+        )
+    summary = _summary(rows, contract)
+    assert summary["status"] == "JUDGE_VALIDATED"
+    assert summary["rotation_consensus"]["eligible_parent_count"] == 1
+    assert summary["rotation_consensus"]["eligible_parent_accuracy"] == 1.0
 
 
 def test_judge_validation_summary_applies_predeclared_thresholds() -> None:

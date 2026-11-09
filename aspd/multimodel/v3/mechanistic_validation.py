@@ -130,6 +130,69 @@ class IntruderJudgeContract(BaseModel):
         return hashlib.sha256(encoded.encode()).hexdigest()
 
 
+class IntruderJudgeV2Contract(BaseModel):
+    """Fail-closed judge contract with calibrated abstention controls."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[2]
+    status: Literal["RESEARCHER_AUTHORIZED_LOCAL_INTRUDER_JUDGE"]
+    experiment_family: Literal["aspd_v3_zscore_intruder_judge_v2"]
+    judge_model_id: Literal[
+        "mistralai/Mistral-Nemo-Instruct-2407",
+        "meta-llama/Llama-3.3-70B-Instruct",
+    ]
+    judge_revision: Literal[
+        "04d8a90549d23fc6bd7f642064003592df51e9b3",
+        "6f6073b423013f6a7d4d9f39144961bfbfbc386b",
+    ]
+    local_files_only: Literal[True]
+    paid_api: Literal[False]
+    dtype: Literal["bfloat16"]
+    decoding: Literal["greedy"]
+    max_new_tokens: Literal[128]
+    batch_size: int
+    cyclic_rotations: Literal[5]
+    control_rotations: Literal[5]
+    prompt_version: Literal["abstention_calibrated_v2"]
+    control_version: Literal["semantic_paraphrase_v2"]
+    allow_abstention: Literal[True]
+    confidence_scale: tuple[Literal[0], Literal[1], Literal[2], Literal[3]]
+    positive_controls: Literal[20]
+    negative_controls: Literal[20]
+    control_seed: Literal[53]
+    minimum_positive_control_accuracy: Literal[0.8]
+    minimum_negative_control_abstain_or_low_confidence_rate: Literal[0.8]
+    maximum_invalid_rate: Literal[0.05]
+    maximum_position_share: Literal[0.35]
+    minimum_rotation_consensus: Literal[3]
+
+    @model_validator(mode="after")
+    def validate_model_revision_pair(self) -> IntruderJudgeV2Contract:
+        expected = {
+            "mistralai/Mistral-Nemo-Instruct-2407": (
+                "04d8a90549d23fc6bd7f642064003592df51e9b3"
+            ),
+            "meta-llama/Llama-3.3-70B-Instruct": (
+                "6f6073b423013f6a7d4d9f39144961bfbfbc386b"
+            ),
+        }
+        if self.judge_revision != expected[self.judge_model_id]:
+            raise ValueError("judge model/revision pair is not pinned correctly")
+        if self.batch_size <= 0:
+            raise ValueError("judge batch size must be positive")
+        return self
+
+    @classmethod
+    def load(cls, path: str | Path) -> IntruderJudgeV2Contract:
+        return cls.model_validate(yaml.safe_load(Path(path).read_text(encoding="utf-8")))
+
+    def fingerprint(self) -> str:
+        payload = self.model_dump(mode="json")
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode()).hexdigest()
+
+
 @dataclass(frozen=True)
 class PairwiseFiringStatistic:
     left: int
@@ -268,6 +331,7 @@ def temporary_rank_one_ablation(
 __all__ = [
     "MechanisticValidationContract",
     "IntruderJudgeContract",
+    "IntruderJudgeV2Contract",
     "PairwiseFiringStatistic",
     "norm_matched_random_rank_one",
     "pairwise_firing_statistic",
