@@ -196,6 +196,154 @@ def _bootstrap_mean(values: np.ndarray, *, seed: int, replicates: int) -> dict[s
     }
 
 
+def _context_contrasts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        if float(row["strength"]) == 1.0:
+            grouped[
+                (
+                    row["arm"],
+                    row["model"],
+                    row["site"],
+                    int(row["feature"]),
+                    row["context_activity"],
+                    row["anchor_id"],
+                    row["document_id"],
+                )
+            ].append(row)
+    output = []
+    for key, values in sorted(grouped.items()):
+        learned = [row for row in values if row["intervention_kind"] == "learned"]
+        rank_one = [row for row in values if row["intervention_kind"] == "random_rank_one"]
+        random_component = [
+            row for row in values if row["intervention_kind"] == "random_component"
+        ]
+        if len(learned) != 1 or len(rank_one) != 3 or len(random_component) != 1:
+            raise ValueError(f"causal control coverage differs for context {key}")
+        identity = {
+            name: value
+            for name, value in zip(
+                ("arm", "model", "site", "feature", "context_activity", "anchor_id", "document_id"),
+                key,
+                strict=True,
+            )
+        }
+        for control_name, controls in (
+            ("random_rank_one_seed_mean", rank_one),
+            ("random_component", random_component),
+        ):
+            result = {**identity, "control": control_name}
+            for metric in PRIMARY_METRICS:
+                result[f"learned_minus_control_{metric}"] = float(learned[0][metric]) - _mean(
+                    row[metric] for row in controls
+                )
+            output.append(result)
+    return output
+
+
+def _hierarchical_interval(
+    component_values: dict[tuple[str, int], dict[str, np.ndarray]],
+    *,
+    quantity: str,
+    seed: int,
+    replicates: int,
+) -> dict[str, Any]:
+    components = sorted(component_values)
+    if not components:
+        raise ValueError("cannot bootstrap an empty component group")
+
+    def sampled_component(rng: np.random.Generator, component: tuple[str, int]) -> float:
+        active = component_values[component]["active"]
+        active_mean = float(active[rng.integers(0, len(active), size=len(active))].mean())
+        if quantity == "active":
+            return active_mean
+        inactive = component_values[component]["inactive"]
+        inactive_mean = float(inactive[rng.integers(0, len(inactive), size=len(inactive))].mean())
+        return active_mean - inactive_mean
+
+    points = []
+    for component in components:
+        active_mean = float(component_values[component]["active"].mean())
+        if quantity == "active":
+            points.append(active_mean)
+        else:
+            points.append(active_mean - float(component_values[component]["inactive"].mean()))
+    rng = np.random.default_rng(seed)
+    bootstrap = np.empty(replicates, dtype=np.float64)
+    for replicate in range(replicates):
+        chosen = rng.integers(0, len(components), size=len(components))
+        bootstrap[replicate] = _mean(
+            sampled_component(rng, components[index]) for index in chosen
+        )
+    lower, upper = np.quantile(bootstrap, (0.025, 0.975))
+    return {
+        "n_components": len(components),
+        "documents_per_component_activity": 4,
+        "mean": _mean(points),
+        "ci95_lower": float(lower),
+        "ci95_upper": float(upper),
+        "bootstrap_unit": "component_then_document_within_activity",
+        "bootstrap_replicates": replicates,
+    }
+
+
+def _hierarchical_estimands(
+    rows: list[dict[str, Any]], contract: CausalValidationContract
+) -> list[dict[str, Any]]:
+    contrasts = _context_contrasts(rows)
+    output = []
+    sequence = 0
+    for arm in contract.arms:
+        for model in contract.model_order:
+            for site in ("all", "pre", "mid"):
+                for metric in PRIMARY_METRICS:
+                    for control in ("random_rank_one_seed_mean", "random_component"):
+                        selected = [
+                            row
+                            for row in contrasts
+                            if row["arm"] == arm
+                            and row["model"] == model
+                            and row["control"] == control
+                            and (site == "all" or row["site"] == site)
+                        ]
+                        component_values: dict[tuple[str, int], dict[str, np.ndarray]] = {}
+                        for component in sorted({(row["site"], row["feature"]) for row in selected}):
+                            component_values[component] = {
+                                activity: np.asarray(
+                                    [
+                                        row[f"learned_minus_control_{metric}"]
+                                        for row in selected
+                                        if (row["site"], row["feature"]) == component
+                                        and row["context_activity"] == activity
+                                    ],
+                                    dtype=np.float64,
+                                )
+                                for activity in ("active", "inactive")
+                            }
+                            if any(len(values) != 4 for values in component_values[component].values()):
+                                raise ValueError(f"document count differs for component {component}")
+                        for quantity in ("active", "specificity"):
+                            interval = _hierarchical_interval(
+                                component_values,
+                                quantity=quantity,
+                                seed=contract.bootstrap_seed + sequence,
+                                replicates=contract.bootstrap_replicates,
+                            )
+                            sequence += 1
+                            output.append(
+                                {
+                                    "arm": arm,
+                                    "model": model,
+                                    "site": site,
+                                    "metric": metric,
+                                    "quantity": quantity,
+                                    "contrast": f"learned_minus_{control}",
+                                    **interval,
+                                }
+                            )
+    return output
+
+
 def _paired_estimands(
     component_rows: list[dict[str, Any]], contract: CausalValidationContract
 ) -> list[dict[str, Any]]:
@@ -357,6 +505,10 @@ def main() -> None:
     estimands = _paired_estimands(components, contract)
     args.output_dir.mkdir(parents=True)
     _write_csv(args.output_dir / "component_effects.csv", components)
+    _write_json(
+        args.output_dir / "primary_hierarchical_estimands.json",
+        _hierarchical_estimands(rows, contract),
+    )
     _write_json(args.output_dir / "paired_estimands.json", estimands)
     _write_json(args.output_dir / "dose_response.json", _dose_response(components))
     _write_json(args.output_dir / "cross_model_correspondence.json", _cross_model(components, contract))
@@ -373,7 +525,8 @@ def main() -> None:
             "input_rows": len(rows),
             "component_intervention_rows": len(components),
             "primary_metrics": list(PRIMARY_METRICS),
-            "bootstrap_unit": "component",
+            "primary_bootstrap_unit": "component_then_document_within_activity",
+            "sensitivity_bootstrap_unit": "component",
             "limitations": [
                 "single training seed per arm",
                 "C1 single-matrix interventions only",
