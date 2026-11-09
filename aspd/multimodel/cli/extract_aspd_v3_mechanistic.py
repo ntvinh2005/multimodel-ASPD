@@ -11,6 +11,7 @@ import socket
 import sqlite3
 import subprocess
 import time
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -282,6 +283,7 @@ def _save_site(
 
 def main() -> None:
     args = _args()
+    evaluation_git_sha = _git_sha()
     rank = int(os.environ["RANK"])
     local_rank = int(os.environ["LOCAL_RANK"])
     world = int(os.environ["WORLD_SIZE"])
@@ -305,7 +307,12 @@ def main() -> None:
 
     device = torch.device("cuda", local_rank)
     torch.cuda.set_device(device)
-    dist.init_process_group("nccl", device_id=device)
+    # A document-disjoint confirmation extraction must replay the frozen stream past
+    # every excluded development document before its first pool. Rank 1 legitimately
+    # waits during that rank-0-only scan, so the default ten-minute watchdog is too short.
+    dist.init_process_group(
+        "nccl", device_id=device, timeout=timedelta(minutes=90)
+    )
     started = time.perf_counter()
     validation_args = argparse.Namespace(
         config=args.config,
@@ -573,7 +580,7 @@ def main() -> None:
                 for key in model_order
             },
             "training_git_sha": provenance["training_git_sha"],
-            "evaluation_git_sha": _git_sha(),
+            "evaluation_git_sha": evaluation_git_sha,
             "config_sha256": provenance["config_sha256"],
             "config_fingerprint": config.fingerprint(),
             "protocol_sha256": sha256_file(args.protocol),

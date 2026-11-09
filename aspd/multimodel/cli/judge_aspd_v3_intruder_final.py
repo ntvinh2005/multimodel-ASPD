@@ -408,6 +408,7 @@ def _validate_calibration(path: Path, contract: FinalIntruderJudgeContract) -> d
 
 def main() -> None:
     args = _args()
+    evaluation_git_sha = _git_sha()
     contract = FinalIntruderJudgeContract.load(args.contract)
     if "qwen" in contract.judge_model_id.casefold():
         raise ValueError("Qwen judges are forbidden")
@@ -477,7 +478,7 @@ def main() -> None:
     _write_json(args.output_dir / "judge_summary.json", summary)
     manifest = {
         "schema_version": 4,
-        "git_sha": _git_sha(),
+        "git_sha": evaluation_git_sha,
         "mode": args.mode,
         "judge_model_id": contract.judge_model_id,
         "judge_revision": contract.judge_revision,
