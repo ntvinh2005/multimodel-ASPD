@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ASPD v3.1 Human Interpretability Evaluation</title>
+  <style>
+    :root { color-scheme: light; --ink:#172033; --muted:#647084; --line:#dce2ea; --panel:#fff; --soft:#f5f7fa; --brand:#2756d8; --mark:#ffe89a; --danger:#b42318; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:#eef2f6; color:var(--ink); font:15px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    button, input, select, textarea { font:inherit; }
+    header { position:sticky; top:0; z-index:10; background:#15213a; color:#fff; padding:14px 22px; box-shadow:0 2px 12px #0002; }
+    header h1 { margin:0 0 6px; font-size:19px; }
+    .header-row { display:flex; gap:18px; align-items:center; flex-wrap:wrap; }
+    .progress { flex:1; min-width:220px; height:8px; border-radius:8px; overflow:hidden; background:#ffffff33; }
+    .progress > div { height:100%; background:#73a2ff; width:0; transition:width .2s; }
+    main { max-width:1120px; margin:22px auto 80px; padding:0 18px; }
+    .toolbar, .card, .rating-panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; box-shadow:0 2px 8px #1e2a3a0b; }
+    .toolbar { padding:14px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:16px; }
+    .toolbar label { font-weight:650; }
+    .toolbar input { min-width:190px; padding:8px 10px; border:1px solid #bec8d5; border-radius:7px; }
+    button, .file-button { border:1px solid #b8c2d0; background:#fff; color:var(--ink); border-radius:8px; padding:8px 12px; cursor:pointer; }
+    button:hover, .file-button:hover { border-color:var(--brand); }
+    button.primary { color:#fff; background:var(--brand); border-color:var(--brand); }
+    button:disabled { opacity:.45; cursor:not-allowed; }
+    .file-button input { display:none; }
+    .notice { padding:11px 14px; border-left:4px solid var(--brand); background:#edf3ff; border-radius:7px; margin-bottom:16px; }
+    .item-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:13px; }
+    .item-head h2 { margin:0; font-size:20px; }
+    .phase { display:inline-block; color:#43516a; background:#edf0f5; border-radius:999px; padding:3px 9px; font-size:12px; font-weight:700; letter-spacing:.02em; }
+    .examples { display:grid; gap:12px; }
+    .card { padding:0; overflow:hidden; }
+    .choice-row { display:flex; gap:10px; align-items:center; padding:10px 14px; border-bottom:1px solid var(--line); background:var(--soft); }
+    .choice-row strong { min-width:78px; }
+    .context { white-space:pre-wrap; overflow-wrap:anywhere; padding:14px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:13px; line-height:1.55; }
+    mark { background:var(--mark); color:#111; border:1px solid #e4bf38; border-radius:3px; padding:1px 2px; font-weight:750; }
+    details { border-top:1px dashed var(--line); }
+    summary { cursor:pointer; padding:9px 14px; color:#3d526f; font-weight:650; }
+    details .context { background:#fbfcfe; max-height:360px; overflow:auto; }
+    .ellipsis { color:#8a94a6; font-weight:700; }
+    .rating-panel { padding:16px; margin-top:16px; }
+    .field { margin:0 0 15px; }
+    .field > label, .field > legend { display:block; font-weight:750; margin-bottom:7px; }
+    fieldset { border:0; padding:0; }
+    .radio-scale { display:flex; gap:8px; flex-wrap:wrap; }
+    .radio-scale label { border:1px solid #c8d0dc; border-radius:8px; padding:7px 10px; cursor:pointer; background:#fff; }
+    .radio-scale label:has(input:checked) { border-color:var(--brand); background:#edf3ff; }
+    select, textarea { width:100%; border:1px solid #bec8d5; border-radius:8px; padding:9px 10px; background:#fff; }
+    textarea { min-height:88px; resize:vertical; }
+    .cannot { padding:10px 12px; background:#fff8e6; border:1px solid #ecd28a; border-radius:8px; margin-top:12px; display:block; }
+    .navigation { display:flex; justify-content:space-between; gap:10px; margin-top:18px; }
+    .status { color:var(--muted); }
+    .error { color:var(--danger); font-weight:700; }
+    .footer-note { color:var(--muted); margin-top:16px; font-size:13px; }
+    @media (max-width:700px) { main { padding:0 10px; } .context { font-size:12px; } .navigation { position:sticky; bottom:8px; background:#eef2f6; padding:8px 0; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ASPD v3.1 Human Interpretability Evaluation</h1>
+    <div class="header-row"><span id="progressText">0 completed</span><div class="progress"><div id="progressBar"></div></div><span id="saveState">Not saved</span></div>
+  </header>
+  <main>
+    <div class="toolbar">
+      <label for="evaluatorId">Evaluator ID</label><input id="evaluatorId" autocomplete="off" placeholder="e.g. researcher-01">
+      <button id="exportBtn" class="primary">Export responses</button>
+      <label class="file-button">Import responses<input id="importFile" type="file" accept="application/json,.json"></label>
+      <button id="clearBtn">Clear local progress</button>
+      <span class="status" id="datasetInfo"></span>
+    </div>
+    <div class="notice" id="notice"></div>
+    <section id="task"></section>
+    <div class="navigation"><button id="prevBtn">← Previous</button><button id="saveNextBtn" class="primary">Save &amp; next →</button></div>
+    <p class="footer-note">The page contains no arm labels, feature IDs, activations, or answer key. Exported responses are not graded in this page.</p>
+  </main>
+  <script>
+  "use strict";
+  const DATASET_SHA256 = "__DATASET_SHA256__";
+  const decodeB64 = value => JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(value), c => c.charCodeAt(0))));
+  const dataset = decodeB64("__DATASET_B64__");
+  const blankTemplate = decodeB64("__RESPONSE_TEMPLATE_B64__");
+  const storageKey = `aspd-human-eval:${DATASET_SHA256}`;
+  const clone = value => JSON.parse(JSON.stringify(value));
+  let state = clone(blankTemplate);
+  let current = 0;
+  try {
+    const stored = localStorage.getItem(storageKey);
+    if (stored) state = JSON.parse(stored);
+  } catch (error) { console.warn("Could not restore local progress", error); }
+
+  const byId = id => document.getElementById(id);
+  const task = byId("task");
+  const complete = row => Boolean((row.cannot_determine || row.intruder_choice) && row.coherence && row.pattern_category && row.confidence);
+  const escapeText = value => document.createTextNode(value == null ? "" : String(value));
+  function appendMarked(container, parts) {
+    if (parts.truncated_left) { const e=document.createElement("span"); e.className="ellipsis"; e.textContent="… "; container.append(e); }
+    container.append(escapeText(parts.prefix));
+    const mark=document.createElement("mark"); mark.textContent=parts.anchor; mark.title="Aligned activation token"; container.append(mark);
+    container.append(escapeText(parts.suffix));
+    if (parts.truncated_right) { const e=document.createElement("span"); e.className="ellipsis"; e.textContent=" …"; container.append(e); }
+  }
+  function saveLocal() {
+    state.evaluator_id = byId("evaluatorId").value.trim();
+    if (!state.started_at) state.started_at = new Date().toISOString();
+    localStorage.setItem(storageKey, JSON.stringify(state));
+    byId("saveState").textContent = "Saved locally";
+    updateProgress();
+  }
+  function updateProgress() {
+    const rows=Object.values(state.responses); const done=rows.filter(complete).length;
+    byId("progressText").textContent=`${done}/${rows.length} completed`;
+    byId("progressBar").style.width=`${100*done/rows.length}%`;
+  }
+  function render() {
+    const item=dataset.items[current]; const response=state.responses[item.item_id];
+    task.replaceChildren();
+    const head=document.createElement("div"); head.className="item-head";
+    const left=document.createElement("div"); const title=document.createElement("h2"); title.textContent=item.item_id; left.append(title);
+    const sub=document.createElement("div"); sub.className="status"; sub.textContent=item.phase==="practice" ? "Practice item — excluded from scientific scoring" : `Scientific batch ${item.batch}`; left.append(sub);
+    const phase=document.createElement("span"); phase.className="phase"; phase.textContent=`Item ${current+1} of ${dataset.items.length}`; head.append(left,phase); task.append(head);
+    const intro=document.createElement("p"); intro.textContent="Choose the one context that does not share the apparent pattern. The highlighted span is the aligned activation token in every example; highlighting does not identify the intruder."; task.append(intro);
+    const examples=document.createElement("div"); examples.className="examples";
+    item.examples.forEach(example => {
+      const card=document.createElement("article"); card.className="card";
+      const row=document.createElement("div"); row.className="choice-row";
+      const radio=document.createElement("input"); radio.type="radio"; radio.name="intruder"; radio.value=example.candidate_id; radio.checked=response.intruder_choice===example.candidate_id && !response.cannot_determine;
+      radio.addEventListener("change",()=>{ response.intruder_choice=example.candidate_id; response.cannot_determine=false; saveLocal(); render(); });
+      const label=document.createElement("strong"); label.textContent=`Example ${example.candidate_id}`; row.append(radio,label); card.append(row);
+      const compact=document.createElement("div"); compact.className="context"; appendMarked(compact,example.compact); card.append(compact);
+      const details=document.createElement("details"); const summary=document.createElement("summary"); summary.textContent="Show longer source context"; const expanded=document.createElement("div"); expanded.className="context"; appendMarked(expanded,example.expanded); details.append(summary,expanded); card.append(details); examples.append(card);
+    });
+    task.append(examples);
+    const panel=document.createElement("div"); panel.className="rating-panel";
+    const cannot=document.createElement("label"); cannot.className="cannot"; const cb=document.createElement("input"); cb.type="checkbox"; cb.checked=Boolean(response.cannot_determine); cb.addEventListener("change",()=>{ response.cannot_determine=cb.checked; if(cb.checked) response.intruder_choice=null; saveLocal(); render(); }); cannot.append(cb,escapeText(" Cannot determine a unique intruder")); panel.append(cannot);
+    const coherence=document.createElement("fieldset"); coherence.className="field"; const legend=document.createElement("legend"); legend.textContent="Feature coherence (1 = none, 5 = strong and specific)"; coherence.append(legend); const scale=document.createElement("div"); scale.className="radio-scale";
+    [1,2,3,4,5].forEach(value=>{ const label=document.createElement("label"); const input=document.createElement("input"); input.type="radio"; input.name="coherence"; input.value=value; input.checked=Number(response.coherence)===value; input.addEventListener("change",()=>{response.coherence=value;saveLocal();}); label.append(input,escapeText(` ${value}`)); scale.append(label); }); coherence.append(scale); panel.append(coherence);
+    const categoryWrap=document.createElement("div"); categoryWrap.className="field"; const categoryLabel=document.createElement("label"); categoryLabel.textContent="Pattern category"; const category=document.createElement("select"); category.innerHTML='<option value="">Select…</option><option value="semantic">Semantic</option><option value="syntactic">Syntactic</option><option value="stylistic">Stylistic</option><option value="formatting">Formatting</option><option value="mixed">Mixed</option><option value="unclear">Unclear</option>'; category.value=response.pattern_category||""; category.addEventListener("change",()=>{response.pattern_category=category.value||null;saveLocal();}); categoryWrap.append(categoryLabel,category); panel.append(categoryWrap);
+    const confidence=document.createElement("fieldset"); confidence.className="field"; const confLegend=document.createElement("legend"); confLegend.textContent="Interpretation confidence (1 = very low, 5 = very high)"; confidence.append(confLegend); const confScale=document.createElement("div"); confScale.className="radio-scale";
+    [1,2,3,4,5].forEach(value=>{ const label=document.createElement("label"); const input=document.createElement("input"); input.type="radio"; input.name="confidence"; input.value=value; input.checked=Number(response.confidence)===value; input.addEventListener("change",()=>{response.confidence=value;saveLocal();}); label.append(input,escapeText(` ${value}`)); confScale.append(label); }); confidence.append(confScale); panel.append(confidence);
+    const explanationWrap=document.createElement("div"); explanationWrap.className="field"; const explanationLabel=document.createElement("label"); explanationLabel.textContent="Common pattern or uncertainty (recorded verbatim)"; const textarea=document.createElement("textarea"); textarea.placeholder="Describe the shared pattern, or why no reliable pattern is visible."; textarea.value=response.explanation||""; textarea.addEventListener("input",()=>{response.explanation=textarea.value;saveLocal();}); explanationWrap.append(explanationLabel,textarea); panel.append(explanationWrap); task.append(panel);
+    byId("prevBtn").disabled=current===0; byId("saveNextBtn").textContent=current===dataset.items.length-1?"Save item":"Save & next →";
+    window.scrollTo({top:0,behavior:"smooth"}); updateProgress();
+  }
+  function importResponses(file) {
+    const reader=new FileReader(); reader.onload=()=>{ try { const incoming=JSON.parse(reader.result); if(incoming.schema_version!==1||incoming.dataset_sha256!==DATASET_SHA256) throw new Error("Dataset hash or schema does not match this package"); const expected=new Set(dataset.items.map(item=>item.item_id)); if(Object.keys(incoming.responses||{}).length!==expected.size||Object.keys(incoming.responses).some(id=>!expected.has(id))) throw new Error("Response item IDs do not match this package"); state=incoming; byId("evaluatorId").value=state.evaluator_id||""; saveLocal(); render(); alert("Responses imported successfully."); } catch(error) { alert(`Import failed: ${error.message}`); } }; reader.readAsText(file);
+  }
+  byId("prevBtn").addEventListener("click",()=>{saveLocal();current=Math.max(0,current-1);render();});
+  byId("saveNextBtn").addEventListener("click",()=>{saveLocal();if(current<dataset.items.length-1)current+=1;render();});
+  byId("evaluatorId").value=state.evaluator_id||""; byId("evaluatorId").addEventListener("input",saveLocal);
+  byId("exportBtn").addEventListener("click",()=>{saveLocal();if(!state.evaluator_id){alert("Enter an evaluator ID before exporting.");return;}state.exported_at=new Date().toISOString();const blob=new Blob([JSON.stringify(state,null,2)+"\n"],{type:"application/json"});const url=URL.createObjectURL(blob);const link=document.createElement("a");link.href=url;link.download=`aspd_human_responses_${state.evaluator_id.replace(/[^a-z0-9_-]+/gi,"_")}.json`;link.click();URL.revokeObjectURL(url);});
+  byId("importFile").addEventListener("change",event=>{if(event.target.files[0])importResponses(event.target.files[0]);event.target.value="";});
+  byId("clearBtn").addEventListener("click",()=>{if(confirm("Clear all locally saved responses for this frozen dataset?")){localStorage.removeItem(storageKey);state=clone(blankTemplate);current=0;byId("evaluatorId").value="";render();}});
+  byId("datasetInfo").textContent=`Frozen dataset ${DATASET_SHA256.slice(0,12)}…`;
+  byId("notice").textContent=`Complete ${dataset.practice_item_count} practice items first. Scientific items are blinded and split into batches. You may abstain whenever no unique intruder or shared pattern is defensible.`;
+  render();
+  </script>
+</body>
+</html>

@@ -35,6 +35,7 @@ from aspd.multimodel.v3.gate_collapse_recovery_config import (
 from aspd.multimodel.v3.hooks import assert_frozen_backbone, logical_weight_bias
 from aspd.multimodel.v3.mechanistic_validation import (
     FinalIntruderValidationContract,
+    HumanInterpretabilityContract,
     MechanisticValidationContract,
 )
 from aspd.multimodel.v3.model_owned import ModelOwnedMain2B
@@ -68,7 +69,11 @@ def _write_json(path: Path, payload: Any) -> None:
         handle.write("\n")
 
 
-ValidationContract = MechanisticValidationContract | FinalIntruderValidationContract
+ValidationContract = (
+    MechanisticValidationContract
+    | FinalIntruderValidationContract
+    | HumanInterpretabilityContract
+)
 
 
 def _load_protocol(path: Path) -> ValidationContract:
@@ -79,6 +84,8 @@ def _load_protocol(path: Path) -> ValidationContract:
         return MechanisticValidationContract.load(path)
     if family == "aspd_v3_zscore_intruder_final_v1":
         return FinalIntruderValidationContract.load(path)
+    if family == "aspd_v3_human_interpretability_v1":
+        return HumanInterpretabilityContract.load(path)
     raise ValueError(f"unsupported mechanistic protocol family: {family!r}")
 
 
@@ -149,6 +156,7 @@ def _update_contexts(
     model_key: str,
     tokens_per_side: int,
     canonical_characters_per_side: int | None,
+    anchor_span_cache: dict[tuple[str, int, int], tuple[int, int, str]],
     limit: int,
 ) -> None:
     """Retain the strongest activation per document, bounded to ``limit`` documents."""
@@ -213,11 +221,43 @@ def _update_contexts(
                 assert canonical_boundaries is not None
                 canonical_text = str(observation["canonical_text"])
                 boundary = canonical_boundaries[anchor_index]
+                cache_key = (document_id, int(context["model_token_index"]), boundary)
+                if cache_key not in anchor_span_cache:
+                    encoded = tokenizer(
+                        canonical_text,
+                        add_special_tokens=True,
+                        return_attention_mask=True,
+                        return_offsets_mapping=True,
+                        truncation=True,
+                        max_length=len(pool.models[model_key].input_ids[document_index]),
+                    )
+                    offsets = encoded["offset_mapping"]
+                    if hasattr(offsets, "tolist"):
+                        offsets = offsets.tolist()
+                    if offsets and isinstance(offsets[0], list) and len(offsets) == 1:
+                        offsets = offsets[0]
+                    token_index = int(context["model_token_index"])
+                    if not 0 <= token_index < len(offsets):
+                        raise ValueError("anchor token index is outside tokenizer offsets")
+                    anchor_start, anchor_end = (int(value) for value in offsets[token_index])
+                    if anchor_start >= anchor_end or anchor_end != boundary:
+                        raise ValueError(
+                            "tokenizer offset does not reproduce the aligned canonical boundary"
+                        )
+                    anchor_span_cache[cache_key] = (
+                        anchor_start,
+                        anchor_end,
+                        canonical_text[anchor_start:anchor_end],
+                    )
+                anchor_start, anchor_end, anchor_text = anchor_span_cache[cache_key]
                 lower = max(0, boundary - canonical_characters_per_side)
                 upper = min(len(canonical_text), boundary + canonical_characters_per_side)
                 context.update(
                     {
                         "canonical_character_boundary": boundary,
+                        "canonical_anchor_start": anchor_start,
+                        "canonical_anchor_end": anchor_end,
+                        "canonical_anchor_text": anchor_text,
                         "canonical_context_start": lower,
                         "canonical_context_end": upper,
                         "canonical_context": canonical_text[lower:upper],
@@ -369,7 +409,7 @@ def main() -> None:
 
     excluded_document_ids: frozenset[str] = frozenset()
     excluded_manifest_sha256 = None
-    if isinstance(protocol, FinalIntruderValidationContract):
+    if isinstance(protocol, (FinalIntruderValidationContract, HumanInterpretabilityContract)):
         excluded_path = Path(protocol.excluded_document_manifest)
         excluded_manifest_sha256 = sha256_file(excluded_path)
         if excluded_manifest_sha256 != protocol.excluded_document_manifest_sha256:
@@ -423,6 +463,7 @@ def main() -> None:
     retained = {
         site: [dict() for _ in range(n_features)] for site in ("pre", "mid")
     }
+    anchor_span_cache: dict[tuple[str, int, int], tuple[int, int, str]] = {}
     document_ids: list[str] = []
     document_to_index: dict[str, int] = {}
     document_rows: list[dict[str, Any]] = []
@@ -484,9 +525,13 @@ def main() -> None:
                     tokens_per_side=protocol.context_tokens_per_side,
                     canonical_characters_per_side=(
                         protocol.canonical_context_characters_per_side
-                        if isinstance(protocol, FinalIntruderValidationContract)
+                        if isinstance(
+                            protocol,
+                            (FinalIntruderValidationContract, HumanInterpretabilityContract),
+                        )
                         else None
                     ),
+                    anchor_span_cache=anchor_span_cache,
                     limit=protocol.retained_contexts_per_feature,
                 )
         accepted += pool.anchor_count
