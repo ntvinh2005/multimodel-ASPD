@@ -1,0 +1,41 @@
+schema_version: 1
+status: RESEARCHER_AUTHORIZED_HUMAN_INTERPRETABILITY
+experiment_family: aspd_v3_human_interpretability_v1
+training_authorized_by_this_contract: false
+final_semantic_judge: human_researcher
+model_order: [gemma, smol]
+forbidden_model_substrings: [qwen]
+arms: [full_only_control, per_anchor_zscore]
+checkpoint_steps: 1221
+accepted_training_exposures: 10002432
+selected_split: test
+split_unit: source_document
+test_buckets: [10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+accepted_evaluation_anchors: 100352
+pool_anchors: 2048
+excluded_document_manifest: /orange/thai/vinhnguyen1/aspd_v3/human_interpretability_v1/provenance/excluded_documents.json
+excluded_document_manifest_sha256: f90c4c5e94ff52588bd887d4cc4d0e756037a30189413bbd5a8c6e0c9f826407
+excluded_document_count: 585
+context_tokens_per_side: 48
+canonical_context_characters_per_side: 768
+compact_context_characters_per_side: 192
+contexts_per_feature: 4
+retained_contexts_per_feature: 16
+features_per_arm_site: 10
+frequency_strata: [low, medium, high]
+minimum_feature_fires: 4
+minimum_unique_documents: 4
+intruder_examples: 5
+intruder_chance_accuracy: 0.2
+require_target_inactive_at_intruder: true
+require_distinct_target_documents: true
+require_intruder_document_disjoint: true
+maximum_normalized_text_jaccard: 0.8
+feature_sampling_seed: 101
+intruder_selection_seed: 103
+presentation_seed: 107
+repeated_parent_items: 4
+practice_items: 6
+scientific_batch_size: 22
+bootstrap_seed: 109
+bootstrap_replicates: 5000
