@@ -1,0 +1,157 @@
+{
+  "component_intervention_rows": 448,
+  "contract_sha256": "bd70a754691c46ce9f92b28c85d79657fbacdd989f43a06b693656bc98584f69",
+  "git_sha": "b8377b3f3473801147e3e2755ce240ac0327bac0",
+  "input_manifests": [
+    {
+      "arm": "full_only_control",
+      "checkpoint_manifest_sha256": "8f075f9b1dc264b043b649378761b24321fd1433c293ac5627bde75108c37750",
+      "checkpoint_owner_rank": 0,
+      "checkpoint_step": 1221,
+      "config_sha256": "7081dc544aa8d99d53d5bfd87d84101573447e59fc6f94b20021ab6460cf41bd",
+      "contract_fingerprint": "9349ac4c7c34c951a56d410b7ede53641affc8f0dd378df2a5f4b7359a6a6e31",
+      "contract_sha256": "bd70a754691c46ce9f92b28c85d79657fbacdd989f43a06b693656bc98584f69",
+      "directory": "/orange/thai/vinhnguyen1/aspd_v3/zscore_mechanistic_validation_v1/causal_screen_v1/job_50363891_0/full_only_control/gemma",
+      "elapsed_seconds": 3.8995614238083363,
+      "finite_aspd_state": {
+        "status": "PASS",
+        "tensors": 260,
+        "values": 3758772228
+      },
+      "git_sha": "ab79ba65bf2ccde2d2cc0a41d1325797b18775dc",
+      "model": "gemma",
+      "model_id": "google/gemma-2-2b-it",
+      "model_revision": "299a8560bedf22ed1c72a8a11e7dce4a7f9f51f8",
+      "plan_sha256": "fbf913b7024d24b77dcde102a2bec82eed107eb1de5fe4acae914be2845fbdd4",
+      "result_sha256": "38847f5f2ec7c20e7f164e06450cd3837ff6a76aa13950fe4b7660d4c024b177",
+      "runtime_state_step": 1221,
+      "schema_version": 1,
+      "slurm_job_id": "50364028",
+      "software": {
+        "cuda": "12.8",
+        "python": "3.13.15",
+        "torch": "2.8.0+cu128"
+      },
+      "source_weights_unchanged": "PASS",
+      "status": "C1_DIRECT_PARAMETER_CAUSAL_SCREEN_COMPLETE",
+      "target_selection_sha256": "2aa298b9eeb67100751095a49da8e707f4bfa7ba0d3e8b78dd10e5f568cf6b42",
+      "zero_strength_invariance": "PASS"
+    },
+    {
+      "arm": "full_only_control",
+      "checkpoint_manifest_sha256": "8f075f9b1dc264b043b649378761b24321fd1433c293ac5627bde75108c37750",
+      "checkpoint_owner_rank": 1,
+      "checkpoint_step": 1221,
+      "config_sha256": "7081dc544aa8d99d53d5bfd87d84101573447e59fc6f94b20021ab6460cf41bd",
+      "contract_fingerprint": "9349ac4c7c34c951a56d410b7ede53641affc8f0dd378df2a5f4b7359a6a6e31",
+      "contract_sha256": "bd70a754691c46ce9f92b28c85d79657fbacdd989f43a06b693656bc98584f69",
+      "directory": "/orange/thai/vinhnguyen1/aspd_v3/zscore_mechanistic_validation_v1/causal_screen_v1/job_50363891_1/full_only_control/smol",
+      "elapsed_seconds": 3.079964828211814,
+      "finite_aspd_state": {
+        "status": "PASS",
+        "tensors": 260,
+        "values": 3523887108
+      },
+      "git_sha": "ab79ba65bf2ccde2d2cc0a41d1325797b18775dc",
+      "model": "smol",
+      "model_id": "HuggingFaceTB/SmolLM2-1.7B-Instruct",
+      "model_revision": "31b70e2e869a7173562077fd711b654946d38674",
+      "plan_sha256": "fbf913b7024d24b77dcde102a2bec82eed107eb1de5fe4acae914be2845fbdd4",
+      "result_sha256": "0b74b711699616a6a4cafbe4fb409b174726eac4e3cafcb1facff7fe23c15696",
+      "runtime_state_step": 1221,
+      "schema_version": 1,
+      "slurm_job_id": "50364029",
+      "software": {
+        "cuda": "12.8",
+        "python": "3.13.15",
+        "torch": "2.8.0+cu128"
+      },
+      "source_weights_unchanged": "PASS",
+      "status": "C1_DIRECT_PARAMETER_CAUSAL_SCREEN_COMPLETE",
+      "target_selection_sha256": "9881c671a71308ea2e7c467fc76c535e6dfd790f1a4c311717dd50a3d4d1f044",
+      "zero_strength_invariance": "PASS"
+    },
+    {
+      "arm": "per_anchor_zscore",
+      "checkpoint_manifest_sha256": "c18e93a7f86771164acdedc47390eed11560bf492ce5d7201190d63edc5a45f1",
+      "checkpoint_owner_rank": 0,
+      "checkpoint_step": 1221,
+      "config_sha256": "6a0ea531b7e27a562d62d2385649cc6b2d723d730a748ee73cf2db81ba463d97",
+      "contract_fingerprint": "9349ac4c7c34c951a56d410b7ede53641affc8f0dd378df2a5f4b7359a6a6e31",
+      "contract_sha256": "bd70a754691c46ce9f92b28c85d79657fbacdd989f43a06b693656bc98584f69",
+      "directory": "/orange/thai/vinhnguyen1/aspd_v3/zscore_mechanistic_validation_v1/causal_screen_v1/job_50363891_2/per_anchor_zscore/gemma",
+      "elapsed_seconds": 3.895468438975513,
+      "finite_aspd_state": {
+        "status": "PASS",
+        "tensors": 260,
+        "values": 3758772228
+      },
+      "git_sha": "ab79ba65bf2ccde2d2cc0a41d1325797b18775dc",
+      "model": "gemma",
+      "model_id": "google/gemma-2-2b-it",
+      "model_revision": "299a8560bedf22ed1c72a8a11e7dce4a7f9f51f8",
+      "plan_sha256": "fbf913b7024d24b77dcde102a2bec82eed107eb1de5fe4acae914be2845fbdd4",
+      "result_sha256": "9158f0b5ffbc45a290edfaed54860b72968e2a42940920850b209582ab8e79c4",
+      "runtime_state_step": 1221,
+      "schema_version": 1,
+      "slurm_job_id": "50364030",
+      "software": {
+        "cuda": "12.8",
+        "python": "3.13.15",
+        "torch": "2.8.0+cu128"
+      },
+      "source_weights_unchanged": "PASS",
+      "status": "C1_DIRECT_PARAMETER_CAUSAL_SCREEN_COMPLETE",
+      "target_selection_sha256": "ebe3a1251019b700a31d588cc6506e9a3fa2b3f57ee707017e52cf6eb91d42ab",
+      "zero_strength_invariance": "PASS"
+    },
+    {
+      "arm": "per_anchor_zscore",
+      "checkpoint_manifest_sha256": "c18e93a7f86771164acdedc47390eed11560bf492ce5d7201190d63edc5a45f1",
+      "checkpoint_owner_rank": 1,
+      "checkpoint_step": 1221,
+      "config_sha256": "6a0ea531b7e27a562d62d2385649cc6b2d723d730a748ee73cf2db81ba463d97",
+      "contract_fingerprint": "9349ac4c7c34c951a56d410b7ede53641affc8f0dd378df2a5f4b7359a6a6e31",
+      "contract_sha256": "bd70a754691c46ce9f92b28c85d79657fbacdd989f43a06b693656bc98584f69",
+      "directory": "/orange/thai/vinhnguyen1/aspd_v3/zscore_mechanistic_validation_v1/causal_screen_v1/job_50363891_3/per_anchor_zscore/smol",
+      "elapsed_seconds": 3.0282559958286583,
+      "finite_aspd_state": {
+        "status": "PASS",
+        "tensors": 260,
+        "values": 3523887108
+      },
+      "git_sha": "ab79ba65bf2ccde2d2cc0a41d1325797b18775dc",
+      "model": "smol",
+      "model_id": "HuggingFaceTB/SmolLM2-1.7B-Instruct",
+      "model_revision": "31b70e2e869a7173562077fd711b654946d38674",
+      "plan_sha256": "fbf913b7024d24b77dcde102a2bec82eed107eb1de5fe4acae914be2845fbdd4",
+      "result_sha256": "6d25d745fba5304615b26fb5af03994c3cf7c0e3ebfe45d09c518bfbad66203c",
+      "runtime_state_step": 1221,
+      "schema_version": 1,
+      "slurm_job_id": "50363891",
+      "software": {
+        "cuda": "12.8",
+        "python": "3.13.15",
+        "torch": "2.8.0+cu128"
+      },
+      "source_weights_unchanged": "PASS",
+      "status": "C1_DIRECT_PARAMETER_CAUSAL_SCREEN_COMPLETE",
+      "target_selection_sha256": "a92ea2f644bf6387570b37e24edde98e1a5414a951028a2169b418df2d32812d",
+      "zero_strength_invariance": "PASS"
+    }
+  ],
+  "input_rows": 3584,
+  "limitations": [
+    "single training seed per arm",
+    "C1 single-matrix interventions only",
+    "cross-model correlations compare effect magnitude, not semantic direction"
+  ],
+  "primary_bootstrap_unit": "component_then_document_within_activity",
+  "primary_metrics": [
+    "kl_clean_to_edited",
+    "logit_delta_rms"
+  ],
+  "schema_version": 1,
+  "sensitivity_bootstrap_unit": "component",
+  "status": "CAUSAL_SCREEN_ANALYSIS_COMPLETE"
+}

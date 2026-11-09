@@ -1,0 +1,134 @@
+[
+  {
+    "arm": "full_only_control",
+    "intervention_kind": "learned",
+    "maximum_realized_to_intended_norm_ratio": 1.001893401145935,
+    "mean_realized_to_intended_cosine": 0.9986534006893635,
+    "mean_realized_to_intended_norm_ratio": 1.001273863017559,
+    "minimum_realized_to_intended_cosine": 0.9979932308197021,
+    "minimum_realized_to_intended_norm_ratio": 1.0002890825271606,
+    "model": "gemma",
+    "n": 16
+  },
+  {
+    "arm": "full_only_control",
+    "intervention_kind": "random_component",
+    "maximum_realized_to_intended_norm_ratio": 1.0019475221633911,
+    "mean_realized_to_intended_cosine": 0.9986498765647411,
+    "mean_realized_to_intended_norm_ratio": 1.001289814710617,
+    "minimum_realized_to_intended_cosine": 0.997974693775177,
+    "minimum_realized_to_intended_norm_ratio": 1.0003156661987305,
+    "model": "gemma",
+    "n": 16
+  },
+  {
+    "arm": "full_only_control",
+    "intervention_kind": "random_rank_one",
+    "maximum_realized_to_intended_norm_ratio": 1.0018247365951538,
+    "mean_realized_to_intended_cosine": 0.9986834314962229,
+    "mean_realized_to_intended_norm_ratio": 1.0012243663271267,
+    "minimum_realized_to_intended_cosine": 0.9980266094207764,
+    "minimum_realized_to_intended_norm_ratio": 1.0003104209899902,
+    "model": "gemma",
+    "n": 48
+  },
+  {
+    "arm": "full_only_control",
+    "intervention_kind": "learned",
+    "maximum_realized_to_intended_norm_ratio": 1.0356072187423706,
+    "mean_realized_to_intended_cosine": 0.9406094364821911,
+    "mean_realized_to_intended_norm_ratio": 1.0237739905714989,
+    "minimum_realized_to_intended_cosine": 0.8680061101913452,
+    "minimum_realized_to_intended_norm_ratio": 1.0013319253921509,
+    "model": "smol",
+    "n": 16
+  },
+  {
+    "arm": "full_only_control",
+    "intervention_kind": "random_component",
+    "maximum_realized_to_intended_norm_ratio": 1.0519076585769653,
+    "mean_realized_to_intended_cosine": 0.9379882253706455,
+    "mean_realized_to_intended_norm_ratio": 1.0277155712246895,
+    "minimum_realized_to_intended_cosine": 0.870113730430603,
+    "minimum_realized_to_intended_norm_ratio": 1.00131094455719,
+    "model": "smol",
+    "n": 16
+  },
+  {
+    "arm": "full_only_control",
+    "intervention_kind": "random_rank_one",
+    "maximum_realized_to_intended_norm_ratio": 1.0288358926773071,
+    "mean_realized_to_intended_cosine": 0.9462085974713167,
+    "mean_realized_to_intended_norm_ratio": 1.0215097765127819,
+    "minimum_realized_to_intended_cosine": 0.8948544859886169,
+    "minimum_realized_to_intended_norm_ratio": 1.0011930465698242,
+    "model": "smol",
+    "n": 48
+  },
+  {
+    "arm": "per_anchor_zscore",
+    "intervention_kind": "learned",
+    "maximum_realized_to_intended_norm_ratio": 1.0020086765289307,
+    "mean_realized_to_intended_cosine": 0.9986404664814472,
+    "mean_realized_to_intended_norm_ratio": 1.001284621655941,
+    "minimum_realized_to_intended_cosine": 0.9978881478309631,
+    "minimum_realized_to_intended_norm_ratio": 1.0008528232574463,
+    "model": "gemma",
+    "n": 16
+  },
+  {
+    "arm": "per_anchor_zscore",
+    "intervention_kind": "random_component",
+    "maximum_realized_to_intended_norm_ratio": 1.002021074295044,
+    "mean_realized_to_intended_cosine": 0.9986226297914982,
+    "mean_realized_to_intended_norm_ratio": 1.001311980187893,
+    "minimum_realized_to_intended_cosine": 0.9978622794151306,
+    "minimum_realized_to_intended_norm_ratio": 1.0008522272109985,
+    "model": "gemma",
+    "n": 16
+  },
+  {
+    "arm": "per_anchor_zscore",
+    "intervention_kind": "random_rank_one",
+    "maximum_realized_to_intended_norm_ratio": 1.0019185543060303,
+    "mean_realized_to_intended_cosine": 0.9986533547441164,
+    "mean_realized_to_intended_norm_ratio": 1.0012582118312519,
+    "minimum_realized_to_intended_cosine": 0.9979320168495178,
+    "minimum_realized_to_intended_norm_ratio": 1.0008233785629272,
+    "model": "gemma",
+    "n": 48
+  },
+  {
+    "arm": "per_anchor_zscore",
+    "intervention_kind": "learned",
+    "maximum_realized_to_intended_norm_ratio": 1.0305395126342773,
+    "mean_realized_to_intended_cosine": 0.9584709405899048,
+    "mean_realized_to_intended_norm_ratio": 1.0198027193546295,
+    "minimum_realized_to_intended_cosine": 0.8733591437339783,
+    "minimum_realized_to_intended_norm_ratio": 1.0097758769989014,
+    "model": "smol",
+    "n": 16
+  },
+  {
+    "arm": "per_anchor_zscore",
+    "intervention_kind": "random_component",
+    "maximum_realized_to_intended_norm_ratio": 1.038424015045166,
+    "mean_realized_to_intended_cosine": 0.9546704404056072,
+    "mean_realized_to_intended_norm_ratio": 1.023739442229271,
+    "minimum_realized_to_intended_cosine": 0.8619251251220703,
+    "minimum_realized_to_intended_norm_ratio": 1.0109819173812866,
+    "model": "smol",
+    "n": 16
+  },
+  {
+    "arm": "per_anchor_zscore",
+    "intervention_kind": "random_rank_one",
+    "maximum_realized_to_intended_norm_ratio": 1.0285402536392212,
+    "mean_realized_to_intended_cosine": 0.9612996826569239,
+    "mean_realized_to_intended_norm_ratio": 1.0187044963240623,
+    "minimum_realized_to_intended_cosine": 0.893630862236023,
+    "minimum_realized_to_intended_norm_ratio": 1.009968876838684,
+    "model": "smol",
+    "n": 48
+  }
+]

@@ -1,0 +1,145 @@
+{
+  "schema_version": 1,
+  "status": "MECHANISTIC_VALIDATION_PROMISING",
+  "generated_on": "2026-11-09",
+  "experiment_family": "aspd_v3_zscore_mechanistic_validation_v1",
+  "scope": {
+    "configuration": "two_model_diagnostic",
+    "final_objective": "three_model_aspd",
+    "third_model_approved": false,
+    "qwen_executed": false,
+    "optimizer_steps": 1221,
+    "accepted_aligned_anchor_exposures": 10002432,
+    "training_seeds_per_arm": 1
+  },
+  "test_set": {
+    "source_split": "test_buckets_10_19",
+    "anchors": 100352,
+    "source_documents": 296,
+    "paired_arm_anchor_ids": true,
+    "previous_306_document_evaluation_classification": "development_validation_not_untouched_test"
+  },
+  "semantic_coherence": {
+    "conclusion": "INCONCLUSIVE",
+    "judge_model_id": "meta-llama/Llama-3.3-70B-Instruct",
+    "judge_revision": "6f6073b423013f6a7d4d9f39144961bfbfbc386b",
+    "paid_api": false,
+    "forced_choice": {
+      "positive_control_accuracy": 1.0,
+      "negative_control_abstain_or_low_confidence_rate": 0.94,
+      "eligible_parent_accuracy": 0.3008130081,
+      "eligible_parent_count": 123,
+      "scientific_maximum_position_share": 0.5203252033,
+      "status": "JUDGE_VALIDATION_FAILED_EXPLORATORY_ONLY"
+    },
+    "leave_one_out": {
+      "positive_control_accuracy": 0.8,
+      "negative_control_abstention_rate": 1.0,
+      "scientific_abstention_rate": 0.945,
+      "answered_control_correct": 0,
+      "answered_control_total": 4,
+      "answered_zscore_correct": 5,
+      "answered_zscore_total": 7,
+      "status": "JUDGE_VALIDATION_FAILED_EXPLORATORY_ONLY"
+    }
+  },
+  "diversity": {
+    "conclusion": "SUPPORTED_WITH_LIMITATIONS",
+    "pre": {
+      "control_features_firing": 2396,
+      "zscore_features_firing": 5522,
+      "control_eligible_features": 693,
+      "zscore_eligible_features": 5451,
+      "control_mean_jaccard": 0.0070191472,
+      "zscore_mean_jaccard": 0.0029130322,
+      "control_near_duplicate_pairs": 442,
+      "zscore_near_duplicate_pairs": 35
+    },
+    "mid": {
+      "control_features_firing": 2975,
+      "zscore_features_firing": 5506,
+      "control_eligible_features": 1503,
+      "zscore_eligible_features": 5398,
+      "control_mean_jaccard": 0.0020152775,
+      "zscore_mean_jaccard": 0.0029243798,
+      "control_near_duplicate_pairs": 370,
+      "zscore_near_duplicate_pairs": 82
+    }
+  },
+  "direct_parameter_causal": {
+    "conclusion": "PARTIALLY_SUPPORTED",
+    "level": "C1_single_matrix",
+    "components_per_arm": 16,
+    "active_documents_per_component": 4,
+    "inactive_documents_per_component": 4,
+    "random_rank_one_seeds": [101, 103, 107],
+    "random_component_seed": 109,
+    "source_weight_restoration": "PASS",
+    "zero_strength_invariance": "PASS",
+    "specificity_logit_delta_rms_vs_random_rank_one": {
+      "control_gemma": {
+        "mean": 0.0013216093,
+        "ci95": [-0.0042808201, 0.0081379319],
+        "positive_components": 8
+      },
+      "zscore_gemma": {
+        "mean": 0.0144993985,
+        "ci95": [0.0016432, 0.04096727],
+        "positive_components": 13
+      },
+      "control_smol": {
+        "mean": -0.003821438,
+        "ci95": [-0.01082418, 0.003112925],
+        "positive_components": 4
+      },
+      "zscore_smol": {
+        "mean": 0.0075369513,
+        "ci95": [-0.0000815901, 0.01489034],
+        "positive_components": 12
+      }
+    },
+    "zscore_minus_control_specificity_difference": {
+      "gemma": {
+        "mean": 0.01317779,
+        "ci95": [0.002234733, 0.02652386]
+      },
+      "smol": {
+        "mean": 0.01135839,
+        "ci95": [0.004754825, 0.01766364]
+      }
+    },
+    "cross_model_correspondence": {
+      "conclusion": "NOT_SUPPORTED",
+      "zscore_spearman_active_logit_delta_rms": 0.4970588235,
+      "zscore_spearman_specificity_logit_delta_rms": 0.2176470588,
+      "functional_direction_tested": false
+    }
+  },
+  "required_questions": {
+    "Q1_coherence": "INCONCLUSIVE",
+    "Q2_meaningful_diversity": "SUPPORTED_WITH_LIMITATIONS",
+    "Q3_context_specific_causal_effects": "PARTIALLY_SUPPORTED",
+    "Q4_beyond_norm_matched_random": "PARTIALLY_SUPPORTED",
+    "Q5_cross_model_correspondence": "NOT_SUPPORTED",
+    "Q6_improves_with_exposures": "INCONCLUSIVE",
+    "Q7_readiness": "READY_FOR_25M_CONFIRMATION_NOT_500M_OR_THREE_MODEL"
+  },
+  "readiness": {
+    "ready_for_25m_confirmation": true,
+    "ready_for_independent_seed_after_25m": "conditional",
+    "ready_for_50m": false,
+    "ready_for_500m": false,
+    "ready_for_three_model_training": false
+  },
+  "resources": {
+    "b200_gpu_hours": 2.08,
+    "evaluation_namespace_mebibytes_approximate": 193,
+    "checkpoints_created_or_modified": 0,
+    "final_causal_array_job_id": "50363891",
+    "final_causal_tasks_completed": 4,
+    "non_scientific_failed_tasks": 1,
+    "orange_free_space_gib_approximate": 203,
+    "orange_inode_use_fraction": 0.42
+  },
+  "primary_analysis_directory": "docs/multimodel/analysis/aspd_v3_zscore_mechanistic_validation_v1/causal_screen_git_f692522"
+}
