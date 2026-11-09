@@ -128,25 +128,37 @@ def _parse_response(text: str, labels: tuple[str, ...]) -> dict[str, Any]:
     return {"valid": True, "intruder_id": label, "reason": reason.strip()}
 
 
+def _snapshot_path(contract: FinalIntruderJudgeContract) -> Path:
+    hf_home = Path(os.environ["HF_HOME"])
+    snapshot = (
+        hf_home
+        / "hub"
+        / f"models--{contract.judge_model_id.replace('/', '--')}"
+        / "snapshots"
+        / contract.judge_revision
+    )
+    required = ("config.json", "tokenizer.json", "model.safetensors.index.json")
+    missing = [name for name in required if not (snapshot / name).is_file()]
+    if missing:
+        raise FileNotFoundError(f"pinned local judge snapshot is incomplete: {missing}")
+    return snapshot
+
+
 def _load_model(contract: FinalIntruderJudgeContract) -> tuple[Any, Any]:
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    cache = os.environ.get("HF_HOME")
+    snapshot = _snapshot_path(contract)
     tokenizer = AutoTokenizer.from_pretrained(
-        contract.judge_model_id,
-        revision=contract.judge_revision,
-        cache_dir=cache,
+        snapshot,
         local_files_only=contract.local_files_only,
     )
     tokenizer.padding_side = "left"
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
     model = AutoModelForCausalLM.from_pretrained(
-        contract.judge_model_id,
-        revision=contract.judge_revision,
-        cache_dir=cache,
+        snapshot,
         local_files_only=contract.local_files_only,
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         device_map={"": 0},
     )
     model.eval()
@@ -406,6 +418,7 @@ def main() -> None:
             raise ValueError("development/final mode requires --calibration-summary")
         _validate_calibration(args.calibration_summary, contract)
     tasks = _jsonl(args.tasks)
+    snapshot = _snapshot_path(contract)
     if len({str(row["trial_id"]) for row in tasks}) != len(tasks):
         raise ValueError("task file contains duplicate parent trial IDs")
     expanded = [
@@ -468,6 +481,11 @@ def main() -> None:
         "mode": args.mode,
         "judge_model_id": contract.judge_model_id,
         "judge_revision": contract.judge_revision,
+        "judge_snapshot_path": str(snapshot),
+        "judge_config_sha256": sha256_file(snapshot / "config.json"),
+        "judge_weight_index_sha256": sha256_file(
+            snapshot / "model.safetensors.index.json"
+        ),
         "contract_fingerprint": contract.fingerprint(),
         "tasks_sha256": sha256_file(args.tasks),
         "answer_key_sha256": sha256_file(args.answer_key),
