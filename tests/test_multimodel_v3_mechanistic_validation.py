@@ -13,7 +13,14 @@ from aspd.multimodel.cli.analyze_aspd_v3_mechanistic import (
     _stratified_features,
 )
 from aspd.multimodel.cli.extract_aspd_v3_mechanistic import _save_site
+from aspd.multimodel.cli.judge_aspd_v3_intruder import (
+    _control_tasks,
+    _parse_response,
+    _rotate_task,
+    _summary,
+)
 from aspd.multimodel.v3.mechanistic_validation import (
+    IntruderJudgeContract,
     MechanisticValidationContract,
     norm_matched_random_rank_one,
     pairwise_firing_statistic,
@@ -56,6 +63,13 @@ def test_contract_is_frozen_to_untouched_test_split() -> None:
     assert contract.test_buckets == tuple(range(10, 20))
     assert contract.training_authorized_by_this_contract is False
     assert len(contract.fingerprint()) == 64
+
+    judge = IntruderJudgeContract.load(
+        ROOT / "configs/multimodel/aspd_v3/zscore_intruder_judge_v1.yaml"
+    )
+    assert judge.paid_api is False
+    assert "qwen" not in judge.judge_model_id.lower()
+    assert judge.cyclic_rotations == 5
 
 
 def test_pairwise_firing_statistic_uses_marginal_independence_reference() -> None:
@@ -208,3 +222,82 @@ def test_intruder_task_is_blinded_and_uses_disjoint_document() -> None:
     assert "arm" not in task and "feature" not in task and "activation" not in task
     assert answer["intruder_document_id"] == "donor"
     assert answer["intruder_document_id"] not in answer["target_document_ids"]
+
+
+def test_intruder_rotations_balance_every_answer_position() -> None:
+    task = {
+        "trial_id": "trial",
+        "examples": [
+            {"position": index + 1, "text": f"example-{index}"} for index in range(5)
+        ],
+    }
+    answer = {"trial_id": "trial", "intruder_position": 2}
+    rotated = [_rotate_task(task, answer, rotation) for rotation in range(5)]
+    assert sorted(row[1]["intruder_position"] for row in rotated) == [1, 2, 3, 4, 5]
+    for rotated_task, rotated_answer in rotated:
+        expected_text = f"example-{answer['intruder_position'] - 1}"
+        observed = rotated_task["examples"][rotated_answer["intruder_position"] - 1]["text"]
+        assert observed == expected_text
+
+
+def test_judge_parser_and_controls_fail_closed() -> None:
+    assert _parse_response(
+        '{"intruder_position": 3, "confidence": 2, "reason": "different topic"}'
+    )["valid"]
+    assert _parse_response(
+        '{"intruder_position": null, "confidence": 0, "reason": "no unique item"}'
+    )["valid"]
+    assert not _parse_response("not json")["valid"]
+    assert not _parse_response(
+        '{"intruder_position": 8, "confidence": 3, "reason": "bad"}'
+    )["valid"]
+
+    contract = IntruderJudgeContract.load(
+        ROOT / "configs/multimodel/aspd_v3/zscore_intruder_judge_v1.yaml"
+    )
+    tasks, answers = _control_tasks(contract)
+    assert len(tasks) == len(answers) == 40
+    assert sum(row["control_kind"] == "positive" for row in tasks) == 20
+    assert all(
+        answer["intruder_position"] is None
+        for answer in answers
+        if answer["control_kind"] == "negative"
+    )
+
+
+def test_judge_validation_summary_applies_predeclared_thresholds() -> None:
+    contract = IntruderJudgeContract.load(
+        ROOT / "configs/multimodel/aspd_v3/zscore_intruder_judge_v1.yaml"
+    )
+    rows = []
+    for index in range(20):
+        rows.append(
+            {
+                "control_kind": "positive",
+                "correct_position": index % 5 + 1,
+                "parsed": {
+                    "valid": True,
+                    "intruder_position": index % 5 + 1,
+                    "confidence": 3,
+                },
+            }
+        )
+        rows.append(
+            {
+                "control_kind": "negative",
+                "correct_position": None,
+                "parsed": {"valid": True, "intruder_position": None, "confidence": 0},
+            }
+        )
+        rows.append(
+            {
+                "control_kind": None,
+                "correct_position": index % 5 + 1,
+                "parsed": {
+                    "valid": True,
+                    "intruder_position": index % 5 + 1,
+                    "confidence": 2,
+                },
+            }
+        )
+    assert _summary(rows, contract)["status"] == "JUDGE_VALIDATED"

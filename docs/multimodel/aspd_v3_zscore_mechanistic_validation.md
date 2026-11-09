@@ -93,8 +93,8 @@ No single composite score will combine these estimands.
   CPU-tested.
 - Validation-split GPU extraction smoke: passed on job `50338801_1` (2 B200 GPUs,
   1 minute 54 seconds elapsed; approximately 0.063 B200 GPU-hours).
-- Untouched test extraction, Intruder judging, redundancy analysis, and causal inference:
-  pending.
+- Untouched paired test extraction: complete on jobs `50339064_0` and `50339064_1`.
+- Intruder judging, redundancy analysis, and causal inference: pending.
 - Longer training: not started and remains blocked until the current 10M evaluation is
   interpreted.
 
@@ -112,6 +112,21 @@ counts varied because BatchTopK is pool-wide. PRE and MID used 4,643 and 4,357 f
 this small smoke sample. Context retention kept at most one activation per source document,
 and this distinct-document invariant passed for every retained feature. These are technical
 smoke results on development data, not scientific evidence for z-score.
+
+### Untouched paired test extraction
+
+Both arms completed on exactly the same 100,352 anchor IDs from 296 source documents in
+test buckets 10–19. Document assignments and source-document manifests were paired. Each
+arm/site contained 3,211,264 natural firing events, exactly 32 per anchor on average under
+pool-wide BatchTopK, with no forced activations. The control fired 2,396 PRE and 2,975 MID
+features; z-score fired 5,522 PRE and 5,506 MID features. All ASPD tensors were finite, the
+replicated shared-encoder digest matched between model-owner ranks, and both frozen
+source-model parameter signatures were unchanged after extraction.
+
+The two full extraction tasks consumed approximately 0.87 B200 GPU-hours; including the
+validation smoke, extraction used approximately 0.93 B200 GPU-hours. These observations
+confirm paired coverage and artifact integrity only. They do not establish coherence,
+nonredundancy, or causal specificity.
 
 ## Final scientific decision
 

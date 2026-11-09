@@ -93,6 +93,43 @@ class MechanisticValidationContract(BaseModel):
         return hashlib.sha256(encoded.encode()).hexdigest()
 
 
+class IntruderJudgeContract(BaseModel):
+    """Pinned local-judge and position-balance contract, separate from feature sampling."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1]
+    status: Literal["RESEARCHER_AUTHORIZED_LOCAL_INTRUDER_JUDGE"]
+    experiment_family: Literal["aspd_v3_zscore_intruder_judge_v1"]
+    judge_model_id: Literal["mistralai/Mistral-Nemo-Instruct-2407"]
+    judge_revision: Literal["04d8a90549d23fc6bd7f642064003592df51e9b3"]
+    local_files_only: Literal[True]
+    paid_api: Literal[False]
+    dtype: Literal["bfloat16"]
+    decoding: Literal["greedy"]
+    max_new_tokens: Literal[128]
+    batch_size: Literal[8]
+    cyclic_rotations: Literal[5]
+    allow_abstention: Literal[True]
+    confidence_scale: tuple[Literal[0], Literal[1], Literal[2], Literal[3]]
+    positive_controls: Literal[20]
+    negative_controls: Literal[20]
+    control_seed: Literal[53]
+    minimum_positive_control_accuracy: Literal[0.8]
+    minimum_negative_control_abstain_or_low_confidence_rate: Literal[0.8]
+    maximum_invalid_rate: Literal[0.05]
+    maximum_position_share: Literal[0.35]
+
+    @classmethod
+    def load(cls, path: str | Path) -> IntruderJudgeContract:
+        return cls.model_validate(yaml.safe_load(Path(path).read_text(encoding="utf-8")))
+
+    def fingerprint(self) -> str:
+        payload = self.model_dump(mode="json")
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode()).hexdigest()
+
+
 @dataclass(frozen=True)
 class PairwiseFiringStatistic:
     left: int
@@ -230,6 +267,7 @@ def temporary_rank_one_ablation(
 
 __all__ = [
     "MechanisticValidationContract",
+    "IntruderJudgeContract",
     "PairwiseFiringStatistic",
     "norm_matched_random_rank_one",
     "pairwise_firing_statistic",
