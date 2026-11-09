@@ -176,7 +176,11 @@ def _control_tasks(
     for index in range(contract.positive_controls):
         theme, *phrases = _CONTROL_THEMES[index % len(_CONTROL_THEMES)]
         intruder = phrases[-1]
-        position = int(rng.integers(0, 5))
+        position = (
+            index % 5
+            if getattr(contract, "balanced_control_positions", False)
+            else int(rng.integers(0, 5))
+        )
         examples = phrases[:4]
         examples.insert(position, intruder)
         tasks.append(
@@ -202,7 +206,7 @@ def _control_tasks(
             }
         )
     for index in range(contract.negative_controls):
-        if isinstance(contract, IntruderJudgeV2Contract):
+        if getattr(contract, "control_version", None) == "semantic_paraphrase_v2":
             theme, paraphrases = _NEGATIVE_CONTROL_PARAPHRASES[
                 index % len(_NEGATIVE_CONTROL_PARAPHRASES)
             ]

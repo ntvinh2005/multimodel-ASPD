@@ -193,6 +193,48 @@ class IntruderJudgeV2Contract(BaseModel):
         return hashlib.sha256(encoded.encode()).hexdigest()
 
 
+class IntruderLeaveOneOutJudgeContract(BaseModel):
+    """Position-decoupled leave-one-out coherence judge contract."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[3]
+    status: Literal["RESEARCHER_AUTHORIZED_LOCAL_INTRUDER_JUDGE"]
+    experiment_family: Literal["aspd_v3_zscore_intruder_loo_judge_v1"]
+    judge_model_id: Literal["meta-llama/Llama-3.3-70B-Instruct"]
+    judge_revision: Literal["6f6073b423013f6a7d4d9f39144961bfbfbc386b"]
+    local_files_only: Literal[True]
+    paid_api: Literal[False]
+    dtype: Literal["bfloat16"]
+    decoding: Literal["greedy"]
+    max_new_tokens: Literal[96]
+    batch_size: Literal[4]
+    prompt_version: Literal["leave_one_out_coherence_v1"]
+    control_version: Literal["semantic_paraphrase_v2"]
+    balanced_control_positions: Literal[True]
+    coherence_scale: tuple[
+        Literal[0], Literal[1], Literal[2], Literal[3], Literal[4]
+    ]
+    minimum_top_coherence: Literal[3]
+    minimum_top_margin: Literal[1]
+    positive_controls: Literal[20]
+    negative_controls: Literal[20]
+    control_seed: Literal[53]
+    minimum_positive_control_accuracy: Literal[0.8]
+    minimum_negative_control_abstention_rate: Literal[0.8]
+    maximum_invalid_parent_rate: Literal[0.05]
+    maximum_position_share: Literal[0.35]
+
+    @classmethod
+    def load(cls, path: str | Path) -> IntruderLeaveOneOutJudgeContract:
+        return cls.model_validate(yaml.safe_load(Path(path).read_text(encoding="utf-8")))
+
+    def fingerprint(self) -> str:
+        payload = self.model_dump(mode="json")
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode()).hexdigest()
+
+
 @dataclass(frozen=True)
 class PairwiseFiringStatistic:
     left: int
@@ -332,6 +374,7 @@ __all__ = [
     "MechanisticValidationContract",
     "IntruderJudgeContract",
     "IntruderJudgeV2Contract",
+    "IntruderLeaveOneOutJudgeContract",
     "PairwiseFiringStatistic",
     "norm_matched_random_rank_one",
     "pairwise_firing_statistic",

@@ -19,9 +19,18 @@ from aspd.multimodel.cli.judge_aspd_v3_intruder import (
     _rotate_task,
     _summary,
 )
+from aspd.multimodel.cli.judge_aspd_v3_intruder_loo import (
+    _ordered_remaining,
+    _parse_score,
+    _select_intruder,
+)
+from aspd.multimodel.cli.judge_aspd_v3_intruder_loo import (
+    _summary as _loo_summary,
+)
 from aspd.multimodel.v3.mechanistic_validation import (
     IntruderJudgeContract,
     IntruderJudgeV2Contract,
+    IntruderLeaveOneOutJudgeContract,
     MechanisticValidationContract,
     norm_matched_random_rank_one,
     pairwise_firing_statistic,
@@ -356,6 +365,85 @@ def test_judge_v2_summary_uses_rotation_consensus_as_parent_unit() -> None:
     assert summary["status"] == "JUDGE_VALIDATED"
     assert summary["rotation_consensus"]["eligible_parent_count"] == 1
     assert summary["rotation_consensus"]["eligible_parent_accuracy"] == 1.0
+
+
+def test_leave_one_out_judge_is_position_decoupled_and_fail_closed() -> None:
+    contract = IntruderLeaveOneOutJudgeContract.load(
+        ROOT / "configs/multimodel/aspd_v3/zscore_intruder_loo_judge_v1_llama.yaml"
+    )
+    task = {
+        "trial_id": "parent",
+        "examples": [
+            {"position": index, "text": f"text-{index}"} for index in range(1, 6)
+        ],
+    }
+    for omitted in range(1, 6):
+        remaining = _ordered_remaining(task, omitted)
+        assert len(remaining) == 4
+        assert f"text-{omitted}" not in remaining
+        assert remaining == _ordered_remaining(task, omitted)
+
+    assert _parse_score('{"coherence_score": 4, "reason": "specific pattern"}')[
+        "valid"
+    ]
+    assert not _parse_score('{"coherence_score": 7, "reason": "invalid"}')[
+        "valid"
+    ]
+    candidates = [
+        {
+            "candidate_position": position,
+            "parsed": {
+                "valid": True,
+                "coherence_score": 4 if position == 3 else 2,
+            },
+        }
+        for position in range(1, 6)
+    ]
+    assert _select_intruder(candidates, contract) == 3
+    for row in candidates:
+        row["parsed"]["coherence_score"] = 4
+    assert _select_intruder(candidates, contract) is None
+
+
+def test_leave_one_out_summary_applies_parent_level_controls() -> None:
+    contract = IntruderLeaveOneOutJudgeContract.load(
+        ROOT / "configs/multimodel/aspd_v3/zscore_intruder_loo_judge_v1_llama.yaml"
+    )
+    rows = []
+    for index in range(20):
+        position = index % 5 + 1
+        rows.append(
+            {
+                "valid_parent": True,
+                "control_kind": "positive",
+                "predicted_position": position,
+                "correct_position": position,
+            }
+        )
+        rows.append(
+            {
+                "valid_parent": True,
+                "control_kind": "negative",
+                "predicted_position": None,
+                "correct_position": None,
+            }
+        )
+    for index in range(10):
+        rows.append(
+            {
+                "valid_parent": True,
+                "control_kind": None,
+                "predicted_position": index % 5 + 1,
+                "correct_position": index % 5 + 1,
+            }
+        )
+    summary = _loo_summary(rows, prompt_count=len(rows) * 5, contract=contract)
+    assert summary["status"] == "JUDGE_VALIDATED"
+    assert summary["negative_control_abstention_rate"] == 1.0
+    rows[0]["valid_parent"] = False
+    assert _loo_summary(rows, prompt_count=len(rows) * 5, contract=contract)[
+        "invalid_parent_rate"
+    ] > 0
 
 
 def test_judge_validation_summary_applies_predeclared_thresholds() -> None:
