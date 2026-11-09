@@ -1,0 +1,31 @@
+schema_version: 1
+status: RESEARCHER_AUTHORIZED_CAUSAL_SCREEN
+experiment_family: aspd_v3_zscore_causal_validation_v1
+training_authorized_by_this_contract: false
+intervention_level: C1_single_matrix
+arms: [full_only_control, per_anchor_zscore]
+model_order: [gemma, smol]
+components_per_arm: 16
+components_per_site: 8
+component_selection_frame: intruder_disjoint_feature_census
+exclude_intruder_features: true
+site_stratum_quota:
+  low: 3
+  medium: 3
+  high: 2
+active_contexts_per_component: 4
+inactive_contexts_per_component: 4
+active_context_rank_start: 0
+target_selection_policy: maximum_learned_operator_frobenius_within_site
+learned_strengths: [0.0, 0.5, 1.0]
+random_rank_one_seeds: [101, 103, 107]
+random_component_seed: 109
+parameter_restore: bitwise_exact_logical_slice_copy
+context_activity_definition: natural_batchtopk_support
+metrics:
+  - kl_clean_to_edited
+  - logit_delta_rms
+  - clean_top_token_probability_change
+selection_seed: 59
+bootstrap_seed: 61
+bootstrap_replicates: 2000

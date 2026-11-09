@@ -1,0 +1,204 @@
+schema_version: 1
+experiment_family: aspd_v3_1_three_model_main500m
+scientific_status: MAIN_500M_NOT_AUTHORIZED
+full_training_authorized: false
+
+models:
+  - key: gemma
+    approval_status: RETAINED_APPROVED
+    model_id: google/gemma-2-2b-it
+    revision: 299a8560bedf22ed1c72a8a11e7dce4a7f9f51f8
+    tokenizer_id: google/gemma-2-2b-it
+    tokenizer_revision: 299a8560bedf22ed1c72a8a11e7dce4a7f9f51f8
+    family: gemma2
+    license: gemma
+    access: gated_account_scoped
+    checkpoint_parameter_count: 2614341888
+    selected_layers: [9, 10, 11, 12, 13, 14, 15, 16]
+    hidden_size: 2304
+    intermediate_size: 9216
+    num_hidden_layers: 26
+    num_attention_heads: 8
+    num_key_value_heads: 4
+    head_dim: 256
+    layer_prefixes: [model.layers]
+    residual_pre_suffix: input_layernorm
+    residual_mid_suffix: pre_feedforward_layernorm
+    fused_qkv: false
+    fused_gate_up: false
+    frozen: true
+  - key: smol
+    approval_status: RETAINED_APPROVED
+    model_id: HuggingFaceTB/SmolLM2-1.7B-Instruct
+    revision: 31b70e2e869a7173562077fd711b654946d38674
+    tokenizer_id: HuggingFaceTB/SmolLM2-1.7B-Instruct
+    tokenizer_revision: 31b70e2e869a7173562077fd711b654946d38674
+    family: llama
+    license: apache-2.0
+    access: public
+    checkpoint_parameter_count: 1711376384
+    selected_layers: [8, 9, 10, 11, 12, 13, 14, 15]
+    hidden_size: 2048
+    intermediate_size: 8192
+    num_hidden_layers: 24
+    num_attention_heads: 32
+    num_key_value_heads: 32
+    head_dim: 64
+    layer_prefixes: [model.layers]
+    residual_pre_suffix: input_layernorm
+    residual_mid_suffix: post_attention_layernorm
+    fused_qkv: false
+    fused_gate_up: false
+    frozen: true
+  - key: model3_pending
+    approval_status: PENDING_RESEARCHER_APPROVAL
+    model_id: null
+    revision: null
+    tokenizer_id: null
+    tokenizer_revision: null
+    family: null
+    license: null
+    access: null
+    checkpoint_parameter_count: null
+    selected_layers: null
+    hidden_size: null
+    intermediate_size: null
+    num_hidden_layers: null
+    num_attention_heads: null
+    num_key_value_heads: null
+    head_dim: null
+    layer_prefixes: null
+    residual_pre_suffix: null
+    residual_mid_suffix: null
+    fused_qkv: null
+    fused_gate_up: null
+    frozen: null
+
+architecture:
+  required_model_count: 3
+  model_order: [gemma, smol, model3_pending]
+  selected_layers_per_model: 8
+  logical_matrices: [q, k, v, o, mlp_gate, mlp_up, mlp_down]
+  dictionary_size: 8192
+  batch_topk_k: 32
+  pool_tokens: 2048
+  pools_per_step: 4
+  top_k_aux: 2048
+  auxk_coefficient: 0.03125
+  gate_grouping: pre_mid
+  latent_tokens_per_model: 8
+  packing_method: learned_projection
+  packed_token_width: 512
+  intra_model_layers: 2
+  intra_model_heads: 8
+  cross_model_layers: 2
+  cross_model_heads: 8
+  cross_model_width: 512
+  cross_input_adapter: linear_517_to_512
+  feature_readout: mean
+  encoder_mixer: hierarchical_transformer
+  dropout: 0
+  activation: GELU
+
+objective:
+  internal_code: binary_support
+  activation_code: continuous
+  internal_gradient_route: rank_one_only
+  activation_gradient_route: encoder_packing_adapter_readout_and_activation_decoder
+  internal_loss: balanced_pre_mid_mean_fvu
+  activation_loss: balanced_pre_mid_mean_full_fvu
+  activation_objective_mode: full_only
+  auxk_loss: balanced_pre_mid_dead_feature_revival
+  auxk_score_source: post_relu
+  auxk_softplus_temperature: null
+  internal_coefficient: 1.0
+  activation_coefficient: 1.0
+  fvu_reduction_dtype: float32
+  activation_target_normalization: per_anchor_l2
+  activation_target_epsilon: 1.0e-6
+  activation_decoder_normalization: none
+  activation_reconstruction_scale: none
+  gate_logit_normalization: per_anchor_feature_zscore
+  gate_logit_normalization_epsilon: 1.0e-5
+  native_bias: preserve
+
+optimization:
+  optimizer: Adam
+  betas: [0.9, 0.99]
+  weight_decay: 0
+  rank_one_lr: 0.0003
+  activation_decoder_lr: 0.0003
+  encoder_lr: 0.0001
+  schedule: constant
+  seed: 0
+  precision: bfloat16
+  fp32_master_parameters: true
+
+data:
+  dataset_id: monology/pile-uncopyrighted
+  dataset_revision: 3be90335b66f24456a5d6659d9c8d208c0357119
+  sequence_length: 512
+  effective_batch_anchors: 8192
+  target_accepted_anchor_exposures: 500000000
+  planned_accepted_anchor_exposures: 500006912
+  optimizer_steps: 61036
+  repeated_anchor_policy: forbidden
+  split_unit: document
+  split_seed: 0
+  split_modulus: 1000
+  validation_buckets: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  test_buckets: [10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+  canonical_text_policy: exact_fast_tokenizer_offsets_and_exact_prefix_roundtrip_v2
+  alignment_acceptance: intersection_of_exact_canonical_text_boundaries
+
+monitoring:
+  monitor_every_steps: 64
+  minimum_positive_candidates_per_anchor: 512
+  minimum_effective_dictionary_size: 1024
+  maximum_top_1_percent_share: 0.50
+  maximum_top_10_percent_share: 0.80
+  maximum_recently_dead_fraction: 0.75
+  maximum_activation_fvu: 0.85
+  maximum_internal_fvu: 0.85
+  maximum_model_loss_ratio: 2.0
+  hard_abort_on_repeated_exposure: true
+  hard_abort_on_nonfinite: true
+  hard_abort_on_checkpoint_failure: true
+  hard_abort_on_storage_reserve_breach: true
+  storage_reserve_bytes: 214748364800
+  staged_milestone_exposures: [10002432, 25001984, 50003968, 100007936, 250003456, 500006912]
+
+runtime:
+  strategy: model_owned
+  world_size: 3
+  checkpoint_every_steps: 1000
+  keep_complete_checkpoints: 2
+  checkpoint_recovery_databases: [exposure_ledger.sqlite, stream_dedup.sqlite]
+  activation_backward_chunk: 8
+  matrix_backward_chunk: 28
+  sparse_backend: dense
+  early_exit_after_selected_layers: true
+  data_prefetch_depth: 1
+  ledger_anchor_storage: exact_compact_v1
+  output_root: /orange/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/runs
+  checkpoint_root: /orange/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/checkpoints
+  dataset_manifest: /orange/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/data/pile_uncopyrighted/manifest.json
+  alignment_manifest: /orange/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/data/pile_uncopyrighted/alignment_manifest.json
+  preflight_evidence: /orange/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/preflight/preflight_report.json
+  max_preflight_steps: 20
+  max_preflight_minutes: 45
+
+approvals:
+  third_model: PENDING_RESEARCHER_APPROVAL
+  three_way_alignment: PENDING_THIRD_TOKENIZER_VALIDATION
+  human_interpretability:
+    status: PENDING_RESEARCHER_DECISION
+    artifact_path: null
+    artifact_sha256: null
+    researcher_decision: null
+  exact_resume: SYNTHETIC_VALIDATED_REAL_THREE_MODEL_PENDING
+  storage_reservation: STORAGE_BLOCKED
+  three_model_gpu_preflight: PENDING_MODEL_THREE
+  full_training: MAIN_500M_NOT_AUTHORIZED
+
+evaluation_status: HUMAN_INTERPRETABILITY_DECISION_PENDING

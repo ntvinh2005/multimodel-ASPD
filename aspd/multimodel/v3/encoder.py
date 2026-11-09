@@ -49,19 +49,27 @@ class ChannelSlicePacker:
     def __call__(self, concatenated: Tensor) -> Tensor:
         if concatenated.shape[-1] != self.concatenated_width:
             raise ValueError("channel_slice input width differs from the registered model width")
-        return concatenated.reshape(
-            *concatenated.shape[:2], self.latent_tokens, self.token_width
-        )
+        return concatenated.reshape(*concatenated.shape[:2], self.latent_tokens, self.token_width)
 
 
 class LearnedProjectionPacker(nn.Module):
     """Explicitly provisional learned packing; selecting it does not approve the method."""
 
-    def __init__(self, concatenated_width: int, latent_tokens: int, token_width: int):
+    def __init__(
+        self,
+        concatenated_width: int,
+        latent_tokens: int,
+        token_width: int,
+        *,
+        device: torch.device | str | None = None,
+        dtype: torch.dtype | None = None,
+    ):
         super().__init__()
         self.latent_tokens = latent_tokens
         self.token_width = token_width
-        self.projection = nn.Linear(concatenated_width, latent_tokens * token_width)
+        self.projection = nn.Linear(
+            concatenated_width, latent_tokens * token_width, device=device, dtype=dtype
+        )
 
     def forward(self, concatenated: Tensor) -> Tensor:
         projected = self.projection(concatenated)
@@ -69,7 +77,16 @@ class LearnedProjectionPacker(nn.Module):
 
 
 class IntraModelTransformer(nn.Module):
-    def __init__(self, width: int, *, layers: int, heads: int, mlp_ratio: float = 4.0):
+    def __init__(
+        self,
+        width: int,
+        *,
+        layers: int,
+        heads: int,
+        mlp_ratio: float = 4.0,
+        device: torch.device | str | None = None,
+        dtype: torch.dtype | None = None,
+    ):
         super().__init__()
         if width % heads:
             raise ValueError("intra-model token width must be divisible by attention heads")
@@ -81,6 +98,8 @@ class IntraModelTransformer(nn.Module):
             norm_first=True,
             dropout=0.0,
             activation="gelu",
+            device=device,
+            dtype=dtype,
         )
         self.encoder = nn.TransformerEncoder(layer, layers, enable_nested_tensor=False)
 
@@ -96,7 +115,7 @@ class IntraModelTransformer(nn.Module):
 class CrossModelTokens:
     values: Tensor
     identity_indices: tuple[int, ...]
-    separator_positions: tuple[int, int]
+    separator_positions: tuple[int, ...]
 
 
 def pack_cross_model_tokens(
@@ -104,10 +123,12 @@ def pack_cross_model_tokens(
     *,
     model_order: Sequence[str] = MODEL_ORDER,
 ) -> CrossModelTokens:
-    """Build ``A_Qwen, SEP, A_Gemma, SEP, A_Phi`` with parameter-free identities."""
+    """Pack ordered model tokens with one parameter-free identity per model/separator."""
 
     if tuple(tokens) != tuple(model_order):
-        raise ValueError("intra-model tokens must use deterministic qwen/gemma/phi order")
+        raise ValueError("intra-model tokens must use the configured deterministic order")
+    if len(model_order) < 2:
+        raise ValueError("cross-model packing requires at least two models")
     shapes = [tokens[key].shape for key in model_order]
     if any(len(shape) != 4 for shape in shapes):
         raise ValueError("cross-model inputs must have shape [B,A,a,d]")
@@ -116,7 +137,7 @@ def pack_cross_model_tokens(
         raise ValueError("all models must share batch, anchor, and latent-token axes")
     batch, anchors, latent_tokens = shapes[0][:3]
     max_width = max(shape[-1] for shape in shapes)
-    identity_width = len(model_order) + 2
+    identity_width = 2 * len(model_order) - 1
 
     pieces: list[Tensor] = []
     identity_indices: list[int] = []
@@ -161,12 +182,21 @@ def pack_cross_model_tokens(
     return CrossModelTokens(
         packed,
         tuple(identity_indices),
-        (separator_positions[0], separator_positions[1]),
+        tuple(separator_positions),
     )
 
 
 class CrossModelTransformer(nn.Module):
-    def __init__(self, width: int, *, layers: int, heads: int, mlp_ratio: float = 4.0):
+    def __init__(
+        self,
+        width: int,
+        *,
+        layers: int,
+        heads: int,
+        mlp_ratio: float = 4.0,
+        device: torch.device | str | None = None,
+        dtype: torch.dtype | None = None,
+    ):
         super().__init__()
         if width % heads:
             raise ValueError("cross-model token width must be divisible by attention heads")
@@ -178,33 +208,78 @@ class CrossModelTransformer(nn.Module):
             norm_first=True,
             dropout=0.0,
             activation="gelu",
+            device=device,
+            dtype=dtype,
         )
         self.encoder = nn.TransformerEncoder(layer, layers, enable_nested_tensor=False)
 
     def forward(self, tokens: Tensor) -> Tensor:
         if tokens.ndim != 4:
-            raise ValueError("cross-model tokens must have shape [B,A,3a+2,d]")
+            raise ValueError("cross-model inputs must have model and separator token axes")
         batch, anchors, count, width = tokens.shape
         output = self.encoder(tokens.reshape(batch * anchors, count, width))
         return output.reshape(batch, anchors, count, width)
 
 
 class FeatureReadout(nn.Module):
-    """Experimental readout interface; the main-run choice remains unresolved."""
+    r"""Shared readout followed by the configured v3.1 gate-logit transformation.
 
-    def __init__(self, width: int, n_features: int, method: Literal["mean"]):
+    ``projection_logits`` are the mathematical :math:`z_{a,c}`.  With per-anchor
+    feature-axis z-score enabled, the returned ``logits`` are :math:`\tilde z_{a,c}`
+    using population variance over C (the PyTorch LayerNorm convention) and no learned
+    affine parameters.  ReLU produces :math:`s_{a,c}` before pool-wide BatchTopK.
+    """
+
+    def __init__(
+        self,
+        width: int,
+        n_features: int,
+        method: Literal["mean"],
+        logit_normalization: Literal["none", "per_anchor_feature_zscore"] = "none",
+        logit_normalization_epsilon: float = 1e-5,
+        *,
+        device: torch.device | str | None = None,
+        dtype: torch.dtype | None = None,
+    ):
         super().__init__()
         if method != "mean":
-            raise NotImplementedError("only the explicitly labeled experimental mean readout exists")
+            raise NotImplementedError(
+                "only the explicitly labeled experimental mean readout exists"
+            )
         self.method = method
-        self.output = nn.Linear(width, n_features)
+        if logit_normalization not in {"none", "per_anchor_feature_zscore"}:
+            raise ValueError(f"unknown feature-readout logit normalization: {logit_normalization}")
+        if logit_normalization_epsilon <= 0:
+            raise ValueError("feature-readout logit normalization epsilon must be positive")
+        self.logit_normalization = logit_normalization
+        self.logit_normalization_epsilon = float(logit_normalization_epsilon)
+        self.latest_projection_logits: Tensor | None = None
+        self.output = nn.Linear(width, n_features, device=device, dtype=dtype)
 
     def forward(self, tokens: Tensor, valid_anchors: Tensor) -> Tensor:
+        scores, _logits = self.forward_with_logits(tokens, valid_anchors)
+        return scores
+
+    def forward_with_logits(
+        self, tokens: Tensor, valid_anchors: Tensor
+    ) -> tuple[Tensor, Tensor]:
         if valid_anchors.shape != tokens.shape[:2]:
             raise ValueError("valid_anchors must match the [B,A] aligned-anchor grid")
         pooled = tokens.mean(dim=2)
-        scores = torch.relu(self.output(pooled))
-        return scores * valid_anchors[..., None].to(scores.dtype)
+        projection_logits = self.output(pooled)
+        self.latest_projection_logits = projection_logits
+        if self.logit_normalization == "per_anchor_feature_zscore":
+            logits = torch.nn.functional.layer_norm(
+                projection_logits,
+                (projection_logits.shape[-1],),
+                weight=None,
+                bias=None,
+                eps=self.logit_normalization_epsilon,
+            )
+        else:
+            logits = projection_logits
+        mask = valid_anchors[..., None].to(logits.dtype)
+        return torch.relu(logits) * mask, logits * mask
 
 
 class HierarchicalV3Encoder(nn.Module):
@@ -214,50 +289,72 @@ class HierarchicalV3Encoder(nn.Module):
         self,
         packers: Mapping[str, InputPacker | nn.Module],
         *,
+        model_order: Sequence[str] = MODEL_ORDER,
         intra_layers: int,
         intra_heads: int,
         cross_layers: int,
         cross_heads: int,
+        cross_width: int | None = None,
         n_features: int,
         readout: Literal["mean"],
+        device: torch.device | str | None = None,
+        dtype: torch.dtype | None = None,
     ):
         super().__init__()
-        if tuple(packers) != MODEL_ORDER:
-            raise ValueError("v3 encoder packers must be ordered qwen, gemma, phi")
+        self.model_order = tuple(model_order)
+        if len(self.model_order) < 2 or tuple(packers) != self.model_order:
+            raise ValueError(f"v3 encoder packers must match model order: {self.model_order}")
         widths = {key: int(value.token_width) for key, value in packers.items()}
-        incompatible_intra = {
-            key: width for key, width in widths.items() if width % intra_heads
-        }
+        incompatible_intra = {key: width for key, width in widths.items() if width % intra_heads}
         if incompatible_intra:
             raise ValueError(
                 "intra-model token widths must be divisible by attention heads before "
                 f"module allocation: heads={intra_heads}, widths={incompatible_intra}"
             )
-        cross_width = max(widths.values()) + len(MODEL_ORDER) + 2
+        identity_width = 2 * len(self.model_order) - 1
+        packed_cross_width = max(widths.values()) + identity_width
+        cross_width = packed_cross_width if cross_width is None else cross_width
         if cross_width % cross_heads:
             raise ValueError(
                 "cross-model token width must be divisible by attention heads before "
                 f"module allocation: content_width={max(widths.values())}, "
-                f"identity_width={len(MODEL_ORDER) + 2}, cross_width={cross_width}, "
+                f"identity_width={identity_width}, cross_width={cross_width}, "
                 f"heads={cross_heads}"
             )
         latent_tokens = {key: int(value.latent_tokens) for key, value in packers.items()}
         if len(set(latent_tokens.values())) != 1:
-            raise ValueError("all three v3 models must use the same latent-token count a")
+            raise ValueError("all v3 models must use the same latent-token count a")
         self.packer_modules = nn.ModuleDict(
             {key: value for key, value in packers.items() if isinstance(value, nn.Module)}
         )
         self._packers = dict(packers)
         self.intra = nn.ModuleDict(
             {
-                key: IntraModelTransformer(width, layers=intra_layers, heads=intra_heads)
+                key: IntraModelTransformer(
+                    width,
+                    layers=intra_layers,
+                    heads=intra_heads,
+                    device=device,
+                    dtype=dtype,
+                )
                 for key, width in widths.items()
             }
         )
+        self.cross_input_adapter: nn.Module
+        if packed_cross_width == cross_width:
+            self.cross_input_adapter = nn.Identity()
+        else:
+            self.cross_input_adapter = nn.Linear(
+                packed_cross_width, cross_width, device=device, dtype=dtype
+            )
         self.cross = CrossModelTransformer(
-            cross_width, layers=cross_layers, heads=cross_heads
+            cross_width,
+            layers=cross_layers,
+            heads=cross_heads,
+            device=device,
+            dtype=dtype,
         )
-        self.readout = FeatureReadout(cross_width, n_features, readout)
+        self.readout = FeatureReadout(cross_width, n_features, readout, device=device, dtype=dtype)
         self.latent_tokens = latent_tokens
 
     def forward(
@@ -265,16 +362,22 @@ class HierarchicalV3Encoder(nn.Module):
         layer_activations: Mapping[str, Sequence[Tensor]],
         valid_anchors: Tensor,
     ) -> Tensor:
-        if tuple(layer_activations) != MODEL_ORDER:
-            raise ValueError("v3 activations must be ordered qwen, gemma, phi")
+        if tuple(layer_activations) != self.model_order:
+            raise ValueError(f"v3 activations must be ordered {self.model_order}")
         intra_tokens: dict[str, Tensor] = {}
-        for key in MODEL_ORDER:
+        for key in self.model_order:
             concatenated = concatenate_layer_activations(layer_activations[key])
             packed = self._packers[key](concatenated)  # type: ignore[operator]
             intra_tokens[key] = self.intra[key](packed)
-        cross = pack_cross_model_tokens(intra_tokens)
-        expected = 3 * next(iter(self.latent_tokens.values())) + 2
+        cross = pack_cross_model_tokens(intra_tokens, model_order=self.model_order)
+        expected = (
+            len(self.model_order) * next(iter(self.latent_tokens.values()))
+            + len(self.model_order)
+            - 1
+        )
         if cross.values.shape[2] != expected:
-            raise AssertionError("v3 cross-model sequence must have length 3a+2")
-        encoded = self.cross(cross.values)
+            raise AssertionError(
+                "v3 cross-model sequence must have length N*a+(N-1)"
+            )
+        encoded = self.cross(self.cross_input_adapter(cross.values))
         return self.readout(encoded, valid_anchors)

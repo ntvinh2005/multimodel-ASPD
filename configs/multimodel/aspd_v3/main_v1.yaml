@@ -1,0 +1,94 @@
+schema_version: 1
+experiment_family: aspd_v3_three_family_main
+scientific_status: FROZEN_RESEARCHER_APPROVED
+execution_authorized: true
+authorization_statement_sha256: 831723eacce597b04f4ee824ea223ec871f322798c9be2b768814ebb8448591f
+approved_config_path: configs/multimodel/aspd_v3/approved.yaml
+approved_config_sha256: 0d45e2679a3677a2d3ea752284fd112cc8216414c05a19d64a739997ff2e6542
+
+architecture:
+  dictionary_size: 8192
+  batch_topk_k: 32
+  pool_tokens: 2048
+  top_k_aux: 2048
+  auxk_coefficient: 0.03125
+  matryoshka_group_fracs: [0.0625, 0.0625, 0.125, 0.25, 0.5]
+  gate_grouping: pre_mid
+  model_order: [qwen, gemma, phi]
+  logical_matrices: [q, k, v, o, mlp_gate, mlp_up, mlp_down]
+  latent_tokens_per_model: 8
+  packing_method: learned_projection
+  packed_token_width: 512
+  intra_model_layers: 2
+  intra_model_heads: 8
+  cross_model_layers: 2
+  cross_model_heads: 8
+  cross_model_width: 512
+  cross_input_adapter: linear_517_to_512
+  feature_readout: mean
+  dropout: 0
+  activation: GELU
+
+objective:
+  internal_code: binary_support
+  activation_code: continuous
+  internal_gradient_route: rank_one_only
+  activation_gradient_route: encoder_packing_adapter_readout_and_activation_decoder
+  internal_loss: balanced_pre_mid_mean_fvu
+  activation_loss: balanced_pre_mid_mean_matryoshka_fvu
+  auxk_loss: balanced_pre_mid_dead_feature_revival
+  internal_coefficient: 1.0
+  activation_coefficient: 1.0
+  fvu_reduction_dtype: float32
+  activation_decoder_normalization: unit_row_norm_with_radial_gradient_projection
+  native_bias: preserve
+
+optimization:
+  optimizer: Adam
+  betas: [0.9, 0.99]
+  weight_decay: 0
+  rank_one_lr: 0.0003
+  activation_decoder_lr: 0.0003
+  encoder_lr: 0.0001
+  schedule: constant
+  seed: 0
+  precision: bfloat16
+
+data:
+  sequence_length: 512
+  effective_batch_anchors: 8192
+  minimum_accepted_anchor_exposures: 2048000000
+  minimum_optimizer_steps: 250000
+  split_unit: document
+  split_seed: 0
+  split_modulus: 1000
+  validation_buckets: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  test_buckets: [10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+  canonical_text_policy: identity_exact_three_way_prefix
+  validation_target_anchors: 5000000
+  test_target_anchors: 5000000
+
+runtime:
+  strategy: fsdp
+  world_size: 3
+  checkpoint_every_steps: 1000
+  keep_complete_checkpoints: 2
+  output_root: out/multimodel/aspd_v3/main_v1/runs/aspd_v3_qwen_gemma_phi_168targets_c8192_k32_2048m_main_v1
+  checkpoint_root: out/multimodel/aspd_v3/main_v1/checkpoints/aspd_v3_qwen_gemma_phi_168targets_c8192_k32_2048m_main_v1
+  dataset_manifest: out/multimodel/aspd_v3/main_v1/data/pile_uncopyrighted/manifest.json
+  alignment_manifest: out/multimodel/aspd_v3/main_v1/data/pile_uncopyrighted/alignment_manifest.json
+  preflight_evidence: out/multimodel/aspd_v3/main_v1/preflight/aspd_v3_qwen_gemma_phi_168targets_c8192_k32_preflight_v12_3gpu_b200_tensor_dcp/preflight_report.json
+  max_preflight_steps: 20
+  max_preflight_minutes: 45
+
+access_evidence:
+  slurm_job_id: "48541592"
+  account: thai
+  partition: hpg-rtx6000
+  hostname: c0800a-s25.ufhpc
+  evidence_dir: out/multimodel/aspd_v3/smoke/20261031T153008Z_job48541592_d614d41dff88
+  smoke_source_sha256: 9f037c55af1efddfa85744350280c8b93295bbcddc993e319087f70ab858ecaf
+  committed_smoke_source_git_sha: 5e1e418e24dc917e33e1d256484800df4af4d58e
+  scope: this_account_environment_and_recorded_run_only
+
+evaluation_status: "NOT_IMPLEMENTED — DEFERRED BY RESEARCHER"

@@ -1,0 +1,24 @@
+schema_version: 3
+status: RESEARCHER_AUTHORIZED_LOCAL_INTRUDER_JUDGE
+experiment_family: aspd_v3_zscore_intruder_loo_judge_v1
+judge_model_id: meta-llama/Llama-3.3-70B-Instruct
+judge_revision: 6f6073b423013f6a7d4d9f39144961bfbfbc386b
+local_files_only: true
+paid_api: false
+dtype: bfloat16
+decoding: greedy
+max_new_tokens: 96
+batch_size: 4
+prompt_version: leave_one_out_coherence_v1
+control_version: semantic_paraphrase_v2
+balanced_control_positions: true
+coherence_scale: [0, 1, 2, 3, 4]
+minimum_top_coherence: 3
+minimum_top_margin: 1
+positive_controls: 20
+negative_controls: 20
+control_seed: 53
+minimum_positive_control_accuracy: 0.8
+minimum_negative_control_abstention_rate: 0.8
+maximum_invalid_parent_rate: 0.05
+maximum_position_share: 0.35

@@ -288,7 +288,7 @@ class SQLiteExposureLedger:
     rank-local IDs before invoking this class.
     """
 
-    SCHEMA_VERSION = 2
+    SCHEMA_VERSION = 3
 
     def __init__(
         self,
@@ -297,6 +297,8 @@ class SQLiteExposureLedger:
         dataset_manifest_sha256: str,
         world_size: int = 1,
         writer_rank: int = 0,
+        model_order: tuple[str, ...] = ("qwen", "gemma", "phi"),
+        compact_anchor_ids: bool = False,
     ):
         if len(dataset_manifest_sha256) != 64 or any(
             character not in "0123456789abcdef" for character in dataset_manifest_sha256
@@ -311,17 +313,26 @@ class SQLiteExposureLedger:
         self.dataset_manifest_sha256 = dataset_manifest_sha256
         self.world_size = world_size
         self.writer_rank = writer_rank
+        if len(model_order) not in {2, 3} or len(set(model_order)) != len(model_order):
+            raise ValueError("exposure ledger requires two or three distinct model keys")
+        self.model_order = tuple(model_order)
+        self.compact_anchor_ids = compact_anchor_ids
+        self.schema_version = 4 if compact_anchor_ids else self.SCHEMA_VERSION
         self.connection = sqlite3.connect(self.path)
-        self.connection.execute("PRAGMA journal_mode=WAL")
+        # The ledger lives on Blue. WAL's shared-memory index is unsafe on this parallel
+        # filesystem; DELETE mode remains transactional and works with synchronous=FULL.
+        journal_mode = self.connection.execute("PRAGMA journal_mode=DELETE").fetchone()[0]
+        if str(journal_mode).lower() != "delete":
+            raise RuntimeError("exposure ledger requires DELETE journaling")
         self.connection.execute("PRAGMA synchronous=FULL")
         self.connection.executescript(
-            """
+            f"""
             CREATE TABLE IF NOT EXISTS exposure_metadata (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS seen_anchors (
-                anchor_id TEXT PRIMARY KEY,
+                anchor_id {"BLOB" if compact_anchor_ids else "TEXT"} PRIMARY KEY,
                 first_step INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS seen_anchors_first_step_idx
@@ -345,7 +356,8 @@ class SQLiteExposureLedger:
                 payload_sha256 TEXT NOT NULL,
                 raw_tokens_qwen INTEGER NOT NULL,
                 raw_tokens_gemma INTEGER NOT NULL,
-                raw_tokens_phi INTEGER NOT NULL
+                raw_tokens_phi INTEGER NOT NULL,
+                observed_before_step INTEGER NOT NULL
             );
             CREATE TABLE IF NOT EXISTS exposure_totals (
                 singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -366,11 +378,17 @@ class SQLiteExposureLedger:
         existing = dict(self.connection.execute("SELECT key,value FROM exposure_metadata"))
         if existing:
             expected_fixed = {
-                "schema_version": str(self.SCHEMA_VERSION),
+                "schema_version": str(self.schema_version),
                 "dataset_manifest_sha256": dataset_manifest_sha256,
                 "world_size": str(world_size),
                 "global_writer_rank": "0",
             }
+            if compact_anchor_ids:
+                expected_fixed["anchor_storage"] = "exact_compact_v1"
+            if self.model_order != ("qwen", "gemma", "phi"):
+                expected_fixed["model_order_json"] = json.dumps(
+                    self.model_order, separators=(",", ":")
+                )
             observed_fixed = {key: existing.get(key) for key in expected_fixed}
             if observed_fixed != expected_fixed or set(existing) != set(expected_fixed) | {
                 "ledger_uuid",
@@ -390,13 +408,19 @@ class SQLiteExposureLedger:
             self.ledger_uuid = str(uuid.uuid4())
             self.genesis_receipt_sha256 = self._genesis_receipt(self.ledger_uuid)
             metadata = {
-                "schema_version": str(self.SCHEMA_VERSION),
+                "schema_version": str(self.schema_version),
                 "dataset_manifest_sha256": dataset_manifest_sha256,
                 "world_size": str(world_size),
                 "global_writer_rank": "0",
                 "ledger_uuid": self.ledger_uuid,
                 "genesis_receipt_sha256": self.genesis_receipt_sha256,
             }
+            if compact_anchor_ids:
+                metadata["anchor_storage"] = "exact_compact_v1"
+            if self.model_order != ("qwen", "gemma", "phi"):
+                metadata["model_order_json"] = json.dumps(
+                    self.model_order, separators=(",", ":")
+                )
             with self.connection:
                 self.connection.executemany(
                     "INSERT INTO exposure_metadata(key,value) VALUES (?,?)", metadata.items()
@@ -413,10 +437,19 @@ class SQLiteExposureLedger:
 
     def _genesis_receipt(self, ledger_uuid: str) -> str:
         payload = (
-            f"aspd-v3-exposure-ledger-v2\0{ledger_uuid}\0"
+            f"aspd-v3-exposure-ledger-v{self.schema_version}\0{ledger_uuid}\0"
             f"{self.dataset_manifest_sha256}\0{self.world_size}"
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def _encoded_anchor_id(self, anchor_id: str) -> str | bytes:
+        """Return an injective compact SQLite key without changing anchor identity semantics."""
+
+        if not self.compact_anchor_ids:
+            return anchor_id
+        if len(anchor_id) == 64 and all(character in "0123456789abcdef" for character in anchor_id):
+            return b"\x00" + bytes.fromhex(anchor_id)
+        return b"\x01" + anchor_id.encode("utf-8")
 
     @staticmethod
     def _step_receipt(
@@ -636,16 +669,6 @@ class SQLiteExposureLedger:
         current = self.snapshot()
         if current.optimization_steps < receipt.optimizer_step:
             raise ValueError("live exposure ledger is behind the checkpoint receipt")
-        if (
-            current.raw_tokens_qwen,
-            current.raw_tokens_gemma,
-            current.raw_tokens_phi,
-        ) != (
-            receipt.counters.raw_tokens_qwen,
-            receipt.counters.raw_tokens_gemma,
-            receipt.counters.raw_tokens_phi,
-        ):
-            raise ValueError("alignment token counters changed after training began")
         if receipt.optimizer_step:
             row = self.connection.execute(
                 "SELECT receipt_sha256 FROM optimizer_steps WHERE step_id=?",
@@ -656,7 +679,16 @@ class SQLiteExposureLedger:
             observed_receipt = self.genesis_receipt_sha256
         if observed_receipt != receipt.receipt_sha256:
             raise ValueError("live exposure ledger does not contain the checkpoint receipt")
-        if current.optimization_steps == receipt.optimizer_step:
+        raw_counts_match = (
+            current.raw_tokens_qwen,
+            current.raw_tokens_gemma,
+            current.raw_tokens_phi,
+        ) == (
+            receipt.counters.raw_tokens_qwen,
+            receipt.counters.raw_tokens_gemma,
+            receipt.counters.raw_tokens_phi,
+        )
+        if current.optimization_steps == receipt.optimizer_step and raw_counts_match:
             self._validate_constant_time_state()
             return current
 
@@ -667,6 +699,10 @@ class SQLiteExposureLedger:
             )
             self.connection.execute(
                 "DELETE FROM seen_anchors WHERE first_step>=?", (receipt.optimizer_step,)
+            )
+            self.connection.execute(
+                "DELETE FROM alignment_observations WHERE observed_before_step>=?",
+                (receipt.optimizer_step,),
             )
             counters = receipt.counters
             self.connection.execute(
@@ -694,17 +730,30 @@ class SQLiteExposureLedger:
         self._validate_constant_time_state()
         return self.snapshot()
 
-    def observe_alignment(self, observation_id: str, result: AlignmentResult) -> None:
+    def observe_raw_tokens(
+        self,
+        observation_id: str,
+        counts: Mapping[str, int],
+        *,
+        before_optimizer_step: int | None = None,
+    ) -> None:
         if not observation_id:
             raise ValueError("alignment observation requires a stable global identity")
-        if self.snapshot().optimization_steps:
-            raise RuntimeError("alignment token accounting is frozen after optimizer step zero")
-        counts = {
-            key: int(sum(result.tokenized[key].attention_mask))
-            for key in ("qwen", "gemma", "phi")
-        }
+        current_step = self.snapshot().optimization_steps
+        if before_optimizer_step is None:
+            before_optimizer_step = current_step
+        if before_optimizer_step != current_step:
+            raise ValueError("raw-token observation must be attached to the current step boundary")
+        counts = {key: int(counts[key]) for key in self.model_order}
+        if any(value < 0 for value in counts.values()):
+            raise ValueError("raw-token observations cannot be negative")
         payload = json.dumps(counts, sort_keys=True, separators=(",", ":"))
         payload_sha256 = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        # Schema v3/v4 retains three positional raw-token slots for historical
+        # checkpoint compatibility. Two-model contracts use slots 0/1 and keep slot 2
+        # exactly zero; ``model_order_json`` provides their scientific names.
+        positional_counts = [counts[key] for key in self.model_order]
+        positional_counts.extend([0] * (3 - len(positional_counts)))
         self.connection.execute("BEGIN IMMEDIATE")
         try:
             existing = self.connection.execute(
@@ -717,22 +766,73 @@ class SQLiteExposureLedger:
                 self.connection.rollback()
                 return
             self.connection.execute(
-                "INSERT INTO alignment_observations VALUES (?,?,?,?,?)",
-                (observation_id, payload_sha256, counts["qwen"], counts["gemma"], counts["phi"]),
+                "INSERT INTO alignment_observations VALUES (?,?,?,?,?,?)",
+                (
+                    observation_id,
+                    payload_sha256,
+                    positional_counts[0],
+                    positional_counts[1],
+                    positional_counts[2],
+                    before_optimizer_step,
+                ),
             )
             self.connection.execute(
                 "UPDATE exposure_totals SET raw_tokens_qwen=raw_tokens_qwen+?, "
                 "raw_tokens_gemma=raw_tokens_gemma+?, raw_tokens_phi=raw_tokens_phi+? "
                 "WHERE singleton=1",
-                (counts["qwen"], counts["gemma"], counts["phi"]),
+                (
+                    positional_counts[0],
+                    positional_counts[1],
+                    positional_counts[2],
+                ),
             )
             self.connection.commit()
         except Exception:
             self.connection.rollback()
             raise
 
+    def observe_alignment(self, observation_id: str, result: AlignmentResult) -> None:
+        self.observe_raw_tokens(
+            observation_id,
+            {
+                key: int(sum(result.tokenized[key].attention_mask))
+                for key in self.model_order
+            },
+        )
+
+    def raw_token_counts(self) -> dict[str, int]:
+        """Return named raw-token slots according to this ledger's immutable model order."""
+
+        counters = self.snapshot()
+        positional_counts = (
+            counters.raw_tokens_qwen,
+            counters.raw_tokens_gemma,
+            counters.raw_tokens_phi,
+        )
+        return dict(zip(self.model_order, positional_counts[: len(self.model_order)], strict=True))
+
     def observe_optimizer_step(self, step_id: int, anchor_ids: Sequence[str]) -> ExposureCounters:
         return self.observe_global_optimizer_step(step_id, {0: anchor_ids})
+
+    def observe_replicated_optimizer_step(
+        self, step_id: int, anchor_ids: Sequence[str]
+    ) -> ExposureCounters:
+        """Count one global batch broadcast identically to every model-parallel rank.
+
+        ASPD v3 places one frozen source family on each rank and broadcasts the same aligned
+        anchors to all ranks.  Those replicas are one scientific exposure, not ``world_size``
+        independent exposures.  Rank zero is the durable ledger owner; empty batches for the
+        other compute ranks preserve the distributed receipt topology without multiplying the
+        exposure budget.
+        """
+
+        return self.observe_global_optimizer_step(
+            step_id,
+            {
+                rank: anchor_ids if rank == 0 else ()
+                for rank in range(self.world_size)
+            },
+        )
 
     def observe_global_optimizer_step(
         self,
@@ -800,7 +900,7 @@ class SQLiteExposureLedger:
             changes_before = self.connection.total_changes
             self.connection.executemany(
                 "INSERT OR IGNORE INTO seen_anchors(anchor_id,first_step) VALUES (?,?)",
-                ((anchor_id, step_id) for anchor_id in flat),
+                ((self._encoded_anchor_id(anchor_id), step_id) for anchor_id in flat),
             )
             newly_observed = self.connection.total_changes - changes_before
             accepted = len(flat)

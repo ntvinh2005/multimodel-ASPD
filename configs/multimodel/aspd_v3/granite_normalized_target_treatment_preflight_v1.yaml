@@ -1,0 +1,15 @@
+extends: granite_normalized_target_treatment_v1.yaml
+scientific_status: THREE_STEP_GPU_PREFLIGHT_AUTHORIZED_BY_RESEARCHER
+gpu_preflight_authorized: true
+preflight_authorization:
+  authorized_by: researcher
+  authorized_on: "2026-11-06"
+  scope: three_step_gpu_preflight_only
+  optimizer_steps: 3
+  gpu_count: 3
+  gpu_type: b200
+  pilot_authorized: false
+  full_training_authorized: false
+runtime:
+  status: THREE_STEP_GPU_PREFLIGHT_AUTHORIZED
+  preflight_evidence: out/multimodel/aspd_v3/granite_normalized_target_v1/preflight/normalized_target/preflight_report.json

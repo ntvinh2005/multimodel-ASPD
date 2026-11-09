@@ -1,0 +1,99 @@
+{
+  "auxk": {
+    "auxk_first_nonzero_step": 137,
+    "auxk_last_nonzero_step": 1221,
+    "auxk_nonzero_fraction": 0.8509418509418509,
+    "auxk_nonzero_steps": 1039,
+    "available_diagnostic_steps": [
+      1,
+      10,
+      50,
+      128,
+      256,
+      500,
+      800,
+      1000,
+      1221
+    ],
+    "canonical_optimizer_steps": 1221,
+    "feature_level_auxk_selection_logged": false,
+    "feature_level_revival_logged": false,
+    "missing_or_uninstrumented_requested_steps": [
+      0,
+      80
+    ],
+    "requested_steps": [
+      0,
+      1,
+      10,
+      50,
+      80,
+      128,
+      256,
+      500,
+      800,
+      1000,
+      1221
+    ]
+  },
+  "checkpoint_gate_replica_verification": {
+    "ranks_verified_equal": [
+      0,
+      1,
+      2
+    ],
+    "steps": [
+      1000,
+      1221
+    ]
+  },
+  "measurement_boundaries": {
+    "auxk_revival": "feature-level selected/revived identities were not logged",
+    "contribution_energy": "observational sum(events * RMS_L2^2), not marginal residual reduction",
+    "heldout_counts": "fixed validation anchors; shared gate counts verified equal across models",
+    "training_counts": "cumulative checkpoint buffers; interval is an exact checkpoint difference",
+    "training_gate_trajectory": "instantaneous per-step pool diagnostics averaged over four pools"
+  },
+  "provenance": {
+    "accepted_heldout_anchors": 100352,
+    "accepted_training_exposures": 10002432,
+    "activation_decoder_normalization": "none",
+    "activation_target_normalization": "per_anchor_l2",
+    "alignment_manifest_sha256": "e3fb039d2f12f3f81fef40fa064eb5b189dcfb8c99ba8fd0b6c0bccfe7a50777",
+    "checkpoint_manifest_experiment_metadata": {
+      "activation_reconstruction_scale": "none",
+      "activation_target_epsilon": 1e-06,
+      "activation_target_normalization": "per_anchor_l2",
+      "experiment_family": "aspd_v3_granite_normalized_target_unconstrained_decoder_v1",
+      "model_order": [
+        "gemma",
+        "smol",
+        "granite"
+      ],
+      "oracle_norm_evaluation": true
+    },
+    "checkpoint_manifest_sha256": "246094cafbd01b05a77762936902a70e92bd11df9b26b602c6b6ace1ef53903a",
+    "checkpoint_step": 1221,
+    "config_file_sha256": "6fbbace8188cb0267b36f8ef99f9b7b3345267f0f93b8ba6ff2077e5b0b631a4",
+    "config_fingerprint": "04599059ec494ebe485d5e2a17780eb983a049404b2bac552f3b2c55e886dc6f",
+    "dataset_manifest_sha256": "a258974d21ceac3457529644be07459518fde7bc28501abde5c67e5e3719286f",
+    "diagnostic_git_sha": "654feac6363b6f6dceb153e3b71eeed0afbbd508",
+    "evaluation_contract_sha256": "8a6fc9334fdacbdb16fbddf8f2675d52b6aee0e4b00a71373779b82bb67a32ef",
+    "evaluation_job_id": "50148074",
+    "heldout_feature_activity_sha256": "95405e6b75c4483d26c745ad96198c514da5868ba0077299bb75b57599038f35",
+    "model_order": [
+      "gemma",
+      "smol",
+      "granite"
+    ],
+    "recorded_checkpoint_manifest_sha256": "246094cafbd01b05a77762936902a70e92bd11df9b26b602c6b6ace1ef53903a",
+    "source_paths": {
+      "heldout_dir": "/orange/thai/vinhnguyen1/aspd_v3/granite_normalized_target_unconstrained_decoder_v1/evaluation/normalized_target/job_50148074/heldout",
+      "run_dir": "/orange/thai/vinhnguyen1/aspd_v3/granite_normalized_target_unconstrained_decoder_v1/reliability/normalized_target/runs/job_50138545"
+    },
+    "training_git_sha": "654feac6363b6f6dceb153e3b71eeed0afbbd508",
+    "training_job_id": "50138545"
+  },
+  "schema_version": 1,
+  "status": "READ_ONLY_DICTIONARY_CONCENTRATION_AUDIT_COMPLETE"
+}

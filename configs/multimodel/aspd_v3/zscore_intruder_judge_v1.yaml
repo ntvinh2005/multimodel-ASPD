@@ -1,0 +1,21 @@
+schema_version: 1
+status: RESEARCHER_AUTHORIZED_LOCAL_INTRUDER_JUDGE
+experiment_family: aspd_v3_zscore_intruder_judge_v1
+judge_model_id: mistralai/Mistral-Nemo-Instruct-2407
+judge_revision: 04d8a90549d23fc6bd7f642064003592df51e9b3
+local_files_only: true
+paid_api: false
+dtype: bfloat16
+decoding: greedy
+max_new_tokens: 128
+batch_size: 8
+cyclic_rotations: 5
+allow_abstention: true
+confidence_scale: [0, 1, 2, 3]
+positive_controls: 20
+negative_controls: 20
+control_seed: 53
+minimum_positive_control_accuracy: 0.8
+minimum_negative_control_abstain_or_low_confidence_rate: 0.8
+maximum_invalid_rate: 0.05
+maximum_position_share: 0.35

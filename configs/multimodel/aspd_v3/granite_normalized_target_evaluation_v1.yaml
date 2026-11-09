@@ -1,0 +1,22 @@
+schema_version: 1
+status: RESEARCHER_AUTHORIZED_HELDOUT_GATE
+authorized_by: researcher
+authorized_on: '2026-11-07'
+experiment_family: aspd_v3_granite_normalized_target_v1
+split: validation
+split_unit: document
+accepted_anchors: 100352
+pool_anchors: 2048
+pool_count: 49
+bootstrap_unit: source_document
+bootstrap_replicates: 1000
+bootstrap_seed: 0
+jaccard_top_features: 256
+jaccard_min_fires: 4
+checkpoint_steps: 128
+arms: [baseline, normalized_target]
+model_order: [gemma, smol, granite]
+gpu_count: 3
+gpu_type: b200
+read_only: true
+training_authorized_by_this_contract: false

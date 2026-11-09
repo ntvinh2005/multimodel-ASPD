@@ -1,0 +1,162 @@
+[
+  {
+    "arm": "full_only_control",
+    "fraction_monotonic": 0.625,
+    "mean_strength_0_5": 0.0005662725461199614,
+    "mean_strength_1_0": 0.0006044101856250705,
+    "metric": "kl_clean_to_edited",
+    "model": "gemma",
+    "n_components": 8,
+    "site": "mid"
+  },
+  {
+    "arm": "full_only_control",
+    "fraction_monotonic": 0.875,
+    "mean_strength_0_5": 0.04259145964169875,
+    "mean_strength_1_0": 0.047256696328986436,
+    "metric": "logit_delta_rms",
+    "model": "gemma",
+    "n_components": 8,
+    "site": "mid"
+  },
+  {
+    "arm": "full_only_control",
+    "fraction_monotonic": 0.5,
+    "mean_strength_0_5": 0.0005595268447038393,
+    "mean_strength_1_0": 0.0006766523267920377,
+    "metric": "kl_clean_to_edited",
+    "model": "gemma",
+    "n_components": 8,
+    "site": "pre"
+  },
+  {
+    "arm": "full_only_control",
+    "fraction_monotonic": 0.875,
+    "mean_strength_0_5": 0.0387028690893203,
+    "mean_strength_1_0": 0.043063333723694086,
+    "metric": "logit_delta_rms",
+    "model": "gemma",
+    "n_components": 8,
+    "site": "pre"
+  },
+  {
+    "arm": "full_only_control",
+    "fraction_monotonic": 0.375,
+    "mean_strength_0_5": 0.0008341919064802639,
+    "mean_strength_1_0": 0.0006243090279509644,
+    "metric": "kl_clean_to_edited",
+    "model": "smol",
+    "n_components": 8,
+    "site": "mid"
+  },
+  {
+    "arm": "full_only_control",
+    "fraction_monotonic": 0.625,
+    "mean_strength_0_5": 0.05549988796701655,
+    "mean_strength_1_0": 0.05719561065779999,
+    "metric": "logit_delta_rms",
+    "model": "smol",
+    "n_components": 8,
+    "site": "mid"
+  },
+  {
+    "arm": "full_only_control",
+    "fraction_monotonic": 0.625,
+    "mean_strength_0_5": 0.000868806496303165,
+    "mean_strength_1_0": 0.0010263366893923376,
+    "metric": "kl_clean_to_edited",
+    "model": "smol",
+    "n_components": 8,
+    "site": "pre"
+  },
+  {
+    "arm": "full_only_control",
+    "fraction_monotonic": 0.625,
+    "mean_strength_0_5": 0.04898343695094809,
+    "mean_strength_1_0": 0.049720325507223606,
+    "metric": "logit_delta_rms",
+    "model": "smol",
+    "n_components": 8,
+    "site": "pre"
+  },
+  {
+    "arm": "per_anchor_zscore",
+    "fraction_monotonic": 0.375,
+    "mean_strength_0_5": 0.0008655238617478744,
+    "mean_strength_1_0": 0.0015096121059334777,
+    "metric": "kl_clean_to_edited",
+    "model": "gemma",
+    "n_components": 8,
+    "site": "mid"
+  },
+  {
+    "arm": "per_anchor_zscore",
+    "fraction_monotonic": 0.875,
+    "mean_strength_0_5": 0.04980466642882675,
+    "mean_strength_1_0": 0.06522997154388577,
+    "metric": "logit_delta_rms",
+    "model": "gemma",
+    "n_components": 8,
+    "site": "mid"
+  },
+  {
+    "arm": "per_anchor_zscore",
+    "fraction_monotonic": 0.625,
+    "mean_strength_0_5": 0.0005463992152741071,
+    "mean_strength_1_0": 0.0006943621840065362,
+    "metric": "kl_clean_to_edited",
+    "model": "gemma",
+    "n_components": 8,
+    "site": "pre"
+  },
+  {
+    "arm": "per_anchor_zscore",
+    "fraction_monotonic": 0.625,
+    "mean_strength_0_5": 0.04228890623198822,
+    "mean_strength_1_0": 0.04770705010741949,
+    "metric": "logit_delta_rms",
+    "model": "gemma",
+    "n_components": 8,
+    "site": "pre"
+  },
+  {
+    "arm": "per_anchor_zscore",
+    "fraction_monotonic": 0.625,
+    "mean_strength_0_5": 0.0007592248930841095,
+    "mean_strength_1_0": 0.0008668931866466778,
+    "metric": "kl_clean_to_edited",
+    "model": "smol",
+    "n_components": 8,
+    "site": "mid"
+  },
+  {
+    "arm": "per_anchor_zscore",
+    "fraction_monotonic": 0.375,
+    "mean_strength_0_5": 0.05796171381371096,
+    "mean_strength_1_0": 0.06004016497172415,
+    "metric": "logit_delta_rms",
+    "model": "smol",
+    "n_components": 8,
+    "site": "mid"
+  },
+  {
+    "arm": "per_anchor_zscore",
+    "fraction_monotonic": 0.375,
+    "mean_strength_0_5": 0.0007846821091419542,
+    "mean_strength_1_0": 0.0008194855543450785,
+    "metric": "kl_clean_to_edited",
+    "model": "smol",
+    "n_components": 8,
+    "site": "pre"
+  },
+  {
+    "arm": "per_anchor_zscore",
+    "fraction_monotonic": 0.75,
+    "mean_strength_0_5": 0.04603665671311319,
+    "mean_strength_1_0": 0.0513522430555895,
+    "metric": "logit_delta_rms",
+    "model": "smol",
+    "n_components": 8,
+    "site": "pre"
+  }
+]

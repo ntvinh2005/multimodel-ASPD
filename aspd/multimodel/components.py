@@ -25,13 +25,15 @@ class RankOneComponents(nn.Module):
         *,
         transcoder_biases: bool = False,
         unit_norm: bool = False,
+        device: torch.device | str | None = None,
+        dtype: torch.dtype | None = None,
     ):
         super().__init__()
         self.n_features = n_features
         self.d_in = d_in
         self.d_out = d_out
-        self.V = nn.Parameter(torch.empty(n_features, d_in))
-        self.U = nn.Parameter(torch.empty(n_features, d_out))
+        self.V = nn.Parameter(torch.empty(n_features, d_in, device=device, dtype=dtype))
+        self.U = nn.Parameter(torch.empty(n_features, d_out, device=device, dtype=dtype))
         self.transcoder_biases = transcoder_biases
         nn.init.kaiming_uniform_(self.V, a=math.sqrt(5))
         nn.init.kaiming_uniform_(self.U, a=math.sqrt(5))
@@ -40,8 +42,8 @@ class RankOneComponents(nn.Module):
                 self.V.div_(self.V.norm(dim=-1, keepdim=True).clamp_min(1e-8))
                 self.U.div_(self.U.norm(dim=-1, keepdim=True).clamp_min(1e-8))
         if transcoder_biases:
-            self.b_dec = nn.Parameter(torch.zeros(d_in))
-            self.b_out = nn.Parameter(torch.zeros(d_out))
+            self.b_dec = nn.Parameter(torch.zeros(d_in, device=device, dtype=dtype))
+            self.b_out = nn.Parameter(torch.zeros(d_out, device=device, dtype=dtype))
         else:
             self.register_parameter("b_dec", None)
             self.register_parameter("b_out", None)
@@ -87,20 +89,220 @@ class RankOneComponents(nn.Module):
             output = output + self.b_out
         return output
 
+    def forward(self, x: Tensor, coefficients: Tensor, valid_tokens: Tensor) -> Tensor:
+        """Sparse weighted rank-one reconstruction through the module call boundary.
+
+        Calling the component module (rather than reading ``U``/``V`` from its parent) is
+        required for composable FSDP to all-gather and reshard this target independently.
+        Boolean coefficients reproduce :meth:`reconstruct`; continuous coefficients support
+        explicitly requested weighted engineering probes.
+        """
+
+        if x.shape[:2] != coefficients.shape[:2] or coefficients.shape[-1] != self.n_features:
+            raise ValueError("x and coefficients disagree on token grid or feature count")
+        batch, tokens, _ = x.shape
+        flat_x = x.reshape(batch * tokens, self.d_in)
+        flat_coefficients = coefficients.reshape(batch * tokens, self.n_features)
+        flat_valid = valid_tokens.reshape(batch * tokens)
+        active_position, active_feature = (
+            (flat_coefficients != 0) & flat_valid[:, None]
+        ).nonzero(as_tuple=True)
+        output = torch.zeros(
+            batch * tokens,
+            self.d_out,
+            device=x.device,
+            dtype=torch.promote_types(x.dtype, self.U.dtype),
+        )
+        if active_feature.numel():
+            selected_x = flat_x[active_position].to(self.V.dtype)
+            if self.b_dec is not None:
+                selected_x = selected_x - self.b_dec
+            reads = (selected_x * self.V[active_feature]).sum(dim=-1)
+            scales = reads * flat_coefficients[active_position, active_feature].to(reads.dtype)
+            writes = scales[:, None] * self.U[active_feature]
+            output.index_add_(0, active_position, writes.to(output.dtype))
+        output = output.reshape(batch, tokens, self.d_out)
+        if self.b_out is not None:
+            output = output + self.b_out
+        return output
+
+    def forward_sparse(
+        self,
+        x: Tensor,
+        active_position: Tensor,
+        active_feature: Tensor,
+        active_coefficient: Tensor,
+        *,
+        compute_dtype: torch.dtype | None = None,
+        validate_indices: bool = True,
+    ) -> Tensor:
+        """Reconstruct from coordinates prepared once for a shared PRE/MID support.
+
+        ``compute_dtype`` permits FP32 master parameters with BF16 sparse arithmetic. The
+        casts remain differentiable, so gradients are accumulated into the FP32 factors.
+        """
+
+        if x.ndim != 3 or x.shape[-1] != self.d_in:
+            raise ValueError("sparse rank-one input must have shape [B,A,d_in]")
+        if not (
+            active_position.ndim
+            == active_feature.ndim
+            == active_coefficient.ndim
+            == 1
+        ) or not (
+            active_position.numel()
+            == active_feature.numel()
+            == active_coefficient.numel()
+        ):
+            raise ValueError("sparse rank-one coordinates must be matching vectors")
+        batch, anchors, _ = x.shape
+        if validate_indices and active_position.numel() and (
+            int(active_position.max()) >= batch * anchors
+            or int(active_feature.max()) >= self.n_features
+        ):
+            raise ValueError("sparse rank-one coordinate lies outside its tensor")
+        dtype = x.dtype if compute_dtype is None else compute_dtype
+        flat_x = x.reshape(batch * anchors, self.d_in)
+        output = torch.zeros(batch * anchors, self.d_out, device=x.device, dtype=dtype)
+        if active_feature.numel():
+            selected_x = flat_x[active_position].to(dtype)
+            if self.b_dec is not None:
+                selected_x = selected_x - self.b_dec.to(dtype)
+            reads = (selected_x * self.V[active_feature].to(dtype)).sum(dim=-1)
+            scales = reads * active_coefficient.to(dtype)
+            writes = scales[:, None] * self.U[active_feature].to(dtype)
+            output.index_add_(0, active_position, writes.to(dtype))
+        output = output.reshape(batch, anchors, self.d_out)
+        if self.b_out is not None:
+            output = output + self.b_out.to(dtype)
+        return output
+
+    def forward_dense_masked(
+        self,
+        x: Tensor,
+        coefficients: Tensor,
+        valid_tokens: Tensor,
+        *,
+        compute_dtype: torch.dtype | None = None,
+    ) -> Tensor:
+        """Evaluate the same sparse support with dense tensor-core GEMMs.
+
+        BatchTopK still defines the exact binary/continuous support.  This backend only
+        changes execution: zero coefficients mask inactive components after all reads are
+        formed.  On tensor-core GPUs this can be faster than materializing ``T*K`` copies
+        of wide U/V rows for every logical target.
+        """
+
+        if x.ndim != 3 or x.shape[-1] != self.d_in:
+            raise ValueError("dense-masked rank-one input must have shape [B,A,d_in]")
+        if coefficients.shape != (*x.shape[:2], self.n_features):
+            raise ValueError("dense-masked coefficients disagree with the anchor grid")
+        if valid_tokens.shape != x.shape[:2]:
+            raise ValueError("dense-masked valid-token mask disagrees with the anchor grid")
+        dtype = x.dtype if compute_dtype is None else compute_dtype
+        rows = x.shape[0] * x.shape[1]
+        # Frozen capture tensors are intentionally produced under inference_mode. Dense
+        # GEMM backward needs to save its input to form dV, which inference tensors forbid.
+        # Cloning outside inference_mode creates an ordinary constant autograd input, just
+        # as the indexed backend's advanced-index gather does.
+        flat_x = x.reshape(rows, self.d_in).to(dtype).clone()
+        if self.b_dec is not None:
+            flat_x = flat_x - self.b_dec.to(dtype)
+        gate = coefficients.reshape(rows, self.n_features).to(dtype)
+        gate = gate * valid_tokens.reshape(rows, 1).to(dtype)
+        reads = flat_x @ self.V.T.to(dtype)
+        output = (reads * gate) @ self.U.to(dtype)
+        output = output.reshape(*x.shape[:2], self.d_out)
+        if self.b_out is not None:
+            output = output + self.b_out.to(dtype)
+        return output
+
+    def forward_sparse_csr(
+        self,
+        x: Tensor,
+        crow_indices: Tensor,
+        active_feature: Tensor,
+        active_coefficient: Tensor,
+        *,
+        compute_dtype: torch.dtype | None = None,
+    ) -> Tensor:
+        """Equivalent sampled-dense/dense plus sparse/dense reconstruction.
+
+        The CSR pattern is shared by every matrix at one grounding site.  Unlike the
+        indexed implementation, this path does not materialize a copy of every U/V row
+        for every active anchor-feature pair.
+        """
+
+        if x.ndim != 3 or x.shape[-1] != self.d_in:
+            raise ValueError("sparse rank-one input must have shape [B,A,d_in]")
+        batch, anchors, _ = x.shape
+        rows = batch * anchors
+        if crow_indices.shape != (rows + 1,):
+            raise ValueError("CSR row pointer does not match the anchor grid")
+        if active_feature.ndim != 1 or active_coefficient.shape != active_feature.shape:
+            raise ValueError("CSR sparse feature and coefficient vectors must match")
+        if int(crow_indices[-1]) != active_feature.numel():
+            raise ValueError("CSR row pointer disagrees with the active feature count")
+        dtype = x.dtype if compute_dtype is None else compute_dtype
+        flat_x = x.reshape(rows, self.d_in).to(dtype)
+        if self.b_dec is not None:
+            flat_x = flat_x - self.b_dec.to(dtype)
+        if active_feature.numel() == 0:
+            output = torch.zeros(rows, self.d_out, device=x.device, dtype=dtype)
+        else:
+            coefficients = active_coefficient.to(dtype)
+            pattern = torch.sparse_csr_tensor(
+                crow_indices,
+                active_feature,
+                coefficients,
+                size=(rows, self.n_features),
+            )
+            reads = torch.sparse.sampled_addmm(
+                pattern,
+                flat_x,
+                self.V.T.to(dtype),
+                beta=0,
+            )
+            weighted = torch.sparse_csr_tensor(
+                crow_indices,
+                active_feature,
+                reads.values() * coefficients,
+                size=(rows, self.n_features),
+            )
+            output = torch.sparse.mm(weighted, self.U.to(dtype))
+        output = output.reshape(batch, anchors, self.d_out)
+        if self.b_out is not None:
+            output = output + self.b_out.to(dtype)
+        return output
+
     def factors(self) -> tuple[Tensor, Tensor]:
         """Return ``(U,V)`` with feature ``c`` on axis zero."""
 
         return self.U, self.V
 
     @torch.no_grad()
-    def normalize_write_decoder_(self) -> None:
+    def normalize_write_decoder_(self, *, project_gradients: bool = True) -> None:
         """Project radial gradients out of U and restore unit row norms."""
 
-        normed = self.U / self.U.norm(dim=-1, keepdim=True).clamp_min(1e-8)
-        if self.U.grad is not None:
+        norms = self.U.norm(dim=-1, keepdim=True)
+        # ``clamp_min`` has no DTensor sharding strategy in PyTorch 2.8.  Adding the
+        # dtype's smallest normal value leaves every initialized nonzero norm unchanged
+        # while keeping a zero row finite, and remains an elementwise sharded operation.
+        normed = self.U / (norms + torch.finfo(norms.dtype).tiny)
+        if project_gradients and self.U.grad is not None:
             radial = (self.U.grad * normed).sum(dim=-1, keepdim=True) * normed
             self.U.grad.sub_(radial)
         self.U.copy_(normed)
+
+    @torch.no_grad()
+    def project_write_decoder_gradient_(self) -> None:
+        """Remove only the radial gradient; post-step normalization is a separate pass."""
+
+        if self.U.grad is None:
+            return
+        normed = self.U / (self.U.norm(dim=-1, keepdim=True) + torch.finfo(self.U.dtype).tiny)
+        radial = (self.U.grad * normed).sum(dim=-1, keepdim=True) * normed
+        self.U.grad.sub_(radial)
 
 
 class PartitionedComponents(nn.Module):

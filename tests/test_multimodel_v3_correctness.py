@@ -628,5 +628,5 @@ def test_alignment_performance_audit_reports_quadratic_exact_prefix_work() -> No
         assert qwen.prefix_decoded_token_ids == length * (length + 3) // 2
         assert qwen.prefix_decoded_token_ids <= exact_prefix_decode_work_upper_bound(length + 2)
         work.append(qwen.prefix_decoded_token_ids)
-        assert result.report()["performance_status"].startswith("EXACT_BUT_QUADRATIC")
+        assert result.report()["performance_status"] == "EXACT_REFERENCE_PREFIX_DECODE_FALLBACK"
     assert work == [44, 152, 560]

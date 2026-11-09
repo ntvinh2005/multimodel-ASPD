@@ -140,8 +140,13 @@ def _run_alignment(tokenizers: dict[str, Any]) -> dict[str, Any]:
                 "prefix_roundtrip_work": result.report()["prefix_roundtrip_work"],
             }
         )
-    return {
-        "status": "REAL_TOKENIZER_ALIGNMENT_PASS",
+    status = (
+        "REAL_TOKENIZER_ALIGNMENT_PASS"
+        if total_anchors > 0
+        else "REAL_TOKENIZER_ALIGNMENT_FAIL"
+    )
+    result = {
+        "status": status,
         "corpus_kind": "fixed_short_non_sensitive_texts",
         "document_count": len(documents),
         "raw_token_counts": dict(total_raw_tokens),
@@ -152,6 +157,26 @@ def _run_alignment(tokenizers: dict[str, Any]) -> dict[str, Any]:
         "elapsed_seconds": time.perf_counter() - started,
         "documents": documents,
     }
+    if total_anchors == 0:
+        result["reason"] = "the fixed corpus produced zero exact three-family anchors"
+    return result
+
+
+def _classify_outcome(
+    model_results: dict[str, dict[str, Any]], alignment_status: str
+) -> tuple[str, int]:
+    """Classify success, access blocking, and correctness failure without conflating them."""
+
+    statuses = {row["status"] for row in model_results.values()}
+    if "REAL_MODEL_SMOKE_FAIL" in statuses or alignment_status.endswith("_FAIL"):
+        return "REAL_MODEL_SMOKE_FAIL", 1
+    if "BLOCKED_NOT_RUN" in statuses or alignment_status == "BLOCKED_NOT_RUN":
+        return "BLOCKED_NOT_RUN", 2
+    if statuses != {"REAL_MODEL_SMOKE_PASS"} or alignment_status != (
+        "REAL_TOKENIZER_ALIGNMENT_PASS"
+    ):
+        return "REAL_MODEL_SMOKE_FAIL", 1
+    return "REAL_MODEL_SMOKE_PASS", 0
 
 
 def _run_model_smoke(
@@ -465,16 +490,7 @@ def main() -> None:
         model_results[key] = row
         write_json_immutable(args.output_dir / f"model_{key}.json", row)
 
-    statuses = {row["status"] for row in model_results.values()}
-    if "REAL_MODEL_SMOKE_FAIL" in statuses:
-        overall = "REAL_MODEL_SMOKE_FAIL"
-        exit_code = 1
-    elif "BLOCKED_NOT_RUN" in statuses or alignment["status"] == "BLOCKED_NOT_RUN":
-        overall = "BLOCKED_NOT_RUN"
-        exit_code = 2
-    else:
-        overall = "REAL_MODEL_SMOKE_PASS"
-        exit_code = 0
+    overall, exit_code = _classify_outcome(model_results, alignment["status"])
     summary = {
         "schema_version": 1,
         "status": overall,

@@ -1,0 +1,31 @@
+extends: granite_normalized_target_treatment_v1.yaml
+experiment_family: aspd_v3_granite_normalized_target_unconstrained_decoder_v1
+scientific_status: DECODER_NORM_CORRECTION_RELIABILITY_PILOT_AUTHORIZED_BY_RESEARCHER
+short_pilot_authorized: true
+pilot_authorization:
+  authorized_by: researcher
+  authorized_on: '2026-11-07'
+  scope: normalized_target_decoder_norm_correction_1221_steps
+  arm: normalized_target
+  optimizer_steps: 1221
+  accepted_anchor_exposures: 10002432
+  gpu_count: 3
+  gpu_type: b200
+  preflight_report_sha256: 8d3e58ef981401e2a03d9b88e60f69ce26f27377fbbbf214ca9d80e063597c8b
+  preflight_config_fingerprint: a6cf17a7cc48f66076043f2f22fa47e4cd45024775804c3f4a478d894ea0d9b7
+  gate_evidence: []
+  full_training_authorized: false
+objective:
+  activation_decoder_normalization: none
+optimization:
+  status: DECODER_NORM_CORRECTION_RELIABILITY_PILOT_AUTHORIZED
+data:
+  training_budget_status: RESEARCHER_AUTHORIZED_DECODER_NORM_CORRECTION_PILOT
+  approved_optimizer_steps: 1221
+  approved_accepted_anchor_exposures: 10002432
+runtime:
+  status: DECODER_NORM_CORRECTION_RELIABILITY_PILOT_AUTHORIZED
+  output_root: /orange/thai/vinhnguyen1/aspd_v3/granite_normalized_target_unconstrained_decoder_v1/reliability/normalized_target/runs
+  checkpoint_root: /orange/thai/vinhnguyen1/aspd_v3/granite_normalized_target_unconstrained_decoder_v1/reliability/normalized_target/checkpoints
+  preflight_evidence: out/multimodel/aspd_v3/granite_normalized_target_unconstrained_decoder_v1/preflight/normalized_target/preflight_report.json
+evaluation_status: DECODER_NORM_CORRECTION_PILOT_AUTHORIZED

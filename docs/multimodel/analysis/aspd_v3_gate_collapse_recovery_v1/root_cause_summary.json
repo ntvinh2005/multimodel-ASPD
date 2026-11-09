@@ -1,0 +1,165 @@
+{
+  "schema_version": 1,
+  "status": "EXPLORATORY_RECOVERY_PASSES_MATCHED_SINGLE_SEED_CRITERIA",
+  "generated_on": "2026-11-08",
+  "experiment_family": "aspd_v3_gemma_smol_gate_collapse_recovery_v1",
+  "root_cause": {
+    "summary": "Pool-wide BatchTopK creates unequal sparse gradient allocation before candidate starvation. Selected winners receive essentially all direct reconstruction gradient, while positive-unselected and ReLU-negative logits receive none. Representation and readout optimization then drive a feature-specific and global logit drift; post-ReLU AuxK is too sparse and cannot reach negative logits, making death self-reinforcing.",
+    "hypotheses": {
+      "H1_relu_gradient_starvation": "PARTIALLY_SUPPORTED_MAINTENANCE_NOT_SOLE_INITIATOR",
+      "H2_winner_take_all_reinforcement": "SUPPORTED",
+      "H3_multimodule_logit_distribution_drift": "SUPPORTED",
+      "H4_historical_auxk_revival_failure": "SUPPORTED",
+      "H5_matryoshka_as_sole_cause": "NOT_SUPPORTED",
+      "H5_matryoshka_as_accelerator": "PARTIALLY_SUPPORTED",
+      "H6_unhealthy_initial_candidate_population": "NOT_SUPPORTED",
+      "cross_model_gradient_conflict": "NOT_SUPPORTED",
+      "decoder_constraint_as_current_sole_cause": "NOT_SUPPORTED"
+    }
+  },
+  "diagnostic": {
+    "job_id": "50270783",
+    "git_sha": "0f5db1cf0cbf7ba5972b912639c1b4ff8c956ef5",
+    "source_git_sha": "75e1444718617d983aa20c6a1e0c39da637be2dd",
+    "accepted_anchors": 2048,
+    "source_checkpoint_step": 1000,
+    "matched_initial_state": "PASS",
+    "matched_ordered_batches_through_step_1000": "PASS",
+    "source_weights_frozen": true,
+    "checkpoint_created_or_mutated": false,
+    "key_observations": {
+      "initial_negative_logit_fraction_approximately": 0.5,
+      "initial_positive_candidates_per_anchor_approximately": 4090,
+      "trained_negative_logit_fraction_approximately": 0.995,
+      "trained_positive_candidates_per_anchor_range": [38.66, 40.94],
+      "negative_logit_direct_main_gradient_nonzero_fraction": 0.0,
+      "positive_unselected_direct_main_gradient_nonzero_fraction": 0.0,
+      "natural_selected_direct_main_gradient_nonzero_fraction_range": [0.99975, 0.99988],
+      "auxk_negative_logit_gradient_nonzero_fraction": 0.0,
+      "main_cross_model_shared_gradient_cosine_range": [0.61127, 0.94072],
+      "largest_single_shapley_contributor_to_candidate_loss": "readout_weight",
+      "readout_bias_is_primary_cause": false
+    }
+  },
+  "intervention": {
+    "name": "per_anchor_feature_zscore",
+    "formula": "u_gate=(u_projection-mean_feature(u_projection))/sqrt(var_feature(u_projection)+1e-5)",
+    "location": "after shared feature readout and before ReLU",
+    "learned_parameters_added": 0,
+    "forced_support_events": 0,
+    "within_anchor_feature_rank_preserved": true,
+    "training_evaluation_gate_match": true,
+    "semantic_change": "Changes cross-anchor score comparability in pool-wide BatchTopK and couples projection-logit gradients across the feature axis; component indices, natural support, continuous activation codes, detached binary internal support, and model-specific rank-one operators are preserved."
+  },
+  "historical_matryoshka_full_only_recovery": {
+    "array_job_id": "50276566",
+    "status": "BOTH_TASKS_COMPLETED_0_0",
+    "matryoshka_heldout": {
+      "pre_effective_size": 48.6495,
+      "mid_effective_size": 51.2067,
+      "pre_positive_candidates": 37.9008,
+      "mid_positive_candidates": 38.8558,
+      "pre_used_features": 555,
+      "mid_used_features": 2282
+    },
+    "full_only_heldout": {
+      "pre_effective_size": 46.4329,
+      "mid_effective_size": 52.0350,
+      "pre_positive_candidates": 37.4109,
+      "mid_positive_candidates": 40.8705,
+      "pre_used_features": 2482,
+      "mid_used_features": 2923
+    },
+    "interpretation": "Both objectives reach approximately 40 positive candidates and effective size approximately 50; Matryoshka is not the sole cause. Objective-specific FVU values are not treated as equivalent."
+  },
+  "matched_pilot": {
+    "array_job_id": "50280055",
+    "training_git_sha": "5b6365107a72f224bfa3c6a224a54f96372d546c",
+    "optimizer_steps": 1221,
+    "accepted_exposures": 10002432,
+    "heldout_anchors": 100352,
+    "heldout_source_documents": 306,
+    "model_revisions": {
+      "google/gemma-2-2b-it": "299a8560bedf22ed1c72a8a11e7dce4a7f9f51f8",
+      "HuggingFaceTB/SmolLM2-1.7B-Instruct": "31b70e2e869a7173562077fd711b654946d38674"
+    },
+    "dataset_manifest_sha256": "a258974d21ceac3457529644be07459518fde7bc28501abde5c67e5e3719286f",
+    "alignment_manifest_sha256": "bfd825e51bd4b48602c7822b2ed97ffb919cde588886b72352699e7e077d3c56",
+    "evaluation_contract_sha256": "57373b08a80a0a4367b0ba324aa640b071fd163c737ac329e7aa29d20614f6cb",
+    "initial_common_state_sha256": {
+      "gemma": "38050c8bb8e1e8851186d7779a67884850bfef37b1345afaba464a2562bf156f",
+      "smol": "44b57b962f84c8ced63cecf25d8579c25c051a3a5d3d0ab712635d5edea75cec"
+    },
+    "control": {
+      "config_sha256": "7081dc544aa8d99d53d5bfd87d84101573447e59fc6f94b20021ab6460cf41bd",
+      "config_fingerprint": "c4e7b5eba6a0077cd9cb44217a754f4c2eb984e08c05dd889ee7311cc057fdac",
+      "checkpoint_manifest_sha256": "8f075f9b1dc264b043b649378761b24321fd1433c293ac5627bde75108c37750"
+    },
+    "treatment": {
+      "config_sha256": "6a0ea531b7e27a562d62d2385649cc6b2d723d730a748ee73cf2db81ba463d97",
+      "config_fingerprint": "7944cf5f58e90d446ebc260708bf1bcd1dd5c0afefa9b4c4282c12780e199d02",
+      "checkpoint_manifest_sha256": "c18e93a7f86771164acdedc47390eed11560bf492ce5d7201190d63edc5a45f1"
+    }
+  },
+  "step_1221_training": {
+    "control": {
+      "activation_loss": 0.7088730261,
+      "internal_loss": 0.6619369388,
+      "pre": {"positive_candidates": 37.6870, "effective_size": 45.7555, "top_1_percent_share": 0.997902, "negative_fraction": 0.995400},
+      "mid": {"positive_candidates": 41.2308, "effective_size": 50.1321, "top_1_percent_share": 0.994835, "negative_fraction": 0.994967}
+    },
+    "treatment": {
+      "activation_loss": 0.5730660483,
+      "internal_loss": 0.6011878327,
+      "pre": {"positive_candidates": 5944.8733, "effective_size": 2130.4959, "top_1_percent_share": 0.186871, "negative_fraction": 0.274307, "projection_negative_fraction": 0.008348},
+      "mid": {"positive_candidates": 5860.2456, "effective_size": 1808.4142, "top_1_percent_share": 0.216923, "negative_fraction": 0.284637, "projection_negative_fraction": 0.005911}
+    }
+  },
+  "heldout": {
+    "activation_normalized_full_fvu": {
+      "gemma_pre": {"control": 0.6825973533, "treatment": 0.5478290231, "delta": -0.1347683301},
+      "gemma_mid": {"control": 0.6821320019, "treatment": 0.5715415433, "delta": -0.1105904586},
+      "smol_pre": {"control": 0.7014429955, "treatment": 0.5369157453, "delta": -0.1645272502},
+      "smol_mid": {"control": 0.6997515009, "treatment": 0.5612416888, "delta": -0.1385098121},
+      "equal_model_site_delta": -0.1370989628
+    },
+    "internal_fvu": {
+      "pre": {"control": 0.5725385495, "treatment": 0.5170659163, "delta": -0.0554726332},
+      "mid": {"control": 0.7126379402, "treatment": 0.6390231048, "delta": -0.0736148354},
+      "equal_site": {"control": 0.6425882448, "treatment": 0.5780445105, "delta": -0.0645437343}
+    },
+    "dictionary": {
+      "pre": {"control_effective_size": 46.4329, "treatment_effective_size": 2731.7700, "control_used_features": 2482, "treatment_used_features": 5521, "control_top_1_percent_share": 0.997401, "treatment_top_1_percent_share": 0.156296},
+      "mid": {"control_effective_size": 52.0350, "treatment_effective_size": 2338.7566, "control_used_features": 2923, "treatment_used_features": 5503, "control_top_1_percent_share": 0.993706, "treatment_top_1_percent_share": 0.191843}
+    },
+    "paired_document_bootstrap": {
+      "samples": 10000,
+      "seed": 0,
+      "activation_macro_delta": -0.1531223723,
+      "activation_95_percentile_interval": [-0.1560826990, -0.1501773204],
+      "internal_equal_site_macro_delta": -0.0732106489,
+      "internal_95_percentile_interval": [-0.0769308681, -0.0695823669]
+    },
+    "all_preregistered_reconstruction_and_coverage_checks_pass": true
+  },
+  "readiness": {
+    "sustained_gate_collapse_addressed_through_step_1221": true,
+    "heldout_reconstruction_preserved": true,
+    "internal_parameter_reconstruction_preserved": true,
+    "natural_dictionary_diversity_improved": true,
+    "semantic_feature_quality_established": false,
+    "ready_for_longer_multiseed_confirmation": true,
+    "ready_for_500m_training": false
+  },
+  "resources": {
+    "new_slurm_submissions": ["50270457", "50270783", "50277092", "50278599", "50280055"],
+    "b200_gpu_hours": 6.9483,
+    "namespace_bytes": 351981662411,
+    "complete_checkpoints_preserved": 4,
+    "failed_jobs": {
+      "50270457": "diagnostic instrumentation retain_grad bug; corrected before scientific measurement",
+      "50277092": "fail-closed checkpoint-retention config validation; no scientific training conclusion"
+    },
+    "storage_free_bytes_approximate_at_close": 219000000000
+  }
+}

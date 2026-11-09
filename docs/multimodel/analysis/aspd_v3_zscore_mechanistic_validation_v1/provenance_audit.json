@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "status": "PHASE_0_PROVENANCE_AUDIT_COMPLETE",
+  "audit_timestamp": "2026-11-08T22:12:27-05:00",
+  "research_scope": {
+    "current_configuration": "two_model_diagnostic_validation",
+    "final_objective": "three_model_aspd_model_three_not_approved",
+    "new_training_authorized_before_10m_evaluation": false,
+    "qwen_execution_allowed": false
+  },
+  "comparison": {
+    "matched_batch_sequence": true,
+    "optimizer_steps": 1221,
+    "accepted_exposures": 10002432,
+    "newly_observed_exposures": 10002432,
+    "repeated_exposures": 0,
+    "final_batch_sha256": "34bbae19fe0feb659ba7a223389a3a8be7eb59887cf84b8bf26c720032a43d35",
+    "training_git_sha": "5b6365107a72f224bfa3c6a224a54f96372d546c",
+    "model_order": [
+      "gemma",
+      "smol"
+    ],
+    "logical_target_count": 112,
+    "objective": "full_only_activation_fvu_plus_binary_internal_fvu_plus_original_post_relu_auxk",
+    "activation_target_normalization": "per_anchor_l2",
+    "activation_decoder_normalization": "none",
+    "only_primary_intervention": "gate_logit_normalization_none_vs_per_anchor_feature_zscore"
+  },
+  "models": {
+    "gemma": {
+      "model_id": "google/gemma-2-2b-it",
+      "revision": "299a8560bedf22ed1c72a8a11e7dce4a7f9f51f8",
+      "selected_layers": [9, 10, 11, 12, 13, 14, 15, 16],
+      "frozen": true
+    },
+    "smol": {
+      "model_id": "HuggingFaceTB/SmolLM2-1.7B-Instruct",
+      "revision": "31b70e2e869a7173562077fd711b654946d38674",
+      "selected_layers": [8, 9, 10, 11, 12, 13, 14, 15],
+      "frozen": true
+    }
+  },
+  "data": {
+    "dataset_id": "monology/pile-uncopyrighted",
+    "dataset_revision": "3be90335b66f24456a5d6659d9c8d208c0357119",
+    "dataset_manifest_sha256": "a258974d21ceac3457529644be07459518fde7bc28501abde5c67e5e3719286f",
+    "alignment_manifest_sha256": "bfd825e51bd4b48602c7822b2ed97ffb919cde588886b72352699e7e077d3c56",
+    "split_unit": "source_document",
+    "split_seed": 0,
+    "validation_buckets": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+    "test_buckets": [10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+  },
+  "arms": {
+    "full_only_control": {
+      "config_sha256": "7081dc544aa8d99d53d5bfd87d84101573447e59fc6f94b20021ab6460cf41bd",
+      "config_fingerprint": "c4e7b5eba6a0077cd9cb44217a754f4c2eb984e08c05dd889ee7311cc057fdac",
+      "checkpoint_manifest_sha256": "8f075f9b1dc264b043b649378761b24321fd1433c293ac5627bde75108c37750",
+      "checkpoint_step": 1221,
+      "checkpoint_status": "COMPLETE",
+      "run_dir": "/orange/thai/vinhnguyen1/aspd_v3/gemma_smol_gate_collapse_recovery_v1/full_only_control/pilot/runs/job_50280055_0"
+    },
+    "per_anchor_zscore": {
+      "config_sha256": "6a0ea531b7e27a562d62d2385649cc6b2d723d730a748ee73cf2db81ba463d97",
+      "config_fingerprint": "7944cf5f58e90d446ebc260708bf1bcd1dd5c0afefa9b4c4282c12780e199d02",
+      "checkpoint_manifest_sha256": "c18e93a7f86771164acdedc47390eed11560bf492ce5d7201190d63edc5a45f1",
+      "checkpoint_step": 1221,
+      "checkpoint_status": "COMPLETE",
+      "run_dir": "/orange/thai/vinhnguyen1/aspd_v3/gemma_smol_gate_collapse_recovery_v1/per_anchor_zscore/pilot/runs/job_50280055_1"
+    }
+  },
+  "leakage_audit": {
+    "prior_evaluation_split": "validation",
+    "prior_document_count": 306,
+    "prior_document_set_sha256": "229f87c2e6255a8fa52b4c579ffe14002820ea4e70fba6778325c68243179ce4",
+    "prior_document_sets_identical_between_arms": true,
+    "prior_validation_influenced_intervention_selection": true,
+    "classification": "development_validation_not_untouched_test",
+    "confirmatory_split": "test"
+  },
+  "protocol": {
+    "path": "configs/multimodel/aspd_v3/zscore_mechanistic_validation_v1.yaml",
+    "file_sha256": "501ab840c8bf2159155456162687f1d582aa2d25dd9639cf4fd58cf54556e9ee",
+    "canonical_fingerprint": "ffc31b30057ff8e0949703869b9dc6faf1d63bb79c5ece6744f5d720d0320792"
+  },
+  "infrastructure_snapshot": {
+    "running_user_jobs": 0,
+    "partition": "hpg-b200",
+    "orange_available_gib_approx": 204,
+    "orange_percent_used": 91,
+    "orange_inode_percent_used": 42,
+    "quota_hard_limit_reported": false,
+    "estimated_peak_output_bytes_per_extraction_arm": 2147483648
+  },
+  "limitations": [
+    "The exposure-ledger raw token columns retain legacy names; model_order_json binds them to the actual Gemma/Smol roster.",
+    "The two checkpoints are one matched seed at an early 10M-exposure horizon.",
+    "No semantic or causal conclusion is implied by this provenance audit."
+  ]
+}

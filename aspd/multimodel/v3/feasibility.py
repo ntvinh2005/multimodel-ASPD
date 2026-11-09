@@ -114,3 +114,82 @@ def estimate_v3_feasibility(
         "main_run_claim": "NOT_READY",
         "runtime_peak_memory_measurement": None,
     }
+
+
+def estimate_main_v1_feasibility(
+    registry: Mapping[str, ModelFamilyLayout], *, world_size: int = 4
+) -> dict[str, Any]:
+    """Exact trainable-shape accounting for the frozen main-v1 architecture."""
+
+    dictionary_size = 8192
+    targets = [target for layout in registry.values() for target in layout.targets()]
+    rank_one = dictionary_size * sum(target.d_in + target.d_out for target in targets)
+    activation_per_site = sum(
+        8 * (dictionary_size * layout.hidden_size + layout.hidden_size)
+        for layout in registry.values()
+    )
+
+    latent_tokens = 8
+    width = 512
+    packer_output = latent_tokens * width
+    packers = sum(
+        (8 * layout.hidden_size) * packer_output + packer_output
+        for layout in registry.values()
+    )
+    feedforward = 4 * width
+    transformer_layer = (
+        3 * width * width
+        + 3 * width
+        + width * width
+        + width
+        + feedforward * width
+        + feedforward
+        + width * feedforward
+        + width
+        + 4 * width
+    )
+    intra = len(registry) * 2 * transformer_layer
+    cross = 2 * transformer_layer
+    adapter = 517 * width + width
+    readout = width * dictionary_size + dictionary_size
+    encoder_per_site = packers + intra + cross + adapter + readout
+    trainable = rank_one + 2 * activation_per_site + 2 * encoder_per_site
+
+    bf16_parameters = trainable * 2
+    fp32_gradients = trainable * 4
+    adam_moments = trainable * 8
+    optional_master = trainable * 4
+    checkpoint = bf16_parameters + adam_moments
+    return {
+        "schema_version": 1,
+        "logical_targets": len(targets),
+        "rank_one_parameters": rank_one,
+        "activation_decoder_parameters_per_site": activation_per_site,
+        "activation_decoder_sites": 2,
+        "encoder_parameters_per_site": encoder_per_site,
+        "encoder_sites": 2,
+        "trainable_parameters": trainable,
+        "aggregate_training_bytes_without_master_weights": (
+            bf16_parameters + fp32_gradients + adam_moments
+        ),
+        "aggregate_training_bytes_with_master_weights": (
+            bf16_parameters + fp32_gradients + adam_moments + optional_master
+        ),
+        "fsdp_shard_bytes_without_master_weights": (
+            bf16_parameters + fp32_gradients + adam_moments
+        )
+        // world_size,
+        "fsdp_shard_bytes_with_master_weights": (
+            bf16_parameters + fp32_gradients + adam_moments + optional_master
+        )
+        // world_size,
+        "complete_checkpoint_bytes_lower_bound": checkpoint,
+        "two_complete_checkpoints_bytes_lower_bound": 2 * checkpoint,
+        "excludes": [
+            "frozen source models",
+            "forward activations",
+            "FSDP all-gather and communication buffers",
+            "DCP metadata and filesystem overhead",
+            "alignment manifests and exposure ledger",
+        ],
+    }

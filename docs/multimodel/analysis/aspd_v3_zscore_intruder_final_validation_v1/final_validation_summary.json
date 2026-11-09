@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "status": "JUDGE_VALIDATION_FAILED",
+  "scientific_conclusion": "No valid semantic arm comparison; z-score coverage is strongly improved, while semantic coherence remains unresolved.",
+  "main_training_preparation_recommended": false,
+  "training_performed": false,
+  "qwen_executed": false,
+  "paid_api_used": false,
+  "git": {
+    "training_sha": "5b6365107a72f224bfa3c6a224a54f96372d546c",
+    "primary_evaluation_sha": "84239dab68d3f6530f3d163f8e06182ee9a55281",
+    "supplementary_evaluation_sha": "64b2af3ca981b5cfb27e4472897c1403a1f47a87"
+  },
+  "source_models": {
+    "gemma": {
+      "model_id": "google/gemma-2-2b-it",
+      "revision": "299a8560bedf22ed1c72a8a11e7dce4a7f9f51f8",
+      "tokenizer_revision": "299a8560bedf22ed1c72a8a11e7dce4a7f9f51f8"
+    },
+    "smol": {
+      "model_id": "HuggingFaceTB/SmolLM2-1.7B-Instruct",
+      "revision": "31b70e2e869a7173562077fd711b654946d38674",
+      "tokenizer_revision": "31b70e2e869a7173562077fd711b654946d38674"
+    }
+  },
+  "manifest_hashes": {
+    "training_config_sha256": "7081dc544aa8d99d53d5bfd87d84101573447e59fc6f94b20021ab6460cf41bd",
+    "dataset_manifest_sha256": "a258974d21ceac3457529644be07459518fde7bc28501abde5c67e5e3719286f",
+    "alignment_manifest_sha256": "bfd825e51bd4b48602c7822b2ed97ffb919cde588886b72352699e7e077d3c56",
+    "control_extraction_manifest_sha256": "72fd629a1f79e131e763352310cbb8294c66f8061883fa320cef5936f0fa465f",
+    "zscore_extraction_manifest_sha256": "d20940ea597cac6864207ccf0f7259324aa9b28b6b3d17450353d44a8e499806",
+    "task_preparation_manifest_sha256": "5425436d62fffc4819379eea4b76fcda8297b6fe7ae4b90f7dcb7a590bc36f79"
+  },
+  "checkpoints": {
+    "optimizer_step": 1221,
+    "accepted_aligned_anchor_exposures": 10002432,
+    "control_sha256": "8f075f9b1dc264b043b649378761b24321fd1433c293ac5627bde75108c37750",
+    "zscore_sha256": "c18e93a7f86771164acdedc47390eed11560bf492ce5d7201190d63edc5a45f1"
+  },
+  "confirmatory_data": {
+    "excluded_development_documents": 296,
+    "excluded_manifest_sha256": "f718dde2a8f68420b56da18a87abae043061f4005a2522a53724d542646da3ef",
+    "source_documents": 289,
+    "aligned_anchors": 100352,
+    "aligned_anchors_sha256": "50c80d6242aff1e316c27001a0ea8b57834d53d4ccd1fb45e3e9e67db7f8e602",
+    "documents_sha256": "fbc2526b8ad08ca5ff716c03baa454ce389a14a83f7ebc89fb7c0a94a50a9926"
+  },
+  "coverage": {
+    "control_pre": {"firing": 2470, "eligible": 732, "sampled": 100, "evaluated": 100},
+    "control_mid": {"firing": 2951, "eligible": 1474, "sampled": 100, "evaluated": 100},
+    "zscore_pre": {"firing": 5511, "eligible": 5437, "sampled": 100, "evaluated": 100},
+    "zscore_mid": {"firing": 5499, "eligible": 5388, "sampled": 100, "evaluated": 99}
+  },
+  "forced_choice": {
+    "judge_model": "meta-llama/Llama-3.3-70B-Instruct",
+    "judge_revision": "6f6073b423013f6a7d4d9f39144961bfbfbc386b",
+    "calibration_job_id": 50438587,
+    "calibration_status": "JUDGE_VALIDATED",
+    "positive_control_accuracy": 0.988,
+    "calibration_valid_response_rate": 0.9973333333333333,
+    "calibration_position_chi_square_pvalue": 0.9924166166947971,
+    "calibration_summary_sha256": "a3a67c7b48374b1df97456a76ac4ab290a14f413fe87aa4976337a0226b613fd",
+    "scientific_job_id": 50449116,
+    "scientific_status": "SCIENTIFIC_POSITION_DIAGNOSTIC_FAILED",
+    "parent_tasks": 399,
+    "rotations": 1995,
+    "invalid_responses": 14,
+    "valid_response_rate": 0.9929824561403509,
+    "prediction_position_counts": [158, 584, 333, 353, 553],
+    "maximum_allowed_position_count": 448,
+    "position_chi_square_pvalue": 1.1952010637832843e-65,
+    "correct_position_accuracy_spread": 0.17543859649122806,
+    "scientific_summary_sha256": "15b6876b67cd43c6b5b67ab5f0422ac6a519e2cba6f0c26b5e005b2a35d7b57c",
+    "exploratory_invalid_scores": {
+      "control_pre": {"mean": 0.162, "ci95": [0.116, 0.212], "activity_weighted": 0.2042341573},
+      "control_mid": {"mean": 0.154, "ci95": [0.11, 0.2], "activity_weighted": 0.1268611675},
+      "zscore_pre": {"mean": 0.24, "ci95": [0.182, 0.3], "activity_weighted": 0.2177423523},
+      "zscore_mid": {"mean": 0.2525252525, "ci95": [0.19388889, 0.31515152], "activity_weighted": 0.2070185428}
+    }
+  },
+  "position_independent_coherence": {
+    "calibration_job_id": 50468888,
+    "status": "JUDGE_VALIDATION_FAILED",
+    "positive_control_accuracy": 0.28,
+    "positive_unique_argmax_rate": 0.28,
+    "valid_response_rate": 1.0,
+    "deterministic_replay_exact": true,
+    "scientific_run_submitted": false,
+    "summary_sha256": "33ea23d15b9fc4d7dac1d2697337fa90ba13d17aec3f52ed61137d88a3c6e6d0"
+  },
+  "resources": {
+    "b200_gpu_seconds": 12232,
+    "b200_gpu_hours": 3.3977777778,
+    "jobs": [50435027, 50435169, 50436181, 50438587, 50439868, 50449116, 50468888],
+    "output_namespace_gib_approx": 3.3
+  },
+  "artifact_root": "/orange/thai/vinhnguyen1/aspd_v3/zscore_intruder_final_validation_v1"
+}

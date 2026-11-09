@@ -1,0 +1,20 @@
+schema_version: 1
+status: RESEARCHER_AUTHORIZED_READ_ONLY_LOGIT_DRIFT_REPLAY
+authorized_by: researcher
+authorized_on: '2026-11-07'
+experiment_family: aspd_v3_granite_normalized_target_unconstrained_decoder_v1
+training_job_id: '50138545'
+heldout_evaluation_job_id: '50148074'
+checkpoint_steps: [1000, 1221]
+split: validation
+split_unit: document
+pool_anchors: 2048
+pool_count: 1
+model_order: [gemma, smol, granite]
+factor_order: [local_encoder, shared_cross_encoder, readout_weight, readout_bias]
+counterfactual_count: 16
+gpu_count: 3
+gpu_type: b200
+read_only: true
+training_authorized_by_this_contract: false
+checkpoint_creation_authorized: false

@@ -1,0 +1,242 @@
+[
+  {
+    "arm": "full_only_control",
+    "metric": "kl_clean_to_edited",
+    "n_components": 16,
+    "pearson": 0.3975319518543949,
+    "quantity": "active",
+    "scope_warning": "magnitude agreement only; not functional-direction correspondence",
+    "site": "all",
+    "spearman": 0.4088235294117647
+  },
+  {
+    "arm": "full_only_control",
+    "metric": "kl_clean_to_edited",
+    "n_components": 16,
+    "pearson": 0.5531645884475012,
+    "quantity": "specificity",
+    "scope_warning": "magnitude agreement only; not functional-direction correspondence",
+    "site": "all",
+    "spearman": 0.4823529411764706
+  },
+  {
+    "arm": "full_only_control",
+    "metric": "logit_delta_rms",
+    "n_components": 16,
+    "pearson": 0.4694228069324749,
+    "quantity": "active",
+    "scope_warning": "magnitude agreement only; not functional-direction correspondence",
+    "site": "all",
+    "spearman": 0.5470588235294118
+  },
+  {
+    "arm": "full_only_control",
+    "metric": "logit_delta_rms",
+    "n_components": 16,
+    "pearson": 0.3465927957682171,
+    "quantity": "specificity",
+    "scope_warning": "magnitude agreement only; not functional-direction correspondence",
+    "site": "all",
+    "spearman": 0.3852941176470588
+  },
+  {
+    "arm": "full_only_control",
+    "metric": "kl_clean_to_edited",
+    "n_components": 8,
+    "pearson": 0.3173870461354955,
+    "quantity": "active",
+    "scope_warning": "magnitude agreement only; not functional-direction correspondence",
+    "site": "pre",
+    "spearman": 0.3571428571428572
+  },
+  {
+    "arm": "full_only_control",
+    "metric": "kl_clean_to_edited",
+    "n_components": 8,
+    "pearson": 0.5132804133341473,
+    "quantity": "specificity",
+    "scope_warning": "magnitude agreement only; not functional-direction correspondence",
+    "site": "pre",
+    "spearman": 0.3571428571428572
+  },
+  {
+    "arm": "full_only_control",
+    "metric": "logit_delta_rms",
+    "n_components": 8,
+    "pearson": 0.3691338170953265,
+    "quantity": "active",
+    "scope_warning": "magnitude agreement only; not functional-direction correspondence",
+    "site": "pre",
+    "spearman": 0.5714285714285715
+  },
+  {
+    "arm": "full_only_control",
+    "metric": "logit_delta_rms",
+    "n_components": 8,
+    "pearson": -0.47318657512846457,
+    "quantity": "specificity",
+    "scope_warning": "magnitude agreement only; not functional-direction correspondence",
+    "site": "pre",
+    "spearman": -0.14285714285714288
+  },
+  {
+    "arm": "full_only_control",
+    "metric": "kl_clean_to_edited",
+    "n_components": 8,
+    "pearson": 0.5479779552972922,
+    "quantity": "active",
+    "scope_warning": "magnitude agreement only; not functional-direction correspondence",
+    "site": "mid",
+    "spearman": 0.4523809523809524
+  },
+  {
+    "arm": "full_only_control",
+    "metric": "kl_clean_to_edited",
+    "n_components": 8,
+    "pearson": 0.5469354946806073,
+    "quantity": "specificity",
+    "scope_warning": "magnitude agreement only; not functional-direction correspondence",
+    "site": "mid",
+    "spearman": 0.5000000000000001
+  },
+  {
+    "arm": "full_only_control",
+    "metric": "logit_delta_rms",
+    "n_components": 8,
+    "pearson": 0.4462932802237875,
+    "quantity": "active",
+    "scope_warning": "magnitude agreement only; not functional-direction correspondence",
+    "site": "mid",
+    "spearman": 0.4523809523809524
+  },
+  {
+    "arm": "full_only_control",
+    "metric": "logit_delta_rms",
+    "n_components": 8,
+    "pearson": 0.44144726882338653,
+    "quantity": "specificity",
+    "scope_warning": "magnitude agreement only; not functional-direction correspondence",
+    "site": "mid",
+    "spearman": 0.5476190476190477
+  },
+  {
+    "arm": "per_anchor_zscore",
+    "metric": "kl_clean_to_edited",
+    "n_components": 16,
+    "pearson": 0.17805864915881975,
+    "quantity": "active",
+    "scope_warning": "magnitude agreement only; not functional-direction correspondence",
+    "site": "all",
+    "spearman": 0.15588235294117647
+  },
+  {
+    "arm": "per_anchor_zscore",
+    "metric": "kl_clean_to_edited",
+    "n_components": 16,
+    "pearson": 0.14976870977121437,
+    "quantity": "specificity",
+    "scope_warning": "magnitude agreement only; not functional-direction correspondence",
+    "site": "all",
+    "spearman": 0.18823529411764706
+  },
+  {
+    "arm": "per_anchor_zscore",
+    "metric": "logit_delta_rms",
+    "n_components": 16,
+    "pearson": -0.027373914462604,
+    "quantity": "active",
+    "scope_warning": "magnitude agreement only; not functional-direction correspondence",
+    "site": "all",
+    "spearman": 0.4970588235294117
+  },
+  {
+    "arm": "per_anchor_zscore",
+    "metric": "logit_delta_rms",
+    "n_components": 16,
+    "pearson": 0.10362197525846548,
+    "quantity": "specificity",
+    "scope_warning": "magnitude agreement only; not functional-direction correspondence",
+    "site": "all",
+    "spearman": 0.21764705882352942
+  },
+  {
+    "arm": "per_anchor_zscore",
+    "metric": "kl_clean_to_edited",
+    "n_components": 8,
+    "pearson": 0.04973710419428719,
+    "quantity": "active",
+    "scope_warning": "magnitude agreement only; not functional-direction correspondence",
+    "site": "pre",
+    "spearman": -0.09523809523809526
+  },
+  {
+    "arm": "per_anchor_zscore",
+    "metric": "kl_clean_to_edited",
+    "n_components": 8,
+    "pearson": -0.34235774015945647,
+    "quantity": "specificity",
+    "scope_warning": "magnitude agreement only; not functional-direction correspondence",
+    "site": "pre",
+    "spearman": 0.04761904761904763
+  },
+  {
+    "arm": "per_anchor_zscore",
+    "metric": "logit_delta_rms",
+    "n_components": 8,
+    "pearson": 0.15748696198562173,
+    "quantity": "active",
+    "scope_warning": "magnitude agreement only; not functional-direction correspondence",
+    "site": "pre",
+    "spearman": 0.6190476190476191
+  },
+  {
+    "arm": "per_anchor_zscore",
+    "metric": "logit_delta_rms",
+    "n_components": 8,
+    "pearson": -0.1655777292049016,
+    "quantity": "specificity",
+    "scope_warning": "magnitude agreement only; not functional-direction correspondence",
+    "site": "pre",
+    "spearman": 0.19047619047619052
+  },
+  {
+    "arm": "per_anchor_zscore",
+    "metric": "kl_clean_to_edited",
+    "n_components": 8,
+    "pearson": 0.2322951623262337,
+    "quantity": "active",
+    "scope_warning": "magnitude agreement only; not functional-direction correspondence",
+    "site": "mid",
+    "spearman": 0.4047619047619048
+  },
+  {
+    "arm": "per_anchor_zscore",
+    "metric": "kl_clean_to_edited",
+    "n_components": 8,
+    "pearson": 0.23167141532073443,
+    "quantity": "specificity",
+    "scope_warning": "magnitude agreement only; not functional-direction correspondence",
+    "site": "mid",
+    "spearman": 0.28571428571428575
+  },
+  {
+    "arm": "per_anchor_zscore",
+    "metric": "logit_delta_rms",
+    "n_components": 8,
+    "pearson": -0.27767238095810115,
+    "quantity": "active",
+    "scope_warning": "magnitude agreement only; not functional-direction correspondence",
+    "site": "mid",
+    "spearman": 0.28571428571428575
+  },
+  {
+    "arm": "per_anchor_zscore",
+    "metric": "logit_delta_rms",
+    "n_components": 8,
+    "pearson": -0.08349919588517402,
+    "quantity": "specificity",
+    "scope_warning": "magnitude agreement only; not functional-direction correspondence",
+    "site": "mid",
+    "spearman": -0.07142857142857144
+  }
+]

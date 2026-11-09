@@ -1,5 +1,14 @@
 # Multi-model ASPD: code-to-notation guide
 
+> **ASPD v3 canonical notation notice.** This document describes the earlier general
+> base/finetuned framework and remains only for historical implementations.  It is **not**
+> the notation contract for the Granite three-model normalized-target experiment.  For that
+> family, the replacement canonical specification is
+> [`aspd_v3_granite_normalized_target_notation.md`](aspd_v3_granite_normalized_target_notation.md),
+> including the complete Eq. (1)–(39) framework map and reverse code map.  In particular,
+> this older document's two-model examples, P1 sharedness interpretation, D1/D2 variants, and
+> reduction claims must not be imported into the new experiment.
+
 This implementation learns one sparse coordinate `c` across `N` models. It combines activation
 diffing and ASPD without assuming that a separately trained component in one model corresponds to a
 component with the same index in another model.

@@ -1,0 +1,29 @@
+{
+  "adoption_reason": "The preregistered forced-choice scientific run failed its position-bias gate before arm-level accuracy was inspected.",
+  "arm_level_forced_choice_results_inspected_before_freeze": false,
+  "calibration_acceptance": {
+    "deterministic_replay": "exact for first 20 prompts",
+    "minimum_positive_control_accuracy": 0.8,
+    "minimum_positive_unique_argmax_rate": 0.95,
+    "minimum_valid_response_rate": 0.95
+  },
+  "final_acceptance": {
+    "minimum_unique_argmax_parent_rate": 0.95,
+    "minimum_valid_response_rate": 0.95
+  },
+  "judge": {
+    "model_id": "meta-llama/Llama-3.3-70B-Instruct",
+    "paid_api": false,
+    "revision": "6f6073b423013f6a7d4d9f39144961bfbfbc386b"
+  },
+  "position_independence": {
+    "candidate_scoring": "Each possible omission is scored in an independent four-context prompt.",
+    "decision": "The omitted candidate with the unique maximum remaining-group coherence is selected.",
+    "hard_margin_or_abstention": false,
+    "original_candidate_position_exposed": false,
+    "remaining_context_order": "ascending UTF-8 SHA-256 of context text"
+  },
+  "schema_version": 5,
+  "scientific_parent_tasks": 399,
+  "status_if_supplementary_validation_fails": "JUDGE_VALIDATION_FAILED"
+}

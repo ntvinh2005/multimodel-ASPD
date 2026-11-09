@@ -46,6 +46,7 @@ class TokenizedDocument:
     truncated: bool
     prefix_decode_calls: int
     prefix_decoded_token_ids: int
+    prefix_verifier: str = "reference_repeated_decode"
 
 
 @dataclass(frozen=True)
@@ -70,22 +71,63 @@ class AlignmentResult:
             "truncated_models": sorted(
                 key for key, value in self.tokenized.items() if value.truncated
             ),
-            "alignment_policy": "exact_fast_tokenizer_offsets_and_exact_prefix_roundtrip_v1",
+            "alignment_policy": "exact_fast_tokenizer_offsets_and_exact_prefix_roundtrip_v2",
             "prefix_roundtrip_work": {
                 key: {
                     "decode_calls": value.prefix_decode_calls,
                     "decoded_token_ids": value.prefix_decoded_token_ids,
+                    "verifier": value.prefix_verifier,
                 }
                 for key, value in self.tokenized.items()
             },
             "performance_status": (
-                "EXACT_BUT_QUADRATIC_PREFIX_DECODE; representative-tokenizer smoke required"
+                "EXACT_STREAMING_PREFIX_DECODE_LINEAR"
+                if all(
+                    value.prefix_verifier == "tokenizers_decode_stream"
+                    for value in self.tokenized.values()
+                )
+                else "EXACT_REFERENCE_PREFIX_DECODE_FALLBACK"
             ),
         }
 
 
 class AlignmentError(ValueError):
     pass
+
+
+def _reference_prefixes(tokenizer: FastTokenizer, input_ids: tuple[int, ...]) -> list[str]:
+    """Original exact verifier retained as an equivalence oracle and compatibility fallback."""
+
+    return [
+        tokenizer.decode(
+            input_ids[: token_index + 1],
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        )
+        for token_index in range(len(input_ids))
+    ]
+
+
+def _streaming_prefixes(tokenizer: FastTokenizer, input_ids: tuple[int, ...]) -> list[str] | None:
+    """Decode every prefix in one stateful pass, preserving exact whole-prefix semantics."""
+
+    backend = getattr(tokenizer, "backend_tokenizer", None)
+    if backend is None:
+        return None
+    try:
+        from tokenizers.decoders import DecodeStream
+
+        stream = DecodeStream(skip_special_tokens=True)
+        decoded = ""
+        prefixes: list[str] = []
+        for token_id in input_ids:
+            chunk = stream.step(backend, token_id)
+            if chunk is not None:
+                decoded += chunk
+            prefixes.append(decoded)
+        return prefixes
+    except (AttributeError, RuntimeError, TypeError, ValueError):
+        return None
 
 
 def _flat(values: Any, name: str) -> list[Any]:
@@ -134,6 +176,12 @@ def _tokenize(
     maximum_stop = 0
     prefix_decode_calls = 0
     prefix_decoded_token_ids = 0
+    decoded_prefixes = _streaming_prefixes(tokenizer, input_ids)
+    if decoded_prefixes is None:
+        decoded_prefixes = _reference_prefixes(tokenizer, input_ids)
+        prefix_verifier = "reference_repeated_decode"
+    else:
+        prefix_verifier = "tokenizers_decode_stream"
     for token_index, (token_id, valid, offset) in enumerate(zip(input_ids, mask, offsets, strict=True)):
         if not valid:
             continue
@@ -146,13 +194,11 @@ def _tokenize(
             continue
         previous_start = start
         maximum_stop = max(maximum_stop, stop)
-        decoded_prefix = tokenizer.decode(
-            input_ids[: token_index + 1],
-            skip_special_tokens=True,
-            clean_up_tokenization_spaces=False,
-        )
+        decoded_prefix = decoded_prefixes[token_index]
         prefix_decode_calls += 1
-        prefix_decoded_token_ids += token_index + 1
+        prefix_decoded_token_ids += (
+            token_index + 1 if prefix_verifier == "reference_repeated_decode" else 1
+        )
         canonical_prefix = text[:stop]
         if decoded_prefix != canonical_prefix:
             rejections[f"{model_key}:prefix_roundtrip_mismatch"] += 1
@@ -179,6 +225,7 @@ def _tokenize(
         truncated,
         prefix_decode_calls,
         prefix_decoded_token_ids,
+        prefix_verifier,
     )
 
 

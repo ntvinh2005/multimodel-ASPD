@@ -8,6 +8,7 @@ from typing import Any, Literal
 from torch import nn
 
 from aspd.multimodel.v3.config import V3_LOGICAL_MATRICES, V3ApprovedConfig, V3ApprovedModel
+from aspd.multimodel.v3.main_2b_config import V3Main2BV1Config
 
 GroundingKind = Literal["residual_pre", "residual_mid"]
 
@@ -277,6 +278,55 @@ def build_model_registry(approved: V3ApprovedConfig) -> dict[str, ModelFamilyLay
         raise ValueError("v3 registry must contain 168 unique logical matrix targets")
     if {target.logical_name for target in targets} != set(V3_LOGICAL_MATRICES):
         raise ValueError("v3 registry lost a planned logical matrix type")
+    return registry
+
+
+def build_model_registry_2b(config: V3Main2BV1Config | Any) -> dict[str, ModelFamilyLayout]:
+    """Build an N-model registry entirely from a pinned versioned contract.
+
+    The historical function name is retained for checkpoint compatibility.  Execution
+    configs may contain two or three model-owned sources, but every source must expose a
+    complete, approved physical-layout contract before this function is called.
+    """
+
+    registry = {
+        model.key: ModelFamilyLayout(
+            key=model.key,
+            family=model.family,
+            model_id=model.model_id,
+            revision=model.revision,
+            tokenizer_id=model.tokenizer_id,
+            tokenizer_revision=model.tokenizer_revision,
+            layers=model.selected_layers,
+            layer_prefixes=tuple(
+                getattr(model, "layer_prefixes", None) or (model.layer_prefix,)
+            ),
+            residual_pre_suffix=model.residual_pre_suffix,
+            residual_mid_suffix=model.residual_mid_suffix,
+            hidden_size=model.hidden_size,
+            intermediate_size=model.intermediate_size,
+            num_hidden_layers=model.num_hidden_layers,
+            num_attention_heads=model.num_attention_heads,
+            num_key_value_heads=model.num_key_value_heads,
+            head_dim=model.head_dim,
+            q_out=model.q_out,
+            kv_out=model.kv_out,
+            fused_qkv=bool(getattr(model, "fused_qkv", False)),
+            fused_gate_up=bool(getattr(model, "fused_gate_up", False)),
+        )
+        for model in config.models
+    }
+    model_order = tuple(config.architecture.model_order)
+    if tuple(registry) != model_order:
+        raise ValueError(f"model-owned registry order must be {model_order}")
+    targets = [target for layout in registry.values() for target in layout.targets()]
+    expected_targets = len(model_order) * 8 * 7
+    if len(targets) != expected_targets or len({target.key for target in targets}) != expected_targets:
+        raise ValueError(
+            f"model-owned registry must contain {expected_targets} unique targets"
+        )
+    if {target.logical_name for target in targets} != set(V3_LOGICAL_MATRICES):
+        raise ValueError("model-owned registry lost a required logical matrix type")
     return registry
 
 

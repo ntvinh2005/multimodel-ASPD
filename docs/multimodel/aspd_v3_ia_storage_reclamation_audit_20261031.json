@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-10-31T13:25:08-04:00",
+  "authorized_candidate": "/blue/thai/vinhnguyen1/ia-unforeseen-70b",
+  "resolved_path": "/blue/thai/vinhnguyen1/ia-unforeseen-70b",
+  "filesystem": {
+    "mount": "/blue/thai",
+    "device": "blue2",
+    "owner": "vinhnguyen1",
+    "group": "thai",
+    "bytes_before": 997721243648,
+    "blue_group_kib_before": 5042872692,
+    "blue_group_quota_kib": 5368709120
+  },
+  "git": {
+    "remote": "https://github.com/ntvinh2005/ia-unforeseen-70b.git",
+    "fetch_completed": true,
+    "head": "264c710edf6894d858e45bd40f49fd89aeea7a79",
+    "branch": "main",
+    "origin_main": "264c710edf6894d858e45bd40f49fd89aeea7a79",
+    "head_vs_origin_main": "0 ahead, 0 behind",
+    "local_fix_audit_pipeline": "7276cd743f12fe39e82694e9c3d35de4e01e7e8a",
+    "remote_fix_audit_pipeline": "49da5c633c84aefbc1a0c791f3d93b3abb325239",
+    "fix_branch_preservation": "local tip is reachable from origin/fix/audit-pipeline; local branch is 0 ahead and 2 behind",
+    "tags": [],
+    "additional_worktrees": [],
+    "unreachable_commits": 0
+  },
+  "unpublished_worktree_state": {
+    "tracked_modified": [
+      "scripts/run_persistent_verification_worker.py",
+      "slurm/paper_ia_persistent_verification_worker.slurm"
+    ],
+    "untracked": [
+      "tests/test_persistent_verification_worker.py"
+    ],
+    "diff_stat": "204 insertions, 1 deletion across two tracked files",
+    "ignored_entries_observed": 218734,
+    "unique_artifacts_preserved": [
+      "outputs",
+      "logs",
+      "models",
+      "repos",
+      "tmp",
+      "envs",
+      ".cache/hf_adapters",
+      ".git"
+    ]
+  },
+  "active_use_audit": {
+    "slurm_job": "48553677",
+    "job_kind": "interactive CPU shell",
+    "job_workdir": "/home/vinhnguyen1",
+    "node_process_workdirs": ["/home/vinhnguyen1"],
+    "depends_on_authorized_candidate": false
+  },
+  "deletion_decision": {
+    "whole_project": "BLOCKED",
+    "reason": "The old project contains unpublished tracked and untracked source changes plus preserved experiment artifacts.",
+    "partial_cleanup": "AUTHORIZED_SAFE_CACHE_ONLY",
+    "targets": [
+      {
+        "path": "/blue/thai/vinhnguyen1/ia-unforeseen-70b/cache/huggingface/hub",
+        "bytes_before": 479771328512,
+        "basis": "ignored standard Hugging Face hub cache containing remote refs/blobs/snapshots; token and datasets siblings are outside the target"
+      },
+      {
+        "path": "/blue/thai/vinhnguyen1/ia-unforeseen-70b/.cache/huggingface/hub",
+        "bytes_before": 65539784704,
+        "basis": "ignored standard Hugging Face hub cache containing remote refs/blobs/snapshots; downloaded adapter copies outside the target are preserved"
+      }
+    ],
+    "estimated_recoverable_bytes": 545311113216,
+    "symlink_policy": "Only the two exact physical directory roots are removed; no top-level symlink is followed and no sibling is targeted. Internal Hugging Face snapshot symlinks resolve within their own cache roots."
+  },
+  "post_cleanup": {
+    "completed_at": "2026-10-31T13:28:00-04:00",
+    "result": "PARTIALLY_CLEANED",
+    "deleted_targets_absent": true,
+    "project_bytes_after": 452410130432,
+    "logical_project_bytes_removed": 545311113216,
+    "blue_group_kib_after": 4548977700,
+    "blue_group_headroom_kib_after": 819731420,
+    "blue_group_headroom_bytes_after": 839404974080,
+    "actual_group_quota_kib_recovered": 493894992,
+    "actual_group_quota_bytes_recovered": 505748471808,
+    "note": "Quota-derived recovery is authoritative and is lower than summed logical directory usage. The old IA project and all non-cache research state remain intact."
+  }
+}
