@@ -110,6 +110,13 @@ class V3BatchTopK(nn.Module):
             "accepted_anchor_count": int(self.accepted_anchor_count.item()),
             "feature_fire_counts": self.feature_fire_counts.detach().clone(),
             "used_feature_count": int((self.feature_fire_counts > 0).sum().item()),
+            "never_fired_feature_count": int(
+                (self.feature_fire_counts == 0).sum().item()
+            ),
             "dead_feature_count": int(self.dead_features.sum().item()),
+            # "Dead" is the historical AuxK threshold (320 consecutive pools).  Keep a
+            # separately named field so reports do not confuse lifetime non-use with
+            # recent inactivity.
+            "recently_dead_feature_count": int(self.dead_features.sum().item()),
             "threshold": self.threshold.detach().clone(),
         }

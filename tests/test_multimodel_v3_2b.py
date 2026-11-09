@@ -1,18 +1,25 @@
 from __future__ import annotations
 
+import copy
 import json
 import os
+import shutil
+import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
+import pytest
 import torch
 from torch import nn
 
 from aspd.multimodel.cli.train_aspd_v3_2b import _PoolPrefetcher
 from aspd.multimodel.components import RankOneComponents
 from aspd.multimodel.v3.data import SQLiteExposureLedger
+from aspd.multimodel.v3.encoder import FeatureReadout, pack_cross_model_tokens
 from aspd.multimodel.v3.gating import V3BatchTopK
+from aspd.multimodel.v3.main500m_config import V31Main500MConfig, load_main500m_config
+from aspd.multimodel.v3.main500m_monitoring import evaluate_main500m_health
 from aspd.multimodel.v3.main_2b_config import MODEL_ORDER_2B, load_main_2b_v1_config
 from aspd.multimodel.v3.model_owned import (
     LocalCaptureBatch,
@@ -54,6 +61,154 @@ def _config():
     return load_main_2b_v1_config(
         ROOT / "configs/multimodel/aspd_v3/main_2b_v1.yaml"
     )
+
+
+def _main500m_config():
+    return load_main500m_config(
+        ROOT / "configs/multimodel/aspd_v3/main500m_preparation_v1.yaml"
+    )
+
+
+def test_main500m_draft_preserves_zscore_math_and_fails_closed() -> None:
+    config = _main500m_config()
+    report = config.structural_report()
+    assert report["logical_target_slots"] == 168
+    assert report["approved_physical_targets"] == 112
+    assert report["pending_physical_targets"] == 56
+    assert config.objective.gate_logit_normalization == "per_anchor_feature_zscore"
+    assert config.objective.gate_logit_normalization_epsilon == 1e-5
+    assert config.objective.activation_objective_mode == "full_only"
+    assert config.objective.activation_decoder_normalization == "none"
+    assert config.objective.internal_code == "binary_support"
+    assert config.objective.activation_code == "continuous"
+    assert config.data.optimizer_steps == 61_036
+    assert config.data.planned_accepted_anchor_exposures == 500_006_912
+    assert config.approvals.human_interpretability.status == (
+        "PENDING_RESEARCHER_DECISION"
+    )
+    assert "MODEL_THREE_BLOCKED" in report["blockers"]
+    with pytest.raises(RuntimeError, match="MODEL_THREE_BLOCKED"):
+        config.require_execution_authorized()
+
+    invalid = config.payload()
+    invalid["approvals"]["human_interpretability"]["artifact_path"] = (
+        "/immutable/human-evaluation/decision.json"
+    )
+    with pytest.raises(ValueError, match="pending human-interpretability gate"):
+        V31Main500MConfig.model_validate(invalid)
+
+
+def test_three_model_zscore_and_separator_contract_matches_notation() -> None:
+    torch.manual_seed(23)
+    model_order = ("gemma", "smol", "third")
+    tokens = {key: torch.randn(2, 3, 8, 16) for key in model_order}
+    packed = pack_cross_model_tokens(tokens, model_order=model_order)
+    assert packed.values.shape == (2, 3, 26, 21)
+    assert packed.separator_positions == (8, 17)
+    assert packed.identity_indices == (
+        *(0 for _ in range(8)),
+        3,
+        *(1 for _ in range(8)),
+        4,
+        *(2 for _ in range(8)),
+    )
+
+    readout = FeatureReadout(
+        21,
+        32,
+        "mean",
+        logit_normalization="per_anchor_feature_zscore",
+        logit_normalization_epsilon=1e-5,
+    )
+    valid = torch.tensor([[True, True, False], [True, False, True]])
+    scores, normalized = readout.forward_with_logits(packed.values, valid)
+    raw = readout.latest_projection_logits
+    assert raw is not None
+    mean = raw.mean(dim=-1, keepdim=True)
+    variance = (raw - mean).square().mean(dim=-1, keepdim=True)
+    expected = (raw - mean) / torch.sqrt(variance + 1e-5)
+    expected = expected * valid[..., None]
+    torch.testing.assert_close(normalized, expected)
+    torch.testing.assert_close(scores, torch.relu(expected))
+
+
+def test_main500m_health_monitor_separates_alerts_from_hard_aborts() -> None:
+    thresholds = _main500m_config().monitoring
+    alert = evaluate_main500m_health(
+        {
+            "repeated_exposures": 0,
+            "loss": {
+                "total": 1.0,
+                "diagnostic/gate/pre/gemma/positive_scores_per_anchor": 128.0,
+                "diagnostic/gate/pre/gemma/effective_dictionary_size_in_pool": 900.0,
+                "diagnostic/gate/pre/gemma/top_1_percent_firing_share_in_pool": 0.6,
+                "diagnostic/gate/pre/gemma/top_10_percent_firing_share_in_pool": 0.9,
+                "diagnostic/gate/pre/gemma/recently_dead_features": 7000.0,
+            },
+            "gradient_norms_by_rank": [{"rank": 0, "l2": {"rank_one": 1.0}}],
+        },
+        thresholds,
+    )
+    assert alert["status"] == "ALERT"
+    assert {event["code"] for event in alert["events"]} >= {
+        "GATE_CANDIDATE_COLLAPSE",
+        "DICTIONARY_CONCENTRATION",
+        "RECENT_FEATURE_DEATH",
+    }
+
+    abort = evaluate_main500m_health(
+        {"repeated_exposures": 1, "loss": {"total": float("nan")}}, thresholds
+    )
+    assert abort["status"] == "ABORT"
+    assert {event["code"] for event in abort["events"]} == {
+        "EXPOSURE_DUPLICATION",
+        "NONFINITE_OBJECTIVE",
+    }
+
+
+def test_approved_third_model_contract_registers_exactly_168_unique_targets() -> None:
+    payload = _main500m_config().payload()
+    payload["models"][2] = {
+        "key": "third",
+        "approval_status": "APPROVED",
+        "model_id": "synthetic/third-model",
+        "revision": "a" * 40,
+        "tokenizer_id": "synthetic/third-model",
+        "tokenizer_revision": "a" * 40,
+        "family": "synthetic_transformer",
+        "license": "test-only",
+        "access": "local-test",
+        "checkpoint_parameter_count": 2_000_000_000,
+        "selected_layers": list(range(4, 12)),
+        "hidden_size": 32,
+        "intermediate_size": 64,
+        "num_hidden_layers": 16,
+        "num_attention_heads": 4,
+        "num_key_value_heads": 2,
+        "head_dim": 8,
+        "layer_prefixes": ["model.layers"],
+        "residual_pre_suffix": "input_layernorm",
+        "residual_mid_suffix": "post_attention_layernorm",
+        "fused_qkv": False,
+        "fused_gate_up": False,
+        "frozen": True,
+    }
+    payload["architecture"]["model_order"] = ["gemma", "smol", "third"]
+    payload["approvals"]["third_model"] = "APPROVED"
+    config = V31Main500MConfig.model_validate(payload)
+    registry = build_model_registry_2b(config)
+    targets = [target for layout in registry.values() for target in layout.targets()]
+    assert tuple(registry) == ("gemma", "smol", "third")
+    assert len(targets) == len({target.key for target in targets}) == 168
+    assert {target.logical_name for target in targets} == {
+        "q",
+        "k",
+        "v",
+        "o",
+        "mlp_gate",
+        "mlp_up",
+        "mlp_down",
+    }
 
 
 def test_prefetch_checkpoint_preserves_exact_pool_order() -> None:
@@ -616,6 +771,24 @@ def _tiny_capture(layout: ModelFamilyLayout, rank: int) -> LocalCaptureBatch:
     )
 
 
+def _assert_nested_equal(left, right) -> None:
+    if isinstance(left, torch.Tensor):
+        assert isinstance(right, torch.Tensor)
+        torch.testing.assert_close(left, right, rtol=0, atol=0)
+    elif isinstance(left, dict):
+        assert isinstance(right, dict)
+        assert left.keys() == right.keys()
+        for key in left:
+            _assert_nested_equal(left[key], right[key])
+    elif isinstance(left, (list, tuple)):
+        assert isinstance(right, (list, tuple))
+        assert len(left) == len(right)
+        for left_value, right_value in zip(left, right, strict=True):
+            _assert_nested_equal(left_value, right_value)
+    else:
+        assert left == right
+
+
 def _distributed_model_owned_worker(
     rank: int, world_size: int, init_file: str, checkpoint_root: str
 ) -> None:
@@ -670,6 +843,23 @@ def _distributed_model_owned_worker(
     update()
     manager = ModelOwnedCheckpoint(checkpoint_root, keep_complete=2)
     saved_parameter = next(model.parameters()).detach().clone()
+    recovery_root = Path(checkpoint_root).parent / "live-recovery"
+    recovery_databases = None
+    if rank == 0:
+        recovery_root.mkdir()
+        recovery_databases = {}
+        for name, value in (
+            ("exposure_ledger.sqlite", "ledger-step-1"),
+            ("stream_dedup.sqlite", "stream-step-1"),
+        ):
+            path = recovery_root / name
+            connection = sqlite3.connect(path)
+            connection.execute("CREATE TABLE state(value TEXT NOT NULL)")
+            connection.execute("INSERT INTO state VALUES (?)", (value,))
+            connection.commit()
+            connection.close()
+            recovery_databases[name] = path
+    dist.barrier()
     manager.save(
         step=1,
         model=model,
@@ -681,11 +871,54 @@ def _distributed_model_owned_worker(
         dataset_manifest_sha256="b" * 64,
         model_key=key,
         experiment_metadata={"activation_target_normalization": "none"},
+        recovery_databases=recovery_databases,
     )
+    checkpoint = Path(checkpoint_root) / "step-000000001"
+    if rank == 0:
+        restored_root = Path(checkpoint_root).parent / "external-resume"
+        manager.restore_recovery_databases(
+            path=checkpoint,
+            destination_root=restored_root,
+            config_fingerprint="tiny-model-owned-test",
+            config_file_sha256="a" * 64,
+            dataset_manifest_sha256="b" * 64,
+            expected_world_size=world_size,
+        )
+        for name, expected in (
+            ("exposure_ledger.sqlite", "ledger-step-1"),
+            ("stream_dedup.sqlite", "stream-step-1"),
+        ):
+            connection = sqlite3.connect(restored_root / name)
+            assert connection.execute("SELECT value FROM state").fetchone() == (expected,)
+            connection.close()
+    dist.barrier()
+
+    # Compare one uninterrupted update with the exact same update after external-state reload.
+    update()
+    uninterrupted_model = {
+        name: value.detach().clone() for name, value in model.state_dict().items()
+    }
+    uninterrupted_optimizer = copy.deepcopy(optimizer.state_dict())
+    uninterrupted_scheduler = copy.deepcopy(scheduler.state_dict())
+    manager.load(
+        path=checkpoint,
+        model=model,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        config_fingerprint="tiny-model-owned-test",
+        config_file_sha256="a" * 64,
+        dataset_manifest_sha256="b" * 64,
+        expected_model_key=key,
+    )
+    update()
+    _assert_nested_equal(model.state_dict(), uninterrupted_model)
+    _assert_nested_equal(optimizer.state_dict(), uninterrupted_optimizer)
+    _assert_nested_equal(scheduler.state_dict(), uninterrupted_scheduler)
+
     with torch.no_grad():
         next(model.parameters()).add_(1)
     runtime, manifest = manager.load(
-        path=Path(checkpoint_root) / "step-000000001",
+        path=checkpoint,
         model=model,
         optimizer=optimizer,
         scheduler=scheduler,
@@ -701,7 +934,7 @@ def _distributed_model_owned_worker(
     with torch.no_grad():
         next(model.parameters()).sub_(2)
     runtime, manifest = manager.load_model_only(
-        path=Path(checkpoint_root) / "step-000000001",
+        path=checkpoint,
         model=model,
         config_fingerprint="tiny-model-owned-test",
         config_file_sha256="a" * 64,
@@ -714,7 +947,7 @@ def _distributed_model_owned_worker(
     with torch.no_grad():
         next(model.parameters()).add_(3)
     runtime, manifest = manager.load_model_only_owner(
-        path=Path(checkpoint_root) / "step-000000001",
+        path=checkpoint,
         model=model,
         config_fingerprint="tiny-model-owned-test",
         config_file_sha256="a" * 64,
@@ -726,7 +959,22 @@ def _distributed_model_owned_worker(
     torch.testing.assert_close(next(model.parameters()), saved_parameter)
     assert runtime["completed_steps"] == 1
     assert manifest["world_size"] == world_size
-    update()
+    dist.barrier()
+    if rank == 0:
+        corrupt = Path(checkpoint_root).parent / "corrupt-checkpoint"
+        shutil.copytree(checkpoint, corrupt)
+        with (corrupt / "recovery" / "exposure_ledger.sqlite").open("ab") as handle:
+            handle.write(b"corruption")
+        with pytest.raises(ValueError, match="missing or corrupt"):
+            manager.restore_recovery_databases(
+                path=corrupt,
+                destination_root=Path(checkpoint_root).parent / "corrupt-restore",
+                config_fingerprint="tiny-model-owned-test",
+                config_file_sha256="a" * 64,
+                dataset_manifest_sha256="b" * 64,
+                expected_world_size=world_size,
+            )
+    dist.barrier()
     dist.destroy_process_group()
 
 

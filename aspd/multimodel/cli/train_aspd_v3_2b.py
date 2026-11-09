@@ -55,6 +55,11 @@ from aspd.multimodel.v3.granite_normalized_config import (
     load_granite_normalized_target_config,
 )
 from aspd.multimodel.v3.hooks import assert_frozen_backbone, logical_weight_bias
+from aspd.multimodel.v3.main500m_config import (
+    EXPERIMENT_FAMILY as MAIN500M_EXPERIMENT_FAMILY,
+)
+from aspd.multimodel.v3.main500m_config import load_main500m_config
+from aspd.multimodel.v3.main500m_monitoring import evaluate_main500m_health
 from aspd.multimodel.v3.main_2b_config import (
     MODEL_ORDER_2B,
     V3Main2BV1Config,
@@ -175,6 +180,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--local-files-only", action="store_true")
     parser.add_argument("--skip-checkpoint", action="store_true")
     parser.add_argument("--controlled-contract", type=Path)
+    parser.add_argument(
+        "--resume-checkpoint",
+        type=Path,
+        help="immutable external checkpoint directory for exact cross-namespace resume",
+    )
     return parser.parse_args()
 
 
@@ -213,6 +223,8 @@ def _load_training_config(path: Path) -> Any:
         return load_gate_collapse_recovery_config(path)
     if payload.get("experiment_family") == ENCODER_AUXK_FACTORIAL_FAMILY:
         return load_encoder_auxk_factorial_config(path)
+    if payload.get("experiment_family") == MAIN500M_EXPERIMENT_FAMILY:
+        return load_main500m_config(path)
     granite_overlay_bases = {
         "granite_normalized_target_baseline_v1.yaml",
         "granite_normalized_target_treatment_v1.yaml",
@@ -770,6 +782,26 @@ def _finite_gradients(model: torch.nn.Module) -> dict[str, Any]:
     }
 
 
+@torch.no_grad()
+def _gradient_norm_report(model: torch.nn.Module, *, rank: int) -> dict[str, Any]:
+    """Measure model-owned gradient groups only on scheduled monitoring steps."""
+
+    groups = {
+        "local_encoder": model.local_encoders,
+        "shared_encoder": model.shared_encoders,
+        "activation_decoder": model.activation_banks,
+        "rank_one": model.matrix_bank,
+    }
+    l2: dict[str, float] = {}
+    for name, module in groups.items():
+        squared = torch.zeros((), dtype=torch.float64, device=next(model.parameters()).device)
+        for parameter in module.parameters():
+            if parameter.grad is not None:
+                squared.add_(parameter.grad.detach().double().square().sum())
+        l2[name] = float(squared.sqrt().cpu())
+    return {"rank": rank, "model": model.local_model_key, "l2": l2}
+
+
 def _timed(profile: bool, values: dict[str, float], name: str):
     class Timer:
         def __enter__(self):
@@ -791,8 +823,11 @@ def _timed(profile: bool, values: dict[str, float], name: str):
 def main() -> None:
     args = _parse_args()
     git_sha = _require_clean_worktree()
-    rank, world, device = _init_distributed()
     config = _load_training_config(args.config)
+    if config.experiment_family == MAIN500M_EXPERIMENT_FAMILY:
+        # This happens before NCCL initialization or any source-model/tokenizer load.
+        config.require_execution_authorized()
+    rank, world, device = _init_distributed()
     if config.experiment_family in {
         "aspd_v3_granite_normalized_target_v1",
         "aspd_v3_granite_normalized_target_unconstrained_decoder_v1",
@@ -957,8 +992,16 @@ def main() -> None:
             raise RuntimeError("full 500M training is not authorized by main_2b_v1.yaml")
         if args.skip_checkpoint:
             raise RuntimeError("main mode cannot disable recoverable checkpoints")
-        if args.max_steps != config.data.minimum_optimizer_steps:
+        required_main_steps = getattr(config.data, "minimum_optimizer_steps", None)
+        if required_main_steps is None:
+            required_main_steps = config.data.optimizer_steps
+        required_main_steps = int(required_main_steps)
+        if args.max_steps != required_main_steps:
             raise RuntimeError("main mode cannot reduce the frozen 61,036-step budget")
+    if args.resume_checkpoint is not None and (
+        args.strategy != "model_owned" or args.skip_checkpoint
+    ):
+        raise ValueError("external exact resume requires checkpointed model-owned execution")
     if args.mode == "pilot":
         if not getattr(config, "short_pilot_authorized", False):
             raise RuntimeError("short pilot is not authorized by this config")
@@ -1202,6 +1245,24 @@ def main() -> None:
         # All ranks must construct groups in the same order, including Gemma rank 1.
         qwen_smol_group = dist.new_group(ranks=list(controlled.qwen_smol_group))
 
+    external_resume_manifest = None
+    if args.resume_checkpoint is not None:
+        if checkpoint_manager.complete_checkpoints():
+            raise ValueError(
+                "external resume cannot be mixed with checkpoints already in the new run"
+            )
+        if rank == 0:
+            external_resume_manifest = checkpoint_manager.restore_recovery_databases(
+                path=args.resume_checkpoint,
+                destination_root=args.run_dir,
+                config_fingerprint=config.fingerprint(),
+                config_file_sha256=config_sha,
+                dataset_manifest_sha256=dataset_manifest["manifest_sha256"],
+                expected_world_size=world,
+            )
+        external_resume_manifest = _broadcast_object(external_resume_manifest)
+        dist.barrier()
+
     stream = None
     ledger = None
     if rank == 0:
@@ -1262,9 +1323,23 @@ def main() -> None:
             "cuda": torch.version.cuda,
             "parameter_analysis": model_owned_parameter_counts(config, registry),
             "source_correctness": source_smokes,
+            "scientific_approvals": (
+                config.approvals.model_dump(mode="json")
+                if config.experiment_family == MAIN500M_EXPERIMENT_FAMILY
+                else None
+            ),
             "initial_common_state_by_rank": initial_common_states,
             "runtime": runtime_payload,
             "runtime_fingerprint": runtime_fingerprint,
+            "external_resume": (
+                None
+                if args.resume_checkpoint is None
+                else {
+                    "checkpoint": str(args.resume_checkpoint),
+                    "manifest_sha256": _sha256(args.resume_checkpoint / "manifest.json"),
+                    "step": int(external_resume_manifest["step"]),
+                }
+            ),
         }
         if controlled is not None:
             run_manifest["controlled_retrain"] = {
@@ -1293,6 +1368,7 @@ def main() -> None:
                 "dataset_manifest_sha256",
                 "alignment_manifest_sha256",
                 "runtime_fingerprint",
+                "external_resume",
             ):
                 if existing_manifest.get(key) != run_manifest[key]:
                     raise ValueError(f"existing run manifest changed at {key}")
@@ -1307,7 +1383,11 @@ def main() -> None:
     completed_steps = 0
     restored_prefetched_pool = None
     initial_runtime_path = args.run_dir / "initial_runtime.json"
-    checkpoints = checkpoint_manager.complete_checkpoints()
+    checkpoints = (
+        [args.resume_checkpoint]
+        if args.resume_checkpoint is not None
+        else checkpoint_manager.complete_checkpoints()
+    )
     if checkpoints:
         latest = checkpoints[-1]
         if args.strategy == "model_owned":
@@ -1454,6 +1534,10 @@ def main() -> None:
         if diagnostic_parameter_steps:
             collect_step_diagnostics = completed_steps in diagnostic_parameter_steps
             diagnostic_parameter_step = completed_steps if collect_step_diagnostics else None
+        elif getattr(config, "monitoring", None) is not None:
+            interval = int(config.monitoring.monitor_every_steps)
+            collect_step_diagnostics = completed_steps == 0 or completed_steps % interval == 0
+            diagnostic_parameter_step = completed_steps if collect_step_diagnostics else None
         else:
             collect_step_diagnostics = completed_steps + 1 in diagnostic_steps
             diagnostic_parameter_step = (
@@ -1551,6 +1635,11 @@ def main() -> None:
             dist.all_gather_object(reports, gradient_report)
             if any(report["status"] != "PASS" for report in reports):
                 raise FloatingPointError(f"missing/nonfinite gradients: {reports}")
+            gradient_norms_by_rank = None
+            if args.strategy == "model_owned" and collect_step_diagnostics:
+                local_gradient_norms = _gradient_norm_report(model, rank=rank)
+                gradient_norms_by_rank = [None] * world
+                dist.all_gather_object(gradient_norms_by_rank, local_gradient_norms)
             if args.strategy == "model_owned":
                 if controlled is None:
                     model.project_decoder_gradients_()
@@ -1642,15 +1731,14 @@ def main() -> None:
             dist.all_gather_object(
                 decoder_norms_by_rank, model.activation_decoder_norm_report()
             )
+        health = None
         if rank == 0:
             ordered_anchor_digest = hashlib.sha256()
             for anchor_id in step_anchor_ids:
                 encoded = anchor_id.encode("utf-8")
                 ordered_anchor_digest.update(len(encoded).to_bytes(8, "big"))
                 ordered_anchor_digest.update(encoded)
-            _append_jsonl(
-                metrics_path,
-                {
+            metrics_row = {
                     "step": completed_steps,
                     "warmup": completed_steps <= args.warmup_steps,
                     "seconds": seconds,
@@ -1668,9 +1756,17 @@ def main() -> None:
                     "reconstruction_scales_by_rank": scales_by_rank,
                     "reconstruction_log_scale_gradients_by_rank": scale_gradients,
                     "activation_decoder_norms_by_rank": decoder_norms_by_rank,
+                    "gradient_norms_by_rank": gradient_norms_by_rank,
+                    "storage_free_bytes": shutil.disk_usage(args.run_dir).free,
                     "diagnostic_parameter_step": diagnostic_parameter_step,
-                },
-            )
+                }
+            if getattr(config, "monitoring", None) is not None and collect_step_diagnostics:
+                health = evaluate_main500m_health(metrics_row, config.monitoring)
+                metrics_row["health"] = health
+            _append_jsonl(metrics_path, metrics_row)
+        health = _broadcast_object(health)
+        if health is not None and health["status"] == "ABORT":
+            raise RuntimeError(f"ASPD v3.1 health monitor requested abort: {health['events']}")
 
         preflight_reload_due = args.mode == "preflight" and completed_steps == args.max_steps - 1
         checkpoint_due = not args.skip_checkpoint and (
@@ -1751,6 +1847,14 @@ def main() -> None:
                             config.objective, "auxk_softplus_temperature", None
                         ),
                     },
+                    recovery_databases=(
+                        {
+                            "exposure_ledger.sqlite": ledger.path,
+                            "stream_dedup.sqlite": stream.dedup.path,
+                        }
+                        if rank == 0
+                        else None
+                    ),
                 )
             else:
                 checkpoint_manifest = checkpoint_manager.save(

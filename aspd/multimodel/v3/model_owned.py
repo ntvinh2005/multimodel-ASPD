@@ -1,9 +1,9 @@
-"""Model-owned three-rank execution for ASPD v3 main-2b-v1.
+"""Model-owned N-rank execution for ASPD v3.
 
 Each rank owns one frozen backbone, its 56 matrix dictionaries, its 16 activation
 decoders, and its model-specific packing/intra-model modules.  Only 8x512 latent tokens
 per site are exchanged.  Cross-model modules are replicated and receive the sum of the
-three model-specific activation-objective gradients.
+N model-specific activation-objective gradients.
 """
 
 from __future__ import annotations
@@ -351,6 +351,8 @@ class ModelOwnedMain2B(nn.Module):
         continuous_support: dict[str, SparseSupport] = {}
         binary_support: dict[str, SparseSupport] = {}
         self.latest_raw_logits: dict[str, Tensor] = {}
+        self.latest_pre_normalization_logits: dict[str, Tensor] = {}
+        self.latest_normalized_logits: dict[str, Tensor] = {}
         self.latest_projection_logits: dict[str, Tensor] = {}
         self.latest_gate_diagnostics: dict[str, dict[str, float | int]] = {}
         for site in SITE_ORDER:
@@ -365,13 +367,18 @@ class ModelOwnedMain2B(nn.Module):
                 scores[site], logits = self.shared_encoders[site].forward_with_logits(
                     tokens, batch.valid_anchors
                 )
+                # Compatibility alias: historical diagnostics called the actual gate
+                # logits "raw".  In v3.1 notation z is the pre-normalization projection
+                # and tilde-z is the normalized gate logit.
                 self.latest_raw_logits[site] = logits
+                self.latest_normalized_logits[site] = logits
                 projection_logits = self.shared_encoders[site].readout.latest_projection_logits
                 if projection_logits is None:
                     raise RuntimeError("feature readout did not retain projection logits")
                 self.latest_projection_logits[site] = projection_logits * batch.valid_anchors[
                     ..., None
                 ].to(projection_logits.dtype)
+                self.latest_pre_normalization_logits[site] = self.latest_projection_logits[site]
             with torch.profiler.record_function(f"aspd/{site}/batch_topk"):
                 sparse[site] = self.gates[site](
                     scores[site], batch.valid_anchors, update_statistics=update_statistics
@@ -439,7 +446,13 @@ class ModelOwnedMain2B(nn.Module):
                         "projection_negative_logit_fraction": float(
                             (valid_projection_logits < 0).float().mean()
                         ),
+                        "pre_normalization_negative_logit_fraction": float(
+                            (valid_projection_logits < 0).float().mean()
+                        ),
                         "raw_logit_negative_fraction": float((valid_logits < 0).float().mean()),
+                        "normalized_negative_logit_fraction": float(
+                            (valid_logits < 0).float().mean()
+                        ),
                         "raw_logit_zero_fraction": float((valid_logits == 0).float().mean()),
                         "raw_logit_positive_fraction": float((valid_logits > 0).float().mean()),
                         "raw_logit_q01_sampled": float(logit_q[0]),
@@ -505,6 +518,12 @@ class ModelOwnedMain2B(nn.Module):
                         "readout_bias_min": float(readout_bias.min()),
                         "readout_bias_max": float(readout_bias.max()),
                         "dead_features": int(self.gates[site].dead_features.sum()),
+                        "recently_dead_features": int(
+                            self.gates[site].dead_features.sum()
+                        ),
+                        "never_fired_features": int(
+                            (self.gates[site].feature_fire_counts == 0).sum()
+                        ),
                     }
         return scores, sparse, continuous_support, binary_support
 

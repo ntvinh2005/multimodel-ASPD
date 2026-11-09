@@ -222,7 +222,13 @@ class CrossModelTransformer(nn.Module):
 
 
 class FeatureReadout(nn.Module):
-    """Experimental readout interface; the main-run choice remains unresolved."""
+    r"""Shared readout followed by the configured v3.1 gate-logit transformation.
+
+    ``projection_logits`` are the mathematical :math:`z_{a,c}`.  With per-anchor
+    feature-axis z-score enabled, the returned ``logits`` are :math:`\tilde z_{a,c}`
+    using population variance over C (the PyTorch LayerNorm convention) and no learned
+    affine parameters.  ReLU produces :math:`s_{a,c}` before pool-wide BatchTopK.
+    """
 
     def __init__(
         self,
@@ -364,8 +370,14 @@ class HierarchicalV3Encoder(nn.Module):
             packed = self._packers[key](concatenated)  # type: ignore[operator]
             intra_tokens[key] = self.intra[key](packed)
         cross = pack_cross_model_tokens(intra_tokens, model_order=self.model_order)
-        expected = 3 * next(iter(self.latent_tokens.values())) + 2
+        expected = (
+            len(self.model_order) * next(iter(self.latent_tokens.values()))
+            + len(self.model_order)
+            - 1
+        )
         if cross.values.shape[2] != expected:
-            raise AssertionError("v3 cross-model sequence must have length 3a+2")
+            raise AssertionError(
+                "v3 cross-model sequence must have length N*a+(N-1)"
+            )
         encoded = self.cross(self.cross_input_adapter(cross.values))
         return self.readout(encoded, valid_anchors)

@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-11-09",
+  "experiment_family": "aspd_v3_1_three_model_main500m",
+  "scientific_status": "MAIN_500M_NOT_AUTHORIZED",
+  "submission_permitted": false,
+  "reference": {
+    "branch": "aspd-v3.1-intruder-final-validation",
+    "commit": "4c84161bcd2496f22969133a5451b3ca258b934b"
+  },
+  "preparation_branch": "aspd-v3.1-main500m-preparation",
+  "config": {
+    "path": "configs/multimodel/aspd_v3/main500m_preparation_v1.yaml",
+    "fingerprint": "5985536e5cd94fb0181b4517233e03ae1e8d5f59c1d8db6e92e2d689afa61dca",
+    "status": "DRAFT_FAIL_CLOSED"
+  },
+  "architecture": {
+    "required_model_count": 3,
+    "selected_layers_per_model": 8,
+    "logical_matrices_per_layer": 7,
+    "logical_target_slots": 168,
+    "approved_physical_targets": 112,
+    "pending_physical_targets": 56,
+    "encoder": "hierarchical_transformer",
+    "gate": "per_anchor_feature_zscore_relu_pool_wide_batchtopk",
+    "zscore_axis": "feature",
+    "zscore_variance": "population_C",
+    "zscore_epsilon": 1e-05,
+    "dictionary_size": 8192,
+    "batch_topk_k": 32,
+    "activation_code": "continuous",
+    "internal_code": "detached_binary_support",
+    "activation_objective": "full_only_fvu",
+    "activation_target": "per_anchor_l2",
+    "activation_decoder_norm_constraint": "none",
+    "auxk_score_source": "post_relu"
+  },
+  "exposures": {
+    "target": 500000000,
+    "per_optimizer_step": 8192,
+    "optimizer_steps": 61036,
+    "planned": 500006912,
+    "overshoot": 6912,
+    "repeated_anchor_policy": "forbidden"
+  },
+  "alignment": {
+    "method": "exact_fast_tokenizer_offsets_and_exact_prefix_roundtrip_v2",
+    "acceptance": "intersection_of_exact_canonical_text_boundaries",
+    "three_way_source_validation": "PENDING_MODEL_THREE"
+  },
+  "resume": {
+    "synthetic_three_rank_exact_update": "PASS",
+    "optimizer_and_scheduler_state": "PASS",
+    "ledger_and_stream_external_restore": "PASS",
+    "corrupt_snapshot_rejection": "PASS",
+    "real_three_model_gpu": "PENDING"
+  },
+  "storage": {
+    "measured_at": "2026-11-09",
+    "orange_thai": {
+      "size_bytes": 2199023255552,
+      "used_bytes": 1984684720128,
+      "available_bytes": 214338535424,
+      "inode_use_percent": 42
+    },
+    "blue_thai": {
+      "size_bytes": 5497558138880,
+      "used_bytes": 5116135981056,
+      "available_bytes": 381422157824,
+      "inode_use_percent": 72
+    },
+    "estimated_required_free_bytes_low": 821000000000,
+    "estimated_required_free_bytes_high": 872000000000,
+    "recommended_reservation_bytes": 1099511627776,
+    "status": "STORAGE_BLOCKED"
+  },
+  "throughput": {
+    "final_three_model_v3_1_measured": false,
+    "historical_different_composition_b200_step_p50_seconds": 1.445,
+    "historical_different_composition_accepted_anchors_per_second": 6256.6,
+    "projected_wall_hours_low": 24,
+    "projected_wall_hours_high": 30,
+    "projected_b200_gpu_hours_low": 72,
+    "projected_b200_gpu_hours_high": 90
+  },
+  "tests": [
+    {
+      "scope": "v3_2b_non_distributed",
+      "result": "18 passed, 1 deselected",
+      "seconds": 19.52
+    },
+    {
+      "scope": "three_rank_exact_resume",
+      "result": "1 passed, 18 deselected",
+      "seconds": 220.42
+    },
+    {
+      "scope": "gate_correctness_production",
+      "result": "31 passed",
+      "seconds": 12.83
+    },
+    {
+      "scope": "ruff_compile_bash_diff",
+      "result": "PASS"
+    }
+  ],
+  "blockers": [
+    "MODEL_THREE_BLOCKED",
+    "ALIGNMENT_BLOCKED",
+    "STORAGE_BLOCKED",
+    "RESUME_BLOCKED",
+    "HUMAN_INTERPRETABILITY_APPROVAL_PENDING",
+    "THREE_MODEL_GPU_PREFLIGHT_PENDING",
+    "MAIN_500M_NOT_AUTHORIZED"
+  ],
+  "slurm": {
+    "script": "slurm/multimodel/aspd_v3_500m_main_PROPOSAL.sbatch",
+    "submitted": false,
+    "submission_command_after_all_approvals": "sbatch slurm/multimodel/aspd_v3_500m_main_PROPOSAL.sbatch"
+  }
+}

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sqlite3
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -50,6 +51,60 @@ class ModelOwnedCheckpoint:
         name = f"step-{step:09d}"
         return self.root / f".{name}.incomplete", self.root / name
 
+    @staticmethod
+    def _snapshot_sqlite(source: Path, destination: Path) -> None:
+        """Create a transactionally consistent, fsynced SQLite recovery snapshot."""
+
+        if not source.is_file():
+            raise FileNotFoundError(f"checkpoint recovery database is missing: {source}")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        source_connection = sqlite3.connect(f"file:{source}?mode=ro", uri=True)
+        destination_connection = sqlite3.connect(destination)
+        try:
+            source_connection.backup(destination_connection)
+            result = destination_connection.execute("PRAGMA quick_check").fetchone()
+            if result != ("ok",):
+                raise ValueError(
+                    f"checkpoint recovery database failed quick_check: {destination}"
+                )
+            destination_connection.commit()
+        finally:
+            destination_connection.close()
+            source_connection.close()
+        file_descriptor = os.open(destination, os.O_RDONLY)
+        try:
+            os.fsync(file_descriptor)
+        finally:
+            os.close(file_descriptor)
+
+    @staticmethod
+    def _copy_sqlite_exact(source: Path, destination: Path) -> None:
+        """Copy an immutable SQLite snapshot byte-for-byte and verify readability."""
+
+        shutil.copyfile(source, destination)
+        connection = sqlite3.connect(f"file:{destination}?mode=ro", uri=True)
+        try:
+            result = connection.execute("PRAGMA quick_check").fetchone()
+            if result != ("ok",):
+                raise ValueError(f"restored SQLite database failed quick_check: {destination}")
+        finally:
+            connection.close()
+        file_descriptor = os.open(destination, os.O_RDONLY)
+        try:
+            os.fsync(file_descriptor)
+        finally:
+            os.close(file_descriptor)
+
+    @staticmethod
+    def _validate_recovery_names(values: Mapping[str, str | Path]) -> None:
+        for name in values:
+            path = Path(name)
+            if path.name != name or name not in {
+                "exposure_ledger.sqlite",
+                "stream_dedup.sqlite",
+            }:
+                raise ValueError(f"unsupported checkpoint recovery database name: {name}")
+
     def save(
         self,
         *,
@@ -63,6 +118,7 @@ class ModelOwnedCheckpoint:
         dataset_manifest_sha256: str,
         model_key: str,
         experiment_metadata: Mapping[str, Any] | None = None,
+        recovery_databases: Mapping[str, str | Path] | None = None,
     ) -> dict[str, Any]:
         rank, world = self._rank_world()
         incomplete, complete = self._paths(step)
@@ -107,6 +163,11 @@ class ModelOwnedCheckpoint:
         _write_json_fsync(rank_root / "sidecar.json", sidecar)
         dist.barrier()
         if rank == 0:
+            recovery_databases = dict(recovery_databases or {})
+            self._validate_recovery_names(recovery_databases)
+            recovery_root = incomplete / "recovery"
+            for name, source in recovery_databases.items():
+                self._snapshot_sqlite(Path(source), recovery_root / name)
             rank_roots = [incomplete / f"rank-{value:05d}" for value in range(world)]
             missing = [
                 str(path)
@@ -131,6 +192,14 @@ class ModelOwnedCheckpoint:
                 },
                 "rank_dcp_metadata_sha256": {
                     path.name: _sha256(path / "dcp" / ".metadata") for path in rank_roots
+                },
+                "recovery_database_sha256": {
+                    name: _sha256(recovery_root / name)
+                    for name in sorted(recovery_databases)
+                },
+                "recovery_database_bytes": {
+                    name: (recovery_root / name).stat().st_size
+                    for name in sorted(recovery_databases)
                 },
                 "file_count_before_manifest": len(files),
                 "bytes_before_manifest": sum(path.stat().st_size for path in files),
@@ -194,6 +263,67 @@ class ModelOwnedCheckpoint:
             metadata = path / rank_name / "dcp" / ".metadata"
             if not metadata.is_file() or _sha256(metadata) != digest:
                 raise ValueError(f"checkpoint DCP metadata is missing or corrupt: {rank_name}")
+        recovery = manifest.get("recovery_database_sha256", {})
+        if not isinstance(recovery, dict):
+            raise ValueError("checkpoint recovery-database manifest is invalid")
+        for name, digest in recovery.items():
+            self._validate_recovery_names({name: name})
+            database = path / "recovery" / name
+            if not database.is_file() or _sha256(database) != digest:
+                raise ValueError(f"checkpoint recovery database is missing or corrupt: {name}")
+        return manifest
+
+    def restore_recovery_databases(
+        self,
+        *,
+        path: str | Path,
+        destination_root: str | Path,
+        config_fingerprint: str,
+        config_file_sha256: str,
+        dataset_manifest_sha256: str,
+        expected_world_size: int,
+    ) -> dict[str, Any]:
+        """Atomically materialize exact ledger/stream state for an external resume.
+
+        Existing destinations are never overwritten.  This keeps the source checkpoint
+        immutable and prevents an accidental mixture of two recovery histories.
+        """
+
+        checkpoint = Path(path)
+        manifest = self._validate(
+            checkpoint,
+            config_fingerprint=config_fingerprint,
+            config_file_sha256=config_file_sha256,
+            dataset_manifest_sha256=dataset_manifest_sha256,
+            expected_world_size=expected_world_size,
+        )
+        recovery = manifest.get("recovery_database_sha256", {})
+        required = {"exposure_ledger.sqlite", "stream_dedup.sqlite"}
+        if set(recovery) != required:
+            raise ValueError(
+                "external exact resume requires both immutable recovery databases"
+            )
+        destination_root = Path(destination_root)
+        destination_root.mkdir(parents=True, exist_ok=True)
+        for name in sorted(required):
+            destination = destination_root / name
+            if destination.exists():
+                raise FileExistsError(
+                    f"refusing to overwrite existing resume database: {destination}"
+                )
+            temporary = destination_root / f".{name}.restore-incomplete"
+            if temporary.exists():
+                raise FileExistsError(f"stale incomplete resume database: {temporary}")
+            self._copy_sqlite_exact(checkpoint / "recovery" / name, temporary)
+            if _sha256(temporary) != recovery[name]:
+                temporary.unlink()
+                raise ValueError(f"restored recovery database checksum mismatch: {name}")
+            os.replace(temporary, destination)
+        directory_fd = os.open(destination_root, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
         return manifest
 
     def load(

@@ -282,7 +282,12 @@ def build_model_registry(approved: V3ApprovedConfig) -> dict[str, ModelFamilyLay
 
 
 def build_model_registry_2b(config: V3Main2BV1Config | Any) -> dict[str, ModelFamilyLayout]:
-    """Build a 2B registry entirely from a pinned versioned contract."""
+    """Build an N-model registry entirely from a pinned versioned contract.
+
+    The historical function name is retained for checkpoint compatibility.  Execution
+    configs may contain two or three model-owned sources, but every source must expose a
+    complete, approved physical-layout contract before this function is called.
+    """
 
     registry = {
         model.key: ModelFamilyLayout(
@@ -293,7 +298,9 @@ def build_model_registry_2b(config: V3Main2BV1Config | Any) -> dict[str, ModelFa
             tokenizer_id=model.tokenizer_id,
             tokenizer_revision=model.tokenizer_revision,
             layers=model.selected_layers,
-            layer_prefixes=(model.layer_prefix,),
+            layer_prefixes=tuple(
+                getattr(model, "layer_prefixes", None) or (model.layer_prefix,)
+            ),
             residual_pre_suffix=model.residual_pre_suffix,
             residual_mid_suffix=model.residual_mid_suffix,
             hidden_size=model.hidden_size,
@@ -304,20 +311,22 @@ def build_model_registry_2b(config: V3Main2BV1Config | Any) -> dict[str, ModelFa
             head_dim=model.head_dim,
             q_out=model.q_out,
             kv_out=model.kv_out,
-            fused_qkv=False,
-            fused_gate_up=False,
+            fused_qkv=bool(getattr(model, "fused_qkv", False)),
+            fused_gate_up=bool(getattr(model, "fused_gate_up", False)),
         )
         for model in config.models
     }
     model_order = tuple(config.architecture.model_order)
     if tuple(registry) != model_order:
-        raise ValueError(f"2B registry order must be {model_order}")
+        raise ValueError(f"model-owned registry order must be {model_order}")
     targets = [target for layout in registry.values() for target in layout.targets()]
     expected_targets = len(model_order) * 8 * 7
     if len(targets) != expected_targets or len({target.key for target in targets}) != expected_targets:
-        raise ValueError(f"2B registry must contain {expected_targets} unique targets")
+        raise ValueError(
+            f"model-owned registry must contain {expected_targets} unique targets"
+        )
     if {target.logical_name for target in targets} != set(V3_LOGICAL_MATRICES):
-        raise ValueError("2B registry lost a required logical matrix type")
+        raise ValueError("model-owned registry lost a required logical matrix type")
     return registry
 
 
