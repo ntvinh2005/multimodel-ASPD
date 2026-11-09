@@ -8,6 +8,10 @@ import pytest
 import torch
 from torch import nn
 
+from aspd.multimodel.cli.analyze_aspd_v3_causal import (
+    _bootstrap_mean,
+    _component_rows,
+)
 from aspd.multimodel.cli.analyze_aspd_v3_mechanistic import (
     _feature_anchor_lists,
     _intruder_task,
@@ -545,3 +549,41 @@ def test_judge_validation_summary_applies_predeclared_thresholds() -> None:
             }
         )
     assert _summary(rows, contract)["status"] == "JUDGE_VALIDATED"
+
+
+def test_causal_analysis_aggregates_contexts_and_bootstraps_components() -> None:
+    rows = []
+    metadata = {
+        "realized_weight_delta_frobenius_norm": 2.0,
+        "realized_to_intended_norm_ratio": 1.0,
+        "realized_to_intended_cosine": 0.99,
+        "realized_nonzero_fraction": 0.5,
+    }
+    for activity, values in (("active", (2.0, 4.0, 6.0, 8.0)), ("inactive", (1.0,) * 4)):
+        for value in values:
+            rows.append(
+                {
+                    "arm": "full_only_control",
+                    "model": "gemma",
+                    "site": "pre",
+                    "feature": 7,
+                    "frequency_stratum": "medium",
+                    "target": "gemma.L09.q",
+                    "intervention_kind": "learned",
+                    "strength": 1.0,
+                    "control_seed": None,
+                    "context_activity": activity,
+                    "intervention_metadata": metadata,
+                    "kl_clean_to_edited": value,
+                    "logit_delta_rms": value / 2,
+                }
+            )
+    summary = _component_rows(rows)
+    assert len(summary) == 1
+    assert summary[0]["active_kl_clean_to_edited"] == pytest.approx(5.0)
+    assert summary[0]["specificity_kl_clean_to_edited"] == pytest.approx(4.0)
+    assert summary[0]["specificity_kl_clean_to_edited_per_realized_norm"] == pytest.approx(2.0)
+    interval = _bootstrap_mean(np.asarray([1.0, 2.0, 3.0]), seed=61, replicates=100)
+    assert interval["n_components"] == 3
+    assert interval["mean"] == pytest.approx(2.0)
+    assert interval["ci95_lower"] <= interval["mean"] <= interval["ci95_upper"]

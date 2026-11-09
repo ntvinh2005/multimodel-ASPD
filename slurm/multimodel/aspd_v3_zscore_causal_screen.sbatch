@@ -5,7 +5,7 @@
 #SBATCH --array=0-3%4
 #SBATCH --time=01:00:00
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=256G
+#SBATCH --mem=32G
 #SBATCH --output=slurm/logs/aspd-v3-causal-c1-%A_%a.out
 #SBATCH --error=slurm/logs/aspd-v3-causal-c1-%A_%a.err
 
