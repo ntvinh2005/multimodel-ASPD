@@ -10,6 +10,7 @@
 #SBATCH --error=slurm/logs/aspd-v3-intruder-extract-%A_%a.err
 
 set -euo pipefail
+ulimit -c 0
 cd "${SLURM_SUBMIT_DIR:?submit from the final-intruder worktree}"
 module load conda
 source ../../env.sh
