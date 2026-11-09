@@ -179,6 +179,208 @@ def _average_random_rank_one(component_rows: list[dict[str, Any]]) -> list[dict[
     return result
 
 
+def _component_contrasts(component_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    random_means = _average_random_rank_one(component_rows)
+    index = {
+        (
+            row["arm"],
+            row["model"],
+            row["site"],
+            row["feature"],
+            row["intervention_kind"],
+            float(row["strength"]),
+        ): row
+        for row in component_rows + random_means
+    }
+    components = sorted(
+        {
+            (row["arm"], row["model"], row["site"], row["feature"])
+            for row in component_rows
+        }
+    )
+    output = []
+    for arm, model, site, feature in components:
+        learned = index[(arm, model, site, feature, "learned", 1.0)]
+        for control in ("random_rank_one_seed_mean", "random_component"):
+            random_control = index[(arm, model, site, feature, control, 1.0)]
+            for metric in PRIMARY_METRICS:
+                for quantity in ("active", "specificity"):
+                    field = f"{quantity}_{metric}"
+                    normalized_field = f"{field}_per_realized_norm"
+                    output.append(
+                        {
+                            "arm": arm,
+                            "model": model,
+                            "site": site,
+                            "feature": feature,
+                            "frequency_stratum": learned["frequency_stratum"],
+                            "metric": metric,
+                            "quantity": quantity,
+                            "control": control,
+                            "learned_minus_control": learned[field] - random_control[field],
+                            "learned_minus_control_per_realized_norm": (
+                                learned[normalized_field] - random_control[normalized_field]
+                            ),
+                        }
+                    )
+    return output
+
+
+def _robust_component_summary(contrasts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
+    for row in contrasts:
+        grouped[
+            (
+                row["arm"],
+                row["model"],
+                row["site"],
+                row["metric"],
+                row["quantity"],
+                row["control"],
+            )
+        ].append(row)
+    output = []
+    for key, rows in sorted(grouped.items()):
+        values = np.asarray([row["learned_minus_control"] for row in rows], dtype=np.float64)
+        trimmed = np.delete(values, np.argmax(np.abs(values))) if len(values) > 1 else values
+        output.append(
+            {
+                **{
+                    name: value
+                    for name, value in zip(
+                        ("arm", "model", "site", "metric", "quantity", "control"),
+                        key,
+                        strict=True,
+                    )
+                },
+                "n_components": len(values),
+                "mean": float(values.mean()),
+                "median": float(np.median(values)),
+                "fraction_positive": float(np.mean(values > 0)),
+                "mean_after_removing_largest_absolute_value": float(trimmed.mean()),
+            }
+        )
+    return output
+
+
+def _arm_contrasts(
+    contrasts: list[dict[str, Any]], contract: CausalValidationContract
+) -> list[dict[str, Any]]:
+    output = []
+    sequence = 0
+    for model in contract.model_order:
+        for site in ("all", "pre", "mid"):
+            for metric in PRIMARY_METRICS:
+                for quantity in ("active", "specificity"):
+                    for control in ("random_rank_one_seed_mean", "random_component"):
+                        selected = [
+                            row
+                            for row in contrasts
+                            if row["model"] == model
+                            and row["metric"] == metric
+                            and row["quantity"] == quantity
+                            and row["control"] == control
+                            and (site == "all" or row["site"] == site)
+                        ]
+                        strata = sorted(
+                            {(row["site"], row["frequency_stratum"]) for row in selected}
+                        )
+                        by_arm_stratum = {
+                            (arm, stratum): np.asarray(
+                                [
+                                    row["learned_minus_control"]
+                                    for row in selected
+                                    if row["arm"] == arm
+                                    and (row["site"], row["frequency_stratum"]) == stratum
+                                ],
+                                dtype=np.float64,
+                            )
+                            for arm in contract.arms
+                            for stratum in strata
+                        }
+                        if any(not len(values) for values in by_arm_stratum.values()):
+                            raise ValueError("arm contrast is missing a matched sampling stratum")
+                        point = {
+                            arm: _mean(
+                                value
+                                for stratum in strata
+                                for value in by_arm_stratum[(arm, stratum)]
+                            )
+                            for arm in contract.arms
+                        }
+                        rng = np.random.default_rng(contract.bootstrap_seed + sequence)
+                        sequence += 1
+                        bootstrap = np.empty(contract.bootstrap_replicates, dtype=np.float64)
+                        for replicate in range(contract.bootstrap_replicates):
+                            sampled = {}
+                            for arm in contract.arms:
+                                stratum_means = []
+                                stratum_weights = []
+                                for stratum in strata:
+                                    values = by_arm_stratum[(arm, stratum)]
+                                    stratum_means.append(
+                                        float(
+                                            values[
+                                                rng.integers(0, len(values), size=len(values))
+                                            ].mean()
+                                        )
+                                    )
+                                    stratum_weights.append(len(values))
+                                sampled[arm] = float(
+                                    np.average(stratum_means, weights=stratum_weights)
+                                )
+                            bootstrap[replicate] = (
+                                sampled["per_anchor_zscore"] - sampled["full_only_control"]
+                            )
+                        lower, upper = np.quantile(bootstrap, (0.025, 0.975))
+                        output.append(
+                            {
+                                "model": model,
+                                "site": site,
+                                "metric": metric,
+                                "quantity": quantity,
+                                "control": control,
+                                "contrast": "per_anchor_zscore_minus_full_only_control",
+                                "control_mean": point["full_only_control"],
+                                "zscore_mean": point["per_anchor_zscore"],
+                                "mean_difference": (
+                                    point["per_anchor_zscore"] - point["full_only_control"]
+                                ),
+                                "ci95_lower": float(lower),
+                                "ci95_upper": float(upper),
+                                "bootstrap_unit": "component_within_site_frequency_stratum",
+                                "bootstrap_replicates": contract.bootstrap_replicates,
+                            }
+                        )
+    return output
+
+
+def _realized_perturbation_audit(component_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+    for row in component_rows:
+        if float(row["strength"]) == 1.0:
+            grouped[(row["arm"], row["model"], row["intervention_kind"])].append(row)
+    output = []
+    for key, rows in sorted(grouped.items()):
+        ratios = np.asarray([row["realized_to_intended_norm_ratio"] for row in rows])
+        cosines = np.asarray([row["realized_to_intended_cosine"] for row in rows])
+        output.append(
+            {
+                **{
+                    name: value
+                    for name, value in zip(("arm", "model", "intervention_kind"), key, strict=True)
+                },
+                "n": len(rows),
+                "mean_realized_to_intended_norm_ratio": float(ratios.mean()),
+                "minimum_realized_to_intended_norm_ratio": float(ratios.min()),
+                "maximum_realized_to_intended_norm_ratio": float(ratios.max()),
+                "mean_realized_to_intended_cosine": float(cosines.mean()),
+                "minimum_realized_to_intended_cosine": float(cosines.min()),
+            }
+        )
+    return output
+
+
 def _bootstrap_mean(values: np.ndarray, *, seed: int, replicates: int) -> dict[str, Any]:
     values = np.asarray(values, dtype=np.float64)
     if not len(values) or not np.isfinite(values).all():
@@ -502,14 +704,25 @@ def main() -> None:
     rows, manifests = _load_inputs(args.input_dir)
     _validate(rows, contract)
     components = _component_rows(rows)
+    component_contrasts = _component_contrasts(components)
     estimands = _paired_estimands(components, contract)
     args.output_dir.mkdir(parents=True)
     _write_csv(args.output_dir / "component_effects.csv", components)
+    _write_csv(args.output_dir / "component_contrasts.csv", component_contrasts)
     _write_json(
         args.output_dir / "primary_hierarchical_estimands.json",
         _hierarchical_estimands(rows, contract),
     )
     _write_json(args.output_dir / "paired_estimands.json", estimands)
+    _write_json(
+        args.output_dir / "robust_component_summary.json",
+        _robust_component_summary(component_contrasts),
+    )
+    _write_json(args.output_dir / "arm_contrasts.json", _arm_contrasts(component_contrasts, contract))
+    _write_json(
+        args.output_dir / "realized_perturbation_audit.json",
+        _realized_perturbation_audit(components),
+    )
     _write_json(args.output_dir / "dose_response.json", _dose_response(components))
     _write_json(args.output_dir / "cross_model_correspondence.json", _cross_model(components, contract))
     _write_json(
