@@ -13,9 +13,11 @@ import math
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
+import yaml
+from pydantic import BaseModel, ConfigDict
 
 PUBLIC_FORBIDDEN_KEYS = frozenset(
     {
@@ -42,6 +44,39 @@ PATTERN_CATEGORIES = (
     "mixed",
     "unclear",
 )
+
+
+class HumanLlamaJudgeContract(BaseModel):
+    """Single-presentation exploratory Llama judge requested alongside human scoring."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1]
+    status: Literal["RESEARCHER_AUTHORIZED_EXPLORATORY_RAW_LLM_JUDGE"]
+    experiment_family: Literal["aspd_v3_human_items_llama70b_raw_v1"]
+    judge_model_id: Literal["meta-llama/Llama-3.3-70B-Instruct"]
+    judge_revision: Literal["6f6073b423013f6a7d4d9f39144961bfbfbc386b"]
+    local_files_only: Literal[True]
+    paid_api: Literal[False]
+    forbidden_model_substrings: tuple[Literal["qwen"]]
+    dtype: Literal["bfloat16"]
+    decoding: Literal["greedy"]
+    batch_size: Literal[4]
+    max_new_tokens: Literal[96]
+    forced_choice: Literal[True]
+    cyclic_rotations: Literal[1]
+    position_bias_gate: Literal[False]
+    prompt_version: Literal["original_aspd_single_forced_choice_v1"]
+    bootstrap_seed: Literal[113]
+    bootstrap_replicates: Literal[5_000]
+
+    @classmethod
+    def load(cls, path: str | Path) -> HumanLlamaJudgeContract:
+        return cls.model_validate(yaml.safe_load(Path(path).read_text(encoding="utf-8")))
+
+    def fingerprint(self) -> str:
+        encoded = json.dumps(self.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode()).hexdigest()
 
 
 def canonical_json_bytes(value: Any) -> bytes:

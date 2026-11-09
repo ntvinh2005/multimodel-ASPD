@@ -7,8 +7,16 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from aspd.multimodel.cli.judge_aspd_v3_human_llama import (
+    _messages as _llama_messages,
+)
+from aspd.multimodel.cli.judge_aspd_v3_human_llama import _parse as _parse_llama
+from aspd.multimodel.cli.judge_aspd_v3_human_llama import (
+    _summary as _llama_summary,
+)
 from aspd.multimodel.cli.prepare_aspd_v3_human_interpretability import _build
 from aspd.multimodel.v3.human_interpretability import (
+    HumanLlamaJudgeContract,
     balanced_positions,
     balanced_round_robin,
     bootstrap_group,
@@ -27,6 +35,9 @@ from aspd.multimodel.v3.mechanistic_validation import HumanInterpretabilityContr
 ROOT = Path(__file__).resolve().parents[1]
 PROTOCOL = ROOT / "configs/multimodel/aspd_v3/human_interpretability_v1.yaml"
 HTML = ROOT / "aspd/multimodel/assets/aspd_v3_human_evaluation.html"
+LLAMA_CONTRACT = (
+    ROOT / "configs/multimodel/aspd_v3/human_interpretability_llama70b_raw_v1.yaml"
+)
 
 
 def _parts(anchor: str = "token") -> dict[str, object]:
@@ -342,3 +353,51 @@ def test_representative_package_build_is_blinded_and_capped_at_fifty(tmp_path: P
     answer = (output / "protected/answer_key.jsonl").read_text()
     assert "full_only_control" in answer and "per_anchor_zscore" in answer
     assert (output / "protected/answer_key.jsonl").stat().st_mode & 0o777 == 0o600
+
+
+def test_raw_llama_judge_is_single_presentation_non_qwen_and_has_no_bias_gate() -> None:
+    contract = HumanLlamaJudgeContract.load(LLAMA_CONTRACT)
+    assert contract.cyclic_rotations == 1
+    assert contract.position_bias_gate is False
+    assert contract.paid_api is False
+    assert "qwen" not in contract.judge_model_id.casefold()
+
+
+def test_raw_llama_prompt_uses_only_public_context_and_strict_parser() -> None:
+    item = _public_item()
+    messages = _llama_messages(item)
+    prompt = "\n".join(row["content"] for row in messages)
+    assert "arm" not in prompt
+    assert "feature_fires" not in prompt
+    assert _parse_llama('{"intruder_position": 3, "reason": "different topic"}')[
+        "intruder_position"
+    ] == 3
+    assert not _parse_llama('{"intruder_position": null, "reason": "unclear"}')["valid"]
+    assert not _parse_llama('{"intruder_position": 6, "reason": "bad"}')["valid"]
+
+
+def test_raw_llama_summary_reports_score_even_without_position_gate() -> None:
+    contract = HumanLlamaJudgeContract.load(LLAMA_CONTRACT)
+    rows = []
+    for arm in ("full_only_control", "per_anchor_zscore"):
+        for site in ("pre", "mid"):
+            for index in range(3):
+                rows.append(
+                    {
+                        "parent_uid": f"{arm}-{site}-{index}",
+                        "repeat_of_parent_uid": None,
+                        "arm": arm,
+                        "site": site,
+                        "frequency_stratum": ("low", "medium", "high")[index],
+                        "feature_fires": index + 4,
+                        "correct": index != 1,
+                        "valid": True,
+                        "predicted_position": index + 1,
+                    }
+                )
+    result = _llama_summary(rows, contract)
+    assert result["status"] == "EXPLORATORY_RAW_LLM_SCORE_COMPLETE_NO_BIAS_GATE"
+    assert result["position_bias_gate_applied"] is False
+    assert result["groups"]["per_anchor_zscore.pre"]["raw_accuracy"] == pytest.approx(
+        2 / 3
+    )
