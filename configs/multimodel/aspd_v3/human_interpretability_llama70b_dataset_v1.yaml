@@ -1,0 +1,11 @@
+schema_version: 1
+status: RESEARCHER_AUTHORIZED_EXPLORATORY_RAW_LLM_DATASET
+experiment_family: aspd_v3_llama70b_intruder_dataset_v1
+arms: [full_only_control, per_anchor_zscore]
+sites: [pre, mid]
+features_per_arm_site: 50
+contexts_per_feature: 4
+frequency_strata: [low, medium, high]
+feature_sampling_seed: 127
+intruder_selection_seed: 131
+presentation_seed: 137

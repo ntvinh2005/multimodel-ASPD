@@ -17,6 +17,7 @@ from aspd.multimodel.cli.judge_aspd_v3_human_llama import (
 from aspd.multimodel.cli.prepare_aspd_v3_human_interpretability import _build
 from aspd.multimodel.v3.human_interpretability import (
     HumanLlamaJudgeContract,
+    LlamaIntruderDatasetContract,
     balanced_positions,
     balanced_round_robin,
     bootstrap_group,
@@ -37,6 +38,9 @@ PROTOCOL = ROOT / "configs/multimodel/aspd_v3/human_interpretability_v1.yaml"
 HTML = ROOT / "aspd/multimodel/assets/aspd_v3_human_evaluation.html"
 LLAMA_CONTRACT = (
     ROOT / "configs/multimodel/aspd_v3/human_interpretability_llama70b_raw_v1.yaml"
+)
+LLAMA_DATASET_CONTRACT = (
+    ROOT / "configs/multimodel/aspd_v3/human_interpretability_llama70b_dataset_v1.yaml"
 )
 
 
@@ -87,6 +91,12 @@ def test_human_contract_is_bounded_to_fifty_displays_and_prohibits_training() ->
     assert contract.training_authorized_by_this_contract is False
     assert contract.final_semantic_judge == "human_researcher"
     assert contract.forbidden_model_substrings == ("qwen",)
+
+
+def test_llama_dataset_contract_freezes_two_hundred_unique_features() -> None:
+    contract = LlamaIntruderDatasetContract.load(LLAMA_DATASET_CONTRACT)
+    assert contract.features_per_arm_site * len(contract.arms) * len(contract.sites) == 200
+    assert contract.contexts_per_feature == 4
 
 
 def test_freeze_exclusions_is_sorted_deduplicated_and_hashed(tmp_path: Path) -> None:

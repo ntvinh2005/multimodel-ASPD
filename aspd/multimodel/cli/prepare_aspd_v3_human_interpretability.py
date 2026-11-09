@@ -160,6 +160,9 @@ def _build_group(
     site: str,
     directory: Path,
     contract: HumanInterpretabilityContract,
+    sample_size: int | None = None,
+    feature_sampling_seed: int | None = None,
+    intruder_selection_seed: int | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     indptr, indices, _values, shape = _load_sparse(directory / f"{site}_natural_firings.npz")
     documents_rows = _json(directory / "documents.json")
@@ -174,12 +177,14 @@ def _build_group(
         document_counts,
         minimum_fires=contract.minimum_feature_fires,
         minimum_documents=contract.minimum_unique_documents,
-        sample_size=contract.features_per_arm_site,
-        seed=contract.feature_sampling_seed + contract.arms.index(arm) * 100 + (site == "mid"),
+        sample_size=sample_size or contract.features_per_arm_site,
+        seed=(feature_sampling_seed or contract.feature_sampling_seed)
+        + contract.arms.index(arm) * 100
+        + (site == "mid"),
     )
     retained = _contexts(directory / f"{site}_feature_contexts.jsonl")
     rng = np.random.default_rng(
-        contract.intruder_selection_seed
+        (intruder_selection_seed or contract.intruder_selection_seed)
         + contract.arms.index(arm) * 1_000
         + (100 if site == "mid" else 0)
     )

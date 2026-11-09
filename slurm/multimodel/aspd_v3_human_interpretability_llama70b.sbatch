@@ -15,7 +15,7 @@ module load conda
 source ../../env.sh
 
 PYTHON=../.venv/bin/python
-PACKAGE=/orange/thai/vinhnguyen1/aspd_v3/human_interpretability_v1/package
+PACKAGE=/orange/thai/vinhnguyen1/aspd_v3/human_interpretability_v1/llama70b_dataset_v2
 PUBLIC="${PACKAGE}/public/blinded_items.json"
 KEY="${PACKAGE}/protected/answer_key.jsonl"
 CONTRACT=configs/multimodel/aspd_v3/human_interpretability_llama70b_raw_v1.yaml

@@ -79,6 +79,32 @@ class HumanLlamaJudgeContract(BaseModel):
         return hashlib.sha256(encoded.encode()).hexdigest()
 
 
+class LlamaIntruderDatasetContract(BaseModel):
+    """Frozen 200-feature sampling contract for the exploratory raw Llama judge."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1]
+    status: Literal["RESEARCHER_AUTHORIZED_EXPLORATORY_RAW_LLM_DATASET"]
+    experiment_family: Literal["aspd_v3_llama70b_intruder_dataset_v1"]
+    arms: tuple[Literal["full_only_control"], Literal["per_anchor_zscore"]]
+    sites: tuple[Literal["pre"], Literal["mid"]]
+    features_per_arm_site: Literal[50]
+    contexts_per_feature: Literal[4]
+    frequency_strata: tuple[Literal["low"], Literal["medium"], Literal["high"]]
+    feature_sampling_seed: Literal[127]
+    intruder_selection_seed: Literal[131]
+    presentation_seed: Literal[137]
+
+    @classmethod
+    def load(cls, path: str | Path) -> LlamaIntruderDatasetContract:
+        return cls.model_validate(yaml.safe_load(Path(path).read_text(encoding="utf-8")))
+
+    def fingerprint(self) -> str:
+        encoded = json.dumps(self.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode()).hexdigest()
+
+
 def canonical_json_bytes(value: Any) -> bytes:
     """Return the on-disk canonical JSON representation used by frozen artifacts."""
 
