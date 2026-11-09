@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "status": "EXPLORATORY_BLINDED_READER_AUDIT_COMPLETE",
+  "source_job_id": "50512144",
+  "source_dataset_sha256": "74221ed2632aa1f77a1852b205d1d488bb8fd21aedd87ac338b39f1a3ddd8de8",
+  "selection": "Judge Set 001 through Judge Set 040, fixed before answer-key access",
+  "view": "compact contexts with highlighted anchor",
+  "answer_key_access": "after all choices and abstentions were frozen",
+  "choices": {
+    "Judge Set 006": 5,
+    "Judge Set 008": 3,
+    "Judge Set 009": 5,
+    "Judge Set 013": 1,
+    "Judge Set 017": 2,
+    "Judge Set 018": 2,
+    "Judge Set 030": 2,
+    "Judge Set 033": 3,
+    "Judge Set 039": 2
+  },
+  "all_other_items_abstained": true,
+  "results": {
+    "audited": 40,
+    "forced_choices": 9,
+    "abstentions": 31,
+    "correct_forced_choices": 4,
+    "conditional_accuracy": 0.4444444444444444,
+    "intention_to_evaluate_accuracy": 0.1,
+    "groups": {
+      "full_only_control.pre": {"audited": 10, "forced": 1, "correct": 0},
+      "full_only_control.mid": {"audited": 10, "forced": 2, "correct": 0},
+      "per_anchor_zscore.pre": {"audited": 10, "forced": 2, "correct": 1},
+      "per_anchor_zscore.mid": {"audited": 10, "forced": 4, "correct": 3}
+    }
+  },
+  "llama_position_audit": {
+    "valid_responses": 194,
+    "true_position_histogram": {"1": 40, "2": 40, "3": 40, "4": 40, "5": 40},
+    "prediction_position_histogram": {"1": 8, "2": 113, "3": 32, "4": 23, "5": 18},
+    "uniform_preference_chi_square": 185.1237113402062,
+    "uniform_preference_p_value": 5.91555742489882e-39,
+    "position_2_prediction_precision": 0.21238938053097345,
+    "position_2_true_answer_recall": 0.6
+  },
+  "conclusion": "Llama has genuine position-2 preference; low score also reflects frequent target incoherence and non-unique visible intruders. The small reader audit offers only exploratory evidence that z-score items may be more identifiable."
+}
