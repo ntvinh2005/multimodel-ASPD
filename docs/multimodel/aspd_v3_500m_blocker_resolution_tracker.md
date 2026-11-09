@@ -21,9 +21,8 @@ detached binary internal support. No main-training job has been submitted.
   Neither satisfies the provisional 1 TiB safety reservation.
 - Inodes were not the immediate constraint: `/orange/thai` reported 13,422,163,115 free and
   `/blue/thai` reported 4,107,495,892 free.
-- User quotas reported usage but no explicit user soft/hard byte or inode limits. The attempted
-  group lookup with group name `thai` was invalid and must be repeated with the actual allocation
-  group/project identifier.
+- User and numeric group-3059 quota queries reported usage but no explicit soft/hard byte or inode
+  limits. Filesystem-wide free capacity is the current constraint.
 
 ## Blockers
 
@@ -32,7 +31,7 @@ detached binary internal support. No main-training job has been submitted.
 | 1 | Preflight authorization deadlock | Main authorization, including prior preflight PASS, ran before mode dispatch; preflight had no independent bounded authorization or pinned result schema. | `main500m_config.py`, `train_aspd_v3_2b.py`, draft YAML, `test_multimodel_v3_2b.py` | Six focused CPU tests; full regression pending at this checkpoint. | `FIXED_TESTED` | Researcher must later authorize an exact model-3 preflight budget and namespace; the checked-in draft remains pending. |
 | 2 | Third-model selection | Exact model, revision, tokenizer, layers, and hook layout are not approved. | None yet | Not executable without approval. | `BLOCKED_RESEARCHER_DECISION` | Exact model/revision/tokenizer/layers and license/access acceptance. |
 | 3 | Three-way alignment | Exact-prefix contract is implemented, but no approved third tokenizer has been tested; one legacy policy-name inconsistency is confirmed. | None yet | Synthetic coverage exists; real three-tokenizer evidence absent. | `BLOCKED_EXTERNAL_DEPENDENCY` | Model 3 first, then authorization for bounded tokenizer validation. |
-| 4 | Storage capacity | Live free space is below the provisional 1 TiB reservation; safe reclamation candidates are not yet inventoried. | None yet | Live `df`, inode, and user-quota queries completed. | `AUDITING` | Exact deletion targets require separate approval; storage reservation remains a decision. |
+| 4 | Storage capacity | Live free space is below the 1 TiB reservation. A dry-run inventory identifies a narrowly sufficient `/blue` Tier A, but no deletion or dedicated reservation is approved. | Storage proposal and machine-readable inventory. | Live `df`/inode/quota, exact `du`, COMPLETE markers, report and manifest SHA-256 checks. | `BLOCKED_STORAGE` | Exact deletion targets or additional capacity, then remeasurement and path approval. |
 | 5 | Real three-model GPU preflight | Synthetic distributed tests do not validate three real source models. | None yet | Not run. | `BLOCKED_RESEARCHER_DECISION` | Model 3, alignment, and bounded preflight authorization. |
 | 6 | Exact checkpoint resume | Synthetic three-rank resume passed previously; real three-model GPU resume remains untested. | None yet | Not run in this branch. | `BLOCKED_EXTERNAL_DEPENDENCY` | Real-model preflight prerequisites and bounded GPU authorization. |
 | 7 | Sustained-collapse protection | Monitor is stateless; a collapse alert does not cause a checkpointed controlled pause. | None yet | Existing single-snapshot tests only. | `AUDITING` | Threshold/action policy must remain versioned; final threshold approval required. |
@@ -72,3 +71,18 @@ Scientific semantics changed: no. The encoder, gate equations, z-score axis and 
 BatchTopK, loss definitions, C, K, source freezing, target count, and exposure budget are
 unchanged. The checked-in configuration remains fail-closed and does not authorize preflight or
 main execution.
+
+The committed CLI was also invoked directly in `--mode preflight` without distributed
+environment variables. It failed before NCCL/source loading with all four expected blockers:
+`MODEL_THREE_BLOCKED`, `MODEL_THREE_APPROVAL_PENDING`, `ALIGNMENT_BLOCKED`, and
+`BOUNDED_PREFLIGHT_NOT_AUTHORIZED`.
+
+## Blocker 4 audit record
+
+The read-only inventory is documented in
+`aspd_v3_500m_storage_reclamation_proposal.md` and its JSON companion. No files were removed.
+The seven recommended `/blue` Tier A targets total 731,456,405,504 bytes and would project
+1,112,878,538,752 bytes free from this snapshot—only 13,366,910,976 bytes above 1 TiB. That is
+mathematically sufficient but operationally fragile under concurrent storage use. `/orange` cannot
+reach the reservation using the identified safe candidates. Storage therefore remains blocked
+pending exact-target approval plus additional margin or a dedicated allocation.
