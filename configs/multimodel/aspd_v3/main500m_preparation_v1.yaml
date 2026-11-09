@@ -184,6 +184,7 @@ runtime:
   checkpoint_root: /orange/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/checkpoints
   dataset_manifest: /orange/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/data/pile_uncopyrighted/manifest.json
   alignment_manifest: /orange/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/data/pile_uncopyrighted/alignment_manifest.json
+  preflight_output_root: /orange/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/preflight
   preflight_evidence: /orange/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/preflight/preflight_report.json
   max_preflight_steps: 20
   max_preflight_minutes: 45
@@ -198,7 +199,17 @@ approvals:
     researcher_decision: null
   exact_resume: SYNTHETIC_VALIDATED_REAL_THREE_MODEL_PENDING
   storage_reservation: STORAGE_BLOCKED
-  three_model_gpu_preflight: PENDING_MODEL_THREE
+  bounded_preflight:
+    status: PENDING_RESEARCHER_APPROVAL
+    optimizer_steps: null
+    output_namespace: null
+    authorization_reference: null
+  three_model_gpu_preflight:
+    status: PENDING_MODEL_THREE
+    artifact_path: null
+    artifact_sha256: null
+    execution_contract_fingerprint: null
+    optimizer_steps: null
   full_training: MAIN_500M_NOT_AUTHORIZED
 
 evaluation_status: HUMAN_INTERPRETABILITY_DECISION_PENDING

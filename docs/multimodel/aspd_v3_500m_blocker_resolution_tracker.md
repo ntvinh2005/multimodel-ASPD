@@ -1,0 +1,74 @@
+# ASPD v3.1 500M blocker-resolution tracker
+
+Status date: 2026-11-09 (America/New_York)
+
+Branch: `aspd-v3.1-main500m-blocker-resolution`
+
+Base commit: `738f1a0d8742ce6c97c74cadb2550ffade648b19`
+
+The canonical scientific contract remains the three-model hierarchical Transformer encoder with
+per-anchor feature-axis z-score, ReLU, pool-wide BatchTopK, continuous activation code, and
+detached binary internal support. No main-training job has been submitted.
+
+## Live audit snapshot
+
+- Slurm query at `2026-11-09T18:32:46-05:00`: no jobs owned by the researcher were queued or
+  running. The sandboxed query failed, so this statement uses the subsequent live scheduler
+  query outside the sandbox.
+- `hpg-b200` was up with 60 nodes advertising eight B200 GPUs per node. This is partition
+  inventory, not an availability or fair-share guarantee.
+- `/orange/thai`: 213,821,587,456 bytes available; `/blue/thai`: 381,422,133,248 bytes available.
+  Neither satisfies the provisional 1 TiB safety reservation.
+- Inodes were not the immediate constraint: `/orange/thai` reported 13,422,163,115 free and
+  `/blue/thai` reported 4,107,495,892 free.
+- User quotas reported usage but no explicit user soft/hard byte or inode limits. The attempted
+  group lookup with group name `thai` was invalid and must be repeated with the actual allocation
+  group/project identifier.
+
+## Blockers
+
+| ID | Blocker | Root cause | Files changed | Tests | Status | Approval needed |
+|---|---|---|---|---|---|---|
+| 1 | Preflight authorization deadlock | Main authorization, including prior preflight PASS, ran before mode dispatch; preflight had no independent bounded authorization or pinned result schema. | `main500m_config.py`, `train_aspd_v3_2b.py`, draft YAML, `test_multimodel_v3_2b.py` | Six focused CPU tests; full regression pending at this checkpoint. | `FIXED_TESTED` | Researcher must later authorize an exact model-3 preflight budget and namespace; the checked-in draft remains pending. |
+| 2 | Third-model selection | Exact model, revision, tokenizer, layers, and hook layout are not approved. | None yet | Not executable without approval. | `BLOCKED_RESEARCHER_DECISION` | Exact model/revision/tokenizer/layers and license/access acceptance. |
+| 3 | Three-way alignment | Exact-prefix contract is implemented, but no approved third tokenizer has been tested; one legacy policy-name inconsistency is confirmed. | None yet | Synthetic coverage exists; real three-tokenizer evidence absent. | `BLOCKED_EXTERNAL_DEPENDENCY` | Model 3 first, then authorization for bounded tokenizer validation. |
+| 4 | Storage capacity | Live free space is below the provisional 1 TiB reservation; safe reclamation candidates are not yet inventoried. | None yet | Live `df`, inode, and user-quota queries completed. | `AUDITING` | Exact deletion targets require separate approval; storage reservation remains a decision. |
+| 5 | Real three-model GPU preflight | Synthetic distributed tests do not validate three real source models. | None yet | Not run. | `BLOCKED_RESEARCHER_DECISION` | Model 3, alignment, and bounded preflight authorization. |
+| 6 | Exact checkpoint resume | Synthetic three-rank resume passed previously; real three-model GPU resume remains untested. | None yet | Not run in this branch. | `BLOCKED_EXTERNAL_DEPENDENCY` | Real-model preflight prerequisites and bounded GPU authorization. |
+| 7 | Sustained-collapse protection | Monitor is stateless; a collapse alert does not cause a checkpointed controlled pause. | None yet | Existing single-snapshot tests only. | `AUDITING` | Threshold/action policy must remain versioned; final threshold approval required. |
+| 8 | Staged milestones | Milestones are configured but the runner does not enforce checkpointed review pauses. | None yet | No enforcement test yet. | `AUDITING` | Continuation decisions at configured milestones. |
+| 9 | Human interpretability | Interface/protocol exist, but no versioned researcher response or decision artifact is present; completion status schema is too narrow. | None yet | Preparation tests exist; no scientific response evidence. | `BLOCKED_RESEARCHER_DECISION` | Researcher completion and explicit semantic-risk decision. |
+| 10 | Slurm/runtime reliability | Main proposal exists; preflight proposal and bounded signal/requeue evidence remain incomplete. | None yet | Shell/runtime audit pending. | `AUDITING` | No main submission authorization exists. |
+| 11 | Specification/metadata consistency | Confirmed alignment policy-name mismatch and human-status limitation; broader notation/config/runtime comparison remains in progress. | None yet | Audit in progress. | `AUDITING` | Documentation corrections do not require scientific approval; semantic changes would. |
+
+## Blocker 1 resolution record
+
+What was wrong: the v3.1 runner called full main authorization before it knew whether the request
+was a preflight. Full authorization required an already-passed preflight, creating a circular
+dependency.
+
+What changed: bounded preflight authorization and completed preflight evidence are now separate,
+typed records. Preflight requires approved source and alignment contracts, an exact budget of at
+most 20 optimizer steps, model-owned checkpointing, a dedicated non-existing namespace, and no
+external resume. Main independently requires every approval plus a SHA-256-pinned, semantically
+validated preflight report. The preflight-to-main comparison uses an immutable execution-contract
+fingerprint that excludes mutable approvals. Approved v3.1 source contracts reject Qwen before
+execution.
+
+Tests run:
+
+```text
+/blue/thai/vinhnguyen1/multimodel-ASPD/repo/.venv/bin/pytest -q \
+  tests/test_multimodel_v3_2b.py -k 'main500m'
+6 passed, 17 deselected
+```
+
+`ruff` passed. The remaining 22 tests in the file passed inside the sandbox, while the existing
+three-process Gloo test was blocked there by socket permissions. Its escalated retry initialized
+without that permission error but did not complete after 147.58 seconds and was interrupted; it is
+therefore recorded as inconclusive, not passing evidence.
+
+Scientific semantics changed: no. The encoder, gate equations, z-score axis and epsilon,
+BatchTopK, loss definitions, C, K, source freezing, target count, and exposure budget are
+unchanged. The checked-in configuration remains fail-closed and does not authorize preflight or
+main execution.

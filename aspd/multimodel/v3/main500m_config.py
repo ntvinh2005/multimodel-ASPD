@@ -62,6 +62,13 @@ class Main500MSource(BaseModel):
 
     @model_validator(mode="after")
     def validate_source(self) -> Main500MSource:
+        identity = " ".join(
+            str(value)
+            for value in (self.key, self.model_id, self.tokenizer_id, self.family)
+            if value is not None
+        ).lower()
+        if "qwen" in identity:
+            raise ValueError("Qwen is forbidden in the ASPD v3.1 main source contract")
         scientific = {
             "model_id": self.model_id,
             "revision": self.revision,
@@ -110,6 +117,13 @@ class Main500MSource(BaseModel):
             raise ValueError(f"{self.key} selected layers exceed the source backbone")
         if self.frozen is not True:
             raise ValueError(f"{self.key} source weights must remain frozen")
+        assert self.layer_prefixes is not None
+        if not self.layer_prefixes or any(not value.strip() for value in self.layer_prefixes):
+            raise ValueError(f"{self.key} physical layer prefixes must be non-empty")
+        if not str(self.residual_pre_suffix).strip() or not str(
+            self.residual_mid_suffix
+        ).strip():
+            raise ValueError(f"{self.key} PRE/MID hook suffixes must be non-empty")
         return self
 
     def _required(self, name: str) -> int:
@@ -286,6 +300,7 @@ class Main500MRuntime(BaseModel):
     checkpoint_root: str
     dataset_manifest: str
     alignment_manifest: str
+    preflight_output_root: str
     preflight_evidence: str
     max_preflight_steps: int = Field(gt=0, le=20)
     max_preflight_minutes: int = Field(gt=0, le=45)
@@ -297,12 +312,75 @@ class Main500MRuntime(BaseModel):
             self.checkpoint_root,
             self.dataset_manifest,
             self.alignment_manifest,
+            self.preflight_output_root,
             self.preflight_evidence,
         )
         if any("aspd_v3/main500m_preparation_v1" not in value for value in paths):
             raise ValueError("main 500M paths must use the isolated preparation namespace")
         if any(value.startswith(("~", "/home/")) for value in paths):
             raise ValueError("large ASPD artifacts must not default to HOME")
+        return self
+
+
+class Main500MBoundedPreflightAuthorization(BaseModel):
+    """Researcher authorization for one bounded engineering preflight only."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["PENDING_RESEARCHER_APPROVAL", "AUTHORIZED"]
+    optimizer_steps: int | None = Field(default=None, ge=3, le=20)
+    output_namespace: str | None = None
+    authorization_reference: str | None = None
+
+    @model_validator(mode="after")
+    def validate_authorization(self) -> Main500MBoundedPreflightAuthorization:
+        evidence = (
+            self.optimizer_steps,
+            self.output_namespace,
+            self.authorization_reference,
+        )
+        if self.status == "PENDING_RESEARCHER_APPROVAL":
+            if any(value is not None for value in evidence):
+                raise ValueError(
+                    "pending bounded preflight must not contain authorization evidence"
+                )
+        elif any(value is None or not str(value).strip() for value in evidence):
+            raise ValueError(
+                "authorized bounded preflight requires an exact step budget, output "
+                "namespace, and authorization reference"
+            )
+        return self
+
+
+class Main500MGPUPreflightEvidence(BaseModel):
+    """Pinned evidence consumed by main authorization after preflight completes."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["PENDING_MODEL_THREE", "PASSED"]
+    artifact_path: str | None = None
+    artifact_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    execution_contract_fingerprint: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
+    optimizer_steps: int | None = Field(default=None, ge=3, le=20)
+
+    @model_validator(mode="after")
+    def validate_evidence(self) -> Main500MGPUPreflightEvidence:
+        evidence = (
+            self.artifact_path,
+            self.artifact_sha256,
+            self.execution_contract_fingerprint,
+            self.optimizer_steps,
+        )
+        if self.status == "PENDING_MODEL_THREE":
+            if any(value is not None for value in evidence):
+                raise ValueError("pending three-model preflight must not contain PASS evidence")
+        elif any(value is None or not str(value).strip() for value in evidence):
+            raise ValueError(
+                "passed three-model preflight requires a pinned artifact, contract "
+                "fingerprint, and optimizer-step count"
+            )
         return self
 
 
@@ -344,7 +422,8 @@ class Main500MApprovals(BaseModel):
         "VALIDATED_THREE_MODEL_GPU",
     ]
     storage_reservation: Literal["STORAGE_BLOCKED", "APPROVED"]
-    three_model_gpu_preflight: Literal["PENDING_MODEL_THREE", "PASSED"]
+    bounded_preflight: Main500MBoundedPreflightAuthorization
+    three_model_gpu_preflight: Main500MGPUPreflightEvidence
     full_training: Literal["MAIN_500M_NOT_AUTHORIZED", "AUTHORIZED"]
 
 
@@ -384,8 +463,20 @@ class V31Main500MConfig(BaseModel):
                 raise ValueError("third-model approval cannot precede a complete source contract")
         elif third.approval_status != "APPROVED" or self.approvals.third_model != "APPROVED":
             raise ValueError("the third model requires explicit researcher approval")
+        preflight = self.approvals.bounded_preflight
+        if preflight.status == "AUTHORIZED":
+            if preflight.output_namespace != self.runtime.preflight_output_root:
+                raise ValueError(
+                    "bounded-preflight authorization must pin the configured output namespace"
+                )
+            if Path(self.runtime.preflight_evidence).parent != Path(
+                self.runtime.preflight_output_root
+            ):
+                raise ValueError(
+                    "preflight evidence must be inside the dedicated preflight namespace"
+                )
         if self.full_training_authorized:
-            self.require_execution_authorized()
+            self.require_main_authorized()
         elif self.scientific_status != "MAIN_500M_NOT_AUTHORIZED":
             raise ValueError("unauthorized config must remain MAIN_500M_NOT_AUTHORIZED")
         return self
@@ -395,6 +486,20 @@ class V31Main500MConfig(BaseModel):
 
     def fingerprint(self) -> str:
         encoded = json.dumps(self.payload(), sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode()).hexdigest()
+
+    def execution_contract_fingerprint(self) -> str:
+        """Hash immutable scientific/runtime inputs, excluding mutable approvals."""
+
+        payload = self.payload()
+        for key in (
+            "scientific_status",
+            "full_training_authorized",
+            "approvals",
+            "evaluation_status",
+        ):
+            payload.pop(key)
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(encoded.encode()).hexdigest()
 
     def readiness_blockers(self) -> list[str]:
@@ -409,7 +514,7 @@ class V31Main500MConfig(BaseModel):
             blockers.append("STORAGE_BLOCKED")
         if self.approvals.human_interpretability.status != "APPROVED":
             blockers.append("HUMAN_INTERPRETABILITY_APPROVAL_PENDING")
-        if self.approvals.three_model_gpu_preflight != "PASSED":
+        if self.approvals.three_model_gpu_preflight.status != "PASSED":
             blockers.append("THREE_MODEL_GPU_PREFLIGHT_PENDING")
         if (
             self.approvals.full_training != "AUTHORIZED"
@@ -418,12 +523,113 @@ class V31Main500MConfig(BaseModel):
             blockers.append("MAIN_500M_NOT_AUTHORIZED")
         return blockers
 
-    def require_execution_authorized(self) -> None:
+    def require_preflight_authorized(
+        self,
+        *,
+        optimizer_steps: int,
+        run_dir: str | Path,
+    ) -> None:
+        """Authorize one exact, bounded preflight without requiring prior PASS evidence."""
+
+        blockers: list[str] = []
+        if self.models[2].approval_status != "APPROVED":
+            blockers.append("MODEL_THREE_BLOCKED")
+        if self.approvals.third_model != "APPROVED":
+            blockers.append("MODEL_THREE_APPROVAL_PENDING")
+        if self.approvals.three_way_alignment != "APPROVED":
+            blockers.append("ALIGNMENT_BLOCKED")
+        authorization = self.approvals.bounded_preflight
+        if authorization.status != "AUTHORIZED":
+            blockers.append("BOUNDED_PREFLIGHT_NOT_AUTHORIZED")
+        if blockers:
+            raise RuntimeError(
+                "ASPD v3.1 bounded preflight is fail-closed: " + ", ".join(blockers)
+            )
+        assert authorization.optimizer_steps is not None
+        assert authorization.output_namespace is not None
+        if optimizer_steps != authorization.optimizer_steps:
+            raise RuntimeError(
+                "ASPD v3.1 bounded preflight step budget differs from its authorization"
+            )
+        if optimizer_steps > min(20, self.runtime.max_preflight_steps):
+            raise RuntimeError("ASPD v3.1 bounded preflight exceeds 20 optimizer steps")
+        run_path = Path(run_dir)
+        if run_path != Path(authorization.output_namespace):
+            raise RuntimeError(
+                "ASPD v3.1 bounded preflight must use its dedicated output namespace"
+            )
+        if run_path.exists():
+            raise RuntimeError(
+                "ASPD v3.1 bounded preflight refuses to overwrite an existing namespace"
+            )
+
+    def validate_preflight_evidence(self) -> dict[str, Any]:
+        evidence = self.approvals.three_model_gpu_preflight
+        if evidence.status != "PASSED":
+            raise RuntimeError("THREE_MODEL_GPU_PREFLIGHT_PENDING")
+        assert evidence.artifact_path is not None
+        assert evidence.artifact_sha256 is not None
+        assert evidence.execution_contract_fingerprint is not None
+        assert evidence.optimizer_steps is not None
+        artifact = Path(evidence.artifact_path)
+        if artifact != Path(self.runtime.preflight_evidence) or not artifact.is_file():
+            raise RuntimeError("THREE_MODEL_GPU_PREFLIGHT_ARTIFACT_MISSING")
+        observed_sha256 = hashlib.sha256(artifact.read_bytes()).hexdigest()
+        if observed_sha256 != evidence.artifact_sha256:
+            raise RuntimeError("THREE_MODEL_GPU_PREFLIGHT_ARTIFACT_HASH_MISMATCH")
+        report = json.loads(artifact.read_text(encoding="utf-8"))
+        expected = {
+            "status": "PASS",
+            "mode": "preflight",
+            "strategy": "model_owned",
+            "world_size": 3,
+            "logical_target_count": 168,
+            "optimizer_steps": evidence.optimizer_steps,
+            "execution_contract_fingerprint": self.execution_contract_fingerprint(),
+            "dcp_save_reload_resume_update": "PASS",
+            "checkpoint_parameter_and_adam_restore_probe": "PASS",
+        }
+        mismatch = {
+            key: {"expected": value, "observed": report.get(key)}
+            for key, value in expected.items()
+            if report.get(key) != value
+        }
+        if evidence.execution_contract_fingerprint != self.execution_contract_fingerprint():
+            mismatch["approval.execution_contract_fingerprint"] = {
+                "expected": self.execution_contract_fingerprint(),
+                "observed": evidence.execution_contract_fingerprint,
+            }
+        source_correctness = report.get("source_correctness")
+        if not isinstance(source_correctness, list) or len(source_correctness) != 3:
+            mismatch["source_correctness"] = "must contain exactly three source reports"
+        else:
+            for index, source in enumerate(source_correctness):
+                if not isinstance(source, dict) or any(
+                    source.get(key) != value
+                    for key, value in {
+                        "status": "PASS",
+                        "targets": 56,
+                        "frozen_parameters": "PASS",
+                    }.items()
+                ):
+                    mismatch[f"source_correctness[{index}]"] = source
+        checkpoint_manifest = report.get("checkpoint_manifest")
+        if not isinstance(checkpoint_manifest, dict) or any(
+            checkpoint_manifest.get(key) != value
+            for key, value in {"status": "COMPLETE", "world_size": 3}.items()
+        ):
+            mismatch["checkpoint_manifest"] = checkpoint_manifest
+        if mismatch:
+            raise RuntimeError(f"THREE_MODEL_GPU_PREFLIGHT_EVIDENCE_INVALID: {mismatch}")
+        return report
+
+    def require_main_authorized(self) -> None:
         blockers = self.readiness_blockers()
         if blockers:
             raise RuntimeError(
                 "ASPD v3.1 main 500M execution is fail-closed: " + ", ".join(blockers)
             )
+        self.validate_preflight_evidence()
         human = self.approvals.human_interpretability
         assert human.artifact_path is not None and human.artifact_sha256 is not None
         artifact = Path(human.artifact_path)
@@ -438,6 +644,11 @@ class V31Main500MConfig(BaseModel):
                 "ASPD v3.1 main 500M execution is fail-closed: "
                 "HUMAN_INTERPRETABILITY_ARTIFACT_HASH_MISMATCH"
             )
+
+    def require_execution_authorized(self) -> None:
+        """Backward-compatible alias for full main authorization only."""
+
+        self.require_main_authorized()
 
     def structural_report(self) -> dict[str, Any]:
         return {

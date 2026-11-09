@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import shutil
@@ -13,7 +14,10 @@ import pytest
 import torch
 from torch import nn
 
-from aspd.multimodel.cli.train_aspd_v3_2b import _PoolPrefetcher
+from aspd.multimodel.cli.train_aspd_v3_2b import (
+    _authorize_main500m_mode,
+    _PoolPrefetcher,
+)
 from aspd.multimodel.components import RankOneComponents
 from aspd.multimodel.v3.data import SQLiteExposureLedger
 from aspd.multimodel.v3.encoder import FeatureReadout, pack_cross_model_tokens
@@ -69,6 +73,37 @@ def _main500m_config():
     )
 
 
+def _with_approved_synthetic_third(payload: dict) -> dict:
+    payload["models"][2] = {
+        "key": "third",
+        "approval_status": "APPROVED",
+        "model_id": "synthetic/third-model",
+        "revision": "a" * 40,
+        "tokenizer_id": "synthetic/third-model",
+        "tokenizer_revision": "a" * 40,
+        "family": "synthetic_transformer",
+        "license": "test-only",
+        "access": "local-test",
+        "checkpoint_parameter_count": 2_000_000_000,
+        "selected_layers": list(range(4, 12)),
+        "hidden_size": 32,
+        "intermediate_size": 64,
+        "num_hidden_layers": 16,
+        "num_attention_heads": 4,
+        "num_key_value_heads": 2,
+        "head_dim": 8,
+        "layer_prefixes": ["model.layers"],
+        "residual_pre_suffix": "input_layernorm",
+        "residual_mid_suffix": "post_attention_layernorm",
+        "fused_qkv": False,
+        "fused_gate_up": False,
+        "frozen": True,
+    }
+    payload["architecture"]["model_order"] = ["gemma", "smol", "third"]
+    payload["approvals"]["third_model"] = "APPROVED"
+    return payload
+
+
 def test_main500m_draft_preserves_zscore_math_and_fails_closed() -> None:
     config = _main500m_config()
     report = config.structural_report()
@@ -96,6 +131,155 @@ def test_main500m_draft_preserves_zscore_math_and_fails_closed() -> None:
     )
     with pytest.raises(ValueError, match="pending human-interpretability gate"):
         V31Main500MConfig.model_validate(invalid)
+
+
+def test_main500m_bounded_preflight_has_independent_fail_closed_authorization(
+    tmp_path: Path,
+) -> None:
+    draft = _main500m_config()
+    with pytest.raises(RuntimeError, match="MODEL_THREE_BLOCKED"):
+        draft.require_preflight_authorized(
+            optimizer_steps=4,
+            run_dir=tmp_path / "unapproved",
+        )
+
+    payload = _with_approved_synthetic_third(draft.payload())
+    preflight_root = (
+        tmp_path / "aspd_v3" / "main500m_preparation_v1" / "preflight"
+    )
+    payload["runtime"]["preflight_output_root"] = str(preflight_root)
+    payload["runtime"]["preflight_evidence"] = str(
+        preflight_root / "preflight_report.json"
+    )
+    payload["approvals"]["three_way_alignment"] = "APPROVED"
+    payload["approvals"]["bounded_preflight"] = {
+        "status": "AUTHORIZED",
+        "optimizer_steps": 4,
+        "output_namespace": str(preflight_root),
+        "authorization_reference": "unit-test-only",
+    }
+    authorized = V31Main500MConfig.model_validate(payload)
+    authorized.require_preflight_authorized(
+        optimizer_steps=4,
+        run_dir=preflight_root,
+    )
+    with pytest.raises(RuntimeError, match="step budget differs"):
+        authorized.require_preflight_authorized(
+            optimizer_steps=5,
+            run_dir=preflight_root,
+        )
+    with pytest.raises(RuntimeError, match="dedicated output namespace"):
+        authorized.require_preflight_authorized(
+            optimizer_steps=4,
+            run_dir=preflight_root.parent / "wrong",
+        )
+    preflight_root.mkdir(parents=True)
+    with pytest.raises(RuntimeError, match="refuses to overwrite"):
+        authorized.require_preflight_authorized(
+            optimizer_steps=4,
+            run_dir=preflight_root,
+        )
+
+
+def test_main500m_mode_gate_cannot_cross_preflight_and_main_boundaries(
+    tmp_path: Path,
+) -> None:
+    draft = _main500m_config()
+    main_args = SimpleNamespace(
+        mode="main",
+        strategy="model_owned",
+        skip_checkpoint=False,
+        resume_checkpoint=None,
+        max_steps=61_036,
+        run_dir=tmp_path / "main",
+    )
+    with pytest.raises(RuntimeError, match="MODEL_THREE_BLOCKED"):
+        _authorize_main500m_mode(draft, main_args)
+
+    skip_args = copy.copy(main_args)
+    skip_args.skip_checkpoint = True
+    with pytest.raises(RuntimeError, match="cannot disable checkpoint recovery"):
+        _authorize_main500m_mode(draft, skip_args)
+
+    invalid_mode = copy.copy(main_args)
+    invalid_mode.mode = "benchmark"
+    with pytest.raises(RuntimeError, match="only preflight or main"):
+        _authorize_main500m_mode(draft, invalid_mode)
+
+
+def test_main500m_preflight_evidence_is_pinned_and_semantically_validated(
+    tmp_path: Path,
+) -> None:
+    payload = _with_approved_synthetic_third(_main500m_config().payload())
+    preflight_root = (
+        tmp_path / "aspd_v3" / "main500m_preparation_v1" / "preflight"
+    )
+    evidence_path = preflight_root / "preflight_report.json"
+    payload["runtime"]["preflight_output_root"] = str(preflight_root)
+    payload["runtime"]["preflight_evidence"] = str(evidence_path)
+    payload["approvals"]["three_way_alignment"] = "APPROVED"
+    payload["approvals"]["bounded_preflight"] = {
+        "status": "AUTHORIZED",
+        "optimizer_steps": 4,
+        "output_namespace": str(preflight_root),
+        "authorization_reference": "unit-test-only",
+    }
+    contract = V31Main500MConfig.model_validate(payload)
+    contract_fingerprint = contract.execution_contract_fingerprint()
+    payload["approvals"]["three_model_gpu_preflight"] = {
+        "status": "PASSED",
+        "artifact_path": str(evidence_path),
+        "artifact_sha256": "0" * 64,
+        "execution_contract_fingerprint": contract_fingerprint,
+        "optimizer_steps": 4,
+    }
+    missing = V31Main500MConfig.model_validate(payload)
+    with pytest.raises(RuntimeError, match="ARTIFACT_MISSING"):
+        missing.validate_preflight_evidence()
+
+    preflight_root.mkdir(parents=True)
+    report = {
+        "status": "PASS",
+        "mode": "preflight",
+        "strategy": "model_owned",
+        "world_size": 3,
+        "logical_target_count": 168,
+        "optimizer_steps": 4,
+        "execution_contract_fingerprint": contract_fingerprint,
+        "dcp_save_reload_resume_update": "PASS",
+        "checkpoint_parameter_and_adam_restore_probe": "PASS",
+        "source_correctness": [
+            {
+                "status": "PASS",
+                "targets": 56,
+                "frozen_parameters": "PASS",
+            }
+            for _ in range(3)
+        ],
+        "checkpoint_manifest": {"status": "COMPLETE", "world_size": 3},
+    }
+    evidence_path.write_text(json.dumps(report, sort_keys=True), encoding="utf-8")
+    payload["approvals"]["three_model_gpu_preflight"]["artifact_sha256"] = (
+        hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+    )
+    valid = V31Main500MConfig.model_validate(payload)
+    assert valid.validate_preflight_evidence() == report
+
+    report["logical_target_count"] = 167
+    evidence_path.write_text(json.dumps(report, sort_keys=True), encoding="utf-8")
+    payload["approvals"]["three_model_gpu_preflight"]["artifact_sha256"] = (
+        hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+    )
+    invalid = V31Main500MConfig.model_validate(payload)
+    with pytest.raises(RuntimeError, match="EVIDENCE_INVALID"):
+        invalid.validate_preflight_evidence()
+
+
+def test_main500m_source_contract_rejects_qwen() -> None:
+    payload = _with_approved_synthetic_third(_main500m_config().payload())
+    payload["models"][2]["model_id"] = "Qwen/forbidden-new-experiment"
+    with pytest.raises(ValueError, match="Qwen is forbidden"):
+        V31Main500MConfig.model_validate(payload)
 
 
 def test_three_model_zscore_and_separator_contract_matches_notation() -> None:
@@ -167,34 +351,7 @@ def test_main500m_health_monitor_separates_alerts_from_hard_aborts() -> None:
 
 
 def test_approved_third_model_contract_registers_exactly_168_unique_targets() -> None:
-    payload = _main500m_config().payload()
-    payload["models"][2] = {
-        "key": "third",
-        "approval_status": "APPROVED",
-        "model_id": "synthetic/third-model",
-        "revision": "a" * 40,
-        "tokenizer_id": "synthetic/third-model",
-        "tokenizer_revision": "a" * 40,
-        "family": "synthetic_transformer",
-        "license": "test-only",
-        "access": "local-test",
-        "checkpoint_parameter_count": 2_000_000_000,
-        "selected_layers": list(range(4, 12)),
-        "hidden_size": 32,
-        "intermediate_size": 64,
-        "num_hidden_layers": 16,
-        "num_attention_heads": 4,
-        "num_key_value_heads": 2,
-        "head_dim": 8,
-        "layer_prefixes": ["model.layers"],
-        "residual_pre_suffix": "input_layernorm",
-        "residual_mid_suffix": "post_attention_layernorm",
-        "fused_qkv": False,
-        "fused_gate_up": False,
-        "frozen": True,
-    }
-    payload["architecture"]["model_order"] = ["gemma", "smol", "third"]
-    payload["approvals"]["third_model"] = "APPROVED"
+    payload = _with_approved_synthetic_third(_main500m_config().payload())
     config = V31Main500MConfig.model_validate(payload)
     registry = build_model_registry_2b(config)
     targets = [target for layout in registry.values() for target in layout.targets()]

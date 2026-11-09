@@ -264,11 +264,42 @@ def _preflight_identity_requirements(
         if authorization is None:
             raise RuntimeError("Granite pilot is missing its authorization record")
         return {"config_fingerprint": authorization.preflight_config_fingerprint}
+    if config.experiment_family == MAIN500M_EXPERIMENT_FAMILY:
+        return {
+            "execution_contract_fingerprint": config.execution_contract_fingerprint()
+        }
     return {
         "git_sha": git_sha,
         "config_file_sha256": config_file_sha256,
         "config_fingerprint": config.fingerprint(),
     }
+
+
+def _authorize_main500m_mode(config: Any, args: argparse.Namespace) -> None:
+    """Fail closed before NCCL or source loading, with separate preflight/main gates."""
+
+    if args.mode == "preflight":
+        if args.strategy != "model_owned":
+            raise RuntimeError("ASPD v3.1 bounded preflight requires model-owned execution")
+        if args.skip_checkpoint:
+            raise RuntimeError("ASPD v3.1 bounded preflight cannot disable checkpoint recovery")
+        if args.resume_checkpoint is not None:
+            raise RuntimeError("ASPD v3.1 bounded preflight cannot resume an external run")
+        config.require_preflight_authorized(
+            optimizer_steps=args.max_steps,
+            run_dir=args.run_dir,
+        )
+        return
+    if args.mode == "main":
+        if args.strategy != "model_owned":
+            raise RuntimeError("ASPD v3.1 main requires model-owned execution")
+        if args.skip_checkpoint:
+            raise RuntimeError("ASPD v3.1 main cannot disable checkpoint recovery")
+        config.require_main_authorized()
+        if args.max_steps != config.data.optimizer_steps:
+            raise RuntimeError("ASPD v3.1 main requires the exact 61,036-step budget")
+        return
+    raise RuntimeError("ASPD v3.1 main contract permits only preflight or main mode")
 
 
 def _git_sha() -> str:
@@ -826,7 +857,7 @@ def main() -> None:
     config = _load_training_config(args.config)
     if config.experiment_family == MAIN500M_EXPERIMENT_FAMILY:
         # This happens before NCCL initialization or any source-model/tokenizer load.
-        config.require_execution_authorized()
+        _authorize_main500m_mode(config, args)
     rank, world, device = _init_distributed()
     if config.experiment_family in {
         "aspd_v3_granite_normalized_target_v1",
@@ -1985,6 +2016,11 @@ def main() -> None:
             "git_sha": git_sha,
             "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
             "config_fingerprint": config.fingerprint(),
+            "execution_contract_fingerprint": (
+                config.execution_contract_fingerprint()
+                if config.experiment_family == MAIN500M_EXPERIMENT_FAMILY
+                else None
+            ),
             "config_file_sha256": config_sha,
             "dataset_manifest_sha256": dataset_manifest["manifest_sha256"],
             "alignment_manifest_sha256": alignment_manifest["manifest_sha256"],
