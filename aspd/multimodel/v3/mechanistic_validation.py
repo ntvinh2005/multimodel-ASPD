@@ -342,6 +342,48 @@ class FinalIntruderJudgeContract(BaseModel):
         return hashlib.sha256(encoded.encode()).hexdigest()
 
 
+class FinalIntruderCoherenceJudgeContract(BaseModel):
+    """Position-independent omission/coherence judge, calibrated separately."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[5]
+    status: Literal["RESEARCHER_AUTHORIZED_LOCAL_INTRUDER_JUDGE"]
+    experiment_family: Literal["aspd_v3_zscore_intruder_coherence_judge_v1"]
+    judge_model_id: Literal["meta-llama/Llama-3.3-70B-Instruct"]
+    judge_revision: Literal["6f6073b423013f6a7d4d9f39144961bfbfbc386b"]
+    local_files_only: Literal[True]
+    paid_api: Literal[False]
+    dtype: Literal["bfloat16"]
+    decoding: Literal["greedy"]
+    max_new_tokens: Literal[64]
+    batch_size: Literal[4]
+    omissions_per_parent: Literal[5]
+    coherence_minimum: Literal[0]
+    coherence_maximum: Literal[100]
+    remaining_context_order: Literal["ascending_utf8_sha256"]
+    force_unique_argmax: Literal[True]
+    prompt_version: Literal["independent_omission_coherence_v1"]
+    calibration_version: Literal["varied_domain_difficulty_v1"]
+    positive_control_parents: Literal[50]
+    negative_control_parents: Literal[25]
+    minimum_positive_control_accuracy: Literal[0.8]
+    minimum_valid_response_rate: Literal[0.95]
+    minimum_positive_unique_argmax_rate: Literal[0.95]
+    minimum_final_unique_argmax_rate: Literal[0.95]
+    deterministic_replay_prompts: Literal[20]
+    require_exact_deterministic_replay: Literal[True]
+
+    @classmethod
+    def load(cls, path: str | Path) -> FinalIntruderCoherenceJudgeContract:
+        return cls.model_validate(yaml.safe_load(Path(path).read_text(encoding="utf-8")))
+
+    def fingerprint(self) -> str:
+        payload = self.model_dump(mode="json")
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode()).hexdigest()
+
+
 class CausalValidationContract(BaseModel):
     """Frozen C1 direct-parameter intervention screening contract."""
 

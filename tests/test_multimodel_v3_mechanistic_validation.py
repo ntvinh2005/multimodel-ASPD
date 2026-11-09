@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -31,6 +32,15 @@ from aspd.multimodel.cli.judge_aspd_v3_intruder import (
     _rotate_task,
     _summary,
 )
+from aspd.multimodel.cli.judge_aspd_v3_intruder_coherence import (
+    _omission_task,
+)
+from aspd.multimodel.cli.judge_aspd_v3_intruder_coherence import (
+    _parent_rows as _coherence_parent_rows,
+)
+from aspd.multimodel.cli.judge_aspd_v3_intruder_coherence import (
+    _summary as _coherence_summary,
+)
 from aspd.multimodel.cli.judge_aspd_v3_intruder_final import (
     _expand_task as _expand_final_task,
 )
@@ -59,6 +69,7 @@ from aspd.multimodel.cli.run_aspd_v3_causal_screen import (
 )
 from aspd.multimodel.v3.mechanistic_validation import (
     CausalValidationContract,
+    FinalIntruderCoherenceJudgeContract,
     FinalIntruderJudgeContract,
     FinalIntruderValidationContract,
     IntruderJudgeContract,
@@ -132,6 +143,11 @@ def test_contract_is_frozen_to_untouched_test_split() -> None:
     )
     assert "qwen" not in final_judge.judge_model_id.lower()
     assert final_judge.candidate_labels == ("K", "L", "M", "N", "P")
+    coherence_judge = FinalIntruderCoherenceJudgeContract.load(
+        ROOT / "configs/multimodel/aspd_v3/zscore_intruder_coherence_judge_v1_llama.yaml"
+    )
+    assert "qwen" not in coherence_judge.judge_model_id.lower()
+    assert coherence_judge.remaining_context_order == "ascending_utf8_sha256"
 
 
 def test_pairwise_firing_statistic_uses_marginal_independence_reference() -> None:
@@ -437,6 +453,70 @@ def test_final_intruder_bootstrap_resamples_parent_features_not_rotations() -> N
         replicates=20,
     )
     assert draws.tolist() == pytest.approx([0.4] * 20)
+
+
+def test_coherence_omission_hides_original_position_and_hash_sorts_remaining() -> None:
+    task = {
+        "trial_id": "parent",
+        "examples": [
+            {"candidate_id": f"C{index + 1}", "text": text}
+            for index, text in enumerate(("zeta", "alpha", "gamma", "beta", "delta"))
+        ],
+    }
+    omitted = _omission_task(task, 3)
+    assert omitted["omitted_canonical_position"] == 3
+    assert all("omitted" not in row for row in omitted["remaining"])
+    hashes = [
+        hashlib.sha256(row["text"].encode()).hexdigest()
+        for row in omitted["remaining"]
+    ]
+    assert hashes == sorted(hashes)
+
+
+def test_coherence_parent_argmax_and_calibration_gates() -> None:
+    contract = FinalIntruderCoherenceJudgeContract.load(
+        ROOT / "configs/multimodel/aspd_v3/zscore_intruder_coherence_judge_v1_llama.yaml"
+    )
+    task = {
+        "trial_id": "positive-parent",
+        "control_kind": "positive",
+        "examples": [
+            {"candidate_id": f"C{index + 1}", "text": f"example-{index + 1}"}
+            for index in range(5)
+        ],
+    }
+    expanded = [_omission_task(task, omitted) for omitted in range(1, 6)]
+    outputs = [
+        json.dumps(
+            {
+                "coherence": 95 if omitted == 3 else 20 + omitted,
+                "theme": "fixture",
+            }
+        )
+        for omitted in range(1, 6)
+    ]
+    prompt_rows, parents = _coherence_parent_rows(
+        expanded,
+        outputs,
+        [
+            {
+                "trial_id": "positive-parent",
+                "control_kind": "positive",
+                "intruder_position": 3,
+            }
+        ],
+        contract,
+    )
+    summary = _coherence_summary(
+        mode="calibration",
+        prompt_rows=prompt_rows,
+        parents=parents,
+        replay_exact=True,
+        contract=contract,
+    )
+    assert parents[0]["unique_argmax"] and parents[0]["correct"]
+    assert summary["positive_control_accuracy"] == 1.0
+    assert summary["status"] == "JUDGE_VALIDATED"
 
 
 def test_judge_parser_and_controls_fail_closed() -> None:
