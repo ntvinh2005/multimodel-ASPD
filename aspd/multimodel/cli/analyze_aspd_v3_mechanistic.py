@@ -251,7 +251,9 @@ def _intruder_task(
             )
     if not candidates:
         return None
-    _group_penalty, _length_penalty, donor_feature, intruder = min(candidates)
+    _group_penalty, _length_penalty, donor_feature, intruder = min(
+        candidates, key=lambda row: row[:3]
+    )
     position = int(rng.integers(0, examples))
     displayed = [row["context"] for row in target]
     displayed.insert(position, intruder["context"])

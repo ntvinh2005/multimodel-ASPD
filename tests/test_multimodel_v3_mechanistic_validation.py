@@ -204,7 +204,12 @@ def test_intruder_task_is_blinded_and_uses_disjoint_document() -> None:
             for index in range(4)
         ],
         2: [
-            {"context": "different pattern", "document_id": "donor", "source_group": "books"}
+            {"context": "different pattern", "document_id": "donor", "source_group": "books"},
+            {
+                "context": "different example",
+                "document_id": "donor-tie",
+                "source_group": "books",
+            },
         ],
     }
     result = _intruder_task(
