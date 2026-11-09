@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,6 +12,12 @@ from torch import nn
 from aspd.multimodel.cli.analyze_aspd_v3_causal import (
     _bootstrap_mean,
     _component_rows,
+)
+from aspd.multimodel.cli.analyze_aspd_v3_intruder_final import (
+    _bootstrap_group as _bootstrap_final_intruder_group,
+)
+from aspd.multimodel.cli.analyze_aspd_v3_intruder_final import (
+    _parents as _final_intruder_parents,
 )
 from aspd.multimodel.cli.analyze_aspd_v3_mechanistic import (
     _feature_anchor_lists,
@@ -24,6 +31,18 @@ from aspd.multimodel.cli.judge_aspd_v3_intruder import (
     _rotate_task,
     _summary,
 )
+from aspd.multimodel.cli.judge_aspd_v3_intruder_final import (
+    _expand_task as _expand_final_task,
+)
+from aspd.multimodel.cli.judge_aspd_v3_intruder_final import (
+    _parse_response as _parse_final_response,
+)
+from aspd.multimodel.cli.judge_aspd_v3_intruder_final import (
+    _score as _score_final_intruder,
+)
+from aspd.multimodel.cli.judge_aspd_v3_intruder_final import (
+    _summary as _summary_final_intruder,
+)
 from aspd.multimodel.cli.judge_aspd_v3_intruder_loo import (
     _ordered_remaining,
     _parse_score,
@@ -33,12 +52,15 @@ from aspd.multimodel.cli.judge_aspd_v3_intruder_loo import (
     _summary as _loo_summary,
 )
 from aspd.multimodel.cli.plan_aspd_v3_causal import _fires, _select_components
+from aspd.multimodel.cli.prepare_aspd_v3_intruder_final import _text_jaccard
 from aspd.multimodel.cli.run_aspd_v3_causal_screen import (
     _metric_rows,
     _random_component_factors,
 )
 from aspd.multimodel.v3.mechanistic_validation import (
     CausalValidationContract,
+    FinalIntruderJudgeContract,
+    FinalIntruderValidationContract,
     IntruderJudgeContract,
     IntruderJudgeV2Contract,
     IntruderLeaveOneOutJudgeContract,
@@ -98,6 +120,18 @@ def test_contract_is_frozen_to_untouched_test_split() -> None:
     assert judge_v2.prompt_version == "abstention_calibrated_v2"
     assert judge_v2.control_rotations == 5
     assert "qwen" not in judge_v2.judge_model_id.lower()
+
+    final = FinalIntruderValidationContract.load(
+        ROOT / "configs/multimodel/aspd_v3/zscore_intruder_final_validation_v1.yaml"
+    )
+    assert final.excluded_document_count == 296
+    assert final.screening_features_per_arm_site == 100
+    assert final.training_authorized_by_this_contract is False
+    final_judge = FinalIntruderJudgeContract.load(
+        ROOT / "configs/multimodel/aspd_v3/zscore_intruder_final_judge_v1_llama.yaml"
+    )
+    assert "qwen" not in final_judge.judge_model_id.lower()
+    assert final_judge.candidate_labels == ("K", "L", "M", "N", "P")
 
 
 def test_pairwise_firing_statistic_uses_marginal_independence_reference() -> None:
@@ -275,6 +309,134 @@ def test_intruder_rotations_balance_every_answer_position() -> None:
         expected_text = f"example-{answer['intruder_position'] - 1}"
         observed = rotated_task["examples"][rotated_answer["intruder_position"] - 1]["text"]
         assert observed == expected_text
+
+
+def test_final_intruder_rotations_balance_position_and_opaque_label() -> None:
+    task = {
+        "trial_id": "parent",
+        "examples": [
+            {"candidate_id": f"C{index + 1}", "text": f"example-{index + 1}"}
+            for index in range(5)
+        ],
+    }
+    labels = ("K", "L", "M", "N", "P")
+    rotations = [_expand_final_task(task, rotation, labels) for rotation in range(5)]
+    for canonical_position in range(1, 6):
+        occurrences = [
+            row
+            for rotation in rotations
+            for row in rotation["examples"]
+            if row["canonical_position"] == canonical_position
+        ]
+        assert sorted(row["displayed_position"] for row in occurrences) == [1, 2, 3, 4, 5]
+        assert sorted(row["label"] for row in occurrences) == sorted(labels)
+
+
+def test_final_intruder_answer_key_is_not_needed_to_render_or_parse() -> None:
+    task = {
+        "trial_id": "parent",
+        "examples": [
+            {"candidate_id": f"C{index + 1}", "text": f"example-{index + 1}"}
+            for index in range(5)
+        ],
+    }
+    expanded = _expand_final_task(task, 0, ("K", "L", "M", "N", "P"))
+    assert "correct" not in json.dumps(expanded)
+    assert _parse_final_response(
+        '{"intruder_id":"M","reason":"different semantic topic"}',
+        ("K", "L", "M", "N", "P"),
+    )["valid"]
+    assert not _parse_final_response(
+        '{"intruder_id":"A","reason":"bad label"}',
+        ("K", "L", "M", "N", "P"),
+    )["valid"]
+    assert not _parse_final_response(
+        '{"intruder_id":"M","reason":"ok","extra":1}',
+        ("K", "L", "M", "N", "P"),
+    )["valid"]
+
+
+def test_final_intruder_scoring_and_parent_aggregation_preserve_rotations() -> None:
+    contract = FinalIntruderJudgeContract.load(
+        ROOT / "configs/multimodel/aspd_v3/zscore_intruder_final_judge_v1_llama.yaml"
+    )
+    task = {
+        "trial_id": "positive-parent",
+        "control_kind": "positive",
+        "examples": [
+            {"candidate_id": f"C{index + 1}", "text": f"example-{index + 1}"}
+            for index in range(5)
+        ],
+    }
+    expanded = [
+        _expand_final_task(task, rotation, contract.candidate_labels)
+        for rotation in range(5)
+    ]
+    raw = []
+    for row in expanded:
+        correct = next(
+            example for example in row["examples"] if example["canonical_position"] == 3
+        )
+        raw.append(
+            json.dumps(
+                {"intruder_id": correct["label"], "reason": "known positive control"}
+            )
+        )
+    scored = _score_final_intruder(
+        expanded,
+        raw,
+        [
+            {
+                "trial_id": "positive-parent",
+                "control_kind": "positive",
+                "intruder_position": 3,
+            }
+        ],
+        contract,
+    )
+    summary = _summary_final_intruder(
+        mode="calibration",
+        rows=scored,
+        replay_exact=True,
+        contract=contract,
+    )
+    assert all(row["correct"] for row in scored)
+    assert summary["positive_control_accuracy"] == 1.0
+    assert summary["positive_parent_consistency"]["fraction_at_least_0_8"] == 1.0
+
+
+def test_final_intruder_normalized_jaccard_rejects_near_duplicates() -> None:
+    assert _text_jaccard("The planet follows an orbit.", "A planet follows the orbit!") > 0.5
+    assert _text_jaccard("stellar orbit", "bread fermentation") == 0.0
+
+
+def test_final_intruder_bootstrap_resamples_parent_features_not_rotations() -> None:
+    answer = {
+        "trial_id": "parent",
+        "frequency_stratum": "low",
+        "feature_fires": 10,
+    }
+    rotations = [
+        {
+            "parent_trial_id": "parent",
+            "rotation": rotation,
+            "correct": rotation < 2,
+            "valid": True,
+        }
+        for rotation in range(5)
+    ]
+    parents = _final_intruder_parents([answer], rotations)
+    assert parents[0]["rotation_accuracy"] == 0.4
+    draws = _bootstrap_final_intruder_group(
+        [
+            {**parents[0], "frequency_stratum": stratum}
+            for stratum in ("low", "medium", "high")
+        ],
+        {"low": 1, "medium": 1, "high": 1},
+        rng=np.random.default_rng(7),
+        replicates=20,
+    )
+    assert draws.tolist() == pytest.approx([0.4] * 20)
 
 
 def test_judge_parser_and_controls_fail_closed() -> None:

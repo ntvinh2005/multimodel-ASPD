@@ -1,0 +1,26 @@
+schema_version: 4
+status: RESEARCHER_AUTHORIZED_LOCAL_INTRUDER_JUDGE
+experiment_family: aspd_v3_zscore_intruder_final_judge_v1
+judge_model_id: meta-llama/Llama-3.3-70B-Instruct
+judge_revision: 6f6073b423013f6a7d4d9f39144961bfbfbc386b
+local_files_only: true
+paid_api: false
+dtype: bfloat16
+decoding: greedy
+max_new_tokens: 96
+batch_size: 4
+cyclic_rotations: 5
+candidate_labels: [K, L, M, N, P]
+force_exactly_one_choice: true
+prompt_version: balanced_opaque_label_forced_choice_v1
+calibration_version: varied_domain_difficulty_v1
+positive_control_parents: 50
+negative_control_parents: 25
+calibration_seed: 83
+minimum_positive_control_accuracy: 0.8
+minimum_valid_response_rate: 0.95
+minimum_positive_parent_canonical_consistency: 0.8
+maximum_correct_position_accuracy_spread: 0.15
+position_bias_familywise_alpha: 0.01
+deterministic_replay_prompts: 20
+require_exact_deterministic_replay: true

@@ -32,7 +32,10 @@ from aspd.multimodel.v3.gate_collapse_recovery_config import (
     load_gate_collapse_recovery_config,
 )
 from aspd.multimodel.v3.hooks import assert_frozen_backbone, logical_weight_bias
-from aspd.multimodel.v3.mechanistic_validation import MechanisticValidationContract
+from aspd.multimodel.v3.mechanistic_validation import (
+    FinalIntruderValidationContract,
+    MechanisticValidationContract,
+)
 from aspd.multimodel.v3.model_owned import ModelOwnedMain2B
 from aspd.multimodel.v3.model_owned_checkpoint import ModelOwnedCheckpoint
 from aspd.multimodel.v3.models import load_frozen_v3_model, load_v3_tokenizer
@@ -64,13 +67,27 @@ def _write_json(path: Path, payload: Any) -> None:
         handle.write("\n")
 
 
+ValidationContract = MechanisticValidationContract | FinalIntruderValidationContract
+
+
+def _load_protocol(path: Path) -> ValidationContract:
+    import yaml
+
+    family = yaml.safe_load(path.read_text(encoding="utf-8")).get("experiment_family")
+    if family == "aspd_v3_zscore_mechanistic_validation_v1":
+        return MechanisticValidationContract.load(path)
+    if family == "aspd_v3_zscore_intruder_final_v1":
+        return FinalIntruderValidationContract.load(path)
+    raise ValueError(f"unsupported mechanistic protocol family: {family!r}")
+
+
 def _broadcast(value: Any) -> Any:
     values = [value]
     dist.broadcast_object_list(values, src=0)
     return values[0]
 
 
-def _exposure_report(run_dir: Path, protocol: MechanisticValidationContract) -> dict[str, int]:
+def _exposure_report(run_dir: Path, protocol: ValidationContract) -> dict[str, int]:
     path = run_dir / "exposure_ledger.sqlite"
     if not path.is_file():
         raise FileNotFoundError(f"exposure ledger is missing: {path}")
@@ -130,10 +147,20 @@ def _update_contexts(
     tokenizer: Any,
     model_key: str,
     tokens_per_side: int,
+    canonical_characters_per_side: int | None,
     limit: int,
 ) -> None:
     """Retain the strongest activation per document, bounded to ``limit`` documents."""
 
+    canonical_boundaries = None
+    if canonical_characters_per_side is not None:
+        canonical_boundaries = [
+            int(boundary)
+            for row in pool.source_observations
+            for boundary in row["anchor_character_boundaries"]
+        ]
+        if len(canonical_boundaries) != pool.anchor_count:
+            raise ValueError("canonical anchor boundaries do not match pool anchors")
     order = np.argsort(features, kind="stable")
     ordered_features = features[order]
     start = 0
@@ -164,12 +191,15 @@ def _update_contexts(
                     continue
                 del by_document[weakest_document]
             observation = pool.source_observations[document_index]
-            by_document[document_id] = {
+            context = {
                 "activation": value,
                 "anchor_index": pool_anchor_offset + anchor_index,
                 "anchor_id": pool.anchor_ids[anchor_index],
                 "document_id": document_id,
                 "source_group": observation.get("source_group", "unknown"),
+                "model_token_index": int(
+                    pool.models[model_key].anchor_token_indices[anchor_index]
+                ),
                 "context": _decode_context(
                     tokenizer,
                     pool,
@@ -178,6 +208,21 @@ def _update_contexts(
                     tokens_per_side=tokens_per_side,
                 ),
             }
+            if canonical_characters_per_side is not None:
+                assert canonical_boundaries is not None
+                canonical_text = str(observation["canonical_text"])
+                boundary = canonical_boundaries[anchor_index]
+                lower = max(0, boundary - canonical_characters_per_side)
+                upper = min(len(canonical_text), boundary + canonical_characters_per_side)
+                context.update(
+                    {
+                        "canonical_character_boundary": boundary,
+                        "canonical_context_start": lower,
+                        "canonical_context_end": upper,
+                        "canonical_context": canonical_text[lower:upper],
+                    }
+                )
+            by_document[document_id] = context
         start = stop
 
 
@@ -240,7 +285,7 @@ def main() -> None:
     rank = int(os.environ["RANK"])
     local_rank = int(os.environ["LOCAL_RANK"])
     world = int(os.environ["WORLD_SIZE"])
-    protocol = MechanisticValidationContract.load(args.protocol)
+    protocol = _load_protocol(args.protocol)
     config = load_gate_collapse_recovery_config(args.config)
     if tuple(config.architecture.model_order) != protocol.model_order or world != 2:
         raise RuntimeError("mechanistic extraction requires Gemma/SmolLM2 on two ranks")
@@ -315,6 +360,18 @@ def main() -> None:
     if len(set(digests)) != 1:
         raise ValueError("replicated shared encoders differ across model owners")
 
+    excluded_document_ids: frozenset[str] = frozenset()
+    excluded_manifest_sha256 = None
+    if isinstance(protocol, FinalIntruderValidationContract):
+        excluded_path = Path(protocol.excluded_document_manifest)
+        excluded_manifest_sha256 = sha256_file(excluded_path)
+        if excluded_manifest_sha256 != protocol.excluded_document_manifest_sha256:
+            raise ValueError("excluded document manifest hash changed")
+        excluded_rows = json.loads(excluded_path.read_text(encoding="utf-8"))
+        excluded_document_ids = frozenset(str(row["document_id"]) for row in excluded_rows)
+        if len(excluded_document_ids) != protocol.excluded_document_count:
+            raise ValueError("excluded document manifest count changed")
+
     stream = None
     if rank == 0:
         alignment_tokenizers = {
@@ -339,6 +396,7 @@ def main() -> None:
             ),
             dedup_path=args.output_dir / f"{selected_split}_stream_dedup.sqlite",
             selected_split=selected_split,
+            excluded_document_ids=excluded_document_ids,
             sequence_length=config.data.sequence_length,
             model_order=model_order,
         )
@@ -417,6 +475,11 @@ def main() -> None:
                     tokenizer=tokenizer,
                     model_key="gemma",
                     tokens_per_side=protocol.context_tokens_per_side,
+                    canonical_characters_per_side=(
+                        protocol.canonical_context_characters_per_side
+                        if isinstance(protocol, FinalIntruderValidationContract)
+                        else None
+                    ),
                     limit=protocol.retained_contexts_per_feature,
                 )
         accepted += pool.anchor_count
@@ -424,6 +487,8 @@ def main() -> None:
 
     if accepted != expected_anchors:
         raise ValueError("mechanistic extraction accepted-anchor budget changed")
+    if excluded_document_ids.intersection(document_ids):
+        raise ValueError("excluded source documents leaked into final extraction")
     if _parameter_signature(loaded.forward_model) != source_before:
         raise RuntimeError("frozen source model changed during mechanistic extraction")
     local_report = {
@@ -486,6 +551,11 @@ def main() -> None:
             "mode": args.mode,
             "selected_split": selected_split,
             "prior_validation_documents_are_development_data": True,
+            "excluded_document_manifest_sha256": excluded_manifest_sha256,
+            "excluded_document_count": len(excluded_document_ids),
+            "excluded_documents_disjoint": not bool(
+                excluded_document_ids.intersection(document_ids)
+            ),
             "accepted_evaluation_anchors": accepted,
             "unique_source_documents": len(document_ids),
             "natural_gate_only": True,

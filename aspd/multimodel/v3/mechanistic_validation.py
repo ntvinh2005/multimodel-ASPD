@@ -235,6 +235,113 @@ class IntruderLeaveOneOutJudgeContract(BaseModel):
         return hashlib.sha256(encoded.encode()).hexdigest()
 
 
+class FinalIntruderValidationContract(BaseModel):
+    """Frozen document-disjoint task construction and statistical-analysis contract."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[4]
+    status: Literal["RESEARCHER_AUTHORIZED_FINAL_INTRUDER_VALIDATION"]
+    experiment_family: Literal["aspd_v3_zscore_intruder_final_v1"]
+    training_authorized_by_this_contract: Literal[False]
+    model_order: tuple[Literal["gemma"], Literal["smol"]]
+    forbidden_model_substrings: tuple[Literal["qwen"]]
+    arms: tuple[Literal["full_only_control"], Literal["per_anchor_zscore"]]
+    checkpoint_steps: Literal[1_221]
+    accepted_training_exposures: Literal[10_002_432]
+    selected_split: Literal["test"]
+    split_unit: Literal["source_document"]
+    test_buckets: tuple[
+        Literal[10], Literal[11], Literal[12], Literal[13], Literal[14],
+        Literal[15], Literal[16], Literal[17], Literal[18], Literal[19],
+    ]
+    accepted_evaluation_anchors: Literal[100_352]
+    pool_anchors: Literal[2_048]
+    excluded_document_manifest: str
+    excluded_document_manifest_sha256: str
+    excluded_document_count: Literal[296]
+    context_tokens_per_side: Literal[32]
+    canonical_context_characters_per_side: Literal[256]
+    contexts_per_feature: Literal[4]
+    retained_contexts_per_feature: Literal[12]
+    screening_features_per_arm_site: Literal[100]
+    frequency_strata: tuple[Literal["low"], Literal["medium"], Literal["high"]]
+    minimum_feature_fires: Literal[4]
+    minimum_unique_documents: Literal[4]
+    intruder_examples: Literal[5]
+    intruder_chance_accuracy: Literal[0.2]
+    require_target_inactive_at_intruder: Literal[True]
+    require_distinct_target_documents: Literal[True]
+    require_intruder_document_disjoint: Literal[True]
+    maximum_normalized_text_jaccard: Literal[0.8]
+    feature_sampling_seed: Literal[71]
+    intruder_selection_seed: Literal[73]
+    bootstrap_seed: Literal[79]
+    bootstrap_replicates: Literal[5_000]
+
+    @model_validator(mode="after")
+    def validate_final_intruder(self) -> FinalIntruderValidationContract:
+        path = Path(self.excluded_document_manifest)
+        if not path.is_absolute():
+            raise ValueError("excluded document manifest must use an absolute immutable path")
+        if len(self.excluded_document_manifest_sha256) != 64:
+            raise ValueError("excluded document manifest SHA-256 is malformed")
+        if self.accepted_evaluation_anchors % self.pool_anchors:
+            raise ValueError("final Intruder anchor budget must contain complete pools")
+        return self
+
+    @classmethod
+    def load(cls, path: str | Path) -> FinalIntruderValidationContract:
+        return cls.model_validate(yaml.safe_load(Path(path).read_text(encoding="utf-8")))
+
+    def fingerprint(self) -> str:
+        payload = self.model_dump(mode="json")
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode()).hexdigest()
+
+
+class FinalIntruderJudgeContract(BaseModel):
+    """Calibration-gated, forced-choice judge with position and label balancing."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[4]
+    status: Literal["RESEARCHER_AUTHORIZED_LOCAL_INTRUDER_JUDGE"]
+    experiment_family: Literal["aspd_v3_zscore_intruder_final_judge_v1"]
+    judge_model_id: Literal["meta-llama/Llama-3.3-70B-Instruct"]
+    judge_revision: Literal["6f6073b423013f6a7d4d9f39144961bfbfbc386b"]
+    local_files_only: Literal[True]
+    paid_api: Literal[False]
+    dtype: Literal["bfloat16"]
+    decoding: Literal["greedy"]
+    max_new_tokens: Literal[96]
+    batch_size: Literal[4]
+    cyclic_rotations: Literal[5]
+    candidate_labels: tuple[Literal["K"], Literal["L"], Literal["M"], Literal["N"], Literal["P"]]
+    force_exactly_one_choice: Literal[True]
+    prompt_version: Literal["balanced_opaque_label_forced_choice_v1"]
+    calibration_version: Literal["varied_domain_difficulty_v1"]
+    positive_control_parents: Literal[50]
+    negative_control_parents: Literal[25]
+    calibration_seed: Literal[83]
+    minimum_positive_control_accuracy: Literal[0.8]
+    minimum_valid_response_rate: Literal[0.95]
+    minimum_positive_parent_canonical_consistency: Literal[0.8]
+    maximum_correct_position_accuracy_spread: Literal[0.15]
+    position_bias_familywise_alpha: Literal[0.01]
+    deterministic_replay_prompts: Literal[20]
+    require_exact_deterministic_replay: Literal[True]
+
+    @classmethod
+    def load(cls, path: str | Path) -> FinalIntruderJudgeContract:
+        return cls.model_validate(yaml.safe_load(Path(path).read_text(encoding="utf-8")))
+
+    def fingerprint(self) -> str:
+        payload = self.model_dump(mode="json")
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode()).hexdigest()
+
+
 class CausalValidationContract(BaseModel):
     """Frozen C1 direct-parameter intervention screening contract."""
 

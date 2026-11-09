@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from pathlib import Path
 from typing import Any, Literal
 
@@ -47,6 +47,7 @@ class DiagnosticAlignedAnchorStream:
         split_policy: HashSplitPolicy,
         dedup_path: str | Path,
         selected_split: Literal["validation", "test"],
+        excluded_document_ids: Collection[str] = (),
         sequence_length: int = 512,
         model_order: tuple[str, ...] = MODEL_ORDER_2B,
     ):
@@ -67,6 +68,10 @@ class DiagnosticAlignedAnchorStream:
         self.tokenizer_revisions = dict(tokenizer_revisions)
         self.split_policy = split_policy
         self.sequence_length = sequence_length
+        self.excluded_document_ids = frozenset(str(value) for value in excluded_document_ids)
+        excluded_sha256 = hashlib.sha256(
+            "\n".join(sorted(self.excluded_document_ids)).encode()
+        ).hexdigest()
         self.provenance = {
             "schema_version": self.STATE_SCHEMA,
             "purpose": "aspd_v3_500m_read_only_diagnostic",
@@ -82,6 +87,8 @@ class DiagnosticAlignedAnchorStream:
                 "seed": split_policy.seed,
             },
             "sequence_length": sequence_length,
+            "excluded_document_count": len(self.excluded_document_ids),
+            "excluded_document_ids_sha256": excluded_sha256,
             "canonical_text_policy": f"identity_exact_{len(self.model_order)}_way_prefix",
         }
         self.provenance_sha256 = _canonical_sha256(self.provenance)
@@ -91,6 +98,7 @@ class DiagnosticAlignedAnchorStream:
         self.documents_read = 0
         self.documents_by_split = {"train": 0, "validation": 0, "test": 0}
         self.exact_duplicates_rejected = 0
+        self.excluded_documents_rejected = 0
         self.zero_anchor_documents = 0
 
     def close(self) -> None:
@@ -129,6 +137,9 @@ class DiagnosticAlignedAnchorStream:
             split = self.split_policy.split(document)
             self.documents_by_split[split] += 1
             if split != self.selected_split:
+                continue
+            if document.document_id in self.excluded_document_ids:
+                self.excluded_documents_rejected += 1
                 continue
             alignment = align_canonical_text(
                 text,
@@ -203,6 +214,10 @@ class DiagnosticAlignedAnchorStream:
                     "observation_id": document.source_row_id,
                     "document_id": document.document_id,
                     "source_group": document.source_group,
+                    "canonical_text": document.text,
+                    "anchor_character_boundaries": [
+                        anchor.character_boundary for anchor in selected
+                    ],
                     "raw_tokens": {
                         key: len(alignment.tokenized[key].input_ids) for key in self.model_order
                     },
@@ -253,6 +268,7 @@ class DiagnosticAlignedAnchorStream:
             "documents_read": self.documents_read,
             "documents_by_split": dict(self.documents_by_split),
             "exact_duplicates_rejected": self.exact_duplicates_rejected,
+            "excluded_documents_rejected": self.excluded_documents_rejected,
             "zero_anchor_documents": self.zero_anchor_documents,
         }
 
@@ -270,6 +286,9 @@ class DiagnosticAlignedAnchorStream:
             key: int(value) for key, value in state["documents_by_split"].items()
         }
         self.exact_duplicates_rejected = int(state["exact_duplicates_rejected"])
+        self.excluded_documents_rejected = int(
+            state.get("excluded_documents_rejected", 0)
+        )
         self.zero_anchor_documents = int(state["zero_anchor_documents"])
 
 

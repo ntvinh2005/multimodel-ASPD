@@ -388,7 +388,7 @@ def test_diagnostic_stream_can_select_disjoint_test_documents(
             validation_ids.add(document_id)
         elif split == "test":
             expected_test.append(document_id)
-        if len(expected_test) >= 4 and validation_ids:
+        if len(expected_test) >= 5 and validation_ids:
             break
 
     def fake_alignment(text, *, document_id, source_group, tokenizers, model_order, max_length):
@@ -429,11 +429,20 @@ def test_diagnostic_stream_can_select_disjoint_test_documents(
         split_policy=policy,
         dedup_path=tmp_path / "test.sqlite",
         selected_split="test",
+        excluded_document_ids={expected_test[0]},
         sequence_length=1,
         model_order=("gemma", "smol"),
     )
     pool = stream.next_pool(pool_anchors=4)
     stream.close()
-    assert list(pool.document_ids) == expected_test[:4]
+    assert list(pool.document_ids) == expected_test[1:5]
     assert set(pool.document_ids).isdisjoint(validation_ids)
+    assert expected_test[0] not in pool.document_ids
+    assert stream.excluded_documents_rejected == 1
     assert stream.provenance["selected_split"] == "test"
+    assert stream.provenance["excluded_document_count"] == 1
+    assert all("canonical_text" in row for row in pool.source_observations)
+    assert all(
+        row["anchor_character_boundaries"] == [len(row["canonical_text"])]
+        for row in pool.source_observations
+    )

@@ -1,0 +1,54 @@
+{
+  "calibration_acceptance": {
+    "deterministic_replay": "exact for first 20 rendered prompts",
+    "maximum_correct_position_accuracy_spread": 0.15,
+    "minimum_positive_control_accuracy": 0.8,
+    "minimum_positive_parent_canonical_consistency": 0.8,
+    "minimum_valid_response_rate": 0.95,
+    "position_bias": {
+      "chi_square_alpha": 0.01,
+      "maximum_cell_count": "Binomial(n,0.2) upper quantile with Bonferroni alpha/5"
+    }
+  },
+  "calibration_data": {
+    "negative_parent_tasks": 25,
+    "positive_parent_tasks": 50,
+    "scientific_examples_used": false
+  },
+  "decision_rule": {
+    "INCONCLUSIVE": "all other validated-judge outcomes",
+    "INTERPRETABILITY_COMPARABLE_COVERAGE_IMPROVED": "macro CI includes zero, both site CIs include zero, and z-score eligibility exceeds 2x control at both sites",
+    "INTERPRETABILITY_TRADEOFF": "macro z-score-minus-control 95% CI upper bound is below zero",
+    "JUDGE_VALIDATION_FAILED": "calibration or final scientific position diagnostic fails",
+    "SEMANTIC_INTERPRETABILITY_IMPROVED": "macro z-score-minus-control 95% CI lower bound is above zero and neither site point estimate is negative"
+  },
+  "evaluation": {
+    "bootstrap_replicates": 5000,
+    "chance_accuracy": 0.2,
+    "features_per_arm_site": 100,
+    "primary_unit": "parent feature",
+    "primary_estimand": "uniform over eligible natural-firing features with eligible-stratum weighting",
+    "rotations_per_parent": 5,
+    "secondary_estimand": "activity weighted over evaluated features"
+  },
+  "judge": {
+    "model_id": "meta-llama/Llama-3.3-70B-Instruct",
+    "revision": "6f6073b423013f6a7d4d9f39144961bfbfbc386b",
+    "paid_api": false,
+    "qwen_forbidden": true
+  },
+  "protocol": {
+    "answer_labels": ["K", "L", "M", "N", "P"],
+    "forced_choice": true,
+    "label_balance": "each canonical context occupies every opaque label within a parent",
+    "position_balance": "each canonical context occupies every displayed position within a parent"
+  },
+  "schema_version": 4,
+  "test_integrity": {
+    "excluded_prior_document_count": 296,
+    "excluded_prior_document_manifest_sha256": "f718dde2a8f68420b56da18a87abae043061f4005a2522a53724d542646da3ef",
+    "new_accepted_aligned_anchors": 100352,
+    "split": "test buckets 10-19",
+    "unit": "source document"
+  }
+}
