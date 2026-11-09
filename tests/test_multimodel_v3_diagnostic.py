@@ -28,7 +28,10 @@ from aspd.multimodel.v3.diagnostic import (
     pairwise_jaccard,
     summarize_training_trajectory,
 )
-from aspd.multimodel.v3.diagnostic_stream import ValidationAlignedAnchorStream
+from aspd.multimodel.v3.diagnostic_stream import (
+    DiagnosticAlignedAnchorStream,
+    ValidationAlignedAnchorStream,
+)
 from aspd.multimodel.v3.objective import matryoshka_activation_fvu
 from aspd.multimodel.v3.reconstruction import ActivationDecoder
 
@@ -361,3 +364,76 @@ def test_validation_stream_never_emits_train_documents_and_resumes(
     second = resumed.next_pool(pool_anchors=2)
     resumed.close()
     assert list(second.document_ids) == expected_validation[2:4]
+
+
+def test_diagnostic_stream_can_select_disjoint_test_documents(
+    tmp_path: Path, monkeypatch
+) -> None:
+    policy = HashSplitPolicy(
+        modulus=1000,
+        validation_buckets=frozenset(range(10)),
+        test_buckets=frozenset(range(10, 20)),
+        seed=0,
+    )
+    rows = []
+    expected_test = []
+    validation_ids = set()
+    for index in range(30_000):
+        text = f"held-out diagnostic document {index}"
+        document_id = hashlib.sha256(text.encode()).hexdigest()
+        document = SourceDocument(document_id, "fixture", text, f"row-{index}")
+        split = policy.split(document)
+        rows.append({"text": text, "meta": {"pile_set_name": "fixture"}})
+        if split == "validation":
+            validation_ids.add(document_id)
+        elif split == "test":
+            expected_test.append(document_id)
+        if len(expected_test) >= 4 and validation_ids:
+            break
+
+    def fake_alignment(text, *, document_id, source_group, tokenizers, model_order, max_length):
+        tokenized = {}
+        positions = {}
+        for model in model_order:
+            boundary = TokenBoundary(model, 0, 1, 1, len(text), len(text.encode()))
+            positions[model] = boundary
+            tokenized[model] = TokenizedDocument(
+                input_ids=(1,),
+                attention_mask=(1,),
+                boundary_to_token={len(text): boundary},
+                truncated=False,
+                prefix_decode_calls=1,
+                prefix_decoded_token_ids=1,
+            )
+        anchor = AlignedAnchor(
+            anchor_id=f"anchor-{document_id}",
+            document_id=document_id,
+            source_group=source_group,
+            character_boundary=len(text),
+            byte_boundary=len(text.encode()),
+            canonical_prefix_sha256="b" * 64,
+            positions=positions,
+        )
+        return AlignmentResult(document_id, source_group, (anchor,), tokenized, {})
+
+    monkeypatch.setattr(
+        "aspd.multimodel.v3.diagnostic_stream.align_canonical_text", fake_alignment
+    )
+    tokenizers = {key: object() for key in ("gemma", "smol")}
+    stream = DiagnosticAlignedAnchorStream(
+        dataset=_StatefulRows(rows),
+        dataset_id="fixture",
+        dataset_revision="revision",
+        tokenizers=tokenizers,
+        tokenizer_revisions={key: key for key in tokenizers},
+        split_policy=policy,
+        dedup_path=tmp_path / "test.sqlite",
+        selected_split="test",
+        sequence_length=1,
+        model_order=("gemma", "smol"),
+    )
+    pool = stream.next_pool(pool_anchors=4)
+    stream.close()
+    assert list(pool.document_ids) == expected_test[:4]
+    assert set(pool.document_ids).isdisjoint(validation_ids)
+    assert stream.provenance["selected_split"] == "test"

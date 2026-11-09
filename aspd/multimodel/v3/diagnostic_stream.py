@@ -1,9 +1,10 @@
-"""Deterministic validation-only anchor stream for ASPD v3 diagnostics.
+"""Deterministic held-out anchor streams for ASPD v3 diagnostics.
 
 The training stream is intentionally not generalized: changing its provenance payload
 would make historical checkpoint state incompatible.  This separate stream applies the
-same token alignment and document hash split while accepting only the frozen validation
-buckets.
+same token alignment and document hash split while accepting only one explicitly selected
+held-out split.  ``ValidationAlignedAnchorStream`` remains as a compatibility wrapper for
+all historical evaluation jobs.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ import hashlib
 import json
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from aspd.multimodel.v3.alignment import AlignmentResult, FastTokenizer, align_canonical_text
 from aspd.multimodel.v3.data import HashSplitPolicy, SourceDocument
@@ -30,8 +31,8 @@ def _canonical_sha256(value: Mapping[str, Any]) -> str:
     ).hexdigest()
 
 
-class ValidationAlignedAnchorStream:
-    """Read-only validation stream with checkpointable source/dedup state."""
+class DiagnosticAlignedAnchorStream:
+    """Read-only validation/test stream with checkpointable source/dedup state."""
 
     STATE_SCHEMA = 1
 
@@ -45,16 +46,20 @@ class ValidationAlignedAnchorStream:
         tokenizer_revisions: Mapping[str, str],
         split_policy: HashSplitPolicy,
         dedup_path: str | Path,
+        selected_split: Literal["validation", "test"],
         sequence_length: int = 512,
         model_order: tuple[str, ...] = MODEL_ORDER_2B,
     ):
+        if selected_split not in {"validation", "test"}:
+            raise ValueError("diagnostic stream must select validation or test")
+        self.selected_split = selected_split
         self.model_order = tuple(model_order)
         if len(self.model_order) < 2 or len(set(self.model_order)) != len(self.model_order):
-            raise ValueError("validation stream requires at least two unique model keys")
+            raise ValueError("diagnostic stream requires at least two unique model keys")
         if tuple(tokenizers) != self.model_order or tuple(tokenizer_revisions) != self.model_order:
-            raise ValueError("validation stream tokenizer order mismatch")
+            raise ValueError("diagnostic stream tokenizer order mismatch")
         if not hasattr(dataset, "state_dict") or not hasattr(dataset, "load_state_dict"):
-            raise TypeError("pinned validation dataset must expose resumable state")
+            raise TypeError("pinned diagnostic dataset must expose resumable state")
         self.dataset = dataset
         self.dataset_id = dataset_id
         self.dataset_revision = dataset_revision
@@ -65,7 +70,7 @@ class ValidationAlignedAnchorStream:
         self.provenance = {
             "schema_version": self.STATE_SCHEMA,
             "purpose": "aspd_v3_500m_read_only_diagnostic",
-            "selected_split": "validation",
+            "selected_split": selected_split,
             "dataset_id": dataset_id,
             "dataset_revision": dataset_revision,
             "tokenizer_revisions": dict(tokenizer_revisions),
@@ -91,13 +96,15 @@ class ValidationAlignedAnchorStream:
     def close(self) -> None:
         self.dedup.close()
 
-    def _next_validation_alignment(self) -> tuple[SourceDocument, AlignmentResult]:
+    def _next_alignment(self) -> tuple[SourceDocument, AlignmentResult]:
         while True:
             source_state_before = self.dataset.state_dict()
             try:
                 row = next(self._iterator)
             except StopIteration as error:
-                raise RuntimeError("pinned dataset exhausted before validation budget") from error
+                raise RuntimeError(
+                    f"pinned dataset exhausted before {self.selected_split} budget"
+                ) from error
             self.documents_read += 1
             text = row.get("text")
             meta = row.get("meta") or {}
@@ -121,7 +128,7 @@ class ValidationAlignedAnchorStream:
                 continue
             split = self.split_policy.split(document)
             self.documents_by_split[split] += 1
-            if split != "validation":
+            if split != self.selected_split:
                 continue
             alignment = align_canonical_text(
                 text,
@@ -165,7 +172,7 @@ class ValidationAlignedAnchorStream:
         )
         next_anchor = int(self._pending["next_anchor"])
         if not 0 <= next_anchor < len(alignment.anchors):
-            raise ValueError("pending validation cursor is outside its anchor list")
+            raise ValueError("pending diagnostic cursor is outside its anchor list")
         return document, alignment, next_anchor
 
     def next_pool(self, *, pool_anchors: int = 2048) -> AlignedAnchorPool:
@@ -182,7 +189,7 @@ class ValidationAlignedAnchorStream:
         restored = self._restore_pending()
         while len(anchor_ids) < pool_anchors:
             if restored is None:
-                document, alignment = self._next_validation_alignment()
+                document, alignment = self._next_alignment()
                 start = 0
             else:
                 document, alignment, start = restored
@@ -195,6 +202,7 @@ class ValidationAlignedAnchorStream:
                 {
                     "observation_id": document.source_row_id,
                     "document_id": document.document_id,
+                    "source_group": document.source_group,
                     "raw_tokens": {
                         key: len(alignment.tokenized[key].input_ids) for key in self.model_order
                     },
@@ -250,9 +258,9 @@ class ValidationAlignedAnchorStream:
 
     def load_state_dict(self, state: Mapping[str, Any]) -> None:
         if state.get("schema_version") != self.STATE_SCHEMA:
-            raise ValueError("unsupported validation stream state schema")
+            raise ValueError("unsupported diagnostic stream state schema")
         if state.get("provenance_sha256") != self.provenance_sha256:
-            raise ValueError("validation stream provenance mismatch")
+            raise ValueError("diagnostic stream provenance mismatch")
         self.dataset.load_state_dict(dict(state["dataset_state"]))
         self._iterator = iter(self.dataset)
         self.dedup.rollback(int(state["dedup_high_water"]))
@@ -263,3 +271,10 @@ class ValidationAlignedAnchorStream:
         }
         self.exact_duplicates_rejected = int(state["exact_duplicates_rejected"])
         self.zero_anchor_documents = int(state["zero_anchor_documents"])
+
+
+class ValidationAlignedAnchorStream(DiagnosticAlignedAnchorStream):
+    """Backward-compatible validation-only wrapper used by historical evaluators."""
+
+    def __init__(self, **kwargs: Any):
+        super().__init__(selected_split="validation", **kwargs)

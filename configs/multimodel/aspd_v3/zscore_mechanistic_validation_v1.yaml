@@ -1,0 +1,37 @@
+schema_version: 1
+status: RESEARCHER_AUTHORIZED_MECHANISTIC_VALIDATION
+experiment_family: aspd_v3_zscore_mechanistic_validation_v1
+training_authorized_by_this_contract: false
+model_order: [gemma, smol]
+forbidden_model_substrings: [qwen]
+arms: [full_only_control, per_anchor_zscore]
+checkpoint_steps: 1221
+accepted_training_exposures: 10002432
+selected_split: test
+split_unit: source_document
+test_buckets: [10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+accepted_evaluation_anchors: 100352
+pool_anchors: 2048
+context_tokens_per_side: 32
+contexts_per_feature: 4
+retained_contexts_per_feature: 12
+screening_features_per_arm_site: 50
+frequency_strata: [low, medium, high]
+minimum_feature_fires: 4
+minimum_unique_documents: 4
+intruder_examples: 5
+intruder_chance_accuracy: 0.2
+feature_sampling_seed: 31
+intruder_position_seed: 37
+bootstrap_seed: 41
+bootstrap_replicates: 2000
+jaccard_pair_seed: 43
+jaccard_pairs_per_stratum: 20000
+causal_components_per_arm: 16
+causal_strengths: [0.0, 0.5, 1.0]
+random_control_seeds: [101, 103, 107]
+judge_model_id: mistralai/Mistral-Nemo-Instruct-2407
+judge_revision: 04d8a90549d23fc6bd7f642064003592df51e9b3
+judge_paid_api: false
+judge_positive_controls: 20
+judge_negative_controls: 20
