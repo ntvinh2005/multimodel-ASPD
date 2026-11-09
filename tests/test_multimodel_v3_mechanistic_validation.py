@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -27,7 +28,13 @@ from aspd.multimodel.cli.judge_aspd_v3_intruder_loo import (
 from aspd.multimodel.cli.judge_aspd_v3_intruder_loo import (
     _summary as _loo_summary,
 )
+from aspd.multimodel.cli.plan_aspd_v3_causal import _fires, _select_components
+from aspd.multimodel.cli.run_aspd_v3_causal_screen import (
+    _metric_rows,
+    _random_component_factors,
+)
 from aspd.multimodel.v3.mechanistic_validation import (
+    CausalValidationContract,
     IntruderJudgeContract,
     IntruderJudgeV2Contract,
     IntruderLeaveOneOutJudgeContract,
@@ -444,6 +451,58 @@ def test_leave_one_out_summary_applies_parent_level_controls() -> None:
     assert _loo_summary(rows, prompt_count=len(rows) * 5, contract=contract)[
         "invalid_parent_rate"
     ] > 0
+
+
+def test_causal_contract_selection_and_sparse_support_are_deterministic() -> None:
+    contract = CausalValidationContract.load(
+        ROOT / "configs/multimodel/aspd_v3/zscore_causal_validation_v1.yaml"
+    )
+    assert contract.training_authorized_by_this_contract is False
+    answers = []
+    feature = 0
+    for arm in contract.arms:
+        for site in ("pre", "mid"):
+            for stratum in ("low", "medium", "high"):
+                for _ in range(5):
+                    answers.append(
+                        {
+                            "arm": arm,
+                            "site": site,
+                            "frequency_stratum": stratum,
+                            "feature": feature,
+                        }
+                    )
+                    feature += 1
+    first = _select_components(answers, contract, arm="full_only_control")
+    second = _select_components(answers, contract, arm="full_only_control")
+    assert [row["feature"] for row in first] == [row["feature"] for row in second]
+    assert len(first) == contract.components_per_arm
+
+    indptr = np.asarray([0, 2, 3], dtype=np.int64)
+    indices = np.asarray([1, 4, 2], dtype=np.int64)
+    assert _fires(indptr, indices, anchor=0, feature=4)
+    assert not _fires(indptr, indices, anchor=1, feature=4)
+
+
+def test_causal_metrics_and_random_component_control_are_exact() -> None:
+    clean = torch.tensor([[1.0, 2.0, 3.0], [-2.0, 0.0, 1.0]])
+    rows = _metric_rows(clean, clean.clone())
+    assert all(row["kl_clean_to_edited"] == pytest.approx(0.0) for row in rows)
+    assert all(row["maximum_absolute_logit_delta"] == 0.0 for row in rows)
+
+    target = _target()
+    component = SimpleNamespace(
+        U=torch.tensor([[1.0, 0.0], [0.0, 2.0], [3.0, 0.0]]),
+        V=torch.tensor([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 2.0]]),
+    )
+    model = SimpleNamespace(
+        matrix_bank=SimpleNamespace(components={target.key.replace(".", "__dot__"): component})
+    )
+    feature, u, v = _random_component_factors(
+        model, target, learned_feature=0, learned_norm=2.5, seed=109
+    )
+    assert feature != 0
+    assert float(u.norm() * v.norm()) == pytest.approx(2.5)
 
 
 def test_judge_validation_summary_applies_predeclared_thresholds() -> None:

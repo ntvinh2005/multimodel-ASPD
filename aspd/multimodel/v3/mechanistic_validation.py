@@ -235,6 +235,61 @@ class IntruderLeaveOneOutJudgeContract(BaseModel):
         return hashlib.sha256(encoded.encode()).hexdigest()
 
 
+class CausalValidationContract(BaseModel):
+    """Frozen C1 direct-parameter intervention screening contract."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1]
+    status: Literal["RESEARCHER_AUTHORIZED_CAUSAL_SCREEN"]
+    experiment_family: Literal["aspd_v3_zscore_causal_validation_v1"]
+    training_authorized_by_this_contract: Literal[False]
+    intervention_level: Literal["C1_single_matrix"]
+    arms: tuple[Literal["full_only_control"], Literal["per_anchor_zscore"]]
+    model_order: tuple[Literal["gemma"], Literal["smol"]]
+    components_per_arm: Literal[16]
+    components_per_site: Literal[8]
+    component_selection_frame: Literal["intruder_disjoint_feature_census"]
+    exclude_intruder_features: Literal[True]
+    site_stratum_quota: dict[Literal["low", "medium", "high"], int]
+    active_contexts_per_component: Literal[4]
+    inactive_contexts_per_component: Literal[4]
+    active_context_rank_start: Literal[0]
+    target_selection_policy: Literal["maximum_learned_operator_frobenius_within_site"]
+    learned_strengths: tuple[Literal[0.0], Literal[0.5], Literal[1.0]]
+    random_rank_one_seeds: tuple[Literal[101], Literal[103], Literal[107]]
+    random_component_seed: Literal[109]
+    parameter_restore: Literal["bitwise_exact_logical_slice_copy"]
+    context_activity_definition: Literal["natural_batchtopk_support"]
+    metrics: tuple[
+        Literal["kl_clean_to_edited"],
+        Literal["logit_delta_rms"],
+        Literal["clean_top_token_probability_change"],
+    ]
+    selection_seed: Literal[59]
+    bootstrap_seed: Literal[61]
+    bootstrap_replicates: Literal[2_000]
+
+    @model_validator(mode="after")
+    def validate_causal_screen(self) -> CausalValidationContract:
+        if self.components_per_site * 2 != self.components_per_arm:
+            raise ValueError("causal component/site budgets disagree")
+        if sum(self.site_stratum_quota.values()) != self.components_per_site:
+            raise ValueError("causal frequency-stratum quotas disagree with site budget")
+        if self.site_stratum_quota != {"low": 3, "medium": 3, "high": 2}:
+            raise ValueError("causal frequency-stratum quotas changed")
+        return self
+
+    @classmethod
+    def load(cls, path: str | Path) -> CausalValidationContract:
+        return cls.model_validate(yaml.safe_load(Path(path).read_text(encoding="utf-8")))
+
+    def fingerprint(self) -> str:
+        payload = self.model_dump(mode="json")
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode()).hexdigest()
+
+
 @dataclass(frozen=True)
 class PairwiseFiringStatistic:
     left: int
@@ -375,6 +430,7 @@ __all__ = [
     "IntruderJudgeContract",
     "IntruderJudgeV2Contract",
     "IntruderLeaveOneOutJudgeContract",
+    "CausalValidationContract",
     "PairwiseFiringStatistic",
     "norm_matched_random_rank_one",
     "pairwise_firing_statistic",
