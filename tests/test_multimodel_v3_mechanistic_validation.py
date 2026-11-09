@@ -132,6 +132,10 @@ def test_temporary_rank_one_ablation_edits_equation_and_restores_bitwise() -> No
         expected = original.float() - 0.5 * torch.outer(u, v)
         torch.testing.assert_close(model.projection.weight.float(), expected)
         assert metadata["target"] == "gemma.L09.q"
+        assert metadata["realized_weight_delta_frobenius_norm"] > 0.0
+        assert metadata["realized_to_intended_norm_ratio"] == pytest.approx(1.0)
+        assert metadata["realized_to_intended_cosine"] == pytest.approx(1.0)
+        assert metadata["realized_nonzero_fraction"] == pytest.approx(1.0)
     assert torch.equal(model.projection.weight, original)
 
 

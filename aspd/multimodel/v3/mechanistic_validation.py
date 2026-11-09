@@ -408,6 +408,18 @@ def temporary_rank_one_ablation(
     perturbation = (float(strength) * operator).to(device=weight.device, dtype=weight.dtype)
     with torch.no_grad():
         weight.sub_(perturbation)
+    realized = original.float() - weight.detach().float()
+    intended = (float(strength) * operator).to(device=weight.device).float()
+    realized_norm = realized.norm()
+    intended_norm = intended.norm()
+    if float(realized_norm) == 0.0 or float(intended_norm) == 0.0:
+        realized_to_intended_cosine = 1.0 if torch.equal(realized, intended) else 0.0
+    else:
+        realized_to_intended_cosine = float(
+            torch.nn.functional.cosine_similarity(
+                realized.reshape(1, -1), intended.reshape(1, -1)
+            ).item()
+        )
     metadata = {
         "target": target.key,
         "physical_module_path": physical_path,
@@ -415,6 +427,12 @@ def temporary_rank_one_ablation(
         "operator_frobenius_norm": float(operator.norm()),
         "applied_frobenius_norm_fp32": float((float(strength) * operator).norm()),
         "applied_frobenius_norm_stored_dtype": float(perturbation.float().norm()),
+        "realized_weight_delta_frobenius_norm": float(realized_norm),
+        "realized_to_intended_norm_ratio": (
+            float(realized_norm / intended_norm) if float(intended_norm) != 0.0 else 1.0
+        ),
+        "realized_to_intended_cosine": realized_to_intended_cosine,
+        "realized_nonzero_fraction": float((realized != 0).float().mean()),
     }
     try:
         yield metadata
