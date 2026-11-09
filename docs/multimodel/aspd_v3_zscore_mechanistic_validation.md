@@ -91,7 +91,8 @@ No single composite score will combine these estimands.
 - Natural-gate sparse/context extractor: implemented and CPU-tested.
 - Exact reversible rank-one edit and random norm-matched controls: implemented and
   CPU-tested.
-- Validation-split GPU extraction smoke: pending.
+- Validation-split GPU extraction smoke: passed on job `50338801_1` (2 B200 GPUs,
+  1 minute 54 seconds elapsed; approximately 0.063 B200 GPU-hours).
 - Untouched test extraction, Intruder judging, redundancy analysis, and causal inference:
   pending.
 - Longer training: not started and remains blocked until the current 10M evaluation is
@@ -100,6 +101,17 @@ No single composite score will combine these estimands.
 ## Results
 
 Pending current-checkpoint evaluation.
+
+### Extraction smoke
+
+The z-score checkpoint restored at step 1,221 on both model-owner ranks. Its shared encoder
+digest matched across ranks, all restored tensors were finite, and source-model parameter
+signatures were unchanged after extraction. One complete 2,048-anchor validation pool
+contained exactly 65,536 natural firing events at each site (mean (K=32)); per-anchor
+counts varied because BatchTopK is pool-wide. PRE and MID used 4,643 and 4,357 features in
+this small smoke sample. Context retention kept at most one activation per source document,
+and this distinct-document invariant passed for every retained feature. These are technical
+smoke results on development data, not scientific evidence for z-score.
 
 ## Final scientific decision
 

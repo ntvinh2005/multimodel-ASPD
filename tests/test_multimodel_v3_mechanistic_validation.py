@@ -7,6 +7,11 @@ import pytest
 import torch
 from torch import nn
 
+from aspd.multimodel.cli.analyze_aspd_v3_mechanistic import (
+    _feature_anchor_lists,
+    _intruder_task,
+    _stratified_features,
+)
 from aspd.multimodel.cli.extract_aspd_v3_mechanistic import _save_site
 from aspd.multimodel.v3.mechanistic_validation import (
     MechanisticValidationContract,
@@ -145,3 +150,61 @@ def test_sparse_extraction_artifact_is_valid_csr_and_fail_closed(tmp_path: Path)
             retained=retained,
             accepted_anchors=2,
         )
+
+
+def test_feature_sampling_is_frequency_stratified_and_deterministic() -> None:
+    indptr = np.asarray([0, 2, 4, 6, 9], dtype=np.int64)
+    indices = np.asarray([0, 1, 0, 2, 0, 3, 0, 1, 3], dtype=np.int64)
+    firing, counts = _feature_anchor_lists(indptr, indices, n_features=4)
+    assert counts.tolist() == [4, 2, 1, 2]
+    assert firing[0].tolist() == [0, 1, 2, 3]
+    documents = np.asarray([4, 2, 1, 2])
+    first = _stratified_features(
+        counts,
+        documents,
+        minimum_fires=1,
+        minimum_documents=1,
+        sample_size=4,
+        seed=17,
+    )
+    second = _stratified_features(
+        counts,
+        documents,
+        minimum_fires=1,
+        minimum_documents=1,
+        sample_size=4,
+        seed=17,
+    )
+    assert first == second
+    assert {row["frequency_stratum"] for row in first[0]} == {"low", "medium", "high"}
+
+
+def test_intruder_task_is_blinded_and_uses_disjoint_document() -> None:
+    sampled = [
+        {"feature": 1, "frequency_stratum": "medium", "fires": 10, "unique_documents": 4},
+        {"feature": 2, "frequency_stratum": "medium", "fires": 9, "unique_documents": 4},
+    ]
+    contexts = {
+        1: [
+            {"context": f"shared pattern {index}", "document_id": f"target-{index}", "source_group": "books"}
+            for index in range(4)
+        ],
+        2: [
+            {"context": "different pattern", "document_id": "donor", "source_group": "books"}
+        ],
+    }
+    result = _intruder_task(
+        arm="per_anchor_zscore",
+        site="pre",
+        selected=sampled[0],
+        sampled=sampled,
+        contexts=contexts,
+        rng=np.random.default_rng(5),
+        examples=5,
+    )
+    assert result is not None
+    task, answer = result
+    assert set(task) == {"schema_version", "trial_id", "instruction", "examples"}
+    assert "arm" not in task and "feature" not in task and "activation" not in task
+    assert answer["intruder_document_id"] == "donor"
+    assert answer["intruder_document_id"] not in answer["target_document_ids"]
