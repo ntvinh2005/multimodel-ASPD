@@ -126,6 +126,12 @@
   },
   "readiness": {
     "ready_for_25m_confirmation": true,
+    "25m_training_started": false,
+    "25m_execution_blockers": [
+      "no validated exact external checkpoint continuation mode",
+      "current pilot budget and checkpoint config fingerprint are fixed at 1221 steps",
+      "orange storage headroom is unsafe for two matched 82 GiB checkpoints plus temporary writes"
+    ],
     "ready_for_independent_seed_after_25m": "conditional",
     "ready_for_50m": false,
     "ready_for_500m": false,

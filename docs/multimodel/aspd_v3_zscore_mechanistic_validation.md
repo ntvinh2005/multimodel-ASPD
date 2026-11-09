@@ -374,6 +374,21 @@ Abort or revise before 50M if natural diversity collapses, any model/site activa
 regresses materially, internal FVU regresses, or causal specificity becomes indistinguishable
 from both random controls. Do not launch 500M automatically.
 
+### 9.1 Continuation infrastructure blocker
+
+No 25M job was submitted in this investigation. The current pilot runner fail-closes at the
+configuration's 1,221-step budget and requires the checkpoint configuration fingerprint to
+remain unchanged. Its existing controlled mode reloads model state into a newly constructed
+optimizer, so it is not an exact continuation of the 10M optimizer/scheduler trajectory.
+
+Each complete source checkpoint is approximately 82 GiB. `/orange/thai` had only about
+203 GiB free at close; retaining both immutable 10M checkpoints while writing two matched
+25M checkpoints plus temporary writes would violate the storage-safety margin. A valid next
+implementation must provide an immutable continuation contract, exact external checkpoint
+restore including optimizer/scheduler/stream/ledger state, a deterministic one-update resume
+test, and new output roots on a filesystem with verified headroom. It must not modify or
+retire the 10M checkpoints.
+
 ## 10. Resource and reliability report
 
 - Total new B200 usage for extraction, judges, causal screens, and validation reruns:
@@ -383,6 +398,8 @@ from both random controls. Do not launch 500M automatically.
   array was being replaced; remaining pending tasks were cancelled. It produced no
   scientific conclusion. The replacement used the same frozen plan at a clean commit.
 - No checkpoint was created, changed, or deleted by this evaluation.
+- No 25M training job was submitted because exact cross-namespace continuation and storage
+  headroom are not yet validated.
 - Evaluation namespace size: approximately 193 MiB.
 - Final observed `/orange/thai` headroom: about 203 GiB; inode use 42%.
 - All complete control and z-score checkpoints were preserved.
