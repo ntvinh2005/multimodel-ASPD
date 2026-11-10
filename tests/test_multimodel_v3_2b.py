@@ -130,6 +130,8 @@ def test_main500m_draft_preserves_zscore_math_and_fails_closed() -> None:
     assert config.objective.activation_code == "continuous"
     assert config.data.optimizer_steps == 61_036
     assert config.data.planned_accepted_anchor_exposures == 500_006_912
+    assert config.runtime.startup_storage_required_bytes == 1_099_511_627_776
+    assert config.runtime.checkpoint_root == config.runtime.output_root
     assert config.approvals.human_interpretability.status == (
         "PENDING_RESEARCHER_RESPONSES"
     )
@@ -146,6 +148,46 @@ def test_main500m_draft_preserves_zscore_math_and_fails_closed() -> None:
     invalid["approvals"]["human_interpretability"]["researcher_decision"] = "APPROVE"
     with pytest.raises(ValueError, match="cannot claim a decision"):
         V31Main500MConfig.model_validate(invalid)
+
+
+def test_main500m_slurm_proposals_separate_preflight_and_main() -> None:
+    main = (
+        ROOT / "slurm/multimodel/aspd_v3_500m_main_PROPOSAL.sbatch"
+    ).read_text(encoding="utf-8")
+    preflight = (
+        ROOT / "slurm/multimodel/aspd_v3_500m_preflight_PROPOSAL.sbatch"
+    ).read_text(encoding="utf-8")
+
+    for script in (main, preflight):
+        assert "#SBATCH --account=thai" in script
+        assert "#SBATCH --partition=hpg-b200" in script
+        assert "#SBATCH --gres=gpu:b200:3" in script
+        assert "ASPD_EXPECTED_GIT_SHA" in script
+        assert "startup_storage_required_bytes" in script
+        assert "git status --porcelain" in script
+
+    assert "--mode main" in main
+    assert "--require-ready" in main
+    assert "--continuation-authorization" in main
+    assert "LATEST_COMPLETE_CHECKPOINT" in main
+    assert "  --mode preflight \\\n" not in main
+    assert "#SBATCH --signal=B:USR1@300" in main
+    assert "scontrol requeue" in main
+
+    assert "--mode preflight" in preflight
+    assert "--require-preflight-ready" in preflight
+    assert "PREFLIGHT_STEPS > 20" in preflight
+    assert "  --mode main \\\n" not in preflight
+    assert "scontrol requeue" not in preflight
+
+
+def test_main500m_runtime_rejects_checkpoint_root_different_from_run_root() -> None:
+    payload = _main500m_config().payload()
+    payload["runtime"]["checkpoint_root"] = str(
+        Path(payload["runtime"]["output_root"]) / "separate-checkpoints"
+    )
+    with pytest.raises(ValueError, match="checkpoint_root must equal output_root"):
+        V31Main500MConfig.model_validate(payload)
 
 
 def test_main500m_human_gate_distinguishes_evidence_from_accepted_uncertainty(

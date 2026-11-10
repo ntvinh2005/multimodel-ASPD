@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "measured_at": "2026-11-09T19:39:08-05:00",
+  "status": "STATIC_RUNTIME_GUARDS_PASS_REAL_SIGNAL_TEST_PENDING",
+  "slurm": {
+    "account": "thai",
+    "account_association_observed": true,
+    "preferred_partition": "hpg-b200",
+    "preferred_partition_state": "UP",
+    "preferred_partition_nodes": 60,
+    "preferred_partition_gpu_layout": "8x B200 per node",
+    "preferred_partition_max_walltime": "14-00:00:00",
+    "other_gpu_partitions_observed": [
+      "hpg-rtx6000",
+      "hpg-turin",
+      "hwgui"
+    ],
+    "safe_fallback": "WAIT_FOR_B200_UNLESS_A_SEPARATE_BOUNDED_MEMORY_PREFLIGHT_APPROVES_ANOTHER_GPU_CLASS",
+    "submitted_by_this_audit": false,
+    "cancelled_by_this_audit": false,
+    "other_user_jobs_observed": [
+      {
+        "job_id": "50519752",
+        "name": "cssalt-sonogym-smoke",
+        "state": "RUNNING",
+        "reason_or_node": "c1105a-s4"
+      }
+    ]
+  },
+  "environment": {
+    "env_file": "/blue/thai/vinhnguyen1/multimodel-ASPD/env.sh",
+    "env_file_readable": true,
+    "python": "/blue/thai/vinhnguyen1/multimodel-ASPD/repo/.venv/bin/python",
+    "torchrun": "/blue/thai/vinhnguyen1/multimodel-ASPD/repo/.venv/bin/torchrun",
+    "torch": "2.8.0+cu128",
+    "cuda_build": "12.8"
+  },
+  "contracts": {
+    "configuration_fingerprint": "af976c9ee5a1dadac7e5b915cc2fbc277eee22df3a1b029ec5318a55b99303c0",
+    "execution_contract_fingerprint": "d42977392a791a8c0844fbe477178fa288b19d47304a17c4f046b828db7c65be",
+    "configuration_sha256": "3bc57ddf8ec9fd687776789ca5c31bc696315a5dfa53e5d1974bb1fc1ffdd5df",
+    "main_slurm_sha256": "aac2e25744d48db0121e220ff24c3f68a89569d4fbfc68b2a4511098d98e5fb5",
+    "preflight_slurm_sha256": "531adff3b6e8cd5c22f7913ba644e580906b1822068bfe6e6f088a9c2a131a85"
+  },
+  "verified_guards": [
+    "main_and_preflight_have_separate_mode_specific_authorization",
+    "three_ranks_and_three_B200_requests_are_explicit",
+    "reviewed_git_commit_and_clean_worktree_are_required",
+    "pinned_environment_and_executables_are_required",
+    "one_tibibyte_startup_storage_reservation_is_enforced",
+    "new_preflight_namespace_must_not_exist",
+    "main_existing_run_requires_manifest_and_complete_checkpoint",
+    "external_resume_requires_complete_checkpoint_and_manifest",
+    "milestone_continuation_authorization_is_forwarded",
+    "requeue_occurs_only_after_USR1_and_trainer_exit_99"
+  ],
+  "tests": {
+    "bash_syntax": "PASS_BOTH_PROPOSALS",
+    "focused_cpu": "17_PASSED_17_DESELECTED",
+    "main_draft_validation": "EXPECTED_FAIL_CLOSED_EXIT_2",
+    "preflight_draft_validation": "EXPECTED_FAIL_CLOSED_MODEL3_ALIGNMENT_AUTHORIZATION",
+    "real_slurm_signal_requeue": "NOT_RUN_NO_JOB_SUBMISSION_AUTHORIZATION",
+    "real_final_three_model_throughput": "NOT_RUN_PENDING_MODEL3_AND_PREFLIGHT"
+  },
+  "evidence_boundary": "Static shell and CPU contract validation only. No Slurm job was submitted, no signal was delivered to a scheduled process, and no final three-model throughput was measured."
+}

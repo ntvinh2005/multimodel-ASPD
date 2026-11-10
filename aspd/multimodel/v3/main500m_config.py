@@ -326,6 +326,7 @@ class Main500MRuntime(BaseModel):
     ledger_anchor_storage: Literal["exact_compact_v1"]
     output_root: str
     checkpoint_root: str
+    startup_storage_required_bytes: Literal[1_099_511_627_776]
     dataset_manifest: str
     alignment_manifest: str
     continuation_authorization_root: str
@@ -349,6 +350,11 @@ class Main500MRuntime(BaseModel):
             raise ValueError("main 500M paths must use the isolated preparation namespace")
         if any(value.startswith(("~", "/home/")) for value in paths):
             raise ValueError("large ASPD artifacts must not default to HOME")
+        if Path(self.checkpoint_root) != Path(self.output_root):
+            raise ValueError(
+                "the current runner stores checkpoints inside each run namespace; "
+                "checkpoint_root must equal output_root"
+            )
         return self
 
 

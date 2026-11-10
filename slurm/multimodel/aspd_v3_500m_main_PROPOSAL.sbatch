@@ -2,6 +2,7 @@
 # PROPOSAL ONLY. The checked-in config is MAIN_500M_NOT_AUTHORIZED and this script
 # exits before CUDA initialization while any scientific or operational gate is open.
 #SBATCH --job-name=aspd-v3.1-main500m
+#SBATCH --account=thai
 #SBATCH --partition=hpg-b200
 #SBATCH --gres=gpu:b200:3
 #SBATCH --time=2-00:00:00
@@ -17,7 +18,12 @@ set -euo pipefail
 
 cd "${SLURM_SUBMIT_DIR:?submit from the preparation worktree root}"
 module load conda
-source ../env.sh
+ASPD_ENV_FILE=${ASPD_ENV_FILE:-/blue/thai/vinhnguyen1/multimodel-ASPD/env.sh}
+if [[ ! -r "${ASPD_ENV_FILE}" ]]; then
+  echo "Pinned ASPD environment file is unavailable: ${ASPD_ENV_FILE}" >&2
+  exit 2
+fi
+source "${ASPD_ENV_FILE}"
 
 export PYTHONPATH="${PWD}"
 export HF_HOME=/blue/thai/vinhnguyen1/multimodel-ASPD/cache/huggingface
@@ -25,9 +31,10 @@ export TOKENIZERS_PARALLELISM=false
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 export NCCL_IB_DISABLE=1
+export TMPDIR=${SLURM_TMPDIR:-/tmp}
 
-PYTHON=${ASPD_PYTHON:-../repo/.venv/bin/python}
-TORCHRUN=${ASPD_TORCHRUN:-../repo/.venv/bin/torchrun}
+PYTHON=${ASPD_PYTHON:-/blue/thai/vinhnguyen1/multimodel-ASPD/repo/.venv/bin/python}
+TORCHRUN=${ASPD_TORCHRUN:-/blue/thai/vinhnguyen1/multimodel-ASPD/repo/.venv/bin/torchrun}
 CONFIG=configs/multimodel/aspd_v3/main500m_preparation_v1.yaml
 if [[ ! -x "${PYTHON}" || ! -x "${TORCHRUN}" ]]; then
   echo "Pinned ASPD Python/torchrun executables are unavailable" >&2
@@ -35,6 +42,15 @@ if [[ ! -x "${PYTHON}" || ! -x "${TORCHRUN}" ]]; then
 fi
 if [[ -n "$(git status --porcelain)" ]]; then
   echo "Refusing to train from a dirty worktree" >&2
+  exit 2
+fi
+if [[ -z "${ASPD_EXPECTED_GIT_SHA:-}" ]]; then
+  echo "ASPD_EXPECTED_GIT_SHA must pin the reviewed source commit" >&2
+  exit 2
+fi
+CURRENT_GIT_SHA=$(git rev-parse HEAD)
+if [[ "${CURRENT_GIT_SHA}" != "${ASPD_EXPECTED_GIT_SHA}" ]]; then
+  echo "Reviewed source commit mismatch: expected ${ASPD_EXPECTED_GIT_SHA}, observed ${CURRENT_GIT_SHA}" >&2
   exit 2
 fi
 
@@ -49,14 +65,47 @@ if [[ ! -f "${PREFLIGHT_EVIDENCE}" ]]; then
 fi
 
 RUN_ROOT="$("${PYTHON}" -c 'import sys,yaml; print(yaml.safe_load(open(sys.argv[1]))["runtime"]["output_root"])' "${CONFIG}")"
-RUN_ID=aspd_v3_1_three_model_168targets_c8192_k32_500m_v1
-RUN_DIR="${RUN_ROOT}/${RUN_ID}"
-if [[ -e "${RUN_DIR}" && ! -f "${RUN_DIR}/run_manifest.json" ]]; then
-  echo "Refusing an existing output namespace without a run manifest: ${RUN_DIR}" >&2
+CHECKPOINT_ROOT="$("${PYTHON}" -c 'import sys,yaml; print(yaml.safe_load(open(sys.argv[1]))["runtime"]["checkpoint_root"])' "${CONFIG}")"
+REQUIRED_STARTUP_BYTES="$("${PYTHON}" -c 'import sys,yaml; print(yaml.safe_load(open(sys.argv[1]))["runtime"]["startup_storage_required_bytes"])' "${CONFIG}")"
+if [[ "${CHECKPOINT_ROOT}" != "${RUN_ROOT}" ]]; then
+  echo "Runner requires checkpoint_root to equal output_root" >&2
   exit 2
 fi
+if [[ ! -d "${RUN_ROOT}" || ! -w "${RUN_ROOT}" ]]; then
+  echo "Approved run/storage root must already exist and be writable: ${RUN_ROOT}" >&2
+  exit 2
+fi
+AVAILABLE_BYTES=$(df -PB1 "${RUN_ROOT}" | awk 'NR==2 {print $4}')
+if [[ -z "${AVAILABLE_BYTES}" || "${AVAILABLE_BYTES}" -lt "${REQUIRED_STARTUP_BYTES}" ]]; then
+  echo "Insufficient startup storage: available=${AVAILABLE_BYTES:-unknown}, required=${REQUIRED_STARTUP_BYTES}" >&2
+  exit 2
+fi
+RUN_ID=aspd_v3_1_three_model_168targets_c8192_k32_500m_v1
+RUN_DIR="${RUN_ROOT}/${RUN_ID}"
+if [[ -e "${RUN_DIR}" ]]; then
+  if [[ ! -f "${RUN_DIR}/run_manifest.json" ]]; then
+    echo "Refusing an existing output namespace without a run manifest: ${RUN_DIR}" >&2
+    exit 2
+  fi
+  if [[ -n "${RESUME_CHECKPOINT:-}" ]]; then
+    echo "In-place recovery selects the latest complete run checkpoint automatically; do not also set RESUME_CHECKPOINT" >&2
+    exit 2
+  fi
+  LATEST_COMPLETE_CHECKPOINT=$(find "${RUN_DIR}/checkpoints" -mindepth 1 -maxdepth 1 \
+    -type d -name 'step-*' -exec test -f '{}/COMPLETE' \; -print 2>/dev/null \
+    | sort | tail -n 1)
+  if [[ -z "${LATEST_COMPLETE_CHECKPOINT}" ]]; then
+    echo "Existing run has no complete checkpoint and cannot be resumed: ${RUN_DIR}" >&2
+    exit 2
+  fi
+elif [[ -n "${RESUME_CHECKPOINT:-}" ]]; then
+  if [[ ! -f "${RESUME_CHECKPOINT}/COMPLETE" || ! -f "${RESUME_CHECKPOINT}/manifest.json" ]]; then
+    echo "External resume checkpoint must be complete and manifested: ${RESUME_CHECKPOINT}" >&2
+    exit 2
+  fi
+fi
 
-echo "git_sha=$(git rev-parse HEAD)"
+echo "git_sha=${CURRENT_GIT_SHA}"
 echo "config_sha256=$(sha256sum "${CONFIG}" | awk '{print $1}')"
 echo "preflight_evidence=${PREFLIGHT_EVIDENCE}"
 echo "run_dir=${RUN_DIR}"
@@ -77,6 +126,10 @@ RESUME_ARGS=()
 if [[ -n "${RESUME_CHECKPOINT:-}" ]]; then
   RESUME_ARGS=(--resume-checkpoint "${RESUME_CHECKPOINT}")
 fi
+CONTINUATION_ARGS=()
+if [[ -n "${CONTINUATION_AUTHORIZATION:-}" ]]; then
+  CONTINUATION_ARGS=(--continuation-authorization "${CONTINUATION_AUTHORIZATION}")
+fi
 
 setsid "${TORCHRUN}" \
   --standalone \
@@ -90,7 +143,8 @@ setsid "${TORCHRUN}" \
   --max-steps 61036 \
   --warmup-steps 0 \
   --local-files-only \
-  "${RESUME_ARGS[@]}" &
+  "${RESUME_ARGS[@]}" \
+  "${CONTINUATION_ARGS[@]}" &
 TRAINER_PID=$!
 
 set +e

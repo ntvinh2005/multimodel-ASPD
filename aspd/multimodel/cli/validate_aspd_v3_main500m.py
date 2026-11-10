@@ -15,6 +15,9 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--require-ready", action="store_true")
+    parser.add_argument("--require-preflight-ready", action="store_true")
+    parser.add_argument("--preflight-run-dir", type=Path)
+    parser.add_argument("--preflight-optimizer-steps", type=int)
     return parser.parse_args()
 
 
@@ -55,6 +58,19 @@ def readiness_payload(config_path: Path) -> dict[str, object]:
 
 def main() -> None:
     args = _parse_args()
+    if args.require_ready and args.require_preflight_ready:
+        raise ValueError("main and preflight readiness checks are mutually exclusive")
+    if args.require_preflight_ready:
+        if args.preflight_run_dir is None or args.preflight_optimizer_steps is None:
+            raise ValueError(
+                "preflight readiness requires --preflight-run-dir and "
+                "--preflight-optimizer-steps"
+            )
+        config = load_main500m_config(args.config)
+        config.require_preflight_authorized(
+            optimizer_steps=args.preflight_optimizer_steps,
+            run_dir=args.preflight_run_dir,
+        )
     payload = readiness_payload(args.config)
     if args.output is not None:
         write_json_immutable(args.output, payload)

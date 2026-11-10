@@ -37,7 +37,7 @@ detached binary internal support. No main-training job has been submitted.
 | 7 | Sustained-collapse protection | The monitor was stateless; a collapse alert could not cause a recoverable controlled pause, and scheduled diagnostic completeness was not enforced. | `main500m_monitoring.py`, `main500m_config.py`, runner, draft YAML, tests. | Nine focused main-500M CPU tests; Ruff. | `FIXED_TESTED` | Researcher must approve the versioned v1 thresholds/actions before main authorization; the draft remains pending. |
 | 8 | Staged milestones | Milestones existed only as YAML values; the runner neither forced diagnostics/checkpoints nor required an explicit continuation decision. | Runner, `main500m_continuation.py`, config/schema, authorization template, tests. | Thirteen focused main-500M CPU tests; Ruff; Python compilation. | `FIXED_TESTED` | Researcher must approve policy v1 and provide a checkpoint-pinned decision after each staged review; draft approval remains pending. |
 | 9 | Human interpretability | The validated package exists, but no researcher response, graded human analysis, or decision artifact exists; the main schema could not distinguish these stages or accepted uncertainty. | Main config/schema, draft YAML, status artifact, decision template, tests. | Live read-only package/hash/status audit; focused main-500M tests; Ruff. | `BLOCKED_RESEARCHER_DECISION` | Researcher must complete responses and decide, or explicitly accept remaining semantic uncertainty in a hash-pinned decision artifact. |
-| 10 | Slurm/runtime reliability | Main proposal exists; preflight proposal and bounded signal/requeue evidence remain incomplete. | None yet | Shell/runtime audit pending. | `AUDITING` | No main submission authorization exists. |
+| 10 | Slurm/runtime reliability | The old proposal used worktree-relative environment paths, had no reviewed-commit or startup-storage guard, did not enforce fresh/resume namespace semantics, and had no bounded preflight launcher. | Main/preflight Slurm proposals, validator CLI, runtime config/YAML, tests, runtime status artifact. | Both scripts pass `bash -n`; 17 focused CPU tests pass; main/preflight draft validators fail closed as expected. Real scheduled signal/requeue remains unexecuted. | `BLOCKED_EXTERNAL_DEPENDENCY` | Later authorize a bounded real Slurm signal/requeue test and model-3 preflight; no main submission authorization exists. |
 | 11 | Specification/metadata consistency | Canonical alignment was absent from the formal notation; legacy policy identifiers diverged; raw/normalized logits and Latin u versus Greek nu needed an explicit map; readiness metadata was stale. | Canonical specification, stream/manifest code, tests, consistency artifact; readiness refresh remains part of final audit. | Focused z-score/target/alignment tests, production-policy test, Ruff. | `FIXED_TESTED` | No scientific choice was made; real model-3 evidence remains independently blocked. |
 
 ## Blocker 1 resolution record
@@ -272,3 +272,56 @@ new manifest route against the draft stopped before network access with
 
 Scientific semantics changed: no. These changes make the existing z-score and alignment semantics
 unambiguous and fail closed on mismatched metadata.
+
+## Blocker 10 Slurm and runtime reliability record
+
+What was wrong: the original main proposal resolved its environment and virtualenv relative to a
+different checkout, did not pin the reviewed Git commit, did not enforce the 1 TiB startup reserve,
+and did not distinguish a fresh namespace from a recoverable existing run. There was no separate
+mode-locked bounded-preflight launcher. The configured checkpoint root also implied a separate
+directory even though the runner stores checkpoints below each run directory.
+
+What changed: the main and preflight proposals now use explicit account, partition, environment,
+Python, and torchrun paths; require a clean worktree at `ASPD_EXPECTED_GIT_SHA`; and validate the
+mode-specific authorization before CUDA initialization. Both enforce the configured 1 TiB startup
+reserve. Preflight requires a new dedicated namespace and 3--20 authorized steps. Main requires an
+existing run to contain both its immutable manifest and a complete checkpoint, while an external
+resume checkpoint must contain `COMPLETE` and `manifest.json`. In-place recovery deliberately uses
+the runner's latest complete checkpoint. Milestone continuation authorization is passed explicitly.
+The main script requeues only after Slurm `USR1` is forwarded to the trainer and the trainer exits
+99 after its atomic recovery checkpoint; controlled health and milestone exits 86/87 are not
+automatically requeued.
+
+Live scheduler metadata at `2026-11-09T19:39:08-05:00` showed account `thai`, partition
+`hpg-b200` UP with 60 eight-B200 nodes and a 14-day partition limit. This is inventory, not an
+allocation or fair-share guarantee. The only observed researcher-owned job was unrelated job
+`50519752` on another node; this audit did not submit or cancel anything. No currently advertised
+non-B200 partition is accepted as a safe fallback without its own bounded memory preflight.
+
+Tests run:
+
+```text
+bash -n slurm/multimodel/aspd_v3_500m_main_PROPOSAL.sbatch
+bash -n slurm/multimodel/aspd_v3_500m_preflight_PROPOSAL.sbatch
+PASS
+
+/blue/thai/vinhnguyen1/multimodel-ASPD/repo/.venv/bin/pytest -q \
+  tests/test_multimodel_v3_2b.py -k 'main500m'
+17 passed, 17 deselected
+
+/blue/thai/vinhnguyen1/multimodel-ASPD/repo/.venv/bin/ruff check \
+  aspd/multimodel/cli/validate_aspd_v3_main500m.py \
+  aspd/multimodel/v3/main500m_config.py tests/test_multimodel_v3_2b.py
+All checks passed
+```
+
+The main draft validator exited 2 with `submission_permitted=false`. The preflight validator stopped
+with the four expected blockers: model 3 missing, model-3 approval pending, alignment missing, and
+bounded-preflight authorization missing. A real scheduled signal/requeue test was not run because
+this task does not authorize job submission. It remains required before main authorization and is
+not represented as passing evidence. The machine-readable evidence boundary is in
+`analysis/aspd_v3_500m_blocker_resolution/runtime_reliability_status.json`.
+
+Scientific semantics changed: no. These changes affect launch authorization, provenance, storage,
+recovery, and scheduling control only; the Transformer, z-score gate, BatchTopK, losses, C, K,
+target registration, and exposure accounting are unchanged.

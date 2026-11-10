@@ -12,8 +12,8 @@
   "blocker_resolution_branch": "aspd-v3.1-main500m-blocker-resolution",
   "config": {
     "path": "configs/multimodel/aspd_v3/main500m_preparation_v1.yaml",
-    "fingerprint": "4145ae6be5019f4c30870d0e7d914523f8b576eb65a4979f772762325af5577c",
-    "execution_contract_fingerprint": "e52c1942491a41d20055ecea6c1625292a459490502f03c25ccfef39008aca94",
+    "fingerprint": "af976c9ee5a1dadac7e5b915cc2fbc277eee22df3a1b029ec5318a55b99303c0",
+    "execution_contract_fingerprint": "d42977392a791a8c0844fbe477178fa288b19d47304a17c4f046b828db7c65be",
     "status": "DRAFT_FAIL_CLOSED"
   },
   "architecture": {
@@ -129,7 +129,7 @@
     },
     {
       "scope": "blocker_resolution_main500m_focused",
-      "result": "15 passed, 17 deselected"
+      "result": "17 passed, 17 deselected"
     },
     {
       "scope": "canonical_alignment_policy_provenance",
@@ -149,7 +149,13 @@
   ],
   "slurm": {
     "script": "slurm/multimodel/aspd_v3_500m_main_PROPOSAL.sbatch",
+    "preflight_script": "slurm/multimodel/aspd_v3_500m_preflight_PROPOSAL.sbatch",
+    "static_contract_tests": "PASS",
+    "real_signal_requeue_test": "PENDING_BOUNDED_SLURM_AUTHORIZATION",
+    "preferred_account": "thai",
+    "preferred_partition": "hpg-b200",
+    "startup_storage_required_bytes": 1099511627776,
     "submitted": false,
-    "submission_command_after_all_approvals": "sbatch slurm/multimodel/aspd_v3_500m_main_PROPOSAL.sbatch"
+    "submission_command_after_all_approvals": "ASPD_EXPECTED_GIT_SHA=<approved_commit> sbatch slurm/multimodel/aspd_v3_500m_main_PROPOSAL.sbatch"
   }
 }

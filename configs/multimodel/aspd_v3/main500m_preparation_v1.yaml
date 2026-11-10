@@ -191,7 +191,8 @@ runtime:
   data_prefetch_depth: 1
   ledger_anchor_storage: exact_compact_v1
   output_root: /orange/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/runs
-  checkpoint_root: /orange/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/checkpoints
+  checkpoint_root: /orange/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/runs
+  startup_storage_required_bytes: 1099511627776
   dataset_manifest: /orange/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/data/pile_uncopyrighted/manifest.json
   alignment_manifest: /orange/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/data/pile_uncopyrighted/alignment_manifest.json
   continuation_authorization_root: /orange/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/continuation_authorizations
