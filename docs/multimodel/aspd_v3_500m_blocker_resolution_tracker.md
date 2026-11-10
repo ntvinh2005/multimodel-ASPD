@@ -29,7 +29,7 @@ detached binary internal support. No main-training job has been submitted.
 | ID | Blocker | Root cause | Files changed | Tests | Status | Approval needed |
 |---|---|---|---|---|---|---|
 | 1 | Preflight authorization deadlock | Main authorization, including prior preflight PASS, ran before mode dispatch; preflight had no independent bounded authorization or pinned result schema. | `main500m_config.py`, `train_aspd_v3_2b.py`, draft YAML, `test_multimodel_v3_2b.py` | Six focused CPU tests; full regression pending at this checkpoint. | `FIXED_TESTED` | Researcher must later authorize an exact model-3 preflight budget and namespace; the checked-in draft remains pending. |
-| 2 | Third-model selection | Exact model, revision, tokenizer, layers, and hook layout are not approved. | None yet | Not executable without approval. | `BLOCKED_RESEARCHER_DECISION` | Exact model/revision/tokenizer/layers and license/access acceptance. |
+| 2 | Third-model selection | Exact model, revision, tokenizer, layers, and hook layout are not approved. | Model-3 decision package and machine-readable recommendation. | Official config/model-card/source comparison plus read-only historical metadata cross-check; no model execution. | `BLOCKED_RESEARCHER_DECISION` | Approve or reject the proposed Granite ID/revision/layers, license, residual semantics and subsequent bounded tests. |
 | 3 | Three-way alignment | Exact-prefix contract is implemented, but no approved third tokenizer has been tested; one legacy policy-name inconsistency is confirmed. | None yet | Synthetic coverage exists; real three-tokenizer evidence absent. | `BLOCKED_EXTERNAL_DEPENDENCY` | Model 3 first, then authorization for bounded tokenizer validation. |
 | 4 | Storage capacity | Live free space is below the 1 TiB reservation. A dry-run inventory identifies a narrowly sufficient `/blue` Tier A, but no deletion or dedicated reservation is approved. | Storage proposal and machine-readable inventory. | Live `df`/inode/quota, exact `du`, COMPLETE markers, report and manifest SHA-256 checks. | `BLOCKED_STORAGE` | Exact deletion targets or additional capacity, then remeasurement and path approval. |
 | 5 | Real three-model GPU preflight | Synthetic distributed tests do not validate three real source models. | None yet | Not run. | `BLOCKED_RESEARCHER_DECISION` | Model 3, alignment, and bounded preflight authorization. |
@@ -86,3 +86,14 @@ The seven recommended `/blue` Tier A targets total 731,456,405,504 bytes and wou
 mathematically sufficient but operationally fragile under concurrent storage use. `/orange` cannot
 reach the reservation using the identified safe candidates. Storage therefore remains blocked
 pending exact-target approval plus additional margin or a dedicated allocation.
+
+## Blocker 2 decision record
+
+The recommendation package proposes
+`ibm-granite/granite-3.3-2b-instruct@707f574c62054322f6b5b04b6d075f0a8f05e0f0`,
+layers 16–23, for explicit researcher approval. Granite best balances a distinct model family,
+2,533,539,840-parameter scale, GQA/residual-scaling diversity, and direct seven-matrix/PRE-MID
+semantics. Phi-3.5 is the higher-diversity but substantially larger/fused secondary candidate;
+Llama 3.2 is the lower-hook-risk but less diverse gated fallback; StableLM is deprioritized for its
+license and possible parallel-residual MID ambiguity. The main YAML remains unchanged at
+`model3_pending`; no candidate was downloaded or executed in this audit.
