@@ -63,6 +63,7 @@ from aspd.multimodel.v3.main500m_config import (
 )
 from aspd.multimodel.v3.main500m_config import load_main500m_config
 from aspd.multimodel.v3.main500m_continuation import (
+    continuation_authorized_through,
     load_continuation_authorization,
     milestone_diagnostic_due,
     milestone_pause_due,
@@ -1750,6 +1751,9 @@ def main() -> None:
                             int(pending_review["accepted_exposures"]),
                             config.monitoring.staged_milestone_exposures,
                         ),
+                        final_approved_through_exposures=(
+                            config.monitoring.staged_milestone_exposures[-1]
+                        ),
                     )
                 continuation_record = _broadcast_object(continuation_record)
                 consumed_continuation_authorizations.append(continuation_record)
@@ -2153,9 +2157,24 @@ def main() -> None:
         health_pause_requested = bool(
             health is not None and health["action"] == "CHECKPOINT_AND_PAUSE"
         )
-        milestone_pause_requested = bool(
+        milestone_diagnostic_requested = bool(
             config.experiment_family == MAIN500M_EXPERIMENT_FAMILY
             and args.mode == "main"
+            and milestone_diagnostic_due(
+                counter_payload["accepted"],
+                config.monitoring.staged_milestone_exposures,
+            )
+        )
+        final_continuation_authorized = bool(
+            config.experiment_family == MAIN500M_EXPERIMENT_FAMILY
+            and continuation_authorized_through(
+                consumed_continuation_authorizations,
+                config.monitoring.staged_milestone_exposures[-1],
+            )
+        )
+        milestone_pause_requested = bool(
+            milestone_diagnostic_requested
+            and not final_continuation_authorized
             and milestone_pause_due(
                 counter_payload["accepted"],
                 config.monitoring.staged_milestone_exposures,
@@ -2180,6 +2199,7 @@ def main() -> None:
         checkpoint_due = not args.skip_checkpoint and (
             health_pause_requested
             or milestone_pause_requested
+            or milestone_diagnostic_requested
             or preflight_reload_due
             or (
                 args.mode in {"main", "controlled", "pilot"}
@@ -2379,6 +2399,29 @@ def main() -> None:
                 checkpoint_manager.prune_after_verified_replacement()
             torch.cuda.synchronize()
             checkpoint_seconds = time.perf_counter() - checkpoint_started
+            if rank == 0 and milestone_diagnostic_requested:
+                if checkpoint_path is None or checkpoint_manifest is None:
+                    raise RuntimeError("milestone diagnostic has no complete checkpoint")
+                write_json_immutable(
+                    args.run_dir
+                    / f"milestone_diagnostic_step_{completed_steps:09d}.json",
+                    {
+                        "schema_version": 1,
+                        "status": "CONTINUE_TO_FINAL"
+                        if final_continuation_authorized
+                        else "PENDING_RESEARCHER_REVIEW",
+                        "optimizer_step": completed_steps,
+                        "accepted_exposures": int(counter_payload["accepted"]),
+                        "checkpoint_path": str(checkpoint_path),
+                        "checkpoint_manifest_sha256": _sha256(
+                            checkpoint_path / "manifest.json"
+                        ),
+                        "scientific_review": milestone_scientific_summary(metrics_row),
+                        "consumed_continuation_authorizations": (
+                            consumed_continuation_authorizations
+                        ),
+                    },
+                )
         if exact_resume_parity_enabled and completed_steps == args.max_steps:
             local_digest = _exact_training_state_digest(model, optimizer, scheduler)
             gathered_digests = [None] * world

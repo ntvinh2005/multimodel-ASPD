@@ -28,6 +28,7 @@ from aspd.multimodel.v3.encoder import FeatureReadout, pack_cross_model_tokens
 from aspd.multimodel.v3.gating import V3BatchTopK
 from aspd.multimodel.v3.main500m_config import V31Main500MConfig, load_main500m_config
 from aspd.multimodel.v3.main500m_continuation import (
+    continuation_authorized_through,
     load_continuation_authorization,
     milestone_diagnostic_due,
     milestone_pause_due,
@@ -1018,6 +1019,7 @@ def test_main500m_continuation_authorization_is_checkpoint_and_contract_pinned(
         execution_contract_fingerprint="a" * 64,
         checkpoint_manifest_sha256="b" * 64,
         approved_through_exposures=25_001_984,
+        final_approved_through_exposures=500_006_912,
     )
     assert validated["artifact_path"] == str(path.resolve())
     assert len(validated["artifact_sha256"]) == 64
@@ -1036,6 +1038,63 @@ def test_main500m_continuation_authorization_is_checkpoint_and_contract_pinned(
             execution_contract_fingerprint="a" * 64,
             checkpoint_manifest_sha256="b" * 64,
             approved_through_exposures=25_001_984,
+            final_approved_through_exposures=500_006_912,
+        )
+
+
+def test_main500m_continue_to_final_authorization_is_explicit_and_pinned(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "authorizations"
+    root.mkdir()
+    path = root / "continue_to_final.json"
+    payload = {
+        "schema_version": 1,
+        "status": "APPROVED",
+        "decision": "CONTINUE_TO_FINAL",
+        "policy_version": "v1",
+        "reasons": ["MILESTONE"],
+        "accepted_exposures": 10_002_432,
+        "approved_through_exposures": 500_006_912,
+        "execution_contract_fingerprint": "a" * 64,
+        "checkpoint_manifest_sha256": "b" * 64,
+        "researcher": "unit-test researcher",
+        "decided_at": "2026-11-10T12:00:00-05:00",
+        "scientific_limitations_acknowledged": "synthetic unit-test decision only",
+    }
+    path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+    validated = load_continuation_authorization(
+        path,
+        authorization_root=root,
+        pending_review={
+            "policy_version": "v1",
+            "reasons": ["MILESTONE"],
+            "accepted_exposures": 10_002_432,
+        },
+        execution_contract_fingerprint="a" * 64,
+        checkpoint_manifest_sha256="b" * 64,
+        approved_through_exposures=25_001_984,
+        final_approved_through_exposures=500_006_912,
+    )
+    assert validated["decision"] == "CONTINUE_TO_FINAL"
+    assert continuation_authorized_through([validated], 500_006_912)
+    assert not continuation_authorized_through([], 500_006_912)
+
+    payload["approved_through_exposures"] = 250_003_456
+    path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+    with pytest.raises(ValueError, match="provenance mismatch"):
+        load_continuation_authorization(
+            path,
+            authorization_root=root,
+            pending_review={
+                "policy_version": "v1",
+                "reasons": ["MILESTONE"],
+                "accepted_exposures": 10_002_432,
+            },
+            execution_contract_fingerprint="a" * 64,
+            checkpoint_manifest_sha256="b" * 64,
+            approved_through_exposures=25_001_984,
+            final_approved_through_exposures=500_006_912,
         )
 
 

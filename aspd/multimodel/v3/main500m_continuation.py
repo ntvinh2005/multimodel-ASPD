@@ -17,7 +17,7 @@ class Main500MContinuationAuthorization(BaseModel):
 
     schema_version: Literal[1]
     status: Literal["APPROVED"]
-    decision: Literal["CONTINUE"]
+    decision: Literal["CONTINUE", "CONTINUE_TO_FINAL"]
     policy_version: Literal["v1"]
     reasons: tuple[Literal["HEALTH", "MILESTONE"], ...]
     accepted_exposures: int = Field(gt=0)
@@ -78,6 +78,19 @@ def milestone_pause_due(
     return accepted_exposures_after_step in staged_milestones[:-1]
 
 
+def continuation_authorized_through(
+    consumed_authorizations: list[dict[str, Any]],
+    accepted_exposures: int,
+) -> bool:
+    """Return whether an immutable consumed decision covers the exposure boundary."""
+
+    return any(
+        record.get("decision") == "CONTINUE_TO_FINAL"
+        and int(record.get("approved_through_exposures", 0)) >= accepted_exposures
+        for record in consumed_authorizations
+    )
+
+
 def milestone_scientific_summary(metrics: dict[str, Any]) -> dict[str, Any]:
     """Preserve the exact milestone diagnostics plus compact reconstruction summaries."""
 
@@ -123,6 +136,7 @@ def load_continuation_authorization(
     execution_contract_fingerprint: str,
     checkpoint_manifest_sha256: str,
     approved_through_exposures: int,
+    final_approved_through_exposures: int,
 ) -> dict[str, Any]:
     """Validate an explicit decision without mutating the training configuration."""
 
@@ -136,11 +150,16 @@ def load_continuation_authorization(
         raise FileNotFoundError(f"continuation authorization is missing: {resolved_path}")
     payload = json.loads(resolved_path.read_text(encoding="utf-8"))
     authorization = Main500MContinuationAuthorization.model_validate(payload)
+    expected_approval_boundary = (
+        final_approved_through_exposures
+        if authorization.decision == "CONTINUE_TO_FINAL"
+        else approved_through_exposures
+    )
     expected = {
         "policy_version": pending_review["policy_version"],
         "reasons": tuple(pending_review["reasons"]),
         "accepted_exposures": int(pending_review["accepted_exposures"]),
-        "approved_through_exposures": int(approved_through_exposures),
+        "approved_through_exposures": int(expected_approval_boundary),
         "execution_contract_fingerprint": execution_contract_fingerprint,
         "checkpoint_manifest_sha256": checkpoint_manifest_sha256,
     }
