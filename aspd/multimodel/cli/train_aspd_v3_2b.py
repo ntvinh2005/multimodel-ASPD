@@ -1741,6 +1741,10 @@ def main() -> None:
         prefetcher.start()
 
     stop_requested = False
+    stop_request_file = os.environ.get("ASPD_STOP_REQUEST_FILE")
+    signal_completion_artifact = os.environ.get(
+        "ASPD_SIGNAL_COMPLETION_ARTIFACT"
+    )
 
     def request_stop(_signum, _frame):
         nonlocal stop_requested
@@ -2055,6 +2059,19 @@ def main() -> None:
         health = _broadcast_object(health)
         if health is not None and health["status"] == "ABORT":
             raise RuntimeError(f"ASPD v3.1 health monitor requested abort: {health['events']}")
+        stop_requested = bool(
+            _broadcast_object(
+                (
+                    stop_requested
+                    or bool(
+                        stop_request_file
+                        and Path(stop_request_file).is_file()
+                    )
+                )
+                if rank == 0
+                else None
+            )
+        )
         health_pause_requested = bool(
             health is not None and health["action"] == "CHECKPOINT_AND_PAUSE"
         )
@@ -2544,9 +2561,37 @@ def main() -> None:
         report_path = (
             args.run_dir / f"continuation_review_step_{completed_steps:09d}.json"
             if health_pause_requested or milestone_pause_requested
+            else args.run_dir / f"signal_checkpoint_step_{completed_steps:09d}.json"
+            if stop_requested
             else args.run_dir / "benchmark_report.json"
         )
         write_json_immutable(report_path, report)
+        if stop_requested and signal_completion_artifact:
+            completion_path = Path(signal_completion_artifact)
+            if completion_path.parent != args.run_dir:
+                raise ValueError(
+                    "signal completion artifact must be inside the run directory"
+                )
+            if checkpoint_path is None or checkpoint_manifest is None:
+                raise RuntimeError("signal stop completed without a checkpoint")
+            manifest_path = checkpoint_path / "manifest.json"
+            if checkpoint_manifest.get("status") != "COMPLETE" or not manifest_path.is_file():
+                raise RuntimeError("signal stop checkpoint is not COMPLETE")
+            write_json_immutable(
+                completion_path,
+                {
+                    "schema_version": 1,
+                    "status": "SIGNAL_CHECKPOINT_COMPLETE",
+                    "optimizer_step": completed_steps,
+                    "accepted_exposures": completed_steps * 8192,
+                    "checkpoint_path": str(checkpoint_path),
+                    "checkpoint_manifest_sha256": _sha256(manifest_path),
+                    "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
+                    "slurm_restart_count": int(
+                        os.environ.get("SLURM_RESTART_COUNT", "0")
+                    ),
+                },
+            )
         if (
             args.mode == "preflight"
             and not health_pause_requested
@@ -2568,7 +2613,7 @@ def main() -> None:
         raise SystemExit(86)
     if milestone_pause_requested:
         raise SystemExit(87)
-    if stop_requested:
+    if stop_requested and not signal_completion_artifact:
         raise SystemExit(99)
 
 
