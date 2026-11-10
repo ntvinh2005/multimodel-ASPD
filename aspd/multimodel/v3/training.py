@@ -23,6 +23,7 @@ from aspd.multimodel.v3.data import (
     ExposureCounters,
     ExposureLedgerReceipt,
     SQLiteExposureLedger,
+    counters_from_payload,
     counters_payload,
     write_json_immutable,
 )
@@ -127,7 +128,7 @@ class V3TrainingState:
             schema_version=int(payload["schema_version"]),
             optimizer_step=int(payload["optimizer_step"]),
             stream_cursor=AlignedStreamCursor(**payload["stream_cursor"]),
-            counters=ExposureCounters(**payload["counters"]),
+            counters=counters_from_payload(payload["counters"]),
             dataset_manifest_sha256=str(payload["dataset_manifest_sha256"]),
             alignment_manifest_sha256=str(payload["alignment_manifest_sha256"]),
             config_fingerprint=str(payload["config_fingerprint"]),

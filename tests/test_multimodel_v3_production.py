@@ -297,11 +297,7 @@ def test_streaming_raw_token_ledger_rolls_back_with_checkpoint_receipt(
     recovered = ledger.recover_to_receipt(receipt)
     assert recovered.optimization_steps == 1
     assert recovered.accepted_aligned_anchor_exposures == 8192
-    assert (recovered.raw_tokens_qwen, recovered.raw_tokens_gemma, recovered.raw_tokens_phi) == (
-        5,
-        6,
-        7,
-    )
+    assert recovered.raw_token_slots == (5, 6, 7)
     ledger.close()
 
 

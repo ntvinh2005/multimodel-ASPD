@@ -434,7 +434,7 @@ def test_exposure_hot_path_is_batch_bounded_and_full_audit_is_explicit(tmp_path:
         assert ledger.audit_full_consistency()["status"] == "PASS"
         with ledger.connection:
             ledger.connection.execute(
-                "UPDATE exposure_totals SET raw_tokens_qwen=1 WHERE singleton=1"
+                "UPDATE exposure_totals SET raw_tokens_slot_0=1 WHERE singleton=1"
             )
         with pytest.raises(ValueError, match="alignment-token history"):
             ledger.audit_full_consistency()
@@ -515,7 +515,7 @@ def test_exposure_raw_tokens_are_idempotent_and_interrupted_transaction_rolls_ba
     ledger = SQLiteExposureLedger(path, dataset_manifest_sha256=manifest_hash)
     ledger.observe_alignment("raw-doc", alignment)
     first = ledger.snapshot()
-    assert (first.raw_tokens_qwen, first.raw_tokens_gemma, first.raw_tokens_phi) == (5, 5, 5)
+    assert first.raw_token_slots == (5, 5, 5)
     ledger.observe_alignment("raw-doc", alignment)
     assert ledger.snapshot() == first
     ledger.connection.execute("BEGIN IMMEDIATE")

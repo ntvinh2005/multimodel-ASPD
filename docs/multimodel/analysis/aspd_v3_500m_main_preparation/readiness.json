@@ -13,7 +13,7 @@
   "blocker_resolution_branch": "aspd-v3.1-main500m-blocker-resolution",
   "config": {
     "path": "configs/multimodel/aspd_v3/main500m_preparation_v1.yaml",
-    "fingerprint": "193f1b78fdb5e36167f38855af3ec5399727441bd3705763fd8db29362d2cc41",
+    "fingerprint": "e43e967bfc0730f76c67622ef4740c0e0856201467854bf163e6d2e2d36ef098",
     "execution_contract_fingerprint": "45f8b159d737e1096ef0dda78300484667926e2307800969d3fc800802e24944",
     "status": "DRAFT_FAIL_CLOSED"
   },
@@ -73,10 +73,11 @@
     "automatic_transition_to_main": false,
     "attempts_record": "docs/multimodel/analysis/aspd_v3_500m_blocker_resolution/bounded_preflight_attempts.json",
     "last_attempt": {
-      "slurm_job_id": "50526600",
-      "state": "FAILED_BEFORE_MODEL_LOADING",
-      "optimizer_steps_completed": 0,
-      "scientific_evidence": "NONE"
+      "slurm_job_id": "50538957",
+      "state": "COMPLETED_REJECTED_BY_POST_RUN_AUDIT",
+      "optimizer_steps_completed": 4,
+      "scientific_evidence": "PARTIAL_ENGINEERING_EVIDENCE_ONLY_NOT_MAIN_AUTHORIZATION_EVIDENCE",
+      "rejection_reason": "legacy model-specific raw-token SQL columns"
     }
   },
   "monitoring": {
@@ -104,7 +105,7 @@
     "optimizer_and_scheduler_state": "PASS",
     "ledger_and_stream_external_restore": "PASS",
     "corrupt_snapshot_rejection": "PASS",
-    "real_three_model_gpu": "PENDING"
+    "real_three_model_gpu": "PARTIAL_PASS_RERUN_REQUIRED_AFTER_LEDGER_SCHEMA_FIX"
   },
   "storage": {
     "measured_at": "2026-11-09",

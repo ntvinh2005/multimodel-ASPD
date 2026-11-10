@@ -361,6 +361,7 @@ def test_main500m_preflight_evidence_is_pinned_and_semantically_validated(
         "artifact_path": str(evidence_path),
         "artifact_sha256": "0" * 64,
         "execution_contract_fingerprint": contract_fingerprint,
+        "source_commit": "1" * 40,
         "optimizer_steps": 4,
     }
     missing = V31Main500MConfig.model_validate(payload)
@@ -376,6 +377,7 @@ def test_main500m_preflight_evidence_is_pinned_and_semantically_validated(
         "logical_target_count": 168,
         "optimizer_steps": 4,
         "execution_contract_fingerprint": contract_fingerprint,
+        "git_sha": "1" * 40,
         "dcp_save_reload_resume_update": "PASS",
         "checkpoint_parameter_and_adam_restore_probe": "PASS",
         "source_correctness": [
@@ -395,6 +397,16 @@ def test_main500m_preflight_evidence_is_pinned_and_semantically_validated(
     valid = V31Main500MConfig.model_validate(payload)
     assert valid.validate_preflight_evidence() == report
 
+    report["git_sha"] = "2" * 40
+    evidence_path.write_text(json.dumps(report, sort_keys=True), encoding="utf-8")
+    payload["approvals"]["three_model_gpu_preflight"]["artifact_sha256"] = (
+        hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+    )
+    wrong_source = V31Main500MConfig.model_validate(payload)
+    with pytest.raises(RuntimeError, match="EVIDENCE_INVALID"):
+        wrong_source.validate_preflight_evidence()
+
+    report["git_sha"] = "1" * 40
     report["logical_target_count"] = 167
     evidence_path.write_text(json.dumps(report, sort_keys=True), encoding="utf-8")
     payload["approvals"]["three_model_gpu_preflight"]["artifact_sha256"] = (
@@ -1140,6 +1152,41 @@ def test_exposure_ledger_records_smol_as_immutable_third_tokenizer_slot(tmp_path
     )
     assert reopened.raw_token_counts()["smol"] == 13
     reopened.close()
+
+
+def test_main500m_exposure_ledger_schema_has_no_legacy_model_columns(
+    tmp_path: Path,
+) -> None:
+    model_order = ("gemma", "smol", "granite")
+    ledger = SQLiteExposureLedger(
+        tmp_path / "main500m.sqlite",
+        dataset_manifest_sha256="c" * 64,
+        world_size=3,
+        model_order=model_order,
+        compact_anchor_ids=True,
+    )
+    ledger.observe_raw_tokens(
+        "document-0",
+        {"gemma": 17, "smol": 19, "granite": 23},
+    )
+    ledger.observe_replicated_optimizer_step(0, ("anchor-0",))
+    for table in ("alignment_observations", "exposure_totals"):
+        columns = {
+            str(row[1])
+            for row in ledger.connection.execute(f"PRAGMA table_info({table})")
+        }
+        assert {
+            "raw_tokens_slot_0",
+            "raw_tokens_slot_1",
+            "raw_tokens_slot_2",
+        } <= columns
+        assert not any(name in columns for name in ("raw_tokens_qwen", "raw_tokens_phi"))
+    receipt = ledger.checkpoint_receipt(expected_optimizer_steps=1)
+    payload = receipt.payload()
+    assert payload["model_order"] == list(model_order)
+    assert payload["counters"]["raw_token_slots"] == [17, 19, 23]
+    assert not any("qwen" in key or "phi" in key for key in payload["counters"])
+    ledger.close()
 
 
 def test_compact_exposure_ledger_preserves_exact_membership_and_resume(tmp_path: Path) -> None:

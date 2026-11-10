@@ -229,6 +229,7 @@ approvals:
     artifact_path: null
     artifact_sha256: null
     execution_contract_fingerprint: null
+    source_commit: null
     optimizer_steps: null
   full_training: MAIN_500M_NOT_AUTHORIZED
 

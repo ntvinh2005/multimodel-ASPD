@@ -423,6 +423,7 @@ class Main500MGPUPreflightEvidence(BaseModel):
     execution_contract_fingerprint: str | None = Field(
         default=None, pattern=r"^[0-9a-f]{64}$"
     )
+    source_commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
     optimizer_steps: int | None = Field(default=None, ge=3, le=20)
 
     @model_validator(mode="after")
@@ -431,6 +432,7 @@ class Main500MGPUPreflightEvidence(BaseModel):
             self.artifact_path,
             self.artifact_sha256,
             self.execution_contract_fingerprint,
+            self.source_commit,
             self.optimizer_steps,
         )
         if self.status == "PENDING_MODEL_THREE":
@@ -731,6 +733,7 @@ class V31Main500MConfig(BaseModel):
         assert evidence.artifact_path is not None
         assert evidence.artifact_sha256 is not None
         assert evidence.execution_contract_fingerprint is not None
+        assert evidence.source_commit is not None
         assert evidence.optimizer_steps is not None
         artifact = Path(evidence.artifact_path)
         if artifact != Path(self.runtime.preflight_evidence) or not artifact.is_file():
@@ -747,6 +750,7 @@ class V31Main500MConfig(BaseModel):
             "logical_target_count": 168,
             "optimizer_steps": evidence.optimizer_steps,
             "execution_contract_fingerprint": self.execution_contract_fingerprint(),
+            "git_sha": evidence.source_commit,
             "dcp_save_reload_resume_update": "PASS",
             "checkpoint_parameter_and_adam_restore_probe": "PASS",
         }

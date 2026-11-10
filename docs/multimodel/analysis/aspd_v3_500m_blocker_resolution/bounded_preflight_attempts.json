@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-09T22:05:00-05:00",
+  "updated_at": "2026-11-09T22:30:00-05:00",
   "authorized_contract": {
     "optimizer_steps": 4,
     "world_size": 3,
@@ -23,6 +23,31 @@
       "output_namespace_created": false,
       "scientific_evidence": "NONE",
       "remediation": "Recreated the same reviewed branch at a persistent /blue worktree before any retry."
+    },
+    {
+      "slurm_job_id": "50538957",
+      "state": "COMPLETED_REJECTED_BY_POST_RUN_AUDIT",
+      "elapsed": "00:03:36",
+      "exit_code": "0:0",
+      "node": "c1103a-s5",
+      "start": "2026-11-09T22:03:05-05:00",
+      "end": "2026-11-09T22:06:41-05:00",
+      "report_sha256": "4f56c8b79b8c9561060513a8559b3c71d6c414ab6f4455a6c49bb96238ebb36c",
+      "checkpoint_manifest_sha256": "cd340a60fe061049c97027b0156fb566b74fae5a4ccf2d471cd410367c7d96b6",
+      "optimizer_steps_completed": 4,
+      "accepted_exposures": 32768,
+      "scientific_checks": {
+        "logical_targets": 168,
+        "source_hook_parity": "PASS",
+        "source_frozen": "PASS",
+        "finite_forward_backward": "PASS",
+        "checkpoint_parameter_and_adam_restore_probe": "PASS"
+      },
+      "rejection_reason": "The durable ledger used legacy raw_tokens_qwen/gemma/phi SQL column names for the approved Gemma/Smol/Granite contract. Counts were numerically correct, but the metadata schema was not acceptable for final v3.1 evidence.",
+      "repeated_anchor_exposures": 0,
+      "cross_rank_duplicates": 0,
+      "scientific_evidence": "PARTIAL_ENGINEERING_EVIDENCE_ONLY_NOT_MAIN_AUTHORIZATION_EVIDENCE",
+      "remediation": "Generalize raw-token slots, pin model order in receipt schema, retain legacy-reader compatibility, and rerun from a fresh namespace."
     }
   ]
 }
