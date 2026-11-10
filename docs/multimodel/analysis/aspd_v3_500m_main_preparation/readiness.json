@@ -182,7 +182,7 @@
     "MONITORING_POLICY_APPROVAL_PENDING",
     "MILESTONE_POLICY_APPROVAL_PENDING",
     "HUMAN_INTERPRETABILITY_APPROVAL_PENDING",
-    "REAL_SLURM_SIGNAL_REQUEUE_PENDING",
+    "REAL_THREE_MODEL_EXTERNAL_RESUME_PENDING",
     "FINAL_COMPOSITION_PROFILED_THROUGHPUT_PENDING",
     "MAIN_500M_NOT_AUTHORIZED"
   ],
@@ -190,7 +190,14 @@
     "script": "slurm/multimodel/aspd_v3_500m_main_PROPOSAL.sbatch",
     "preflight_script": "slurm/multimodel/aspd_v3_500m_preflight_PROPOSAL.sbatch",
     "static_contract_tests": "PASS",
-    "real_signal_requeue_test": "PENDING_BOUNDED_SLURM_AUTHORIZATION",
+    "cpu_signal_requeue_test": {
+      "status": "PASS",
+      "slurm_job_id": "50550768",
+      "restart_count": 1,
+      "duplicate_anchors": 0,
+      "checkpoint_sha256": "7224ea4f200d299d49acc7180001bcfb020b6112482322151598bd6162dbb581"
+    },
+    "real_three_model_external_resume": "PENDING",
     "preferred_account": "thai",
     "preferred_partition": "hpg-b200",
     "startup_storage_required_bytes": 1099511627776,
