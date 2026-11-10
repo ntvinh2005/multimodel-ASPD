@@ -170,7 +170,14 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--mode",
-        choices=("benchmark", "preflight", "pilot", "main", "controlled"),
+        choices=(
+            "benchmark",
+            "preflight",
+            "resume_validation",
+            "pilot",
+            "main",
+            "controlled",
+        ),
         required=True,
     )
     parser.add_argument("--strategy", choices=("fsdp_baseline", "model_owned"), required=True)
@@ -194,6 +201,11 @@ def _parse_args() -> argparse.Namespace:
         "--resume-checkpoint",
         type=Path,
         help="immutable external checkpoint directory for exact cross-namespace resume",
+    )
+    parser.add_argument(
+        "--resume-validation-contract",
+        type=Path,
+        help="immutable bounded authorization for real cross-process resume validation",
     )
     parser.add_argument(
         "--continuation-authorization",
@@ -305,6 +317,23 @@ def _authorize_main500m_mode(config: Any, args: argparse.Namespace) -> None:
             run_dir=args.run_dir,
         )
         return
+    if args.mode == "resume_validation":
+        if args.strategy != "model_owned" or args.skip_checkpoint:
+            raise RuntimeError(
+                "ASPD v3.1 resume validation requires checkpointed model-owned execution"
+            )
+        if args.resume_checkpoint is None or args.resume_validation_contract is None:
+            raise RuntimeError(
+                "ASPD v3.1 resume validation requires its checkpoint and contract"
+            )
+        contract = _load_resume_validation_contract(config, args)
+        if args.max_steps != int(contract["target_optimizer_step"]):
+            raise RuntimeError("resume-validation target step differs from authorization")
+        if args.run_dir != Path(contract["output_namespace"]):
+            raise RuntimeError("resume-validation namespace differs from authorization")
+        if args.run_dir.exists():
+            raise RuntimeError("resume-validation refuses to overwrite its namespace")
+        return
     if args.mode == "main":
         if args.strategy != "model_owned":
             raise RuntimeError("ASPD v3.1 main requires model-owned execution")
@@ -314,7 +343,48 @@ def _authorize_main500m_mode(config: Any, args: argparse.Namespace) -> None:
         if args.max_steps != config.data.optimizer_steps:
             raise RuntimeError("ASPD v3.1 main requires the exact 61,036-step budget")
         return
-    raise RuntimeError("ASPD v3.1 main contract permits only preflight or main mode")
+    raise RuntimeError(
+        "ASPD v3.1 main contract permits only preflight, resume_validation, or main mode"
+    )
+
+
+def _load_resume_validation_contract(
+    config: Any, args: argparse.Namespace
+) -> dict[str, Any]:
+    path = args.resume_validation_contract
+    if path is None or not path.is_file():
+        raise RuntimeError("RESUME_VALIDATION_CONTRACT_MISSING")
+    contract = json.loads(path.read_text(encoding="utf-8"))
+    required = {
+        "schema_version": 1,
+        "status": "AUTHORIZED_BOUNDED_RESUME_VALIDATION",
+        "execution_contract_fingerprint": config.execution_contract_fingerprint(),
+        "source_checkpoint": str(args.resume_checkpoint),
+        "output_namespace": str(args.run_dir),
+        "target_optimizer_step": args.max_steps,
+    }
+    mismatch = {
+        key: {"expected": value, "observed": contract.get(key)}
+        for key, value in required.items()
+        if contract.get(key) != value
+    }
+    authorization_reference = contract.get("authorization_reference")
+    if not isinstance(authorization_reference, str) or not authorization_reference.strip():
+        mismatch["authorization_reference"] = "missing"
+    checkpoint = Path(str(contract.get("source_checkpoint", "")))
+    manifest = checkpoint / "manifest.json"
+    preflight_report = Path(str(contract.get("preflight_report", "")))
+    for label, artifact, expected_sha in (
+        ("source_checkpoint_manifest", manifest, contract.get("source_checkpoint_manifest_sha256")),
+        ("preflight_report", preflight_report, contract.get("preflight_report_sha256")),
+    ):
+        if not artifact.is_file():
+            mismatch[label] = "missing"
+        elif _sha256(artifact) != expected_sha:
+            mismatch[label] = "sha256 mismatch"
+    if mismatch:
+        raise RuntimeError(f"RESUME_VALIDATION_CONTRACT_INVALID: {mismatch}")
+    return contract
 
 
 def _git_sha() -> str:
@@ -1016,6 +1086,11 @@ def main() -> None:
         raise ValueError(
             "--continuation-authorization is valid only for ASPD v3.1 main execution"
         )
+    resume_validation_contract = (
+        _load_resume_validation_contract(config, args)
+        if args.mode == "resume_validation"
+        else None
+    )
     rank, world, device = _init_distributed()
     if config.experiment_family in {
         "aspd_v3_granite_normalized_target_v1",
@@ -1343,7 +1418,10 @@ def main() -> None:
                     f"provenance={mismatch}, recovery={recovery_mismatch}"
                 )
     if rank == 0:
-        args.run_dir.mkdir(parents=True, exist_ok=args.mode in {"main", "controlled", "pilot"})
+        args.run_dir.mkdir(
+            parents=True,
+            exist_ok=args.mode in {"main", "controlled", "pilot"},
+        )
     dist.barrier()
 
     torch.manual_seed(config.optimization.seed)
@@ -2382,6 +2460,31 @@ def main() -> None:
                     f"resumed={exact_resume_replayed_digests}"
                 )
             exact_resume_parity = "BITWISE_EXACT"
+        if args.mode == "resume_validation" and completed_steps == args.max_steps:
+            if resume_validation_contract is None:
+                raise RuntimeError("resume-validation contract disappeared")
+            local_digest = _exact_training_state_digest(model, optimizer, scheduler)
+            gathered_digests = [None] * world
+            dist.all_gather_object(gathered_digests, local_digest)
+            reference_report = None
+            if rank == 0:
+                reference_report = json.loads(
+                    Path(resume_validation_contract["preflight_report"]).read_text(
+                        encoding="utf-8"
+                    )
+                )
+            reference_report = _broadcast_object(reference_report)
+            exact_resume_reference_digests = reference_report.get(
+                "uninterrupted_state_sha256_by_rank"
+            )
+            exact_resume_replayed_digests = gathered_digests
+            if exact_resume_replayed_digests != exact_resume_reference_digests:
+                raise RuntimeError(
+                    "external-process resumed state differs from uninterrupted state: "
+                    f"reference={exact_resume_reference_digests}, "
+                    f"resumed={exact_resume_replayed_digests}"
+                )
+            exact_resume_parity = "BITWISE_EXACT"
         if stop_requested or health_pause_requested or milestone_pause_requested:
             break
         if profiler is not None:
@@ -2441,6 +2544,39 @@ def main() -> None:
             raw_rows,
             exact_replay_step=(args.max_steps if exact_resume_parity_enabled else None),
         )
+        if args.mode == "resume_validation":
+            if resume_validation_contract is None:
+                raise RuntimeError("resume-validation contract disappeared")
+            reference_report = json.loads(
+                Path(resume_validation_contract["preflight_report"]).read_text(
+                    encoding="utf-8"
+                )
+            )
+            reference_data = reference_report.get("exact_data_replay")
+            compared_fields = (
+                "ordered_anchor_ids_sha256",
+                "accepted_exposures",
+                "unique_anchors",
+                "repeated_exposures",
+            )
+            final_row = rows[-1]
+            mismatch = {
+                field: {
+                    "uninterrupted": (
+                        None if not isinstance(reference_data, dict) else reference_data.get(field)
+                    ),
+                    "resumed": final_row.get(field),
+                }
+                for field in compared_fields
+                if not isinstance(reference_data, dict)
+                or reference_data.get(field) != final_row.get(field)
+            }
+            if mismatch:
+                raise RuntimeError(f"external-process data replay mismatch: {mismatch}")
+            exact_data_replay = {
+                "step": args.max_steps,
+                **{field: final_row[field] for field in compared_fields},
+            }
         measured = [row for row in rows if not row["warmup"]]
         step_times = sorted(row["seconds"] for row in measured)
 
@@ -2502,6 +2638,14 @@ def main() -> None:
             "resumed_state_sha256_by_rank": exact_resume_replayed_digests,
             "exact_data_replay": exact_data_replay,
             "source_state_immutability_by_rank": source_state_immutability,
+            "resume_validation_contract_sha256": (
+                None
+                if args.resume_validation_contract is None
+                else _sha256(args.resume_validation_contract)
+            ),
+            "external_resume_checkpoint": (
+                None if args.resume_checkpoint is None else str(args.resume_checkpoint)
+            ),
             "checkpoint_manifest": checkpoint_manifest,
             "dcp_save_reload_resume_update": (
                 "PASS"

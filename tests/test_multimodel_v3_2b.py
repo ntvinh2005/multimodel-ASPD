@@ -341,8 +341,53 @@ def test_main500m_mode_gate_cannot_cross_preflight_and_main_boundaries(
 
     invalid_mode = copy.copy(main_args)
     invalid_mode.mode = "benchmark"
-    with pytest.raises(RuntimeError, match="only preflight or main"):
+    with pytest.raises(RuntimeError, match="only preflight"):
         _authorize_main500m_mode(draft, invalid_mode)
+
+
+def test_main500m_resume_validation_requires_pinned_bounded_contract(
+    tmp_path: Path,
+) -> None:
+    config = _main500m_config()
+    checkpoint = tmp_path / "preflight" / "checkpoints" / "step-000000003"
+    checkpoint.mkdir(parents=True)
+    manifest = checkpoint / "manifest.json"
+    manifest.write_text('{"status":"COMPLETE"}\n', encoding="utf-8")
+    preflight_report = tmp_path / "preflight" / "preflight_report.json"
+    preflight_report.write_text('{"status":"PASS"}\n', encoding="utf-8")
+    output = tmp_path / "resume-validation"
+    contract_path = tmp_path / "resume-validation-contract.json"
+    contract = {
+        "schema_version": 1,
+        "status": "AUTHORIZED_BOUNDED_RESUME_VALIDATION",
+        "authorization_reference": "researcher-approved-unverified-checks",
+        "execution_contract_fingerprint": config.execution_contract_fingerprint(),
+        "source_checkpoint": str(checkpoint),
+        "source_checkpoint_manifest_sha256": hashlib.sha256(
+            manifest.read_bytes()
+        ).hexdigest(),
+        "preflight_report": str(preflight_report),
+        "preflight_report_sha256": hashlib.sha256(
+            preflight_report.read_bytes()
+        ).hexdigest(),
+        "output_namespace": str(output),
+        "target_optimizer_step": 4,
+    }
+    contract_path.write_text(json.dumps(contract), encoding="utf-8")
+    args = SimpleNamespace(
+        mode="resume_validation",
+        strategy="model_owned",
+        skip_checkpoint=False,
+        resume_checkpoint=checkpoint,
+        resume_validation_contract=contract_path,
+        max_steps=4,
+        run_dir=output,
+    )
+    _authorize_main500m_mode(config, args)
+    contract["source_checkpoint_manifest_sha256"] = "0" * 64
+    contract_path.write_text(json.dumps(contract), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="CONTRACT_INVALID"):
+        _authorize_main500m_mode(config, args)
 
 
 def test_main500m_preflight_evidence_is_pinned_and_semantically_validated(
