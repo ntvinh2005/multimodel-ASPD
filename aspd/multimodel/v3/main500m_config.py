@@ -272,11 +272,19 @@ class Main500MMonitoring(BaseModel):
     maximum_activation_fvu: float = Field(gt=0)
     maximum_internal_fvu: float = Field(gt=0)
     maximum_model_loss_ratio: float = Field(gt=1)
+    expected_gate_groups: Literal[6]
+    expected_activation_fvu_metrics: Literal[48]
+    expected_internal_fvu_metrics: Literal[168]
+    hard_abort_on_missing_diagnostics: Literal[True]
     hard_abort_on_repeated_exposure: Literal[True]
     hard_abort_on_nonfinite: Literal[True]
     hard_abort_on_checkpoint_failure: Literal[True]
     hard_abort_on_storage_reserve_breach: Literal[True]
     storage_reserve_bytes: int = Field(gt=0)
+    sustained_policy_version: Literal["v1"]
+    sustained_gate_failure_diagnostics: int = Field(ge=2)
+    sustained_reconstruction_failure_diagnostics: int = Field(ge=2)
+    reconstruction_pause_minimum_exposures: int = Field(ge=0)
     staged_milestone_exposures: tuple[int, ...]
 
 
@@ -422,6 +430,7 @@ class Main500MApprovals(BaseModel):
         "VALIDATED_THREE_MODEL_GPU",
     ]
     storage_reservation: Literal["STORAGE_BLOCKED", "APPROVED"]
+    monitoring_policy: Literal["PENDING_RESEARCHER_APPROVAL", "APPROVED"]
     bounded_preflight: Main500MBoundedPreflightAuthorization
     three_model_gpu_preflight: Main500MGPUPreflightEvidence
     full_training: Literal["MAIN_500M_NOT_AUTHORIZED", "AUTHORIZED"]
@@ -512,6 +521,8 @@ class V31Main500MConfig(BaseModel):
             blockers.append("RESUME_BLOCKED")
         if self.approvals.storage_reservation != "APPROVED":
             blockers.append("STORAGE_BLOCKED")
+        if self.approvals.monitoring_policy != "APPROVED":
+            blockers.append("MONITORING_POLICY_APPROVAL_PENDING")
         if self.approvals.human_interpretability.status != "APPROVED":
             blockers.append("HUMAN_INTERPRETABILITY_APPROVAL_PENDING")
         if self.approvals.three_model_gpu_preflight.status != "PASSED":

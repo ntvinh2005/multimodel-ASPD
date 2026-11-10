@@ -7,6 +7,37 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any
 
+GATE_ALERT_CODES = frozenset(
+    {
+        "GATE_CANDIDATE_COLLAPSE",
+        "DICTIONARY_CONCENTRATION",
+        "TOP_1_PERCENT_CONCENTRATION",
+        "TOP_10_PERCENT_CONCENTRATION",
+        "RECENT_FEATURE_DEATH",
+    }
+)
+RECONSTRUCTION_ALERT_CODES = frozenset(
+    {
+        "ACTIVATION_RECONSTRUCTION_REGRESSION",
+        "INTERNAL_RECONSTRUCTION_REGRESSION",
+        "MODEL_LOSS_IMBALANCE",
+    }
+)
+REQUIRED_GATE_METRICS = frozenset(
+    {
+        "projection_negative_logit_fraction",
+        "normalized_negative_logit_fraction",
+        "positive_scores_per_anchor",
+        "positive_firings_per_anchor",
+        "active_features_in_pool",
+        "effective_dictionary_size_in_pool",
+        "top_1_percent_firing_share_in_pool",
+        "top_10_percent_firing_share_in_pool",
+        "dead_features",
+        "recently_dead_features",
+    }
+)
+
 
 @dataclass(frozen=True)
 class HealthEvent:
@@ -47,6 +78,45 @@ def _per_model_losses(losses: Mapping[str, float]) -> dict[str, float]:
     return totals
 
 
+def _missing_diagnostics(
+    metrics: Mapping[str, Any],
+    losses: Mapping[str, float],
+    thresholds: Any,
+) -> list[str]:
+    """Return fail-closed coverage defects for a scheduled diagnostic observation."""
+
+    if metrics.get("diagnostic_parameter_step") is None:
+        return []
+    defects: list[str] = []
+    gate_groups = _gate_groups(losses)
+    expected_gate_groups = int(thresholds.expected_gate_groups)
+    if len(gate_groups) != expected_gate_groups:
+        defects.append(f"gate_groups={len(gate_groups)} expected={expected_gate_groups}")
+    for group, values in sorted(gate_groups.items()):
+        missing = sorted(REQUIRED_GATE_METRICS.difference(values))
+        if missing:
+            defects.append(f"{group} missing gate metrics: {','.join(missing)}")
+
+    activation_count = sum(
+        key.startswith("diagnostic/activation/") and key.endswith("/full_fvu")
+        for key in losses
+    )
+    expected_activation = int(thresholds.expected_activation_fvu_metrics)
+    if activation_count != expected_activation:
+        defects.append(
+            f"activation_full_fvu={activation_count} expected={expected_activation}"
+        )
+    internal_count = sum(key.startswith("loss/internal/") for key in losses)
+    expected_internal = int(thresholds.expected_internal_fvu_metrics)
+    if internal_count != expected_internal:
+        defects.append(f"internal_fvu={internal_count} expected={expected_internal}")
+
+    gradient_reports = metrics.get("gradient_norms_by_rank") or []
+    if len(gradient_reports) != 3 or any(report is None for report in gradient_reports):
+        defects.append(f"gradient_reports={len(gradient_reports)} expected=3 complete")
+    return defects
+
+
 def evaluate_main500m_health(
     metrics: Mapping[str, Any], thresholds: Any
 ) -> dict[str, Any]:
@@ -78,6 +148,16 @@ def evaluate_main500m_health(
                 "NONFINITE_OBJECTIVE",
                 "ABORT",
                 "non-finite loss metrics: " + ", ".join(sorted(nonfinite)[:8]),
+            )
+        )
+    missing_diagnostics = _missing_diagnostics(metrics, losses, thresholds)
+    if missing_diagnostics and bool(thresholds.hard_abort_on_missing_diagnostics):
+        events.append(
+            HealthEvent(
+                "MISSING_DIAGNOSTICS",
+                "ABORT",
+                "scheduled diagnostic observation is incomplete: "
+                + "; ".join(missing_diagnostics[:8]),
             )
         )
     if metrics.get("checkpoint_status") == "FAIL":
@@ -219,3 +299,138 @@ def evaluate_main500m_health(
         "events": [event.payload() for event in events],
         "per_model_loss_contributions": per_model,
     }
+
+
+class SustainedMain500MHealthMonitor:
+    """Versioned, checkpointable escalation policy for diagnostic trajectories.
+
+    A single reconstruction or dictionary-health excursion remains an alert. Consecutive
+    scheduled diagnostic failures request a verified checkpoint followed by a controlled pause.
+    The monitor never changes optimization, loss, sparsity, or feature-selection behavior.
+    """
+
+    STATE_SCHEMA_VERSION = 1
+
+    def __init__(self, thresholds: Any) -> None:
+        if thresholds.sustained_policy_version != "v1":
+            raise ValueError("unsupported sustained health policy version")
+        self.thresholds = thresholds
+        self.gate_failure_streak = 0
+        self.reconstruction_failure_streak = 0
+        self.diagnostic_observations = 0
+        self.last_diagnostic_parameter_step: int | None = None
+
+    def state_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.STATE_SCHEMA_VERSION,
+            "policy_version": self.thresholds.sustained_policy_version,
+            "gate_failure_streak": self.gate_failure_streak,
+            "reconstruction_failure_streak": self.reconstruction_failure_streak,
+            "diagnostic_observations": self.diagnostic_observations,
+            "last_diagnostic_parameter_step": self.last_diagnostic_parameter_step,
+        }
+
+    def load_state_dict(self, state: Mapping[str, Any]) -> None:
+        expected = {
+            "schema_version": self.STATE_SCHEMA_VERSION,
+            "policy_version": self.thresholds.sustained_policy_version,
+        }
+        mismatch = {
+            key: {"expected": value, "observed": state.get(key)}
+            for key, value in expected.items()
+            if state.get(key) != value
+        }
+        if mismatch:
+            raise ValueError(f"health-monitor recovery contract mismatch: {mismatch}")
+        gate_streak = int(state["gate_failure_streak"])
+        reconstruction_streak = int(state["reconstruction_failure_streak"])
+        observations = int(state["diagnostic_observations"])
+        last_step = state.get("last_diagnostic_parameter_step")
+        if min(gate_streak, reconstruction_streak, observations) < 0:
+            raise ValueError("health-monitor counters cannot be negative")
+        if last_step is not None and int(last_step) < 0:
+            raise ValueError("health-monitor diagnostic step cannot be negative")
+        self.gate_failure_streak = gate_streak
+        self.reconstruction_failure_streak = reconstruction_streak
+        self.diagnostic_observations = observations
+        self.last_diagnostic_parameter_step = (
+            None if last_step is None else int(last_step)
+        )
+
+    def observe(self, metrics: Mapping[str, Any]) -> dict[str, Any]:
+        result = evaluate_main500m_health(metrics, self.thresholds)
+        result["action"] = "ABORT" if result["status"] == "ABORT" else "CONTINUE"
+        diagnostic_step = metrics.get("diagnostic_parameter_step")
+        if result["status"] == "ABORT" or diagnostic_step is None:
+            result["monitor_state"] = self.state_dict()
+            return result
+
+        diagnostic_step = int(diagnostic_step)
+        if (
+            self.last_diagnostic_parameter_step is not None
+            and diagnostic_step <= self.last_diagnostic_parameter_step
+        ):
+            duplicate = HealthEvent(
+                "NONMONOTONIC_DIAGNOSTIC_STEP",
+                "ABORT",
+                "diagnostic observations must advance monotonically across resume",
+                "diagnostic_parameter_step",
+                diagnostic_step,
+                self.last_diagnostic_parameter_step,
+            )
+            result["events"].append(duplicate.payload())
+            result["status"] = "ABORT"
+            result["action"] = "ABORT"
+            result["monitor_state"] = self.state_dict()
+            return result
+
+        event_codes = {event["code"] for event in result["events"]}
+        gate_failed = bool(event_codes.intersection(GATE_ALERT_CODES))
+        accepted_exposures = int(metrics.get("accepted_exposures", 0))
+        reconstruction_eligible = accepted_exposures >= int(
+            self.thresholds.reconstruction_pause_minimum_exposures
+        )
+        reconstruction_failed = reconstruction_eligible and bool(
+            event_codes.intersection(RECONSTRUCTION_ALERT_CODES)
+        )
+
+        self.gate_failure_streak = self.gate_failure_streak + 1 if gate_failed else 0
+        self.reconstruction_failure_streak = (
+            self.reconstruction_failure_streak + 1 if reconstruction_failed else 0
+        )
+        self.diagnostic_observations += 1
+        self.last_diagnostic_parameter_step = diagnostic_step
+
+        sustained_events: list[HealthEvent] = []
+        if self.gate_failure_streak >= int(
+            self.thresholds.sustained_gate_failure_diagnostics
+        ):
+            sustained_events.append(
+                HealthEvent(
+                    "SUSTAINED_GATE_HEALTH_FAILURE",
+                    "PAUSE",
+                    "gate-health thresholds failed for consecutive diagnostic observations",
+                    "gate_failure_streak",
+                    self.gate_failure_streak,
+                    int(self.thresholds.sustained_gate_failure_diagnostics),
+                )
+            )
+        if self.reconstruction_failure_streak >= int(
+            self.thresholds.sustained_reconstruction_failure_diagnostics
+        ):
+            sustained_events.append(
+                HealthEvent(
+                    "SUSTAINED_RECONSTRUCTION_FAILURE",
+                    "PAUSE",
+                    "reconstruction thresholds failed for consecutive eligible diagnostics",
+                    "reconstruction_failure_streak",
+                    self.reconstruction_failure_streak,
+                    int(self.thresholds.sustained_reconstruction_failure_diagnostics),
+                )
+            )
+        if sustained_events:
+            result["events"].extend(event.payload() for event in sustained_events)
+            result["status"] = "PAUSE"
+            result["action"] = "CHECKPOINT_AND_PAUSE"
+        result["monitor_state"] = self.state_dict()
+        return result

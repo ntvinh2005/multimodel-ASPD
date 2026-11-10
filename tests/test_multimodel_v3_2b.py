@@ -23,7 +23,10 @@ from aspd.multimodel.v3.data import SQLiteExposureLedger
 from aspd.multimodel.v3.encoder import FeatureReadout, pack_cross_model_tokens
 from aspd.multimodel.v3.gating import V3BatchTopK
 from aspd.multimodel.v3.main500m_config import V31Main500MConfig, load_main500m_config
-from aspd.multimodel.v3.main500m_monitoring import evaluate_main500m_health
+from aspd.multimodel.v3.main500m_monitoring import (
+    SustainedMain500MHealthMonitor,
+    evaluate_main500m_health,
+)
 from aspd.multimodel.v3.main_2b_config import MODEL_ORDER_2B, load_main_2b_v1_config
 from aspd.multimodel.v3.model_owned import (
     LocalCaptureBatch,
@@ -347,6 +350,157 @@ def test_main500m_health_monitor_separates_alerts_from_hard_aborts() -> None:
     assert {event["code"] for event in abort["events"]} == {
         "EXPOSURE_DUPLICATION",
         "NONFINITE_OBJECTIVE",
+    }
+
+
+def _complete_main500m_diagnostic(
+    *,
+    diagnostic_step: int,
+    accepted_exposures: int,
+    gate_collapse: bool = False,
+    reconstruction_regression: bool = False,
+) -> dict:
+    loss: dict[str, float] = {"total": 1.0}
+    for site in ("pre", "mid"):
+        for model in ("gemma", "smol", "third"):
+            prefix = f"diagnostic/gate/{site}/{model}"
+            loss.update(
+                {
+                    f"{prefix}/projection_negative_logit_fraction": 0.5,
+                    f"{prefix}/normalized_negative_logit_fraction": 0.5,
+                    f"{prefix}/positive_scores_per_anchor": (
+                        128.0 if gate_collapse else 4096.0
+                    ),
+                    f"{prefix}/positive_firings_per_anchor": 32.0,
+                    f"{prefix}/active_features_in_pool": (
+                        500 if gate_collapse else 4096
+                    ),
+                    f"{prefix}/effective_dictionary_size_in_pool": (
+                        900.0 if gate_collapse else 4096.0
+                    ),
+                    f"{prefix}/top_1_percent_firing_share_in_pool": (
+                        0.60 if gate_collapse else 0.10
+                    ),
+                    f"{prefix}/top_10_percent_firing_share_in_pool": (
+                        0.90 if gate_collapse else 0.40
+                    ),
+                    f"{prefix}/dead_features": 0.0,
+                    f"{prefix}/recently_dead_features": (
+                        7000.0 if gate_collapse else 0.0
+                    ),
+                }
+            )
+            for window in range(8):
+                loss[
+                    f"diagnostic/activation/{site}/{model}/window_{window}/full_fvu"
+                ] = 0.90 if reconstruction_regression else 0.50
+    for model in ("gemma", "smol", "third"):
+        for target in range(56):
+            loss[f"loss/internal/{model}.target_{target}"] = (
+                0.90 if reconstruction_regression else 0.50
+            )
+    return {
+        "accepted_exposures": accepted_exposures,
+        "repeated_exposures": 0,
+        "diagnostic_parameter_step": diagnostic_step,
+        "loss": loss,
+        "gradient_norms_by_rank": [
+            {"rank": rank, "l2": {"shared_encoder": 1.0, "rank_one": 1.0}}
+            for rank in range(3)
+        ],
+    }
+
+
+def test_main500m_health_monitor_fails_closed_on_incomplete_scheduled_diagnostics() -> None:
+    result = evaluate_main500m_health(
+        {
+            "accepted_exposures": 8192,
+            "repeated_exposures": 0,
+            "diagnostic_parameter_step": 0,
+            "loss": {"total": 1.0},
+            "gradient_norms_by_rank": [],
+        },
+        _main500m_config().monitoring,
+    )
+    assert result["status"] == "ABORT"
+    assert {event["code"] for event in result["events"]} == {"MISSING_DIAGNOSTICS"}
+
+
+def test_main500m_sustained_gate_failure_checkpoints_then_pauses_and_resumes_state() -> None:
+    thresholds = _main500m_config().monitoring
+    monitor = SustainedMain500MHealthMonitor(thresholds)
+    healthy = monitor.observe(
+        _complete_main500m_diagnostic(diagnostic_step=0, accepted_exposures=8192)
+    )
+    assert healthy["status"] == "PASS"
+    assert healthy["action"] == "CONTINUE"
+
+    first = monitor.observe(
+        _complete_main500m_diagnostic(
+            diagnostic_step=64,
+            accepted_exposures=65 * 8192,
+            gate_collapse=True,
+        )
+    )
+    assert first["status"] == "ALERT"
+    second = monitor.observe(
+        _complete_main500m_diagnostic(
+            diagnostic_step=128,
+            accepted_exposures=129 * 8192,
+            gate_collapse=True,
+        )
+    )
+    assert second["status"] == "ALERT"
+
+    resumed = SustainedMain500MHealthMonitor(thresholds)
+    resumed.load_state_dict(monitor.state_dict())
+    third = resumed.observe(
+        _complete_main500m_diagnostic(
+            diagnostic_step=192,
+            accepted_exposures=193 * 8192,
+            gate_collapse=True,
+        )
+    )
+    assert third["status"] == "PAUSE"
+    assert third["action"] == "CHECKPOINT_AND_PAUSE"
+    assert "SUSTAINED_GATE_HEALTH_FAILURE" in {
+        event["code"] for event in third["events"]
+    }
+
+
+def test_main500m_reconstruction_pause_starts_only_after_first_review_milestone() -> None:
+    thresholds = _main500m_config().monitoring
+    monitor = SustainedMain500MHealthMonitor(thresholds)
+    for diagnostic_step in (0, 64):
+        early = monitor.observe(
+            _complete_main500m_diagnostic(
+                diagnostic_step=diagnostic_step,
+                accepted_exposures=(diagnostic_step + 1) * 8192,
+                reconstruction_regression=True,
+            )
+        )
+        assert early["status"] == "ALERT"
+        assert early["action"] == "CONTINUE"
+        assert early["monitor_state"]["reconstruction_failure_streak"] == 0
+
+    first = monitor.observe(
+        _complete_main500m_diagnostic(
+            diagnostic_step=1221,
+            accepted_exposures=10_002_432,
+            reconstruction_regression=True,
+        )
+    )
+    assert first["status"] == "ALERT"
+    second = monitor.observe(
+        _complete_main500m_diagnostic(
+            diagnostic_step=1280,
+            accepted_exposures=10_493_952,
+            reconstruction_regression=True,
+        )
+    )
+    assert second["status"] == "PAUSE"
+    assert "SUSTAINED_RECONSTRUCTION_FAILURE" in {
+        event["code"] for event in second["events"]
     }
 
 

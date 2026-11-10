@@ -161,11 +161,19 @@ monitoring:
   maximum_activation_fvu: 0.85
   maximum_internal_fvu: 0.85
   maximum_model_loss_ratio: 2.0
+  expected_gate_groups: 6
+  expected_activation_fvu_metrics: 48
+  expected_internal_fvu_metrics: 168
+  hard_abort_on_missing_diagnostics: true
   hard_abort_on_repeated_exposure: true
   hard_abort_on_nonfinite: true
   hard_abort_on_checkpoint_failure: true
   hard_abort_on_storage_reserve_breach: true
   storage_reserve_bytes: 214748364800
+  sustained_policy_version: v1
+  sustained_gate_failure_diagnostics: 3
+  sustained_reconstruction_failure_diagnostics: 2
+  reconstruction_pause_minimum_exposures: 10002432
   staged_milestone_exposures: [10002432, 25001984, 50003968, 100007936, 250003456, 500006912]
 
 runtime:
@@ -199,6 +207,7 @@ approvals:
     researcher_decision: null
   exact_resume: SYNTHETIC_VALIDATED_REAL_THREE_MODEL_PENDING
   storage_reservation: STORAGE_BLOCKED
+  monitoring_policy: PENDING_RESEARCHER_APPROVAL
   bounded_preflight:
     status: PENDING_RESEARCHER_APPROVAL
     optimizer_steps: null

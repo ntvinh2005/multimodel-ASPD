@@ -59,7 +59,7 @@ from aspd.multimodel.v3.main500m_config import (
     EXPERIMENT_FAMILY as MAIN500M_EXPERIMENT_FAMILY,
 )
 from aspd.multimodel.v3.main500m_config import load_main500m_config
-from aspd.multimodel.v3.main500m_monitoring import evaluate_main500m_health
+from aspd.multimodel.v3.main500m_monitoring import SustainedMain500MHealthMonitor
 from aspd.multimodel.v3.main_2b_config import (
     MODEL_ORDER_2B,
     V3Main2BV1Config,
@@ -1411,6 +1411,11 @@ def main() -> None:
             write_json_immutable(run_manifest_path, run_manifest)
     dist.barrier()
 
+    health_monitor = (
+        SustainedMain500MHealthMonitor(config.monitoring)
+        if rank == 0 and config.experiment_family == MAIN500M_EXPERIMENT_FAMILY
+        else None
+    )
     completed_steps = 0
     restored_prefetched_pool = None
     initial_runtime_path = args.run_dir / "initial_runtime.json"
@@ -1457,6 +1462,13 @@ def main() -> None:
                 raise ValueError(f"controlled checkpoint resume provenance mismatch: {mismatch}")
         completed_steps = int(restored_runtime["completed_steps"])
         if rank == 0:
+            if health_monitor is not None:
+                health_state = restored_runtime.get("health_monitor")
+                if not isinstance(health_state, dict):
+                    raise ValueError(
+                        "ASPD v3.1 checkpoint is missing the sustained health-monitor state"
+                    )
+                health_monitor.load_state_dict(health_state)
             stream.load_state_dict(restored_runtime["stream"])
             restored_prefetched_pool = restored_runtime.get("prefetched_pool")
             ledger.recover_to_receipt(
@@ -1530,6 +1542,7 @@ def main() -> None:
     checkpoint_path: Path | None = None
     checkpoint_manifest = None
     resumed = False
+    health_pause_requested = False
     diagnostic_steps = {1, 2, 10, 50, 128, 256, 300, 500, 800, 1000, 1221}
     diagnostic_parameter_steps = set(
         getattr(config.runtime, "diagnostic_parameter_steps", ())
@@ -1792,16 +1805,24 @@ def main() -> None:
                     "diagnostic_parameter_step": diagnostic_parameter_step,
                 }
             if getattr(config, "monitoring", None) is not None and collect_step_diagnostics:
-                health = evaluate_main500m_health(metrics_row, config.monitoring)
+                if health_monitor is None:
+                    raise RuntimeError(
+                        "ASPD v3.1 diagnostic step has no stateful health monitor"
+                    )
+                health = health_monitor.observe(metrics_row)
                 metrics_row["health"] = health
             _append_jsonl(metrics_path, metrics_row)
         health = _broadcast_object(health)
         if health is not None and health["status"] == "ABORT":
             raise RuntimeError(f"ASPD v3.1 health monitor requested abort: {health['events']}")
+        health_pause_requested = bool(
+            health is not None and health["action"] == "CHECKPOINT_AND_PAUSE"
+        )
 
         preflight_reload_due = args.mode == "preflight" and completed_steps == args.max_steps - 1
         checkpoint_due = not args.skip_checkpoint and (
-            preflight_reload_due
+            health_pause_requested
+            or preflight_reload_due
             or (
                 args.mode in {"main", "controlled", "pilot"}
                 and (
@@ -1824,6 +1845,9 @@ def main() -> None:
                 ).payload()
                 stream_state = stream.state_dict()
             receipt = _broadcast_object(receipt)
+            health_monitor_state = _broadcast_object(
+                health_monitor.state_dict() if health_monitor is not None else None
+            )
             runtime_state = {
                 "completed_steps": completed_steps,
                 "accepted_exposures": completed_steps * 8192,
@@ -1839,6 +1863,7 @@ def main() -> None:
                 "ledger_receipt": receipt,
                 "stream": stream_state,
                 "prefetched_pool": prefetched_pool,
+                "health_monitor": health_monitor_state,
             }
             save_started = time.perf_counter()
             if args.strategy == "model_owned":
@@ -1941,6 +1966,13 @@ def main() -> None:
                 if int(restored_runtime["completed_steps"]) != completed_steps:
                     raise RuntimeError("checkpoint restored the wrong optimizer step")
                 if rank == 0:
+                    if health_monitor is not None:
+                        health_state = restored_runtime.get("health_monitor")
+                        if not isinstance(health_state, dict):
+                            raise RuntimeError(
+                                "preflight checkpoint omitted sustained health-monitor state"
+                            )
+                        health_monitor.load_state_dict(health_state)
                     stream.load_state_dict(restored_runtime["stream"])
                     prefetcher.restore(restored_runtime.get("prefetched_pool"))
                     ledger.recover_to_receipt(
@@ -1963,7 +1995,7 @@ def main() -> None:
                 checkpoint_manager.prune_after_verified_replacement()
             torch.cuda.synchronize()
             checkpoint_seconds = time.perf_counter() - checkpoint_started
-        if stop_requested:
+        if stop_requested or health_pause_requested:
             break
         if profiler is not None:
             profiler.step()
@@ -2010,7 +2042,9 @@ def main() -> None:
         )
         report = {
             "schema_version": 1,
-            "status": "PASS",
+            "status": (
+                "PAUSED_HEALTH_REVIEW" if health_pause_requested else "PASS"
+            ),
             "mode": args.mode,
             "strategy": args.strategy,
             "git_sha": git_sha,
@@ -2076,8 +2110,13 @@ def main() -> None:
                 "rank_one_matrix_factors": "FROZEN",
                 "optimizer_state": controlled.optimizer_state,
             }
-        write_json_immutable(args.run_dir / "benchmark_report.json", report)
-        if args.mode == "preflight":
+        report_path = (
+            args.run_dir / f"health_pause_step_{completed_steps:09d}.json"
+            if health_pause_requested
+            else args.run_dir / "benchmark_report.json"
+        )
+        write_json_immutable(report_path, report)
+        if args.mode == "preflight" and not health_pause_requested:
             expected_preflight = Path(config.runtime.preflight_evidence)
             if args.run_dir != expected_preflight.parent:
                 raise ValueError(
@@ -2090,6 +2129,8 @@ def main() -> None:
         ledger.close()
     dist.barrier()
     dist.destroy_process_group()
+    if health_pause_requested:
+        raise SystemExit(86)
     if stop_requested:
         raise SystemExit(99)
 

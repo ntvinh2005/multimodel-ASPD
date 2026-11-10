@@ -34,7 +34,7 @@ detached binary internal support. No main-training job has been submitted.
 | 4 | Storage capacity | Live free space is below the 1 TiB reservation. A dry-run inventory identifies a narrowly sufficient `/blue` Tier A, but no deletion or dedicated reservation is approved. | Storage proposal and machine-readable inventory. | Live `df`/inode/quota, exact `du`, COMPLETE markers, report and manifest SHA-256 checks. | `BLOCKED_STORAGE` | Exact deletion targets or additional capacity, then remeasurement and path approval. |
 | 5 | Real three-model GPU preflight | Synthetic distributed tests do not validate three real source models. | None yet | Not run. | `BLOCKED_RESEARCHER_DECISION` | Model 3, alignment, and bounded preflight authorization. |
 | 6 | Exact checkpoint resume | Synthetic three-rank resume passed previously; real three-model GPU resume remains untested. | None yet | Not run in this branch. | `BLOCKED_EXTERNAL_DEPENDENCY` | Real-model preflight prerequisites and bounded GPU authorization. |
-| 7 | Sustained-collapse protection | Monitor is stateless; a collapse alert does not cause a checkpointed controlled pause. | None yet | Existing single-snapshot tests only. | `AUDITING` | Threshold/action policy must remain versioned; final threshold approval required. |
+| 7 | Sustained-collapse protection | The monitor was stateless; a collapse alert could not cause a recoverable controlled pause, and scheduled diagnostic completeness was not enforced. | `main500m_monitoring.py`, `main500m_config.py`, runner, draft YAML, tests. | Nine focused main-500M CPU tests; Ruff. | `FIXED_TESTED` | Researcher must approve the versioned v1 thresholds/actions before main authorization; the draft remains pending. |
 | 8 | Staged milestones | Milestones are configured but the runner does not enforce checkpointed review pauses. | None yet | No enforcement test yet. | `AUDITING` | Continuation decisions at configured milestones. |
 | 9 | Human interpretability | Interface/protocol exist, but no versioned researcher response or decision artifact is present; completion status schema is too narrow. | None yet | Preparation tests exist; no scientific response evidence. | `BLOCKED_RESEARCHER_DECISION` | Researcher completion and explicit semantic-risk decision. |
 | 10 | Slurm/runtime reliability | Main proposal exists; preflight proposal and bounded signal/requeue evidence remain incomplete. | None yet | Shell/runtime audit pending. | `AUDITING` | No main submission authorization exists. |
@@ -97,3 +97,45 @@ semantics. Phi-3.5 is the higher-diversity but substantially larger/fused second
 Llama 3.2 is the lower-hook-risk but less diverse gated fallback; StableLM is deprioritized for its
 license and possible parallel-residual MID ambiguity. The main YAML remains unchanged at
 `model3_pending`; no candidate was downloaded or executed in this audit.
+
+## Blocker 7 resolution record
+
+What was wrong: single diagnostic snapshots could emit alerts, but the runner had no persistent
+trajectory state, no checkpointed escalation counter, and no controlled-pause action. A scheduled
+diagnostic row could also omit whole model/site groups without a fail-closed response.
+
+What changed: policy `v1` requires all six model/site gate groups, 48 activation full-FVU values,
+168 internal-FVU values, and three rank gradient reports on each scheduled diagnostic. Missing
+coverage, nonfinite values, duplicated exposures, storage-reserve breaches, and checkpoint failures
+remain immediate abort conditions. A single gate-health or reconstruction excursion remains an
+alert. Three consecutive gate-health failures, or two consecutive reconstruction failures after
+10,002,432 accepted exposures, request `CHECKPOINT_AND_PAUSE`. The runner persists the monitor
+state in every complete checkpoint, restores it fail-closed, writes an immutable pause report, and
+uses exit code 86 only after completing the recovery checkpoint. A resumed diagnostic step must
+advance monotonically.
+
+Tests run:
+
+```text
+/blue/thai/vinhnguyen1/multimodel-ASPD/repo/.venv/bin/pytest -q \
+  tests/test_multimodel_v3_2b.py -k 'main500m'
+9 passed, 17 deselected
+
+/blue/thai/vinhnguyen1/multimodel-ASPD/repo/.venv/bin/ruff check \
+  aspd/multimodel/v3/main500m_monitoring.py \
+  aspd/multimodel/v3/main500m_config.py \
+  aspd/multimodel/cli/train_aspd_v3_2b.py \
+  tests/test_multimodel_v3_2b.py
+All checks passed
+```
+
+The synthetic trajectories cover healthy, one-off warning, sustained gate collapse, delayed
+reconstruction escalation, state save/restore, and incomplete-diagnostic abort. The full GPU
+runner path is not claimed as executed; that remains part of the bounded real-model preflight.
+All 25 non-distributed tests in `test_multimodel_v3_2b.py` also passed; the existing distributed
+Gloo test was deliberately excluded because its prior live retry remains inconclusive.
+
+Scientific semantics changed: no. The policy changes only observation and fail-safe control flow;
+it does not alter z-score normalization, ReLU, BatchTopK, AuxK, loss weights, decoder constraints,
+dictionary size, or sparse coefficients. The checked-in approval is
+`PENDING_RESEARCHER_APPROVAL`, so the main run remains fail-closed.
