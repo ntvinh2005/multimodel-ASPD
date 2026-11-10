@@ -1836,7 +1836,7 @@ def main() -> None:
     checkpoint_restore_probe = "NOT_RUN"
     checkpoint_path: Path | None = None
     checkpoint_manifest = None
-    resumed = False
+    resumed = bool(checkpoints)
     exact_resume_parity_enabled = bool(
         args.mode == "preflight"
         and config.experiment_family == MAIN500M_EXPERIMENT_FAMILY
