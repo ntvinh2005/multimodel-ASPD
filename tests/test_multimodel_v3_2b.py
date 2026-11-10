@@ -92,8 +92,8 @@ def _pin_test_alignment_evidence(payload: dict, path: Path) -> None:
     provisional = V31Main500MConfig.model_validate(payload)
     report = {
         "status": "PASS",
-        "execution_contract_fingerprint": (
-            provisional.execution_contract_fingerprint()
+        "alignment_contract_fingerprint": (
+            provisional.alignment_contract_fingerprint()
         ),
         "alignment_policy": provisional.data.canonical_text_policy,
         "alignment_acceptance": provisional.data.alignment_acceptance,

@@ -631,6 +631,33 @@ class V31Main500MConfig(BaseModel):
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(encoded.encode()).hexdigest()
 
+    def alignment_contract_fingerprint(self) -> str:
+        """Hash only inputs that can change canonical three-tokenizer alignment."""
+
+        payload = {
+            "models": [
+                {
+                    "key": model.key,
+                    "tokenizer_id": model.tokenizer_id,
+                    "tokenizer_revision": model.tokenizer_revision,
+                }
+                for model in self.models
+            ],
+            "model_order": list(self.architecture.model_order),
+            "dataset_id": self.data.dataset_id,
+            "dataset_revision": self.data.dataset_revision,
+            "sequence_length": self.data.sequence_length,
+            "split_unit": self.data.split_unit,
+            "split_seed": self.data.split_seed,
+            "split_modulus": self.data.split_modulus,
+            "validation_buckets": list(self.data.validation_buckets),
+            "test_buckets": list(self.data.test_buckets),
+            "canonical_text_policy": self.data.canonical_text_policy,
+            "alignment_acceptance": self.data.alignment_acceptance,
+        }
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode()).hexdigest()
+
     def readiness_blockers(self) -> list[str]:
         blockers: list[str] = []
         if self.models[2].approval_status != "APPROVED":
@@ -789,7 +816,7 @@ class V31Main500MConfig(BaseModel):
         ]
         expected = {
             "status": "PASS",
-            "execution_contract_fingerprint": self.execution_contract_fingerprint(),
+            "alignment_contract_fingerprint": self.alignment_contract_fingerprint(),
             "alignment_policy": self.data.canonical_text_policy,
             "alignment_acceptance": self.data.alignment_acceptance,
             "model_order": list(self.architecture.model_order),
@@ -802,8 +829,8 @@ class V31Main500MConfig(BaseModel):
         }
         observed = {
             "status": report.get("status"),
-            "execution_contract_fingerprint": report.get(
-                "execution_contract_fingerprint"
+            "alignment_contract_fingerprint": report.get(
+                "alignment_contract_fingerprint"
             ),
             "alignment_policy": report.get("alignment_policy"),
             "alignment_acceptance": report.get("alignment_acceptance"),

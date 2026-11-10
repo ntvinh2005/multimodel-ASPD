@@ -3,7 +3,7 @@
   "status": "PASS",
   "decision": "THREE_WAY_ALIGNMENT_ENGINEERING_VALIDATED",
   "model_order": ["gemma", "smol", "granite"],
-  "execution_contract_fingerprint": "c37e8999ed31767638041d05ad4e5311243db3fddb439bfcb2c260e8ab01e2f6",
+  "alignment_contract_fingerprint": "4a554683544395e6337b46b2e3fbd51a3130671c2d25424a4ed1c475f31a756d",
   "alignment_policy": "exact_fast_tokenizer_offsets_and_exact_prefix_roundtrip_v2",
   "alignment_acceptance": "intersection_of_exact_canonical_text_boundaries",
   "audit": {
