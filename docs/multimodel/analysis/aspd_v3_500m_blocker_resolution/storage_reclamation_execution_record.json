@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "AWAITING_EXACT_TARGET_APPROVAL",
+  "status": "COMPLETE",
   "resolved_at": "2026-11-09T20:15:25-05:00",
   "filesystem": "/blue/thai",
   "available_bytes_before": 381244870656,
@@ -81,5 +81,16 @@
       "reason": "Historical local semantic-judge model cache. Completed evaluation outputs and human-evaluation package remain outside the cache."
     }
   ],
-  "actual_result": null
+  "actual_result": {
+    "executed_after_exact_target_approval": true,
+    "all_eight_targets_absent": true,
+    "available_bytes_after": 1244881256448,
+    "observed_filesystem_free_space_increase_bytes": 863636385792,
+    "difference_from_target_du_sum_bytes": -8947499008,
+    "margin_over_requirement_bytes": 145369628672,
+    "protected_final_step_1221_checkpoints_present": true,
+    "approved_gemma_smol_granite_caches_present": true,
+    "write_probe": "PASS",
+    "recovery": "Deleted checkpoint payloads are not directly recoverable. REGENERABLE targets require separately authorized reruns; the Llama cache requires redownload; redundant step-1000 recovery points are superseded by preserved step-1221 checkpoints."
+  }
 }

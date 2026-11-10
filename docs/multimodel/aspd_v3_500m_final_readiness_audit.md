@@ -101,7 +101,7 @@ source models.
 | 1. Preflight authorization | Separate bounded-preflight and main authorization implemented and tested. | `FIXED_TESTED` | Populate only after exact model-3/alignment approval. |
 | 2. Model 3 | Exact Granite contract approved, populated, pinned, and CPU-tested. | `FIXED_TESTED` | Alignment and real source execution remain separate gates. |
 | 3. Alignment | Exact canonical-text prefix validation passed on 512 real documents with pinned tokenizers. | `FIXED_TESTED` | Continue source/domain monitoring during execution. |
-| 4. Storage | Live capacity and deletion dry run quantified; nothing deleted. | `STORAGE_BLOCKED` | At least 1 TiB authorized free space with operational margin. |
+| 4. Storage | Exact approved cleanup completed; dedicated `/blue` root has 1.245 TB free. | `FIXED_TESTED` | Continue runtime reserve monitoring. |
 | 5. Real GPU preflight | Launcher and evidence schema prepared. | `THREE_MODEL_GPU_PREFLIGHT_PENDING` | Approved model 3, alignment, storage, and bounded GPU authorization. |
 | 6. Exact resume | Synthetic three-rank deterministic resume evidence exists; recovery is self-contained and fail closed. | `RESUME_BLOCKED` | Real three-model uninterrupted-versus-resumed update and interruption test. |
 | 7. Monitoring | Stateful sustained-failure policy and controlled pause implemented and CPU-tested. | `FIXED_TESTED`, approval pending | Researcher approval of policy v1 and real-run metric coverage. |
@@ -167,17 +167,16 @@ predeclared justified tolerance.
 
 ## Storage decision
 
-The audit snapshot found 213,821,587,456 bytes free on `/orange/thai` and 381,422,133,248 bytes on
-`/blue/thai`; neither meets the 1,099,511,627,776-byte startup reservation. Estimated checkpoint
-and recovery requirements remain 821--872 GB before a final model-3 measurement.
+The original snapshot found neither filesystem met the 1,099,511,627,776-byte startup reservation.
+After exact approval, eight documented targets were deleted from `/blue/thai`. The dedicated root
+now has 1,244,881,256,448 bytes free, 145,369,628,672 bytes above the reservation. Estimated
+checkpoint and recovery requirements remain 821--872 GB before a final preflight measurement.
 
-The seven Tier-A `/blue` candidates could reclaim 731,456,405,504 bytes, projecting only
-13,366,910,976 bytes above 1 TiB at the snapshot. That margin is too fragile under concurrent use.
-The exact dry-run list is in
+The executed set combined the seven Tier-A candidates with the historical Llama judge cache. The
+exact paths, preserved metadata, observed reclamation and recovery limitations are in
 [`aspd_v3_500m_storage_reclamation_proposal.md`](aspd_v3_500m_storage_reclamation_proposal.md).
-Deletion requires explicit path-by-path approval and fresh dependency/size/hash checks. A dedicated
-allocation or additional capacity is preferable. Historical checkpoints, active worktrees, human
-evaluation artifacts, and non-regenerable Qwen-era evidence remain protected.
+Historical final checkpoints, active worktrees, human evaluation artifacts, approved source caches,
+and non-regenerable Qwen-era evidence remain protected.
 
 ## Monitoring and abort behavior
 
@@ -239,19 +238,17 @@ validator stops on model-3, alignment, and authorization gates before CUDA/sourc
 
 Before any real-model preflight:
 
-1. approve an authorized storage root with at least 1 TiB free plus margin, or approve exact
-   deletion targets from the dry-run proposal;
-2. approve monitoring policy v1 and staged-milestone policy v1; and
-3. complete the human response/analysis decision, or explicitly accept the documented remaining
+1. approve monitoring policy v1 and staged-milestone policy v1; and
+2. complete the human response/analysis decision, or explicitly accept the documented remaining
    semantic uncertainty.
 
 Before final main authorization:
 
-4. approve the exact bounded preflight namespace and 3--20 step budget;
-5. review passing 168-target hook/parity, GPU, checkpoint/resume,
+3. approve the exact bounded preflight namespace and 3--20 step budget;
+4. review passing 168-target hook/parity, GPU, checkpoint/resume,
    source-immutability, signal/requeue, throughput, and storage evidence;
-6. regenerate and approve all configuration/manifest fingerprints after those decisions; and
-7. issue a separate explicit authorization for the 500M submission and the first staged interval.
+5. regenerate and approve all configuration/manifest fingerprints after those decisions; and
+6. issue a separate explicit authorization for the 500M submission and the first staged interval.
 
 ## Direct answers
 
@@ -264,7 +261,8 @@ Before final main authorization:
 4. **Is model 3 unresolved?** No. The exact Granite source contract is approved and pinned.
 5. **Is exact resume validated?** Synthetic three-rank recovery: yes. Real final three-model exact
    resume: no.
-6. **Is storage sufficient?** No. `STORAGE_BLOCKED` remains correct.
+6. **Is storage sufficient?** Yes at the current snapshot: 1.245 TB free on the dedicated `/blue`
+   filesystem, with runtime reserve monitoring still required.
 7. **Is throughput measured?** Only for a historical different composition; final v3.1 throughput
    is estimated, not measured.
 8. **Are monitoring and aborts implemented?** Yes and CPU-tested; threshold approval and real-run
@@ -286,7 +284,6 @@ This command is documented only and was not executed.
 
 Exact remaining blockers:
 
-- `STORAGE_BLOCKED`
 - `RESUME_BLOCKED`
 - `THREE_MODEL_GPU_PREFLIGHT_PENDING`
 - `REAL_SLURM_SIGNAL_REQUEUE_PENDING`

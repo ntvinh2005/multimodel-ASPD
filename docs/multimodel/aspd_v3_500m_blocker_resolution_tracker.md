@@ -31,7 +31,7 @@ detached binary internal support. No main-training job has been submitted.
 | 1 | Preflight authorization deadlock | Main authorization, including prior preflight PASS, ran before mode dispatch; preflight had no independent bounded authorization or pinned result schema. | `main500m_config.py`, `train_aspd_v3_2b.py`, draft YAML, `test_multimodel_v3_2b.py` | Six authorization-focused tests; all 31 non-distributed file tests pass; distributed retry remains inconclusive. | `FIXED_TESTED` | Researcher must later authorize an exact model-3 preflight budget and namespace; the checked-in draft remains pending. |
 | 2 | Third-model selection | The exact source contract was previously unapproved. | Model-3 decision package, immutable researcher approval, pinned Granite config, schema and tests. | Exact contract loads; 168 unique targets register; mutation and Qwen rejection tests pass. | `FIXED_TESTED` | None for selection. Alignment, source hooks, GPU preflight and main submission remain separate gates. |
 | 3 | Three-way alignment | The exact-prefix contract had not been tested with the approved Granite tokenizer or real pinned dataset rows. | Real audit CLI, offline tokenizer fix, raw/approval artifacts, validation report, pinned config evidence, tests. | 512 real documents, 154,868 anchors, invariants/repeatability/replay PASS, filter TV 0.0284; 4 audit unit tests. | `FIXED_TESTED` | Continue source/domain monitoring during training; no additional alignment approval is pending. |
-| 4 | Storage capacity | Live free space is below the 1 TiB reservation. A dry-run inventory identifies a narrowly sufficient `/blue` Tier A, but no deletion or dedicated reservation is approved. | Storage proposal and machine-readable inventory. | Live `df`/inode/quota, exact `du`, COMPLETE markers, report and manifest SHA-256 checks. | `BLOCKED_STORAGE` | Exact deletion targets or additional capacity, then remeasurement and path approval. |
+| 4 | Storage capacity | Both filesystems were below the 1 TiB reservation. | Proposal, committed metadata record, exact eight-target cleanup, dedicated `/blue` namespace, config/readiness update. | Exact target absence, protected artifact presence, write probe, `df`/inode remeasurement. | `FIXED_TESTED` | No additional approval; runtime reserve monitoring remains mandatory. |
 | 5 | Real three-model GPU preflight | Synthetic distributed tests do not validate three real source models. | None yet | Not run. | `BLOCKED_RESEARCHER_DECISION` | Model 3, alignment, and bounded preflight authorization. |
 | 6 | Exact checkpoint resume | Synthetic three-rank resume passed previously; real three-model GPU resume remains untested. | None yet | Not run in this branch. | `BLOCKED_EXTERNAL_DEPENDENCY` | Real-model preflight prerequisites and bounded GPU authorization. |
 | 7 | Sustained-collapse protection | The monitor was stateless; a collapse alert could not cause a recoverable controlled pause, and scheduled diagnostic completeness was not enforced. | `main500m_monitoring.py`, `main500m_config.py`, runner, draft YAML, tests. | Nine focused main-500M CPU tests; Ruff. | `FIXED_TESTED` | Researcher must approve the versioned v1 thresholds/actions before main authorization; the draft remains pending. |
@@ -79,24 +79,28 @@ environment variables. It failed before NCCL/source loading with all four expect
 
 ## Blocker 4 audit record
 
-The read-only inventory is documented in
-`aspd_v3_500m_storage_reclamation_proposal.md` and its JSON companion. No files were removed.
-The seven recommended `/blue` Tier A targets total 731,456,405,504 bytes and would project
-1,112,878,538,752 bytes free from this snapshot—only 13,366,910,976 bytes above 1 TiB. That is
-mathematically sufficient but operationally fragile under concurrent storage use. `/orange` cannot
-reach the reservation using the identified safe candidates. Storage therefore remains blocked
-pending exact-target approval plus additional margin or a dedicated allocation.
+The initial read-only inventory is documented in
+`aspd_v3_500m_storage_reclamation_proposal.md` and its JSON companion. It first identified seven
+Tier A `/blue` targets totaling 731,456,405,504 bytes, which was mathematically sufficient but
+operationally fragile. The researcher subsequently approved an exact eight-target set after the
+documentation record was committed. That set was removed, all eight targets were verified absent,
+and protected final checkpoints plus the three approved source-model caches were verified present.
+The live post-cleanup measurement was 1,244,881,256,448 bytes free on `/blue/thai`, leaving
+145,369,628,672 bytes above the 1 TiB reservation. The immutable execution record is
+`analysis/aspd_v3_500m_blocker_resolution/storage_reclamation_execution_record.json`; storage is
+therefore resolved, subject to the mandatory runtime reserve monitor.
 
 ## Blocker 2 decision record
 
-The recommendation package proposes
+The recommendation package proposed
 `ibm-granite/granite-3.3-2b-instruct@707f574c62054322f6b5b04b6d075f0a8f05e0f0`,
-layers 16–23, for explicit researcher approval. Granite best balances a distinct model family,
+layers 16–23. The researcher approved that exact contract, and it is now pinned in the main draft.
+Granite best balances a distinct model family,
 2,533,539,840-parameter scale, GQA/residual-scaling diversity, and direct seven-matrix/PRE-MID
 semantics. Phi-3.5 is the higher-diversity but substantially larger/fused secondary candidate;
 Llama 3.2 is the lower-hook-risk but less diverse gated fallback; StableLM is deprioritized for its
-license and possible parallel-residual MID ambiguity. The main YAML remains unchanged at
-`model3_pending`; no candidate was downloaded or executed in this audit.
+license and possible parallel-residual MID ambiguity. Approval of the contract did not by itself
+authorize source-model execution; real three-model GPU validation remains a separate bounded gate.
 
 ## Blocker 7 resolution record
 
@@ -365,3 +369,16 @@ a conservative capacity estimate rather than a census.
 The config now pins the validation artifact and revalidates its hash, tokenizer revisions,
 execution-contract fingerprint, boundary/replay statuses, capacity and bias before bounded
 preflight. Full report: `aspd_v3_500m_three_way_alignment_validation.md`.
+
+## Blocker 4 storage resolution record
+
+After exact-target approval, seven documented regenerable/redundant checkpoint payloads and the
+historical Llama-3.3-70B judge cache were permanently removed from `/blue/thai`. The operation
+removed only the eight committed absolute paths. Final step-1,221 checkpoints, reports, human
+artifacts, worktrees, approved source caches and historical Qwen evidence remain present.
+
+Post-cleanup free space is 1,244,881,256,448 bytes, 145,369,628,672 bytes above the 1 TiB startup
+reservation. The dedicated root `/blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/` exists
+and passed a write probe. Main, checkpoint, manifest, preflight and continuation paths now use that
+root, and the runtime still aborts on reserve breach. Exact result and recovery limitations are in
+`analysis/aspd_v3_500m_blocker_resolution/storage_reclamation_execution_record.json`.

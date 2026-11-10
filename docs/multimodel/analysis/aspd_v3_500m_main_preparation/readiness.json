@@ -13,8 +13,8 @@
   "blocker_resolution_branch": "aspd-v3.1-main500m-blocker-resolution",
   "config": {
     "path": "configs/multimodel/aspd_v3/main500m_preparation_v1.yaml",
-    "fingerprint": "ee90f3e5848b1f204c23c40645ffb735548ddbb0191e83cb25b3f8063660c6fa",
-    "execution_contract_fingerprint": "c37e8999ed31767638041d05ad4e5311243db3fddb439bfcb2c260e8ab01e2f6",
+    "fingerprint": "a3aa46b3c13e8930d7c4d123f747f2352275e2b7752fec00f64a483ddd76917f",
+    "execution_contract_fingerprint": "45f8b159d737e1096ef0dda78300484667926e2307800969d3fc800802e24944",
     "status": "DRAFT_FAIL_CLOSED"
   },
   "architecture": {
@@ -52,7 +52,7 @@
     "manifest_schema_version": 4,
     "policy_identifier_consistency": "PASS",
     "three_way_source_validation": "PASS_BOUNDED_REAL_TOKENIZERS",
-    "validation_artifact_sha256": "b969b3240a31397308f3c8586ffdffc2e8c0006dcd829a333a10fb5f223d5001",
+    "validation_artifact_sha256": "555407d0e0a2ac9bfd58097f41dbaf1402b0c63159cf05618e2ff91423f68060",
     "sample_documents": 512,
     "accepted_anchors": 154868,
     "boundary_weighted_acceptance_rate": 0.7209601132173848,
@@ -96,13 +96,17 @@
     "blue_thai": {
       "size_bytes": 5497558138880,
       "used_bytes": 5116136005632,
-      "available_bytes": 381422133248,
+      "available_bytes": 1244881256448,
       "inode_use_percent": 72
     },
     "estimated_required_free_bytes_low": 821000000000,
     "estimated_required_free_bytes_high": 872000000000,
     "recommended_reservation_bytes": 1099511627776,
-    "status": "STORAGE_BLOCKED"
+    "approved_root": "/blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1",
+    "reclaimed_targets": 8,
+    "observed_free_space_increase_bytes": 863636385792,
+    "margin_over_reservation_bytes": 145369628672,
+    "status": "APPROVED"
   },
   "throughput": {
     "final_three_model_v3_1_measured": false,
@@ -143,7 +147,6 @@
     }
   ],
   "blockers": [
-    "STORAGE_BLOCKED",
     "RESUME_BLOCKED",
     "MONITORING_POLICY_APPROVAL_PENDING",
     "MILESTONE_POLICY_APPROVAL_PENDING",

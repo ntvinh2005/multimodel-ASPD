@@ -7,8 +7,8 @@
   },
   "configuration": {
     "path": "configs/multimodel/aspd_v3/main500m_preparation_v1.yaml",
-    "fingerprint": "ee90f3e5848b1f204c23c40645ffb735548ddbb0191e83cb25b3f8063660c6fa",
-    "execution_contract_fingerprint": "c37e8999ed31767638041d05ad4e5311243db3fddb439bfcb2c260e8ab01e2f6"
+    "fingerprint": "a3aa46b3c13e8930d7c4d123f747f2352275e2b7752fec00f64a483ddd76917f",
+    "execution_contract_fingerprint": "45f8b159d737e1096ef0dda78300484667926e2307800969d3fc800802e24944"
   },
   "verified_invariants": {
     "model_count": 3,

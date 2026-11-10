@@ -190,14 +190,14 @@ runtime:
   early_exit_after_selected_layers: true
   data_prefetch_depth: 1
   ledger_anchor_storage: exact_compact_v1
-  output_root: /orange/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/runs
-  checkpoint_root: /orange/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/runs
+  output_root: /blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/runs
+  checkpoint_root: /blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/runs
   startup_storage_required_bytes: 1099511627776
-  dataset_manifest: /orange/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/data/pile_uncopyrighted/manifest.json
-  alignment_manifest: /orange/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/data/pile_uncopyrighted/alignment_manifest.json
-  continuation_authorization_root: /orange/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/continuation_authorizations
-  preflight_output_root: /orange/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/preflight
-  preflight_evidence: /orange/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/preflight/preflight_report.json
+  dataset_manifest: /blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/data/pile_uncopyrighted/manifest.json
+  alignment_manifest: /blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/data/pile_uncopyrighted/alignment_manifest.json
+  continuation_authorization_root: /blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/continuation_authorizations
+  preflight_output_root: /blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/preflight
+  preflight_evidence: /blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/preflight/preflight_report.json
   max_preflight_steps: 20
   max_preflight_minutes: 45
 
@@ -205,7 +205,7 @@ approvals:
   third_model: APPROVED
   three_way_alignment: APPROVED
   three_way_alignment_artifact: docs/multimodel/analysis/aspd_v3_500m_blocker_resolution/three_way_alignment_approval.json
-  three_way_alignment_artifact_sha256: b969b3240a31397308f3c8586ffdffc2e8c0006dcd829a333a10fb5f223d5001
+  three_way_alignment_artifact_sha256: 555407d0e0a2ac9bfd58097f41dbaf1402b0c63159cf05618e2ff91423f68060
   human_interpretability:
     status: PENDING_RESEARCHER_RESPONSES
     artifact_path: /orange/thai/vinhnguyen1/aspd_v3/human_interpretability_v1/package/audit/preparation_manifest.json
@@ -216,7 +216,7 @@ approvals:
       - A single-evaluator result would remain exploratory and would not establish inter-rater reliability.
       - The validated package compares the matched two-model control and z-score checkpoints, not the unresolved three-model main system.
   exact_resume: SYNTHETIC_VALIDATED_REAL_THREE_MODEL_PENDING
-  storage_reservation: STORAGE_BLOCKED
+  storage_reservation: APPROVED
   monitoring_policy: PENDING_RESEARCHER_APPROVAL
   milestone_policy: PENDING_RESEARCHER_APPROVAL
   bounded_preflight:

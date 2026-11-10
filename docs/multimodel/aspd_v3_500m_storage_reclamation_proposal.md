@@ -137,3 +137,19 @@ This section resolves the proposed set but does not itself record deletion. The 
 must be committed before removal, and the destructive operation must still receive exact-target
 approval. No parent directory, glob, final checkpoint, report, manifest outside the target, human
 artifact, worktree, Granite/Gemma/Smol model cache, or historical Qwen evidence is included.
+
+### Executed result
+
+The exact eight-target operation was approved and completed. Every target is absent. Protected
+step-1,221 final checkpoints and the approved Gemma, SmolLM2 and Granite caches were rechecked and
+remain present. `/blue/thai` reported 1,244,881,256,448 bytes free after cleanup, which is
+145,369,628,672 bytes above the 1 TiB reservation. The observed filesystem free-space increase was
+863,636,385,792 bytes; it differs from the pre-deletion `du` sum by 8,947,499,008 bytes because
+filesystem-wide concurrent usage changed during the operation. The post-cleanup namespace write
+probe passed.
+
+The deleted payloads are not directly recoverable. Regenerable preflights require a separately
+authorized rerun, the Llama cache requires a future redownload if needed, and the removed step-1,000
+recovery points are superseded by retained step-1,221 checkpoints. `STORAGE_BLOCKED` is resolved for
+the dedicated `/blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/` namespace, subject to the
+runtime monitor's continuing free-space checks.
