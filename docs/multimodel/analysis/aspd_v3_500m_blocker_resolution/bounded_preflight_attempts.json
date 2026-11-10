@@ -47,7 +47,13 @@
       "repeated_anchor_exposures": 0,
       "cross_rank_duplicates": 0,
       "scientific_evidence": "PARTIAL_ENGINEERING_EVIDENCE_ONLY_NOT_MAIN_AUTHORIZATION_EVIDENCE",
-      "remediation": "Generalize raw-token slots, pin model order in receipt schema, retain legacy-reader compatibility, and rerun from a fresh namespace."
+      "remediation": "Generalize raw-token slots, pin model order in receipt schema, retain legacy-reader compatibility, and rerun from a fresh namespace.",
+      "preserved_evidence_path": "/blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/rejected_preflight_evidence/job_50538957",
+      "preserved_report_hash_verified_after_move": true,
+      "rejected_checkpoint_payload_removed": true,
+      "removed_checkpoint_payload_bytes": 127271503532,
+      "removal_authorization": "explicit_exact_target_tool_approval_2026-11-09",
+      "fresh_preflight_namespace_absent_after_cleanup": true
     }
   ]
 }
