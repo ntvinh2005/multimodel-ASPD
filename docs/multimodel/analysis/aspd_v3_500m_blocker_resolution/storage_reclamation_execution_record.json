@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "status": "AWAITING_EXACT_TARGET_APPROVAL",
+  "resolved_at": "2026-11-09T20:15:25-05:00",
+  "filesystem": "/blue/thai",
+  "available_bytes_before": 381244870656,
+  "required_available_bytes": 1099511627776,
+  "proposed_reclaimed_bytes": 872583884800,
+  "projected_available_bytes": 1253828755456,
+  "projected_margin_over_requirement_bytes": 154317127680,
+  "active_researcher_jobs": [],
+  "documentation_preservation": {
+    "storage_inventory": "docs/multimodel/analysis/aspd_v3_500m_blocker_resolution/storage_inventory.json",
+    "proposal": "docs/multimodel/aspd_v3_500m_storage_reclamation_proposal.md",
+    "reports_and_run_manifests_outside_deleted_checkpoint_directories": true,
+    "final_step_1221_replacement_checkpoints_preserved": true,
+    "human_interpretability_artifacts_preserved": true,
+    "historical_qwen_main_preflight_preserved": true
+  },
+  "exact_targets": [
+    {
+      "path": "/blue/thai/vinhnguyen1/multimodel-ASPD/work/out/multimodel/aspd_v3/granite_normalized_target_v1/preflight/baseline/checkpoints",
+      "bytes": 127280418816,
+      "classification": "REGENERABLE",
+      "checkpoint_manifest_sha256": "dd4130ede8d75143a3c1eceb1c481695dcd3f3da8a9f39393739585a28609f62",
+      "checkpoint": {"status": "COMPLETE", "step": 2, "world_size": 3, "config_file_sha256": "0748708cac077c9597c2deff05803d2481561da02571672a9cf313359b9a42f2", "config_fingerprint": "642ce56a1fa83ec552f53d777d73bce6533fb8d9c8f7cb392840f27a0cc705dc", "dataset_manifest_sha256": "a258974d21ceac3457529644be07459518fde7bc28501abde5c67e5e3719286f"},
+      "preserved_report_sha256": "a28b22b8cd233e8d15a86c2ab4e38ea0ae13a97adbe7bda9660da12d5542ba3e"
+    },
+    {
+      "path": "/blue/thai/vinhnguyen1/multimodel-ASPD/work/out/multimodel/aspd_v3/granite_normalized_target_v1/preflight/normalized_target/checkpoints",
+      "bytes": 127280365568,
+      "classification": "REGENERABLE",
+      "checkpoint_manifest_sha256": "bd65de816febfd9bb6a2c944a5fb7c1739bc675dad005911ed46a4d26848829f",
+      "checkpoint": {"status": "COMPLETE", "step": 2, "world_size": 3, "config_file_sha256": "0ec93d7406ef2999b84be999ec3b3e855928565f3ae18d8601ea93d1f246d9bf", "config_fingerprint": "37c5c902e69503c362db37ee5031c0d83be2aa50e6e16fb97d5adb7bbbb93acc", "dataset_manifest_sha256": "a258974d21ceac3457529644be07459518fde7bc28501abde5c67e5e3719286f"},
+      "preserved_report_sha256": "00500532a7c4e5e3dae33d7472028cf6717edebfd23d697d5318df491cdde454"
+    },
+    {
+      "path": "/blue/thai/vinhnguyen1/multimodel-ASPD/work/out/multimodel/aspd_v3/two_model_scale_v1/preflight/baseline/checkpoints",
+      "bytes": 87403884544,
+      "classification": "REGENERABLE",
+      "checkpoint_manifest_sha256": "4339ba9c57348480a55688218a82fd8367c05bd587af7aadebc60e1cfaf65679",
+      "checkpoint": {"status": "COMPLETE", "step": 2, "world_size": 2, "config_file_sha256": "2d7da48ef9792e18d6a102daad3729a9cb7f4e7dac69f51dad8aec7132d8a8c7", "config_fingerprint": "336d7eeb2fab5ccb65d2764804d09af7c75018af6e9345432f601e081fb0f825", "dataset_manifest_sha256": "a258974d21ceac3457529644be07459518fde7bc28501abde5c67e5e3719286f"},
+      "preserved_report_sha256": "d3d5c0d8408a6be08d4216ac63f815fdd6eb879a2e9daeb80701cd83729d472a"
+    },
+    {
+      "path": "/blue/thai/vinhnguyen1/multimodel-ASPD/work/out/multimodel/aspd_v3/two_model_scale_v1/preflight/treatment/checkpoints",
+      "bytes": 87403913216,
+      "classification": "REGENERABLE",
+      "checkpoint_manifest_sha256": "65c5b1650e92204fb9ab3ad431f597660ad7fd86459da64a856a1caba6c4312f",
+      "checkpoint": {"status": "COMPLETE", "step": 2, "world_size": 2, "config_file_sha256": "438a7646ef37dc208705bcc8c62aec1cf0a8351b8c3dfb39e6141fbfad3eebc8", "config_fingerprint": "702915817d6e91f18c3f012157ada6cd47cdc7921bf5e6536479a14e1a2aaf76", "dataset_manifest_sha256": "a258974d21ceac3457529644be07459518fde7bc28501abde5c67e5e3719286f"},
+      "preserved_report_sha256": "96e3fb892811563d1a24d7af7fd405d8c82cff9d26f5fe648f7db76b34c3dd05"
+    },
+    {
+      "path": "/blue/thai/vinhnguyen1/multimodel-ASPD/work/out/multimodel/aspd_v3/granite_normalized_target_unconstrained_decoder_v1/preflight/normalized_target/checkpoints",
+      "bytes": 127280353280,
+      "classification": "REGENERABLE",
+      "checkpoint_manifest_sha256": "79716ec5c8a3e9404096b81fd4b04f307ddc57ef9f17003c888d899df01c39fc",
+      "checkpoint": {"status": "COMPLETE", "step": 2, "world_size": 3, "config_file_sha256": "64fc8a6f2bb48e4c82a469cbabd63481dbf360f32c11594f8e17a6ebee6f419c", "config_fingerprint": "a6cf17a7cc48f66076043f2f22fa47e4cd45024775804c3f4a478d894ea0d9b7", "dataset_manifest_sha256": "a258974d21ceac3457529644be07459518fde7bc28501abde5c67e5e3719286f"},
+      "preserved_report_sha256": "8d3e58ef981401e2a03d9b88e60f69ce26f27377fbbbf214ca9d80e063597c8b"
+    },
+    {
+      "path": "/blue/thai/vinhnguyen1/multimodel-ASPD/work/out/multimodel/aspd_v3/two_model_scale_v1/baseline/job_49977094/checkpoints/step-000001000",
+      "bytes": 87403720704,
+      "classification": "REDUNDANT_VERIFIED",
+      "checkpoint_manifest_sha256": "6b2ceeb361eedcf0d95dad5f63e2b468006fac723f97297de433cad21ed4e612",
+      "checkpoint": {"status": "COMPLETE", "step": 1000, "world_size": 2, "config_file_sha256": "2d7da48ef9792e18d6a102daad3729a9cb7f4e7dac69f51dad8aec7132d8a8c7", "config_fingerprint": "336d7eeb2fab5ccb65d2764804d09af7c75018af6e9345432f601e081fb0f825", "dataset_manifest_sha256": "a258974d21ceac3457529644be07459518fde7bc28501abde5c67e5e3719286f"},
+      "preserved_replacement": {"step": 1221, "complete_sha256": "4cba598a2f9d4917b9c9f67fa0259eabb3b69987e2218dc31c463555eae509b4"}
+    },
+    {
+      "path": "/blue/thai/vinhnguyen1/multimodel-ASPD/work/out/multimodel/aspd_v3/two_model_scale_v1/treatment/job_49977095/checkpoints/step-000001000",
+      "bytes": 87403749376,
+      "classification": "REDUNDANT_VERIFIED",
+      "checkpoint_manifest_sha256": "2164402e65333cc235ae00818863e56663b59f502beca8f945417bb8857ae484",
+      "checkpoint": {"status": "COMPLETE", "step": 1000, "world_size": 2, "config_file_sha256": "438a7646ef37dc208705bcc8c62aec1cf0a8351b8c3dfb39e6141fbfad3eebc8", "config_fingerprint": "702915817d6e91f18c3f012157ada6cd47cdc7921bf5e6536479a14e1a2aaf76", "dataset_manifest_sha256": "a258974d21ceac3457529644be07459518fde7bc28501abde5c67e5e3719286f"},
+      "preserved_replacement": {"step": 1221, "complete_sha256": "c31393de0691094a3ce1819d897832d43530134bd49d194fa931956c1515df35"}
+    },
+    {
+      "path": "/blue/thai/vinhnguyen1/multimodel-ASPD/cache/huggingface/hub/models--meta-llama--Llama-3.3-70B-Instruct",
+      "bytes": 141127479296,
+      "classification": "REGENERABLE_MODEL_CACHE_RESEARCHER_APPROVAL_REQUIRED",
+      "reason": "Historical local semantic-judge model cache. Completed evaluation outputs and human-evaluation package remain outside the cache."
+    }
+  ],
+  "actual_result": null
+}

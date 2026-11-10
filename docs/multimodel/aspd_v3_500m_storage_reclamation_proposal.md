@@ -118,3 +118,22 @@ No deletion command has been run. After the researcher approves exact targets, t
    this document.
 
 Until those steps and the explicit target approval occur, the decision remains `STORAGE_BLOCKED`.
+
+## Exact execution set after in-principle cleanup approval
+
+At `2026-11-09T20:15:25-05:00`, `/blue/thai` had 381,244,870,656 bytes free and no
+researcher-owned Slurm jobs. All seven Tier-A targets retained the exact sizes and manifest/report
+hashes recorded above; both redundant step-1,000 checkpoints still had complete step-1,221
+replacements. To provide a credible margin rather than only 12.4 GiB, the exact proposed execution
+set adds the 141,127,479,296-byte historical Llama-3.3-70B local judge cache. Completed judge and
+human-evaluation artifacts are outside that cache and remain protected.
+
+The eight exact targets total 872,583,884,800 bytes. At the snapshot they would project
+1,253,828,755,456 bytes free, 154,317,127,680 bytes above the 1 TiB reservation. The complete exact
+paths and preserved checkpoint metadata are in
+`analysis/aspd_v3_500m_blocker_resolution/storage_reclamation_execution_record.json`.
+
+This section resolves the proposed set but does not itself record deletion. The execution record
+must be committed before removal, and the destructive operation must still receive exact-target
+approval. No parent directory, glob, final checkpoint, report, manifest outside the target, human
+artifact, worktree, Granite/Gemma/Smol model cache, or historical Qwen evidence is included.
