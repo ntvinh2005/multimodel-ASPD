@@ -35,6 +35,8 @@ from aspd.multimodel.v3.main500m_continuation import (
     next_review_exposure,
 )
 from aspd.multimodel.v3.main500m_monitoring import (
+    DICTIONARY_CONCENTRATION_PAUSE_MINIMUM_EXPOSURES,
+    SUSTAINED_POLICY_IMPLEMENTATION_REVISION,
     SustainedMain500MHealthMonitor,
     evaluate_main500m_health,
 )
@@ -855,6 +857,83 @@ def test_main500m_sustained_gate_failure_checkpoints_then_pauses_and_resumes_sta
     assert "SUSTAINED_GATE_HEALTH_FAILURE" in {
         event["code"] for event in third["events"]
     }
+
+
+def _set_dictionary_concentration_only(metrics: dict, value: float = 900.0) -> dict:
+    for key in tuple(metrics["loss"]):
+        if key.endswith("/effective_dictionary_size_in_pool"):
+            metrics["loss"][key] = value
+    return metrics
+
+
+def test_main500m_dictionary_concentration_only_is_alert_during_zscore_warmup() -> None:
+    thresholds = _main500m_config().monitoring
+    monitor = SustainedMain500MHealthMonitor(thresholds)
+    for diagnostic_step in (192, 256, 320):
+        result = monitor.observe(
+            _set_dictionary_concentration_only(
+                _complete_main500m_diagnostic(
+                    diagnostic_step=diagnostic_step,
+                    accepted_exposures=(diagnostic_step + 1) * 8192,
+                )
+            )
+        )
+        assert result["status"] == "ALERT"
+        assert result["action"] == "CONTINUE"
+        assert result["monitor_state"]["gate_failure_streak"] == 0
+        assert result["monitor_state"]["implementation_revision"] == (
+            SUSTAINED_POLICY_IMPLEMENTATION_REVISION
+        )
+        assert "DICTIONARY_CONCENTRATION_WARMUP_ALERT_ONLY" in {
+            event["code"] for event in result["events"]
+        }
+
+
+def test_main500m_dictionary_concentration_pauses_after_zscore_warmup() -> None:
+    thresholds = _main500m_config().monitoring
+    monitor = SustainedMain500MHealthMonitor(thresholds)
+    first_step = DICTIONARY_CONCENTRATION_PAUSE_MINIMUM_EXPOSURES // 8192 - 1
+    result = None
+    for offset in (0, 64, 128):
+        diagnostic_step = first_step + offset
+        result = monitor.observe(
+            _set_dictionary_concentration_only(
+                _complete_main500m_diagnostic(
+                    diagnostic_step=diagnostic_step,
+                    accepted_exposures=(diagnostic_step + 1) * 8192,
+                )
+            )
+        )
+    assert result is not None
+    assert result["status"] == "PAUSE"
+    assert result["action"] == "CHECKPOINT_AND_PAUSE"
+    assert result["monitor_state"]["gate_failure_streak"] == 3
+
+
+def test_main500m_legacy_pause_streak_resets_on_warmup_only_concentration() -> None:
+    thresholds = _main500m_config().monitoring
+    monitor = SustainedMain500MHealthMonitor(thresholds)
+    monitor.load_state_dict(
+        {
+            "schema_version": 1,
+            "policy_version": "v1",
+            "gate_failure_streak": 3,
+            "reconstruction_failure_streak": 0,
+            "diagnostic_observations": 6,
+            "last_diagnostic_parameter_step": 320,
+        }
+    )
+    result = monitor.observe(
+        _set_dictionary_concentration_only(
+            _complete_main500m_diagnostic(
+                diagnostic_step=384,
+                accepted_exposures=385 * 8192,
+            )
+        )
+    )
+    assert result["status"] == "ALERT"
+    assert result["action"] == "CONTINUE"
+    assert result["monitor_state"]["gate_failure_streak"] == 0
 
 
 def test_main500m_reconstruction_pause_starts_only_after_first_review_milestone() -> None:

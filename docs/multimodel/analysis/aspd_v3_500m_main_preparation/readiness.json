@@ -2,15 +2,16 @@
   "schema_version": 1,
   "generated_at": "2026-11-10",
   "experiment_family": "aspd_v3_1_three_model_main500m",
-  "scientific_status": "RESEARCHER_APPROVED",
-  "final_readiness_decision": "MAIN_AUTHORIZED_READY_FOR_SUBMISSION",
-  "submission_permitted": true,
+  "scientific_status": "RESEARCHER_APPROVED_HEALTH_POLICY_FIX",
+  "final_readiness_decision": "MAIN_PAUSED_FIX_READY_FOR_REVIEW",
+  "submission_permitted": false,
   "reference": {
     "branch": "main",
     "commit": "738f1a0d8742ce6c97c74cadb2550ffade648b19"
   },
   "preparation_branch": "aspd-v3.1-main500m-preparation",
   "blocker_resolution_branch": "aspd-v3.1-main500m-blocker-resolution",
+  "health_fix_branch": "aspd-v3.1-main500m-health-pause-fix",
   "config": {
     "path": "configs/multimodel/aspd_v3/main500m_preparation_v1.yaml",
     "fingerprint": "7e44ead3e8a05913936c1125ce4e4fa30f65a1b90dc466411bf9ae882cac3902",
@@ -82,11 +83,28 @@
   },
   "monitoring": {
     "policy_version": "v1",
-    "implementation": "FIXED_TESTED_CPU",
+    "implementation_revision": "v1.1_zscore_warmup_calibrated",
+    "implementation": "FIXED_TESTED_CPU_AND_REPLAYED_ON_JOB_50640347_METRICS",
     "researcher_approval": "APPROVED",
+    "dictionary_concentration_pause_minimum_exposures": 4202496,
+    "warmup_behavior": "DICTIONARY_CONCENTRATION_ALERT_ONLY_UNLESS_ANOTHER_GATE_ALERT_CODE_FAILS",
     "sustained_gate_failure_diagnostics": 3,
     "sustained_reconstruction_failure_diagnostics": 2,
-    "action": "ATOMIC_CHECKPOINT_THEN_CONTROLLED_PAUSE"
+    "action": "ATOMIC_CHECKPOINT_THEN_CONTROLLED_PAUSE",
+    "postmortem": "docs/multimodel/aspd_v3_500m_gate_health_pause_postmortem.md"
+  },
+  "current_main_run": {
+    "slurm_job_id": "50640347",
+    "executed_git_sha": "6a677e4d6ccb45442cbdca875bc5652dc4165d2e",
+    "scheduler_state": "FAILED_WRAPPED_CONTROLLED_PAUSE",
+    "scientific_state": "PAUSED_HEALTH_REVIEW",
+    "completed_optimizer_steps": 321,
+    "accepted_exposures": 2629632,
+    "checkpoint": "/blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/runs/aspd_v3_1_three_model_168targets_c8192_k32_500m_v1/checkpoints/step-000000321",
+    "checkpoint_complete": true,
+    "pause_trigger": "SUSTAINED_GATE_HEALTH_FAILURE",
+    "diagnosis": "EARLY_ZSCORE_CONCENTRATION_VALLEY_SAMPLED_BY_UNCALIBRATED_64_STEP_STREAK_POLICY",
+    "resume_mode": "NEW_NAMESPACE_EXTERNAL_EXACT_RESUME_ONLY"
   },
   "milestones": {
     "policy_version": "v1",
@@ -204,7 +222,9 @@
       "result": "Slurm job 50611663 completed 0:0; bitwise state and ordered-anchor replay PASS"
     }
   ],
-  "blockers": [],
+  "blockers": [
+    "CONTROLLED_RESUME_REQUIRES_CHECKPOINT_PINNED_CONTINUATION_AUTHORIZATION"
+  ],
   "slurm": {
     "script": "slurm/multimodel/aspd_v3_500m_main_PROPOSAL.sbatch",
     "preflight_script": "slurm/multimodel/aspd_v3_500m_preflight_PROPOSAL.sbatch",

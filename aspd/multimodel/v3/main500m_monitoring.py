@@ -16,6 +16,15 @@ GATE_ALERT_CODES = frozenset(
         "RECENT_FEATURE_DEATH",
     }
 )
+
+# The matched z-score recovery pilot had a real but reversible early concentration
+# valley: PRE/MID entropy-effective sizes were 996/765 at parameter step 256, then
+# recovered to 1432/1250 at step 512 and 2130/1808 at step 1220. Therefore an
+# effective-size alert alone is not pause-eligible until the first diagnostic that
+# reaches the demonstrated recovery boundary. This changes only escalation policy;
+# it does not change the gate, optimizer, loss, sparsity, or emitted diagnostics.
+DICTIONARY_CONCENTRATION_PAUSE_MINIMUM_EXPOSURES = 4_202_496
+SUSTAINED_POLICY_IMPLEMENTATION_REVISION = "v1.1_zscore_warmup_calibrated"
 RECONSTRUCTION_ALERT_CODES = frozenset(
     {
         "ACTIVATION_RECONSTRUCTION_REGRESSION",
@@ -324,6 +333,7 @@ class SustainedMain500MHealthMonitor:
         return {
             "schema_version": self.STATE_SCHEMA_VERSION,
             "policy_version": self.thresholds.sustained_policy_version,
+            "implementation_revision": SUSTAINED_POLICY_IMPLEMENTATION_REVISION,
             "gate_failure_streak": self.gate_failure_streak,
             "reconstruction_failure_streak": self.reconstruction_failure_streak,
             "diagnostic_observations": self.diagnostic_observations,
@@ -342,6 +352,15 @@ class SustainedMain500MHealthMonitor:
         }
         if mismatch:
             raise ValueError(f"health-monitor recovery contract mismatch: {mismatch}")
+        implementation_revision = state.get("implementation_revision")
+        if implementation_revision not in {
+            None,  # Backward-compatible restore of the immutable step-321 checkpoint.
+            SUSTAINED_POLICY_IMPLEMENTATION_REVISION,
+        }:
+            raise ValueError(
+                "health-monitor implementation revision mismatch: "
+                f"{implementation_revision!r}"
+            )
         gate_streak = int(state["gate_failure_streak"])
         reconstruction_streak = int(state["reconstruction_failure_streak"])
         observations = int(state["diagnostic_observations"])
@@ -384,9 +403,29 @@ class SustainedMain500MHealthMonitor:
             result["monitor_state"] = self.state_dict()
             return result
 
-        event_codes = {event["code"] for event in result["events"]}
-        gate_failed = bool(event_codes.intersection(GATE_ALERT_CODES))
         accepted_exposures = int(metrics.get("accepted_exposures", 0))
+        event_codes = {event["code"] for event in result["events"]}
+        pause_eligible_gate_codes = event_codes.intersection(GATE_ALERT_CODES)
+        if (
+            accepted_exposures
+            < DICTIONARY_CONCENTRATION_PAUSE_MINIMUM_EXPOSURES
+            and "DICTIONARY_CONCENTRATION" in pause_eligible_gate_codes
+        ):
+            pause_eligible_gate_codes = pause_eligible_gate_codes.difference(
+                {"DICTIONARY_CONCENTRATION"}
+            )
+            result["events"].append(
+                HealthEvent(
+                    "DICTIONARY_CONCENTRATION_WARMUP_ALERT_ONLY",
+                    "INFO",
+                    "entropy-effective-size concentration remains visible but is not "
+                    "pause-eligible before the matched z-score recovery boundary",
+                    "accepted_exposures",
+                    accepted_exposures,
+                    DICTIONARY_CONCENTRATION_PAUSE_MINIMUM_EXPOSURES,
+                ).payload()
+            )
+        gate_failed = bool(pause_eligible_gate_codes)
         reconstruction_eligible = accepted_exposures >= int(
             self.thresholds.reconstruction_pause_minimum_exposures
         )
