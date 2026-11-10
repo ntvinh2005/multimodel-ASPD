@@ -1045,8 +1045,9 @@ class V31Main500MConfig(BaseModel):
             model.approval_status in {"RETAINED_APPROVED", "APPROVED"}
             for model in self.models
         )
+        blockers = self.readiness_blockers()
         return {
-            "status": "DRAFT_FAIL_CLOSED",
+            "status": "AUTHORIZED_READY" if not blockers else "DRAFT_FAIL_CLOSED",
             "config_fingerprint": self.fingerprint(),
             "required_model_count": 3,
             "logical_target_slots": 3 * 8 * 7,
@@ -1055,7 +1056,7 @@ class V31Main500MConfig(BaseModel):
             "optimizer_steps": self.data.optimizer_steps,
             "target_accepted_anchor_exposures": self.data.target_accepted_anchor_exposures,
             "planned_accepted_anchor_exposures": self.data.planned_accepted_anchor_exposures,
-            "blockers": self.readiness_blockers(),
+            "blockers": blockers,
         }
 
 

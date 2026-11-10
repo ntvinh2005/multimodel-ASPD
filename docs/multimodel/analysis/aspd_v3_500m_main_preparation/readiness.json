@@ -2,9 +2,9 @@
   "schema_version": 1,
   "generated_at": "2026-11-10",
   "experiment_family": "aspd_v3_1_three_model_main500m",
-  "scientific_status": "MAIN_500M_NOT_AUTHORIZED",
-  "final_readiness_decision": "MAIN_READY_PENDING_FINAL_RESEARCHER_AUTHORIZATION",
-  "submission_permitted": false,
+  "scientific_status": "RESEARCHER_APPROVED",
+  "final_readiness_decision": "MAIN_AUTHORIZED_READY_FOR_SUBMISSION",
+  "submission_permitted": true,
   "reference": {
     "branch": "main",
     "commit": "738f1a0d8742ce6c97c74cadb2550ffade648b19"
@@ -13,9 +13,9 @@
   "blocker_resolution_branch": "aspd-v3.1-main500m-blocker-resolution",
   "config": {
     "path": "configs/multimodel/aspd_v3/main500m_preparation_v1.yaml",
-    "fingerprint": "0eb6c804a0f9611e9f73967456fffa15b7e11346d5c5baa9d4c253c4e1db94a3",
+    "fingerprint": "7e44ead3e8a05913936c1125ce4e4fa30f65a1b90dc466411bf9ae882cac3902",
     "execution_contract_fingerprint": "45f8b159d737e1096ef0dda78300484667926e2307800969d3fc800802e24944",
-    "status": "READY_FAIL_CLOSED_FINAL_AUTHORIZATION_PENDING"
+    "status": "AUTHORIZED_READY"
   },
   "architecture": {
     "required_model_count": 3,
@@ -107,6 +107,11 @@
     "artifact": "docs/multimodel/analysis/aspd_v3_500m_blocker_resolution/remaining_policy_researcher_approval_2026-11-10.json",
     "artifact_sha256": "2e28546f62934e3a7315711187db1fc5f1ec8d5310151edbe54e28ca8cf5d40c"
   },
+  "main_submission_authorization": {
+    "status": "AUTHORIZED",
+    "artifact": "docs/multimodel/analysis/aspd_v3_500m_blocker_resolution/main_submission_researcher_authorization_2026-11-10.json",
+    "artifact_sha256": "e5a5642446cc154a5618b2bc0fbc1ceb52155766e9e50503fd4072168fb2a3a2"
+  },
   "resume": {
     "synthetic_three_rank_exact_update": "PASS",
     "optimizer_and_scheduler_state": "PASS",
@@ -166,7 +171,7 @@
     {
       "scope": "final_non_distributed_v3_2b_production_correctness",
       "result": "67 passed, 1 deselected",
-      "seconds": 18.96
+      "seconds": 8.26
     },
     {
       "scope": "three_rank_exact_resume",
@@ -199,9 +204,7 @@
       "result": "Slurm job 50611663 completed 0:0; bitwise state and ordered-anchor replay PASS"
     }
   ],
-  "blockers": [
-    "MAIN_500M_NOT_AUTHORIZED"
-  ],
+  "blockers": [],
   "slurm": {
     "script": "slurm/multimodel/aspd_v3_500m_main_PROPOSAL.sbatch",
     "preflight_script": "slurm/multimodel/aspd_v3_500m_preflight_PROPOSAL.sbatch",

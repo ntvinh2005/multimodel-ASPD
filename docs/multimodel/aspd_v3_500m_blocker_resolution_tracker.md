@@ -372,13 +372,13 @@ no.
 
 ## Final readiness decision
 
-`MAIN_READY_PENDING_FINAL_RESEARCHER_AUTHORIZATION`
+`MAIN_AUTHORIZED_READY_FOR_SUBMISSION`
 
 Independent engineering preparation is complete to the current authorization boundary. Model 3,
 three-way alignment, storage, the real 168-target GPU preflight, profiled final-composition
 throughput, exact in-process replay, isolated external resume, and the scheduler requeue contract
 are now validated. Monitoring v1, milestone v1, and explicit semantic-uncertainty acceptance are
-approved and hash-pinned. The only remaining blocker is separate external submission authorization.
+approved and hash-pinned. The external main submission is also explicitly authorized.
 The complete audit is in
 `aspd_v3_500m_final_readiness_audit.md`.
 
@@ -388,8 +388,8 @@ On 2026-11-10 the researcher approved monitoring policy v1 and staged-milestone 
 explicitly accepted the documented semantic uncertainty instead of claiming completed human
 grading. The decision is pinned in
 `analysis/aspd_v3_500m_blocker_resolution/remaining_policy_researcher_approval_2026-11-10.json`.
-No threshold, milestone, loss, sparsity or gate semantic changed. Main execution remains fail-closed
-until a separate instruction authorizes the external `sbatch` action.
+No threshold, milestone, loss, sparsity or gate semantic changed. The later explicit instruction
+authorized the external `sbatch` action for the first staged interval.
 
 ## Model-3 approval update
 

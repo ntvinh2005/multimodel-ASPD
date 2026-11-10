@@ -87,6 +87,13 @@ def _main500m_config():
     )
 
 
+def _deauthorize_main500m_payload(payload: dict) -> dict:
+    payload["scientific_status"] = "MAIN_500M_NOT_AUTHORIZED"
+    payload["full_training_authorized"] = False
+    payload["approvals"]["full_training"] = "MAIN_500M_NOT_AUTHORIZED"
+    return payload
+
+
 def _pin_test_alignment_evidence(payload: dict, path: Path) -> None:
     payload["approvals"]["three_way_alignment"] = "APPROVED"
     payload["approvals"]["three_way_alignment_artifact"] = str(path)
@@ -148,9 +155,9 @@ def test_main500m_draft_preserves_zscore_math_and_fails_closed() -> None:
     )
     assert "MODEL_THREE_BLOCKED" not in report["blockers"]
     assert "RESUME_BLOCKED" not in report["blockers"]
-    assert report["blockers"] == ["MAIN_500M_NOT_AUTHORIZED"]
-    with pytest.raises(RuntimeError, match="MAIN_500M_NOT_AUTHORIZED"):
-        config.require_execution_authorized()
+    assert report["status"] == "AUTHORIZED_READY"
+    assert report["blockers"] == []
+    config.require_execution_authorized()
 
     invalid = config.payload()
     invalid["approvals"]["human_interpretability"]["status"] = (
@@ -167,7 +174,7 @@ def test_main500m_draft_preserves_zscore_math_and_fails_closed() -> None:
 def test_main500m_exact_resume_evidence_is_hash_pinned_and_semantic(
     tmp_path: Path,
 ) -> None:
-    payload = _main500m_config().payload()
+    payload = _deauthorize_main500m_payload(_main500m_config().payload())
     approvals = payload["approvals"]
     approvals["exact_resume_source_commit"] = "a" * 40
     approvals["exact_resume_contract_sha256"] = "b" * 64
@@ -257,7 +264,7 @@ def test_main500m_slurm_proposals_separate_preflight_and_main() -> None:
 
 
 def test_main500m_runtime_rejects_checkpoint_root_different_from_run_root() -> None:
-    payload = _main500m_config().payload()
+    payload = _deauthorize_main500m_payload(_main500m_config().payload())
     payload["runtime"]["checkpoint_root"] = str(
         Path(payload["runtime"]["output_root"]) / "separate-checkpoints"
     )
@@ -268,7 +275,7 @@ def test_main500m_runtime_rejects_checkpoint_root_different_from_run_root() -> N
 def test_main500m_human_gate_distinguishes_evidence_from_accepted_uncertainty(
     tmp_path: Path,
 ) -> None:
-    payload = _main500m_config().payload()
+    payload = _deauthorize_main500m_payload(_main500m_config().payload())
     gate = payload["approvals"]["human_interpretability"]
     evaluation_path = tmp_path / "package_manifest.json"
     evaluation_path.write_text(
@@ -330,7 +337,7 @@ def test_main500m_human_gate_distinguishes_evidence_from_accepted_uncertainty(
 def test_main500m_bounded_preflight_has_independent_fail_closed_authorization(
     tmp_path: Path,
 ) -> None:
-    payload = _main500m_config().payload()
+    payload = _deauthorize_main500m_payload(_main500m_config().payload())
     payload["approvals"]["bounded_preflight"] = {
         "status": "PENDING_RESEARCHER_APPROVAL",
         "optimizer_steps": None,
@@ -394,8 +401,7 @@ def test_main500m_mode_gate_cannot_cross_preflight_and_main_boundaries(
         max_steps=61_036,
         run_dir=tmp_path / "main",
     )
-    with pytest.raises(RuntimeError, match="MAIN_500M_NOT_AUTHORIZED"):
-        _authorize_main500m_mode(draft, main_args)
+    _authorize_main500m_mode(draft, main_args)
 
     skip_args = copy.copy(main_args)
     skip_args.skip_checkpoint = True
@@ -456,7 +462,7 @@ def test_main500m_resume_validation_requires_pinned_bounded_contract(
 def test_main500m_preflight_evidence_is_pinned_and_semantically_validated(
     tmp_path: Path,
 ) -> None:
-    payload = _main500m_config().payload()
+    payload = _deauthorize_main500m_payload(_main500m_config().payload())
     payload["approvals"]["exact_resume"] = (
         "SYNTHETIC_VALIDATED_REAL_THREE_MODEL_PENDING"
     )
@@ -653,7 +659,7 @@ def test_main500m_three_way_alignment_evidence_is_pinned_and_validated(
     assert report["status"] == "PASS"
     assert report["audit"]["boundary_invariants"] == "PASS"
 
-    payload = config.payload()
+    payload = _deauthorize_main500m_payload(config.payload())
     invalid_path = tmp_path / "invalid_alignment.json"
     invalid_report = copy.deepcopy(report)
     invalid_report["audit"]["dataset_stream_prefix_replay"] = "FAIL"

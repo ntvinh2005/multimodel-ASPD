@@ -6,7 +6,7 @@ Preparation branch: `aspd-v3.1-main500m-preparation`
 
 Reference: `aspd-v3.1-intruder-final-validation@4c84161bcd2496f22969133a5451b3ca258b934b`
 
-Experiment status: **`MAIN_500M_NOT_AUTHORIZED`**
+Experiment status: **`RESEARCHER_APPROVED`**
 
 ## Executive decision
 
@@ -21,8 +21,8 @@ resolved. Granite 3.3 2B is approved and pinned, real three-way alignment passed
 the required 1 TiB startup reservation, three-B200 job `50550194` validated all 168 targets and
 profiled the final composition, and isolated job `50611663` reproduced the uninterrupted step-4
 state bitwise from the immutable step-3 checkpoint. On 2026-11-10 the researcher approved
-monitoring policy v1, milestone policy v1, and explicitly accepted the remaining semantic
-uncertainty. Only the separate external submission action remains unauthorized.
+monitoring policy v1, milestone policy v1, explicitly accepted the remaining semantic uncertainty,
+and authorized submission of the first staged interval.
 
 No full 500M training was submitted.
 
@@ -488,7 +488,7 @@ Executed from the isolated worktree:
 pytest -q tests/test_multimodel_v3_2b.py tests/test_multimodel_v3_production.py \
   tests/test_multimodel_v3_correctness.py \
   -k 'not model_owned_distributed_gradients_optimizer_and_checkpoint'
-67 passed, 1 deselected in 18.96s
+67 passed, 1 deselected in 8.26s
 
 pytest -q tests/test_multimodel_v3_2b.py \
   -k model_owned_distributed_gradients_optimizer_and_checkpoint
@@ -533,14 +533,14 @@ three-process Gloo test passed and was not repeated after the evidence-schema-on
    four-step preflight; the 33.46-hour 500M projection remains provisional due to the short sample.
 8. **Are monitoring and abort mechanisms implemented?** Yes in code and synthetic tests, and
    policy v1 is approved; real-run metric coverage remains fail-closed.
-9. **What approvals are needed?** Only explicit external submission authorization with the final
-   commit/config fingerprint.
+9. **What approvals are needed?** None before initial submission; checkpoint-pinned continuation
+   approval remains mandatory at each staged milestone.
 10. **What exact command submits after approval?** `sbatch
     slurm/multimodel/aspd_v3_500m_main_PROPOSAL.sbatch`; it must remain unexecuted until
     every gate above is encoded as approved.
 
-Final preparation decision: `MAIN_READY_PENDING_FINAL_RESEARCHER_AUTHORIZATION`; the only remaining
-gate is the separate external submission instruction.
+Final preparation decision: `MAIN_AUTHORIZED_READY_FOR_SUBMISSION`; no pre-submission blocker
+remains.
 
 This is an engineering preparation package, not evidence that the full scientific
 experiment is ready or authorized.

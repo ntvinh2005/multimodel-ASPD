@@ -2,7 +2,7 @@
   "schema_version": 1,
   "measured_at": "2026-11-09T19:39:08-05:00",
   "updated_at": "2026-11-10T07:51:47-05:00",
-  "status": "RUNTIME_RELIABILITY_VALIDATED_MAIN_AUTHORIZATION_PENDING",
+  "status": "RUNTIME_RELIABILITY_VALIDATED_MAIN_AUTHORIZED",
   "slurm": {
     "account": "thai",
     "account_association_observed": true,
@@ -37,10 +37,10 @@
     "cuda_build": "12.8"
   },
   "contracts": {
-    "configuration_fingerprint": "0eb6c804a0f9611e9f73967456fffa15b7e11346d5c5baa9d4c253c4e1db94a3",
+    "configuration_fingerprint": "7e44ead3e8a05913936c1125ce4e4fa30f65a1b90dc466411bf9ae882cac3902",
     "execution_contract_fingerprint": "45f8b159d737e1096ef0dda78300484667926e2307800969d3fc800802e24944",
-    "configuration_sha256": "a3d02a6f26d2cf0d11bfc1ac35377bbbce0f2f1f6d722a7259fcaa6e68025568",
-    "main_slurm_sha256": "e673aada1d253c6d6cfaba92e2486d514d905ea12e7c21d950ea72b294be0d03",
+    "configuration_sha256": "f7a6d87436304956ca0baca955ec2e0e929a7207142f57fc35362369822f63be",
+    "main_slurm_sha256": "80a4c348b3350396e56755c67122afb754b1da8cfeeff1d5ff6b67958acb4d34",
     "preflight_slurm_sha256": "7d01ba92137d56374d327df520526936192130864945f51606ba84f9e2bdbae1",
     "resume_validation_slurm_sha256": "708bdcfe99d5b398be723d00cdfb28ea4d1dabf803480019ea13fcd6abe6d900"
   },
@@ -68,5 +68,5 @@
     "real_three_model_preflight": "PASS_JOB_50550194_168_TARGETS_NATIVE_PARITY",
     "real_final_three_model_throughput": "PASS_JOB_50550194_PROFILED_4150.668_ACCEPTED_ANCHORS_PER_SECOND"
   },
-  "evidence_boundary": "The scheduler/shell signal and one-requeue contract passed in CPU-only job 50550768. Isolated three-B200 job 50611663 restored step 3 and reproduced step 4 bitwise with identical ordered anchors, zero repeats and immutable source weights. Monitoring v1, milestone v1 and explicit semantic-uncertainty acceptance are approved; only the separate external main-run submission authorization remains pending."
+  "evidence_boundary": "The scheduler/shell signal and one-requeue contract passed in CPU-only job 50550768. Isolated three-B200 job 50611663 restored step 3 and reproduced step 4 bitwise with identical ordered anchors, zero repeats and immutable source weights. Monitoring v1, milestone v1, semantic-uncertainty acceptance and main submission are explicitly authorized."
 }

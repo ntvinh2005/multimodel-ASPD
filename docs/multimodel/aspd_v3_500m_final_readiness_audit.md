@@ -2,11 +2,11 @@
 
 Status date: 2026-11-10 (America/New_York)
 
-Decision: **`MAIN_READY_PENDING_FINAL_RESEARCHER_AUTHORIZATION`**
+Decision: **`MAIN_AUTHORIZED_READY_FOR_SUBMISSION`**
 
 No 500M job was submitted. Exact researcher-approved storage targets were reclaimed only after
 their reproducibility records were preserved. Engineering validation is complete; the main
-experiment remains fail-closed only on the separate external main-run authorization.
+the main manifest is researcher-authorized; runtime guards remain fail-closed.
 
 ## Evidence boundary
 
@@ -18,8 +18,8 @@ This audit distinguishes three claims:
 2. **Real final-composition GPU-tested:** all 168 physical hooks, frozen-source parity, finite
    forward/backward, shared gradients, profiled throughput, atomic checkpoint recovery, in-process
    bitwise replay and isolated new-process bitwise resume.
-3. **Still researcher-owned:** only the explicit external 500M submission authorization.
-   Monitoring v1, milestone v1, and semantic-uncertainty acceptance were approved on 2026-11-10.
+3. **Researcher-approved:** monitoring v1, milestone v1, semantic-uncertainty acceptance, and the
+   external 500M submission were authorized on 2026-11-10.
 
 Accordingly, neither compilation nor synthetic tests are treated as main readiness.
 
@@ -216,7 +216,7 @@ B200 capacity unless a separate bounded memory/throughput preflight approves ano
   tests/test_multimodel_v3_production.py \
   tests/test_multimodel_v3_correctness.py \
   -k 'not model_owned_distributed_gradients_optimizer_and_checkpoint'
-# 67 passed, 1 deselected in 18.96 s
+# 67 passed, 1 deselected in 8.26 s
 
 /blue/thai/vinhnguyen1/multimodel-ASPD/repo/.venv/bin/ruff check \
   aspd/multimodel/cli/validate_aspd_v3_main500m.py \
@@ -235,11 +235,11 @@ evidence-schema-only change. The final 67-test non-distributed regression, Ruff,
 signal/requeue, and isolated exact-resume evidence respectively. The checked-in draft main
 validator remains fail-closed because researcher decisions and final authorization are pending.
 
-## Required researcher decision
+## Researcher authorization
 
-Monitoring v1, staged milestones v1, and explicit acceptance of semantic uncertainty are recorded
-in immutable artifacts. The only remaining action is a separate explicit instruction to execute
-the documented `sbatch` command for the first staged interval.
+Monitoring v1, staged milestones v1, explicit acceptance of semantic uncertainty, and permission to
+execute the documented `sbatch` command for the first staged interval are recorded in immutable
+artifacts. No scientific approval gate remains.
 
 ## Direct answers
 
@@ -257,7 +257,8 @@ the documented `sbatch` command for the first staged interval.
    remains provisional because the sample is short.
 8. **Are monitoring and aborts implemented?** Yes, CPU-tested, and policy v1 is approved; emitted
    metric coverage is verified fail-closed during execution.
-9. **Which approvals remain?** Only the separate external instruction to submit the main job.
+9. **Which approvals remain?** None before submission; each later milestone still requires its own
+   checkpoint-pinned continuation decision.
 10. **What command would submit after every approval?** From the clean, reviewed, approved commit:
 
 ```bash
@@ -269,7 +270,7 @@ This command is documented only and was not executed.
 
 ## Final decision
 
-`MAIN_READY_PENDING_FINAL_RESEARCHER_AUTHORIZATION`
+`MAIN_AUTHORIZED_READY_FOR_SUBMISSION`
 
-Exact remaining blocker: `MAIN_500M_NOT_AUTHORIZED`.
+Exact remaining blockers: none.
 

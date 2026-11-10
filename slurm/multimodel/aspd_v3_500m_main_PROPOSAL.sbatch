@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# PROPOSAL ONLY. The checked-in config is MAIN_500M_NOT_AUTHORIZED and this script
-# exits before CUDA initialization while any scientific or operational gate is open.
+# Main launcher. The checked-in config and immutable evidence must validate as authorized;
+# the script exits before CUDA initialization if any scientific or operational gate is open.
 #SBATCH --job-name=aspd-v3.1-main500m
 #SBATCH --account=thai
 #SBATCH --partition=hpg-b200

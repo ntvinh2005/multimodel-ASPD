@@ -1,7 +1,7 @@
 schema_version: 1
 experiment_family: aspd_v3_1_three_model_main500m
-scientific_status: MAIN_500M_NOT_AUTHORIZED
-full_training_authorized: false
+scientific_status: RESEARCHER_APPROVED
+full_training_authorized: true
 
 models:
   - key: gemma
@@ -235,6 +235,6 @@ approvals:
     execution_contract_fingerprint: 45f8b159d737e1096ef0dda78300484667926e2307800969d3fc800802e24944
     source_commit: f518cd954b4c56c1736c56c8c9f66b8319b8d8a2
     optimizer_steps: 4
-  full_training: MAIN_500M_NOT_AUTHORIZED
+  full_training: AUTHORIZED
 
 evaluation_status: SEMANTIC_UNCERTAINTY_EXPLICITLY_ACCEPTED
