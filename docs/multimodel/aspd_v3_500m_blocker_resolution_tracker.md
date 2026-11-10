@@ -28,9 +28,9 @@ detached binary internal support. No main-training job has been submitted.
 
 | ID | Blocker | Root cause | Files changed | Tests | Status | Approval needed |
 |---|---|---|---|---|---|---|
-| 1 | Preflight authorization deadlock | Main authorization, including prior preflight PASS, ran before mode dispatch; preflight had no independent bounded authorization or pinned result schema. | `main500m_config.py`, `train_aspd_v3_2b.py`, draft YAML, `test_multimodel_v3_2b.py` | Six focused CPU tests; full regression pending at this checkpoint. | `FIXED_TESTED` | Researcher must later authorize an exact model-3 preflight budget and namespace; the checked-in draft remains pending. |
+| 1 | Preflight authorization deadlock | Main authorization, including prior preflight PASS, ran before mode dispatch; preflight had no independent bounded authorization or pinned result schema. | `main500m_config.py`, `train_aspd_v3_2b.py`, draft YAML, `test_multimodel_v3_2b.py` | Six authorization-focused tests; all 31 non-distributed file tests pass; distributed retry remains inconclusive. | `FIXED_TESTED` | Researcher must later authorize an exact model-3 preflight budget and namespace; the checked-in draft remains pending. |
 | 2 | Third-model selection | Exact model, revision, tokenizer, layers, and hook layout are not approved. | Model-3 decision package and machine-readable recommendation. | Official config/model-card/source comparison plus read-only historical metadata cross-check; no model execution. | `BLOCKED_RESEARCHER_DECISION` | Approve or reject the proposed Granite ID/revision/layers, license, residual semantics and subsequent bounded tests. |
-| 3 | Three-way alignment | Exact-prefix contract is implemented, but no approved third tokenizer has been tested; one legacy policy-name inconsistency is confirmed. | None yet | Synthetic coverage exists; real three-tokenizer evidence absent. | `BLOCKED_EXTERNAL_DEPENDENCY` | Model 3 first, then authorization for bounded tokenizer validation. |
+| 3 | Three-way alignment | Exact-prefix contract is implemented, but no approved third tokenizer has been tested; stream/manifests previously used inconsistent legacy and canonical policy names. | Canonical spec, stream provenance, runner manifest validation, manifest preparer, tests. | Canonical-policy CPU/provenance tests pass; real three-tokenizer evidence absent. | `BLOCKED_EXTERNAL_DEPENDENCY` | Model 3 first, then authorization for bounded tokenizer validation and acceptance/bias measurement. |
 | 4 | Storage capacity | Live free space is below the 1 TiB reservation. A dry-run inventory identifies a narrowly sufficient `/blue` Tier A, but no deletion or dedicated reservation is approved. | Storage proposal and machine-readable inventory. | Live `df`/inode/quota, exact `du`, COMPLETE markers, report and manifest SHA-256 checks. | `BLOCKED_STORAGE` | Exact deletion targets or additional capacity, then remeasurement and path approval. |
 | 5 | Real three-model GPU preflight | Synthetic distributed tests do not validate three real source models. | None yet | Not run. | `BLOCKED_RESEARCHER_DECISION` | Model 3, alignment, and bounded preflight authorization. |
 | 6 | Exact checkpoint resume | Synthetic three-rank resume passed previously; real three-model GPU resume remains untested. | None yet | Not run in this branch. | `BLOCKED_EXTERNAL_DEPENDENCY` | Real-model preflight prerequisites and bounded GPU authorization. |
@@ -38,7 +38,7 @@ detached binary internal support. No main-training job has been submitted.
 | 8 | Staged milestones | Milestones existed only as YAML values; the runner neither forced diagnostics/checkpoints nor required an explicit continuation decision. | Runner, `main500m_continuation.py`, config/schema, authorization template, tests. | Thirteen focused main-500M CPU tests; Ruff; Python compilation. | `FIXED_TESTED` | Researcher must approve policy v1 and provide a checkpoint-pinned decision after each staged review; draft approval remains pending. |
 | 9 | Human interpretability | The validated package exists, but no researcher response, graded human analysis, or decision artifact exists; the main schema could not distinguish these stages or accepted uncertainty. | Main config/schema, draft YAML, status artifact, decision template, tests. | Live read-only package/hash/status audit; focused main-500M tests; Ruff. | `BLOCKED_RESEARCHER_DECISION` | Researcher must complete responses and decide, or explicitly accept remaining semantic uncertainty in a hash-pinned decision artifact. |
 | 10 | Slurm/runtime reliability | Main proposal exists; preflight proposal and bounded signal/requeue evidence remain incomplete. | None yet | Shell/runtime audit pending. | `AUDITING` | No main submission authorization exists. |
-| 11 | Specification/metadata consistency | Confirmed alignment policy-name mismatch and human-status limitation; broader notation/config/runtime comparison remains in progress. | None yet | Audit in progress. | `AUDITING` | Documentation corrections do not require scientific approval; semantic changes would. |
+| 11 | Specification/metadata consistency | Canonical alignment was absent from the formal notation; legacy policy identifiers diverged; raw/normalized logits and Latin u versus Greek nu needed an explicit map; readiness metadata was stale. | Canonical specification, stream/manifest code, tests, consistency artifact; readiness refresh remains part of final audit. | Focused z-score/target/alignment tests, production-policy test, Ruff. | `FIXED_TESTED` | No scientific choice was made; real model-3 evidence remains independently blocked. |
 
 ## Blocker 1 resolution record
 
@@ -219,3 +219,56 @@ Decision template:
 Scientific semantics changed: no. No response was fabricated, no human score was inferred from the
 automated Llama output, and no interpretability approval was granted. The main contract remains
 `HUMAN_INTERPRETABILITY_APPROVAL_PENDING`.
+
+## Blocker 11 notation and metadata consistency record
+
+The canonical source remains `aspd_v3_1_mathematical_specification.md`. It now defines the
+three-way exact canonical-text boundary contract formally, including character offsets, exact
+whole-prefix decode equality, UTF-8 byte boundaries, intersection across all three tokenizer
+families, and fail-closed rejection conditions. This does not claim that the unresolved third
+tokenizer passed the contract.
+
+The notation-to-code map now makes these distinctions explicit:
+
+- \(z_{a,t,c}\) is the pre-normalization projection logit;
+- \(\widetilde z_{a,t,c}\) is the per-anchor feature-axis z-score with population variance and
+  \(\epsilon_z=10^{-5}\);
+- \(s_{a,t,c}=\operatorname{ReLU}(\widetilde z_{a,t,c})\);
+- \(g^s\) is the continuous BatchTopK code, while
+  \(g=\mathbf 1[g^s>0]\) is detached binary internal support; and
+- Latin \(u\) is the write factor and Latin \(v\) is the read factor in
+  \(P=uv^\top\). Historical Greek nu norm notation is not a rank-one factor.
+
+The undocumented symbol `sigma_K` was removed from the code map in favor of the already-defined
+selected index set \(\mathcal I_t\). Legacy fields named `latest_raw_logits` or `raw_logit_*` are
+documented as compatibility aliases for normalized logits under v3.1 and must not be called
+pre-normalization logits in new reports.
+
+The production stream now accepts the canonical policy identifier explicitly, and the v3.1 runner
+requires a schema-v4 alignment manifest whose dataset hash, model order, tokenizer IDs/revisions,
+sequence length, policy, and acceptance rule match the approved execution contract. Historical
+families retain their old policy identifiers by default. The manifest preparer has a separate
+`--main500m` route that fails while model 3 is pending rather than inventing tokenizer metadata.
+
+Machine-readable map:
+`analysis/aspd_v3_500m_blocker_resolution/notation_consistency.json`.
+
+Tests run:
+
+```text
+/blue/thai/vinhnguyen1/multimodel-ASPD/repo/.venv/bin/pytest -q \
+  tests/test_multimodel_v3_2b.py \
+  -k 'not model_owned_distributed_gradients_optimizer_and_checkpoint'
+31 passed, 1 deselected
+
+/blue/thai/vinhnguyen1/multimodel-ASPD/repo/.venv/bin/pytest -q \
+  tests/test_multimodel_v3_production.py
+9 passed
+```
+
+Ruff passed for the changed runtime, stream, manifest-preparation, and test files. Invoking the
+new manifest route against the draft stopped before network access with
+`main500m manifests require the approved third-model contract`, as intended.
+
+Scientific semantics changed: no. These changes make the existing z-score and alignment semantics
+unambiguous and fail closed on mismatched metadata.

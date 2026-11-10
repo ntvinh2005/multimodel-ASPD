@@ -61,7 +61,13 @@ def _train_texts(policy: HashSplitPolicy, count: int) -> list[str]:
     return values
 
 
-def _stream(tmp_path: Path, rows: _StatefulRows, policy: HashSplitPolicy):
+def _stream(
+    tmp_path: Path,
+    rows: _StatefulRows,
+    policy: HashSplitPolicy,
+    *,
+    canonical_text_policy: str | None = None,
+):
     tokenizers = {key: _CharacterTokenizer() for key in ("qwen", "gemma", "phi")}
     revisions = {key: f"{key}-revision" for key in tokenizers}
     return PileAlignedAnchorStream(
@@ -73,7 +79,32 @@ def _stream(tmp_path: Path, rows: _StatefulRows, policy: HashSplitPolicy):
         split_policy=policy,
         dedup_path=tmp_path / "dedup.sqlite",
         sequence_length=64,
+        canonical_text_policy=canonical_text_policy,
     )
+
+
+def test_production_stream_records_the_canonical_exact_prefix_policy(
+    tmp_path: Path,
+) -> None:
+    policy = HashSplitPolicy(
+        modulus=5,
+        validation_buckets=frozenset({0}),
+        test_buckets=frozenset({1}),
+        seed=7,
+    )
+    text = _train_texts(policy, 1)[0]
+    stream = _stream(
+        tmp_path,
+        _StatefulRows([{"text": text, "meta": {"pile_set_name": "unit"}}]),
+        policy,
+        canonical_text_policy=(
+            "exact_fast_tokenizer_offsets_and_exact_prefix_roundtrip_v2"
+        ),
+    )
+    assert stream.provenance["canonical_text_policy"] == (
+        "exact_fast_tokenizer_offsets_and_exact_prefix_roundtrip_v2"
+    )
+    stream.close()
 
 
 def test_dcp_keeps_sharded_state_on_device_for_bounded_sync_writes() -> None:

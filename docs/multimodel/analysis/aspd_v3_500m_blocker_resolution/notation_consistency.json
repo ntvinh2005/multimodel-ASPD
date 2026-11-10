@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "status": "STATIC_CONSISTENCY_PASS_REAL_THREE_MODEL_PENDING",
+  "canonical_specification": {
+    "path": "docs/multimodel/aspd_v3_1_mathematical_specification.md",
+    "sha256": "e78aa1e0e1755edf18d6269f85b731440d915bdeabefa8d7c525fb2aa91a3440"
+  },
+  "configuration": {
+    "path": "configs/multimodel/aspd_v3/main500m_preparation_v1.yaml",
+    "fingerprint": "4145ae6be5019f4c30870d0e7d914523f8b576eb65a4979f772762325af5577c",
+    "execution_contract_fingerprint": "e52c1942491a41d20055ecea6c1625292a459490502f03c25ccfef39008aca94"
+  },
+  "verified_invariants": {
+    "model_count": 3,
+    "selected_layers_per_model": 8,
+    "logical_matrices_per_layer": 7,
+    "logical_targets": 168,
+    "dictionary_size": 8192,
+    "batch_topk_k": 32,
+    "zscore_axis": "per_anchor_feature_axis",
+    "zscore_variance": "population_denominator_C",
+    "zscore_epsilon": 1e-05,
+    "activation_code": "continuous_g_superscript_s",
+    "internal_code": "detached_indicator_g_equals_1_gs_positive",
+    "activation_target": "per_anchor_l2_epsilon_1e-6",
+    "activation_decoder_constraint": "none",
+    "activation_objective": "full_only_fvu",
+    "internal_objective": "balanced_pre_mid_fvu",
+    "auxk": "historical_post_relu_k2048_coefficient_0.03125",
+    "rank_one_orientation": "P_equals_u_v_transpose_with_latin_u_write_and_latin_v_read",
+    "pre_targets_per_model": 24,
+    "mid_targets_per_model": 32,
+    "accepted_exposures_per_step": 8192,
+    "optimizer_steps": 61036,
+    "planned_accepted_exposures": 500006912
+  },
+  "canonical_logit_names": {
+    "z": "latest_projection_logits_or_latest_pre_normalization_logits",
+    "z_tilde": "latest_normalized_logits",
+    "s": "relu_of_z_tilde",
+    "legacy_raw_logit_warning": "latest_raw_logits_and_raw_logit_metrics_are_normalized_logits_in_v3.1"
+  },
+  "alignment": {
+    "policy": "exact_fast_tokenizer_offsets_and_exact_prefix_roundtrip_v2",
+    "acceptance": "intersection_of_exact_canonical_text_boundaries",
+    "manifest_schema_version": 4,
+    "real_three_tokenizer_validation": "PENDING_MODEL_THREE"
+  },
+  "evidence_boundary": "CPU equations, schemas, provenance names, and synthetic contracts only; no unapproved third model or real three-model GPU path was executed."
+}

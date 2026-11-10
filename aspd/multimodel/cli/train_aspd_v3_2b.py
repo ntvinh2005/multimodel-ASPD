@@ -452,6 +452,40 @@ def _read_manifest(path: Path, kind: str) -> dict[str, Any]:
     return payload
 
 
+def _validate_main500m_alignment_manifest(
+    config: Any,
+    alignment_manifest: dict[str, Any],
+    *,
+    dataset_manifest_sha256: str,
+) -> None:
+    """Bind v3.1 execution to the canonical three-tokenizer alignment contract."""
+
+    expected = {
+        "schema_version": 4,
+        "dataset_manifest_sha256": dataset_manifest_sha256,
+        "model_order": list(config.architecture.model_order),
+        "canonical_text": "identity",
+        "alignment": config.data.canonical_text_policy,
+        "alignment_acceptance": config.data.alignment_acceptance,
+        "sequence_length_native_tokens_per_model": config.data.sequence_length,
+        "tokenizers": [
+            {
+                "model_key": model.key,
+                "tokenizer_id": model.tokenizer_id,
+                "tokenizer_revision": model.tokenizer_revision,
+            }
+            for model in config.models
+        ],
+    }
+    mismatch = {
+        key: {"expected": value, "observed": alignment_manifest.get(key)}
+        for key, value in expected.items()
+        if alignment_manifest.get(key) != value
+    }
+    if mismatch:
+        raise ValueError(f"ASPD v3.1 alignment manifest contract mismatch: {mismatch}")
+
+
 def _pad_id(tokenizer: Any) -> int:
     value = tokenizer.pad_token_id
     if value is None:
@@ -1133,6 +1167,12 @@ def main() -> None:
         raise ValueError("dataset manifest does not resolve to the pinned revision")
     if alignment_manifest["model_order"] != list(model_order):
         raise ValueError("alignment manifest model order differs from main-2b-v1")
+    if config.experiment_family == MAIN500M_EXPERIMENT_FAMILY:
+        _validate_main500m_alignment_manifest(
+            config,
+            alignment_manifest,
+            dataset_manifest_sha256=dataset_manifest["manifest_sha256"],
+        )
     if args.mode in {"main", "pilot"}:
         preflight_path = Path(config.runtime.preflight_evidence)
         if not preflight_path.is_file():
@@ -1356,6 +1396,7 @@ def main() -> None:
             dedup_path=stream_dedup_path,
             sequence_length=config.data.sequence_length,
             model_order=model_order,
+            canonical_text_policy=config.data.canonical_text_policy,
         )
         ledger = SQLiteExposureLedger(
             args.run_dir / "exposure_ledger.sqlite",

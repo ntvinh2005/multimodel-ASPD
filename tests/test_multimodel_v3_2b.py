@@ -18,6 +18,7 @@ from aspd.multimodel.cli.train_aspd_v3_2b import (
     _authorize_main500m_mode,
     _PoolPrefetcher,
     _record_continuation_authorization,
+    _validate_main500m_alignment_manifest,
 )
 from aspd.multimodel.components import RankOneComponents
 from aspd.multimodel.v3.data import SQLiteExposureLedger
@@ -690,6 +691,40 @@ def test_approved_third_model_contract_registers_exactly_168_unique_targets() ->
         "mlp_up",
         "mlp_down",
     }
+
+
+def test_main500m_alignment_manifest_uses_the_canonical_policy_identifier() -> None:
+    payload = _with_approved_synthetic_third(_main500m_config().payload())
+    config = V31Main500MConfig.model_validate(payload)
+    manifest = {
+        "schema_version": 4,
+        "dataset_manifest_sha256": "d" * 64,
+        "model_order": list(config.architecture.model_order),
+        "canonical_text": "identity",
+        "alignment": "exact_fast_tokenizer_offsets_and_exact_prefix_roundtrip_v2",
+        "alignment_acceptance": "intersection_of_exact_canonical_text_boundaries",
+        "sequence_length_native_tokens_per_model": 512,
+        "tokenizers": [
+            {
+                "model_key": model.key,
+                "tokenizer_id": model.tokenizer_id,
+                "tokenizer_revision": model.tokenizer_revision,
+            }
+            for model in config.models
+        ],
+    }
+    _validate_main500m_alignment_manifest(
+        config,
+        manifest,
+        dataset_manifest_sha256="d" * 64,
+    )
+    manifest["alignment"] = "identity_exact_three_way_prefix"
+    with pytest.raises(ValueError, match="alignment manifest contract mismatch"):
+        _validate_main500m_alignment_manifest(
+            config,
+            manifest,
+            dataset_manifest_sha256="d" * 64,
+        )
 
 
 def test_prefetch_checkpoint_preserves_exact_pool_order() -> None:

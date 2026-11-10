@@ -56,7 +56,42 @@ PRE grounds \(q_{\mathrm{proj}},k_{\mathrm{proj}},v_{\mathrm{proj}}\). MID
 grounds \(o_{\mathrm{proj}},\mathrm{gate}_{\mathrm{proj}},
 \mathrm{up}_{\mathrm{proj}},\mathrm{down}_{\mathrm{proj}}\).
 
-## 2. Aligned activation encoder
+## 2. Three-way canonical-text alignment contract
+
+Let \(x\) be the exact source-document string; the alignment procedure performs no
+Unicode normalization or whitespace rewriting. For tokenizer \(m\), let
+\((\tau^{(m)}_i,[b^{(m)}_i,e^{(m)}_i))\) denote token ID \(\tau^{(m)}_i\) and its
+fast-tokenizer character-offset interval in \(x\). A character boundary \(r\) is
+eligible for model \(m\) only when all of the following hold:
+
+1. exactly one valid non-special token ends at \(r=e^{(m)}_i\);
+2. the offset is nonempty, ordered, and contained in \(x\);
+3. decoding the complete token prefix \((\tau^{(m)}_0,\ldots,\tau^{(m)}_i)\), with
+   special tokens skipped and tokenizer cleanup disabled, equals \(x[:r]\) exactly; and
+4. its UTF-8 byte boundary equals \(\lvert x[:r].\operatorname{encode}(\text{UTF-8})\rvert\).
+
+Let \(B_m(x)\) be the eligible boundaries for model \(m\). The accepted three-way
+boundaries are the exact intersection
+
+\[
+B(x)=B_1(x)\cap B_2(x)\cap B_3(x).
+\]
+
+For \(r\in B(x)\), the three token indices may differ, and token IDs are not required to
+match. The shared object is the exact canonical prefix \(x[:r]\), its character boundary,
+its UTF-8 byte boundary, and its SHA-256. Any prefix-roundtrip mismatch, duplicate or
+ambiguous boundary, byte-boundary disagreement, missing tokenizer boundary, invalid
+offset, or candidate position beyond a tokenizer's truncated prefix is rejected;
+positions are never approximated or resampled. Earlier exact common boundaries in a
+truncated document remain eligible. A document with no boundary in \(B(x)\) contributes
+no anchor.
+
+This contract is named
+`exact_fast_tokenizer_offsets_and_exact_prefix_roundtrip_v2`; its acceptance rule is
+`intersection_of_exact_canonical_text_boundaries`. The exact three tokenizer revisions
+must be pinned before real alignment evidence is valid.
+
+## 3. Aligned activation encoder
 
 For model \(m\), site \(t\), anchor \(a\), and selected layer \(\ell\), let
 
@@ -112,7 +147,7 @@ T_{t,\mathrm{cross}}(H^{(1)}_{a,t},H^{(2)}_{a,t},H^{(3)}_{a,t})
 PRE and MID have separate encoders and gates. Within a site, component identity \(c\)
 is shared across all three models and all eight selected layers.
 
-## 3. Canonical z-score gate
+## 4. Canonical z-score gate
 
 For every accepted anchor and site, normalize over the full feature axis. Define
 
@@ -167,7 +202,7 @@ This is pool-wide BatchTopK. It is not independent TopK per anchor. If fewer tha
 \(K|\mathcal P|\) selected entries are strictly positive, the corresponding zero-valued
 positions do not become firing events because the binary gate below tests \(g^s>0\).
 
-## 4. Continuous activation code and detached binary internal support
+## 5. Continuous activation code and detached binary internal support
 
 Activation reconstruction uses the continuous sparse coefficients \(g^s\). Internal
 matrix reconstruction uses
@@ -183,7 +218,7 @@ Consequently, the internal loss trains model-specific rank-one operators but sup
 gradient to the shared encoder. This distinction is part of the causal definition of an
 ASPD component and must not be removed by an implementation optimization.
 
-## 5. Activation reconstruction
+## 6. Activation reconstruction
 
 The activation target is normalized per anchor along its hidden dimension:
 
@@ -212,7 +247,7 @@ activation-decoder projection and no learned reconstruction scale. The primary
 activation objective is full-dictionary FVU only; the historical Matryoshka objective is
 not part of this specification.
 
-## 6. Model-specific rank-one parameter operators
+## 7. Model-specific rank-one parameter operators
 
 For model \(m\), selected layer \(\ell\), logical matrix \(j\), and component \(c\),
 the parameter operator is
@@ -245,7 +280,12 @@ Native bias is preserved when the source module has one. The write direction \(u
 unit-normalized after optimization as in the rank-one ASPD parameterization; this is
 separate from the unconstrained activation decoder.
 
-## 7. FVU and balanced objective
+Here \(u\) is the Latin write-direction symbol and \(v\) is the Latin read-direction
+symbol. Greek \(\nu\), used for a norm in some historical pilot notes, is not a rank-one
+factor in this specification. In code these factors are `RankOneComponents.U` and
+`RankOneComponents.V`, respectively.
+
+## 8. FVU and balanced objective
 
 For a target tensor \(Y\) flattened over accepted anchors and centered independently in
 each output coordinate, define
@@ -291,7 +331,7 @@ of the full activation reconstruction. With \(\lambda_{\mathrm{aux}}=0.03125\),
 }.
 \]
 
-## 8. Gradient routes
+## 9. Gradient routes
 
 - \(\mathcal L_{\mathrm{act}}+\lambda_{\mathrm{aux}}\mathcal L_{\mathrm{aux}}\)
   trains model-specific packers/intra-model Transformers, shared cross-model Transformers
@@ -302,7 +342,7 @@ of the full activation reconstruction. With \(\lambda_{\mathrm{aux}}=0.03125\),
   The detached support forbids an internal-loss gradient into the shared encoder.
 - Frozen source-model weights receive no gradient and are not optimizer parameters.
 
-## 9. Exposure accounting
+## 10. Exposure accounting
 
 An accepted exposure is one canonical aligned anchor consumed by one optimizer step. It
 is not a unique raw token count and is not multiplied by the number of models. With
@@ -320,21 +360,25 @@ The final step therefore exceeds the requested minimum by 6,912 accepted exposur
 Every accepted anchor ID must be unique across the run unless a future protocol
 explicitly changes this rule; the current protocol forbids repeated exposures.
 
-## 10. Notation-to-code map
+## 11. Notation-to-code map
 
 | Mathematical object | Implementation |
 |---|---|
-| \(z_{a,t,c}\) | `FeatureReadout.latest_projection_logits` |
-| \(\tilde z_{a,t,c}\) | `FeatureReadout.forward_with_logits(...)[1]` |
+| accepted boundary \(r\in B(x)\) | `align_canonical_text`; exact character/UTF-8 boundary and prefix SHA-256 |
+| \(z_{a,t,c}\) | `FeatureReadout.latest_projection_logits`; `ModelOwnedMain2B.latest_pre_normalization_logits` |
+| \(\tilde z_{a,t,c}\) | `FeatureReadout.forward_with_logits(...)[1]`; `ModelOwnedMain2B.latest_normalized_logits` |
 | \(s_{a,t,c}\) | `FeatureReadout.forward_with_logits(...)[0]` |
 | \(g^s_{a,t,c}\) | `SparseCode.values` / continuous `SparseSupport` |
 | \(g_{a,t,c}\) | detached binary `SparseSupport` / `SparseCode.gate` |
+| \(u_{\ell,j,c}^{(m)},v_{\ell,j,c}^{(m)}\) | `RankOneComponents.U`, `RankOneComponents.V` |
 | \(P_{\ell,j,c}^{(m)}\) | `RankOneMatrixBank` / `RankOneComponents` |
 | activation reconstruction | `ActivationReconstructionBank` and `full_activation_fvu` |
 | internal reconstruction | `RankOneMatrixBank.reconstruct(..., code_semantics="binary_support")` |
 | z-score axis and \(\epsilon_z\) | `FeatureReadout` feature-axis `layer_norm`, `eps=1e-5` |
-| pool-wide \(\sigma_K\) | `batch_topk` with `pool_tokens=2048`, `top_k=32` |
+| \(\mathcal I_t\) and pool-wide BatchTopK | `V3BatchTopK` / `batch_topk`, `pool_tokens=2048`, `top_k=32` |
 
-The compatibility field `latest_raw_logits` currently denotes the logits actually given
-to ReLU, i.e. \(\tilde z\) under v3.1. New diagnostics use the unambiguous names
-`latest_pre_normalization_logits` and `latest_normalized_logits`.
+The compatibility field `latest_raw_logits` and legacy diagnostic keys beginning
+`raw_logit_` currently denote the logits actually given to ReLU, i.e. \(\tilde z\) under
+v3.1. They must not be described as pre-normalization logits in new reports. New
+diagnostics use the unambiguous names `latest_pre_normalization_logits` (or
+`latest_projection_logits`) and `latest_normalized_logits`.

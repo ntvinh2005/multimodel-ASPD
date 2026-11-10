@@ -5,13 +5,15 @@
   "scientific_status": "MAIN_500M_NOT_AUTHORIZED",
   "submission_permitted": false,
   "reference": {
-    "branch": "aspd-v3.1-intruder-final-validation",
-    "commit": "4c84161bcd2496f22969133a5451b3ca258b934b"
+    "branch": "main",
+    "commit": "738f1a0d8742ce6c97c74cadb2550ffade648b19"
   },
   "preparation_branch": "aspd-v3.1-main500m-preparation",
+  "blocker_resolution_branch": "aspd-v3.1-main500m-blocker-resolution",
   "config": {
     "path": "configs/multimodel/aspd_v3/main500m_preparation_v1.yaml",
-    "fingerprint": "5985536e5cd94fb0181b4517233e03ae1e8d5f59c1d8db6e92e2d689afa61dca",
+    "fingerprint": "4145ae6be5019f4c30870d0e7d914523f8b576eb65a4979f772762325af5577c",
+    "execution_contract_fingerprint": "e52c1942491a41d20055ecea6c1625292a459490502f03c25ccfef39008aca94",
     "status": "DRAFT_FAIL_CLOSED"
   },
   "architecture": {
@@ -46,7 +48,29 @@
   "alignment": {
     "method": "exact_fast_tokenizer_offsets_and_exact_prefix_roundtrip_v2",
     "acceptance": "intersection_of_exact_canonical_text_boundaries",
+    "manifest_schema_version": 4,
+    "policy_identifier_consistency": "PASS",
     "three_way_source_validation": "PENDING_MODEL_THREE"
+  },
+  "monitoring": {
+    "policy_version": "v1",
+    "implementation": "FIXED_TESTED_CPU",
+    "researcher_approval": "PENDING_RESEARCHER_APPROVAL",
+    "sustained_gate_failure_diagnostics": 3,
+    "sustained_reconstruction_failure_diagnostics": 2,
+    "action": "ATOMIC_CHECKPOINT_THEN_CONTROLLED_PAUSE"
+  },
+  "milestones": {
+    "policy_version": "v1",
+    "implementation": "FIXED_TESTED_CPU",
+    "researcher_approval": "PENDING_RESEARCHER_APPROVAL",
+    "accepted_exposures": [10002432, 25001984, 50003968, 100007936, 250003456, 500006912]
+  },
+  "human_interpretability": {
+    "status": "HUMAN_INTERPRETABILITY_PACKAGE_COMPLETE_RESPONSES_PENDING",
+    "package_manifest_sha256": "40a508cb821b319890fb49c6a44e47d4642a79275ef564fcebadbb3c1b98fe98",
+    "researcher_response_exports_found": 0,
+    "researcher_decision_found": false
   },
   "resume": {
     "synthetic_three_rank_exact_update": "PASS",
@@ -59,14 +83,14 @@
     "measured_at": "2026-11-09",
     "orange_thai": {
       "size_bytes": 2199023255552,
-      "used_bytes": 1984684720128,
-      "available_bytes": 214338535424,
+      "used_bytes": 1985201668096,
+      "available_bytes": 213821587456,
       "inode_use_percent": 42
     },
     "blue_thai": {
       "size_bytes": 5497558138880,
-      "used_bytes": 5116135981056,
-      "available_bytes": 381422157824,
+      "used_bytes": 5116136005632,
+      "available_bytes": 381422133248,
       "inode_use_percent": 72
     },
     "estimated_required_free_bytes_low": 821000000000,
@@ -86,8 +110,8 @@
   "tests": [
     {
       "scope": "v3_2b_non_distributed",
-      "result": "18 passed, 1 deselected",
-      "seconds": 19.52
+      "result": "31 passed, 1 deselected",
+      "seconds": 6.65
     },
     {
       "scope": "three_rank_exact_resume",
@@ -102,6 +126,14 @@
     {
       "scope": "ruff_compile_bash_diff",
       "result": "PASS"
+    },
+    {
+      "scope": "blocker_resolution_main500m_focused",
+      "result": "15 passed, 17 deselected"
+    },
+    {
+      "scope": "canonical_alignment_policy_provenance",
+      "result": "PASS"
     }
   ],
   "blockers": [
@@ -109,6 +141,8 @@
     "ALIGNMENT_BLOCKED",
     "STORAGE_BLOCKED",
     "RESUME_BLOCKED",
+    "MONITORING_POLICY_APPROVAL_PENDING",
+    "MILESTONE_POLICY_APPROVAL_PENDING",
     "HUMAN_INTERPRETABILITY_APPROVAL_PENDING",
     "THREE_MODEL_GPU_PREFLIGHT_PENDING",
     "MAIN_500M_NOT_AUTHORIZED"
