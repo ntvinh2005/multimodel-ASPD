@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "status": "HUMAN_INTERPRETABILITY_PACKAGE_COMPLETE_RESPONSES_PENDING",
-  "observed_date": "2026-11-09",
+  "status": "SEMANTIC_UNCERTAINTY_EXPLICITLY_ACCEPTED",
+  "observed_date": "2026-11-10",
   "package_manifest": {
     "path": "/orange/thai/vinhnguyen1/aspd_v3/human_interpretability_v1/package/audit/preparation_manifest.json",
     "sha256": "40a508cb821b319890fb49c6a44e47d4642a79275ef564fcebadbb3c1b98fe98",
@@ -27,6 +27,11 @@
   },
   "researcher_response_exports_found": 0,
   "graded_human_analysis_found": false,
-  "researcher_decision_found": false,
-  "main_readiness": "HUMAN_INTERPRETABILITY_APPROVAL_PENDING"
+  "researcher_decision_found": true,
+  "researcher_decision": {
+    "decision": "ACCEPT_SEMANTIC_UNCERTAINTY",
+    "path": "docs/multimodel/analysis/aspd_v3_500m_blocker_resolution/human_interpretability_researcher_decision_2026-11-10.json",
+    "sha256": "833127f63542d8268b0c460036c4de29598c559d626baafc513e7c4217b135ad"
+  },
+  "main_readiness": "HUMAN_INTERPRETABILITY_GATE_SATISFIED_BY_EXPLICIT_UNCERTAINTY_ACCEPTANCE"
 }

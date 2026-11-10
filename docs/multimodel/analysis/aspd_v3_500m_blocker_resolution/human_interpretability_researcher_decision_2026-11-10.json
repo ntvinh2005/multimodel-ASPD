@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "status": "HUMAN_INTERPRETABILITY_RESEARCHER_DECISION",
+  "decision": "ACCEPT_SEMANTIC_UNCERTAINTY",
+  "researcher_decision": "The researcher explicitly accepts the remaining semantic uncertainty for ASPD v3.1 main-training readiness on 2026-11-10.",
+  "scientific_limitations": [
+    "No researcher response export or graded human analysis exists.",
+    "A single-evaluator result would remain exploratory and would not establish inter-rater reliability.",
+    "The validated package compares the matched two-model control and z-score checkpoints; it does not directly evaluate the approved three-model main composition."
+  ],
+  "evaluation_artifact_path": "/orange/thai/vinhnguyen1/aspd_v3/human_interpretability_v1/package/audit/preparation_manifest.json",
+  "evaluation_artifact_sha256": "40a508cb821b319890fb49c6a44e47d4642a79275ef564fcebadbb3c1b98fe98"
+}

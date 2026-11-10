@@ -207,10 +207,10 @@ approvals:
   three_way_alignment_artifact: docs/multimodel/analysis/aspd_v3_500m_blocker_resolution/three_way_alignment_approval.json
   three_way_alignment_artifact_sha256: 555407d0e0a2ac9bfd58097f41dbaf1402b0c63159cf05618e2ff91423f68060
   human_interpretability:
-    status: PENDING_RESEARCHER_RESPONSES
-    artifact_path: /orange/thai/vinhnguyen1/aspd_v3/human_interpretability_v1/package/audit/preparation_manifest.json
-    artifact_sha256: 40a508cb821b319890fb49c6a44e47d4642a79275ef564fcebadbb3c1b98fe98
-    researcher_decision: null
+    status: APPROVED_SEMANTIC_UNCERTAINTY_ACCEPTED
+    artifact_path: docs/multimodel/analysis/aspd_v3_500m_blocker_resolution/human_interpretability_researcher_decision_2026-11-10.json
+    artifact_sha256: 833127f63542d8268b0c460036c4de29598c559d626baafc513e7c4217b135ad
+    researcher_decision: The researcher explicitly accepts the remaining semantic uncertainty for ASPD v3.1 main-training readiness on 2026-11-10.
     scientific_limitations:
       - No researcher response export or graded human analysis exists.
       - A single-evaluator result would remain exploratory and would not establish inter-rater reliability.
@@ -221,8 +221,8 @@ approvals:
   exact_resume_source_commit: c15096768ab89295f43f28225969108805fad1a1
   exact_resume_contract_sha256: 70e094c9b2a9b10494e77864e34d35dd9311127351e91c78d3daf0b0c3cfe6e0
   storage_reservation: APPROVED
-  monitoring_policy: PENDING_RESEARCHER_APPROVAL
-  milestone_policy: PENDING_RESEARCHER_APPROVAL
+  monitoring_policy: APPROVED
+  milestone_policy: APPROVED
   bounded_preflight:
     status: AUTHORIZED
     optimizer_steps: 4
@@ -237,4 +237,4 @@ approvals:
     optimizer_steps: 4
   full_training: MAIN_500M_NOT_AUTHORIZED
 
-evaluation_status: HUMAN_INTERPRETABILITY_PACKAGE_COMPLETE_RESPONSES_PENDING
+evaluation_status: SEMANTIC_UNCERTAINTY_EXPLICITLY_ACCEPTED

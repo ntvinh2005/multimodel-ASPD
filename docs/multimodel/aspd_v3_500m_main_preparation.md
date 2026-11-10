@@ -20,9 +20,9 @@ The main experiment is **not authorized to submit**, but the independent enginee
 resolved. Granite 3.3 2B is approved and pinned, real three-way alignment passed, `/blue/thai` has
 the required 1 TiB startup reservation, three-B200 job `50550194` validated all 168 targets and
 profiled the final composition, and isolated job `50611663` reproduced the uninterrupted step-4
-state bitwise from the immutable step-3 checkpoint. The remaining blockers are researcher approval
-of monitoring policy v1, researcher approval of milestone policy v1, a human-interpretability
-decision (or explicit acceptance of semantic uncertainty), and separate final-run authorization.
+state bitwise from the immutable step-3 checkpoint. On 2026-11-10 the researcher approved
+monitoring policy v1, milestone policy v1, and explicitly accepted the remaining semantic
+uncertainty. Only the separate external submission action remains unauthorized.
 
 No full 500M training was submitted.
 
@@ -448,7 +448,7 @@ preflight never automatically submits or continues the full run.
 
 | Risk | Evidence/status | Required mitigation |
 |---|---|---|
-| Interpretability | Mechanistic gate/reconstruction results improved, but the existing semantic judge failed its controls and does not establish component interpretability. | Researcher must make an explicit human-interpretability decision and attach its artifact/hash to the main manifest. |
+| Interpretability | Mechanistic gate/reconstruction results improved, but the existing semantic judge failed its controls and does not establish component interpretability. | The researcher explicitly accepted this uncertainty; preserve the hash-pinned decision and limitations. |
 | Mechanistic validity | Z-score repairs candidate availability and firing diversity without forced activation, but longer-horizon causal meaning is unproven. | Keep rank-one/binary-support semantics fixed; evaluate causal and dictionary-health milestones before continuation. |
 | Third-model selection | Granite 3.3 2B Instruct is approved at its exact revision; 56 physical targets and PRE/MID hooks passed real parity. | Preserve the pinned contract; reject revision/layout drift and Qwen. |
 | Cross-model token alignment | Real pinned-tokenizer audit passed on 512 documents and 154,868 accepted anchors; filter TV was 0.0284. | Preserve exact canonical-prefix semantics and monitor source/domain selection throughout training. |
@@ -466,8 +466,8 @@ explicitly approve:
   and access disposition;
 - [x] its eight selected layers, all seven physical/logical mappings, and PRE/MID hooks;
 - [x] held-out three-way exact-prefix alignment coverage and failure distribution;
-- [ ] human-interpretability decision and immutable artifact hash;
-- [ ] the provisional monitoring thresholds and staged continuation/abort policy;
+- [x] human-interpretability decision and immutable artifact hash;
+- [x] monitoring thresholds and staged continuation/abort policy v1;
 - [x] at least 1 TiB free authorized storage and final output/checkpoint paths;
 - [x] successful real three-model GPU preflight, including peak memory and throughput;
 - [x] real three-model exact-resume evidence;
@@ -488,7 +488,7 @@ Executed from the isolated worktree:
 pytest -q tests/test_multimodel_v3_2b.py tests/test_multimodel_v3_production.py \
   tests/test_multimodel_v3_correctness.py \
   -k 'not model_owned_distributed_gradients_optimizer_and_checkpoint'
-67 passed, 1 deselected in 9.51s
+67 passed, 1 deselected in 18.96s
 
 pytest -q tests/test_multimodel_v3_2b.py \
   -k model_owned_distributed_gradients_optimizer_and_checkpoint
@@ -531,17 +531,16 @@ three-process Gloo test passed and was not repeated after the evidence-schema-on
    gate after retaining the real checkpoint; the narrow margin is monitored fail-closed.
 7. **Is throughput measured or only estimated?** Final-composition throughput is measured over a
    four-step preflight; the 33.46-hour 500M projection remains provisional due to the short sample.
-8. **Are monitoring and abort mechanisms implemented?** Yes in code and synthetic
-   tests; provisional thresholds still require approval and real-run validation.
-9. **What approvals are needed?** Monitoring policy v1, milestone policy v1, human
-   interpretability (or explicit acceptance of remaining semantic uncertainty), and explicit
-   full-run authorization with the final commit/config fingerprint.
+8. **Are monitoring and abort mechanisms implemented?** Yes in code and synthetic tests, and
+   policy v1 is approved; real-run metric coverage remains fail-closed.
+9. **What approvals are needed?** Only explicit external submission authorization with the final
+   commit/config fingerprint.
 10. **What exact command submits after approval?** `sbatch
     slurm/multimodel/aspd_v3_500m_main_PROPOSAL.sbatch`; it must remain unexecuted until
     every gate above is encoded as approved.
 
-Final preparation decision: `MAIN_BLOCKED` pending the three researcher decisions above and a
-separate final submission authorization.
+Final preparation decision: `MAIN_READY_PENDING_FINAL_RESEARCHER_AUTHORIZATION`; the only remaining
+gate is the separate external submission instruction.
 
 This is an engineering preparation package, not evidence that the full scientific
 experiment is ready or authorized.

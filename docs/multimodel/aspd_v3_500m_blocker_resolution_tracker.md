@@ -39,9 +39,9 @@ real three-model preflight, scheduler requeue harness, and isolated exact-resume
 | 4 | Storage capacity | Both filesystems were below the 1 TiB reservation. | Proposal, committed metadata record, exact eight-target cleanup, dedicated `/blue` namespace, config/readiness update. | Exact target absence, protected artifact presence, write probe, `df`/inode remeasurement. | `FIXED_TESTED` | No additional approval; runtime reserve monitoring remains mandatory. |
 | 5 | Real three-model GPU preflight | Synthetic distributed tests did not validate three real source models. | Exact source/alignment/manifests, generic ledger schema, source-commit-pinned evidence, four-step launcher and profiled stage timings. | Job 50550194 completed `0:0`: 168 targets, exact native parity, frozen sources, finite updates, generic ledger, 0 repeated anchors, checkpoint restore PASS and bitwise in-process replay. | `FIXED_TESTED` | None for bounded GPU preflight; main remains independently unauthorized. |
 | 6 | Exact checkpoint resume | Earlier real evidence reloaded state but did not compare an uninterrupted update with an isolated new-process resume. | Added SHA-256 parity over trainable model, Adam, scheduler and RNG; exact ordered-anchor/counter replay; source-state hashes; bounded cross-process authorization; and pinned evidence validation in the main manifest. | Job 50550194 passed in-process bitwise replay; isolated job 50611663 restored step 3 and reproduced step 4 bitwise with identical anchor digest, 0 repeats and immutable source weights. | `FIXED_TESTED` | None for exact resume. Main remains independently unauthorized. |
-| 7 | Sustained-collapse protection | The monitor was stateless; a collapse alert could not cause a recoverable controlled pause, and scheduled diagnostic completeness was not enforced. | `main500m_monitoring.py`, `main500m_config.py`, runner, draft YAML, tests. | Nine focused main-500M CPU tests; Ruff. | `FIXED_TESTED` | Researcher must approve the versioned v1 thresholds/actions before main authorization; the draft remains pending. |
-| 8 | Staged milestones | Milestones existed only as YAML values; the runner neither forced diagnostics/checkpoints nor required an explicit continuation decision. | Runner, `main500m_continuation.py`, config/schema, authorization template, tests. | Thirteen focused main-500M CPU tests; Ruff; Python compilation. | `FIXED_TESTED` | Researcher must approve policy v1 and provide a checkpoint-pinned decision after each staged review; draft approval remains pending. |
-| 9 | Human interpretability | The validated package exists, but no researcher response, graded human analysis, or decision artifact exists; the main schema could not distinguish these stages or accepted uncertainty. | Main config/schema, draft YAML, status artifact, decision template, tests. | Live read-only package/hash/status audit; focused main-500M tests; Ruff. | `BLOCKED_RESEARCHER_DECISION` | Researcher must complete responses and decide, or explicitly accept remaining semantic uncertainty in a hash-pinned decision artifact. |
+| 7 | Sustained-collapse protection | The monitor was stateless; a collapse alert could not cause a recoverable controlled pause, and scheduled diagnostic completeness was not enforced. | `main500m_monitoring.py`, `main500m_config.py`, runner, draft YAML, tests. | Nine focused main-500M CPU tests; Ruff. | `FIXED_TESTED`, v1 approved | Verify emitted metrics during the first staged interval. |
+| 8 | Staged milestones | Milestones existed only as YAML values; the runner neither forced diagnostics/checkpoints nor required an explicit continuation decision. | Runner, `main500m_continuation.py`, config/schema, authorization template, tests. | Thirteen focused main-500M CPU tests; Ruff; Python compilation. | `FIXED_TESTED`, v1 approved | Provide a checkpoint-pinned decision after each staged review. |
+| 9 | Human interpretability | The package is valid but has no response export or graded human analysis. | Main config/schema, status and researcher-decision artifacts, tests. | Package/hash audit and semantic decision validation. | `FIXED_TESTED`, uncertainty accepted | Preserve the explicit limitations; do not represent this as completed human grading. |
 | 10 | Slurm/runtime reliability | The proposal forwarded `USR1` to torchrun, assumed worker exit 99 survived the launcher, and applied a fresh-start storage threshold to resume. | Replaced it with a file-backed stop request, verified COMPLETE checkpoint artifact, zero-exit torchrun contract, fresh-vs-resume storage thresholds, one-requeue CPU harness and isolated real-model resume launcher. | Job 50550768 passed one scheduler requeue with zero duplicates; job 50611663 passed isolated three-model resume bitwise. Static shell/Ruff/focused tests PASS. | `FIXED_TESTED` | None for engineering reliability; monitoring/milestone/human/final-run approvals remain separate. |
 | 11 | Specification/metadata consistency | Canonical alignment was absent from the formal notation; legacy policy identifiers diverged; raw/normalized logits and Latin u versus Greek nu needed an explicit map; readiness metadata was stale. | Canonical specification, stream/manifest code, tests, consistency artifact and final readiness refresh. | Focused z-score/target/alignment tests, production-policy test, Ruff. | `FIXED_TESTED` | No scientific choice was made; pinned real-model evidence is represented separately. |
 
@@ -372,15 +372,24 @@ no.
 
 ## Final readiness decision
 
-`MAIN_BLOCKED`
+`MAIN_READY_PENDING_FINAL_RESEARCHER_AUTHORIZATION`
 
 Independent engineering preparation is complete to the current authorization boundary. Model 3,
 three-way alignment, storage, the real 168-target GPU preflight, profiled final-composition
 throughput, exact in-process replay, isolated external resume, and the scheduler requeue contract
-are now validated. Remaining blockers are researcher approval of monitoring v1, researcher
-approval of staged milestones v1, the human-interpretability decision (or explicit acceptance of
-semantic uncertainty), and separate final submission authorization. The complete audit is in
+are now validated. Monitoring v1, milestone v1, and explicit semantic-uncertainty acceptance are
+approved and hash-pinned. The only remaining blocker is separate external submission authorization.
+The complete audit is in
 `aspd_v3_500m_final_readiness_audit.md`.
+
+## Remaining-policy approval update
+
+On 2026-11-10 the researcher approved monitoring policy v1 and staged-milestone policy v1 and
+explicitly accepted the documented semantic uncertainty instead of claiming completed human
+grading. The decision is pinned in
+`analysis/aspd_v3_500m_blocker_resolution/remaining_policy_researcher_approval_2026-11-10.json`.
+No threshold, milestone, loss, sparsity or gate semantic changed. Main execution remains fail-closed
+until a separate instruction authorizes the external `sbatch` action.
 
 ## Model-3 approval update
 

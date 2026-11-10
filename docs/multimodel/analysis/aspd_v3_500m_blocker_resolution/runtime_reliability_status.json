@@ -37,9 +37,9 @@
     "cuda_build": "12.8"
   },
   "contracts": {
-    "configuration_fingerprint": "a44a4a6faf0ab08ccd92db0c07bf56c6120c721d403c672afaafd2d363278487",
+    "configuration_fingerprint": "0eb6c804a0f9611e9f73967456fffa15b7e11346d5c5baa9d4c253c4e1db94a3",
     "execution_contract_fingerprint": "45f8b159d737e1096ef0dda78300484667926e2307800969d3fc800802e24944",
-    "configuration_sha256": "d8dad214aa57ef62b8ccfdc51390aa6e14f8c49797c88e0dadeeaf2170df2f2c",
+    "configuration_sha256": "a3d02a6f26d2cf0d11bfc1ac35377bbbce0f2f1f6d722a7259fcaa6e68025568",
     "main_slurm_sha256": "e673aada1d253c6d6cfaba92e2486d514d905ea12e7c21d950ea72b294be0d03",
     "preflight_slurm_sha256": "7d01ba92137d56374d327df520526936192130864945f51606ba84f9e2bdbae1",
     "resume_validation_slurm_sha256": "708bdcfe99d5b398be723d00cdfb28ea4d1dabf803480019ea13fcd6abe6d900"
@@ -68,5 +68,5 @@
     "real_three_model_preflight": "PASS_JOB_50550194_168_TARGETS_NATIVE_PARITY",
     "real_final_three_model_throughput": "PASS_JOB_50550194_PROFILED_4150.668_ACCEPTED_ANCHORS_PER_SECOND"
   },
-  "evidence_boundary": "The scheduler/shell signal and one-requeue contract passed in CPU-only job 50550768. Isolated three-B200 job 50611663 restored step 3 and reproduced step 4 bitwise with identical ordered anchors, zero repeats and immutable source weights. Monitoring, milestone, human-interpretability and final main-run approvals remain pending."
+  "evidence_boundary": "The scheduler/shell signal and one-requeue contract passed in CPU-only job 50550768. Isolated three-B200 job 50611663 restored step 3 and reproduced step 4 bitwise with identical ordered anchors, zero repeats and immutable source weights. Monitoring v1, milestone v1 and explicit semantic-uncertainty acceptance are approved; only the separate external main-run submission authorization remains pending."
 }

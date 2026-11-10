@@ -2,11 +2,11 @@
 
 Status date: 2026-11-10 (America/New_York)
 
-Decision: **`MAIN_BLOCKED`**
+Decision: **`MAIN_READY_PENDING_FINAL_RESEARCHER_AUTHORIZATION`**
 
 No 500M job was submitted. Exact researcher-approved storage targets were reclaimed only after
 their reproducibility records were preserved. Engineering validation is complete; the main
-experiment remains fail-closed on researcher policy, human-evidence and final-run decisions.
+experiment remains fail-closed only on the separate external main-run authorization.
 
 ## Evidence boundary
 
@@ -18,8 +18,8 @@ This audit distinguishes three claims:
 2. **Real final-composition GPU-tested:** all 168 physical hooks, frozen-source parity, finite
    forward/backward, shared gradients, profiled throughput, atomic checkpoint recovery, in-process
    bitwise replay and isolated new-process bitwise resume.
-3. **Still researcher-owned:** monitoring/milestone policy approval, the human-interpretability
-   decision (or explicit acceptance of semantic uncertainty), and final 500M authorization.
+3. **Still researcher-owned:** only the explicit external 500M submission authorization.
+   Monitoring v1, milestone v1, and semantic-uncertainty acceptance were approved on 2026-11-10.
 
 Accordingly, neither compilation nor synthetic tests are treated as main readiness.
 
@@ -103,9 +103,9 @@ the three real pinned source models**.
 | 4. Storage | Exact approved cleanup completed; after retaining the real preflight checkpoint, `/blue` has 1.119 TB free. | `FIXED_TESTED`, narrow margin | Continue runtime reserve monitoring; margin over 1 TiB is 19.62 GB. |
 | 5. Real GPU preflight | Job 50550194 passed on three B200s with 168 targets, exact source parity, frozen sources, finite updates, generic ledger, profiled timings and in-process bitwise replay. | `FIXED_TESTED` | No main authorization implied. |
 | 6. Exact resume | Job 50611663 restored step 3 in a new process and reproduced step 4 bitwise, including optimizer/scheduler/RNG and ordered anchors, with zero repeats. | `FIXED_TESTED` | Preserve the pinned evidence. |
-| 7. Monitoring | Stateful sustained-failure policy and controlled pause implemented and CPU-tested. | `FIXED_TESTED`, approval pending | Researcher approval of policy v1 and real-run metric coverage. |
-| 8. Milestones | Exact exposure boundaries, atomic checkpoint, immutable review, and continuation authorization implemented. | `FIXED_TESTED`, approval pending | Researcher approval of staged policy v1. |
-| 9. Human evidence | Valid package exists; zero researcher response exports and no decision were found. | `HUMAN_INTERPRETABILITY_APPROVAL_PENDING` | Complete human analysis or explicitly accept documented semantic uncertainty. |
+| 7. Monitoring | Stateful sustained-failure policy and controlled pause implemented and CPU-tested. | `FIXED_TESTED`, v1 approved | Verify emitted metrics during the first staged interval. |
+| 8. Milestones | Exact exposure boundaries, atomic checkpoint, immutable review, and continuation authorization implemented. | `FIXED_TESTED`, v1 approved | Checkpoint-pinned approval remains required after each staged review. |
+| 9. Human evidence | No response exports or graded analysis exist; the researcher explicitly accepted the documented semantic uncertainty. | `FIXED_TESTED`, uncertainty accepted | Preserve the decision artifact and stated limitations. |
 | 10. Slurm/runtime | File-backed signal/checkpoint/requeue passed CPU job 50550768; isolated real-model resume and profiled timing also passed. | `FIXED_TESTED` | Final main submission remains separately unauthorized. |
 | 11. Specification/metadata | Canonical notation, alignment identifiers, config fingerprints, and evaluation states synchronized. | `FIXED_TESTED` | Regenerate fingerprints after any approved configuration decision. |
 
@@ -190,7 +190,7 @@ Immediate aborts cover missing scheduled metrics, nonfinite values/gradients, du
 storage reserve breach, and checkpoint failure. A single concentration or reconstruction excursion
 alerts. Three consecutive gate-health failures, or two consecutive reconstruction failures after
 the first milestone, cause an atomic checkpoint and controlled pause. Thresholds are versioned and
-remain pending researcher approval; no monitoring action changes loss weights or sparsity.
+are approved as policy v1; no monitoring action changes loss weights or sparsity.
 
 ## Runtime and resource plan
 
@@ -216,7 +216,7 @@ B200 capacity unless a separate bounded memory/throughput preflight approves ano
   tests/test_multimodel_v3_production.py \
   tests/test_multimodel_v3_correctness.py \
   -k 'not model_owned_distributed_gradients_optimizer_and_checkpoint'
-# 67 passed, 1 deselected in 9.51 s
+# 67 passed, 1 deselected in 18.96 s
 
 /blue/thai/vinhnguyen1/multimodel-ASPD/repo/.venv/bin/ruff check \
   aspd/multimodel/cli/validate_aspd_v3_main500m.py \
@@ -235,19 +235,11 @@ evidence-schema-only change. The final 67-test non-distributed regression, Ruff,
 signal/requeue, and isolated exact-resume evidence respectively. The checked-in draft main
 validator remains fail-closed because researcher decisions and final authorization are pending.
 
-## Required researcher decisions
+## Required researcher decision
 
-The bounded preflight and isolated resume validations are complete. They cannot transition to main.
-
-Before final main authorization, the researcher must:
-
-1. approve monitoring policy v1 and staged-milestone policy v1;
-2. complete the human response/analysis decision, or explicitly accept the documented remaining
-   semantic uncertainty;
-3. review the passing 168-target hook/parity, GPU, checkpoint/resume,
-   source-immutability, signal/requeue, throughput, and storage evidence;
-4. regenerate and approve all configuration/manifest fingerprints after those decisions; and
-5. issue a separate explicit authorization for the 500M submission and the first staged interval.
+Monitoring v1, staged milestones v1, and explicit acceptance of semantic uncertainty are recorded
+in immutable artifacts. The only remaining action is a separate explicit instruction to execute
+the documented `sbatch` command for the first staged interval.
 
 ## Direct answers
 
@@ -263,10 +255,9 @@ Before final main authorization, the researcher must:
    the 1 TiB gate; runtime monitoring is required.
 7. **Is throughput measured?** Yes for the final composition over four steps; the 500M projection
    remains provisional because the sample is short.
-8. **Are monitoring and aborts implemented?** Yes and CPU-tested; threshold approval and real-run
-   coverage are pending.
-9. **Which approvals remain?** Monitoring v1, milestone v1, human interpretation (or explicit
-   semantic-uncertainty acceptance), evidence review, and final main authorization.
+8. **Are monitoring and aborts implemented?** Yes, CPU-tested, and policy v1 is approved; emitted
+   metric coverage is verified fail-closed during execution.
+9. **Which approvals remain?** Only the separate external instruction to submit the main job.
 10. **What command would submit after every approval?** From the clean, reviewed, approved commit:
 
 ```bash
@@ -278,12 +269,7 @@ This command is documented only and was not executed.
 
 ## Final decision
 
-`MAIN_BLOCKED`
+`MAIN_READY_PENDING_FINAL_RESEARCHER_AUTHORIZATION`
 
-Exact remaining blockers:
-
-- `MONITORING_POLICY_APPROVAL_PENDING`
-- `MILESTONE_POLICY_APPROVAL_PENDING`
-- `HUMAN_INTERPRETABILITY_APPROVAL_PENDING`
-- `MAIN_500M_NOT_AUTHORIZED`
+Exact remaining blocker: `MAIN_500M_NOT_AUTHORIZED`.
 

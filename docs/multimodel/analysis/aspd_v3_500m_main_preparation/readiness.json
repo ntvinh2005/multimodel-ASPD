@@ -3,7 +3,7 @@
   "generated_at": "2026-11-10",
   "experiment_family": "aspd_v3_1_three_model_main500m",
   "scientific_status": "MAIN_500M_NOT_AUTHORIZED",
-  "final_readiness_decision": "MAIN_BLOCKED",
+  "final_readiness_decision": "MAIN_READY_PENDING_FINAL_RESEARCHER_AUTHORIZATION",
   "submission_permitted": false,
   "reference": {
     "branch": "main",
@@ -13,9 +13,9 @@
   "blocker_resolution_branch": "aspd-v3.1-main500m-blocker-resolution",
   "config": {
     "path": "configs/multimodel/aspd_v3/main500m_preparation_v1.yaml",
-    "fingerprint": "a44a4a6faf0ab08ccd92db0c07bf56c6120c721d403c672afaafd2d363278487",
+    "fingerprint": "0eb6c804a0f9611e9f73967456fffa15b7e11346d5c5baa9d4c253c4e1db94a3",
     "execution_contract_fingerprint": "45f8b159d737e1096ef0dda78300484667926e2307800969d3fc800802e24944",
-    "status": "DRAFT_FAIL_CLOSED"
+    "status": "READY_FAIL_CLOSED_FINAL_AUTHORIZATION_PENDING"
   },
   "architecture": {
     "required_model_count": 3,
@@ -83,7 +83,7 @@
   "monitoring": {
     "policy_version": "v1",
     "implementation": "FIXED_TESTED_CPU",
-    "researcher_approval": "PENDING_RESEARCHER_APPROVAL",
+    "researcher_approval": "APPROVED",
     "sustained_gate_failure_diagnostics": 3,
     "sustained_reconstruction_failure_diagnostics": 2,
     "action": "ATOMIC_CHECKPOINT_THEN_CONTROLLED_PAUSE"
@@ -91,14 +91,21 @@
   "milestones": {
     "policy_version": "v1",
     "implementation": "FIXED_TESTED_CPU",
-    "researcher_approval": "PENDING_RESEARCHER_APPROVAL",
+    "researcher_approval": "APPROVED",
     "accepted_exposures": [10002432, 25001984, 50003968, 100007936, 250003456, 500006912]
   },
   "human_interpretability": {
-    "status": "HUMAN_INTERPRETABILITY_PACKAGE_COMPLETE_RESPONSES_PENDING",
+    "status": "SEMANTIC_UNCERTAINTY_EXPLICITLY_ACCEPTED",
     "package_manifest_sha256": "40a508cb821b319890fb49c6a44e47d4642a79275ef564fcebadbb3c1b98fe98",
     "researcher_response_exports_found": 0,
-    "researcher_decision_found": false
+    "researcher_decision_found": true,
+    "researcher_decision_artifact": "docs/multimodel/analysis/aspd_v3_500m_blocker_resolution/human_interpretability_researcher_decision_2026-11-10.json",
+    "researcher_decision_artifact_sha256": "833127f63542d8268b0c460036c4de29598c559d626baafc513e7c4217b135ad"
+  },
+  "remaining_policy_approval": {
+    "status": "APPROVED",
+    "artifact": "docs/multimodel/analysis/aspd_v3_500m_blocker_resolution/remaining_policy_researcher_approval_2026-11-10.json",
+    "artifact_sha256": "2e28546f62934e3a7315711187db1fc5f1ec8d5310151edbe54e28ca8cf5d40c"
   },
   "resume": {
     "synthetic_three_rank_exact_update": "PASS",
@@ -159,7 +166,7 @@
     {
       "scope": "final_non_distributed_v3_2b_production_correctness",
       "result": "67 passed, 1 deselected",
-      "seconds": 9.51
+      "seconds": 18.96
     },
     {
       "scope": "three_rank_exact_resume",
@@ -193,9 +200,6 @@
     }
   ],
   "blockers": [
-    "MONITORING_POLICY_APPROVAL_PENDING",
-    "MILESTONE_POLICY_APPROVAL_PENDING",
-    "HUMAN_INTERPRETABILITY_APPROVAL_PENDING",
     "MAIN_500M_NOT_AUTHORIZED"
   ],
   "slurm": {

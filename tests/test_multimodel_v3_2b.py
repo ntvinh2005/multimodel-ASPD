@@ -139,20 +139,27 @@ def test_main500m_draft_preserves_zscore_math_and_fails_closed() -> None:
     assert config.runtime.startup_storage_required_bytes == 1_099_511_627_776
     assert config.runtime.checkpoint_root == config.runtime.output_root
     assert config.approvals.human_interpretability.status == (
-        "PENDING_RESEARCHER_RESPONSES"
+        "APPROVED_SEMANTIC_UNCERTAINTY_ACCEPTED"
     )
-    assert config.evaluation_status == (
-        "HUMAN_INTERPRETABILITY_PACKAGE_COMPLETE_RESPONSES_PENDING"
+    assert config.evaluation_status == "SEMANTIC_UNCERTAINTY_EXPLICITLY_ACCEPTED"
+    assert config.approvals.human_interpretability.permits_main_authorization()
+    assert config.validate_human_interpretability_artifact()["decision"] == (
+        "ACCEPT_SEMANTIC_UNCERTAINTY"
     )
-    assert not config.approvals.human_interpretability.permits_main_authorization()
     assert "MODEL_THREE_BLOCKED" not in report["blockers"]
     assert "RESUME_BLOCKED" not in report["blockers"]
-    assert "MILESTONE_POLICY_APPROVAL_PENDING" in report["blockers"]
-    with pytest.raises(RuntimeError, match="MONITORING_POLICY_APPROVAL_PENDING"):
+    assert report["blockers"] == ["MAIN_500M_NOT_AUTHORIZED"]
+    with pytest.raises(RuntimeError, match="MAIN_500M_NOT_AUTHORIZED"):
         config.require_execution_authorized()
 
     invalid = config.payload()
+    invalid["approvals"]["human_interpretability"]["status"] = (
+        "PENDING_RESEARCHER_RESPONSES"
+    )
     invalid["approvals"]["human_interpretability"]["researcher_decision"] = "APPROVE"
+    invalid["evaluation_status"] = (
+        "HUMAN_INTERPRETABILITY_PACKAGE_COMPLETE_RESPONSES_PENDING"
+    )
     with pytest.raises(ValueError, match="cannot claim a decision"):
         V31Main500MConfig.model_validate(invalid)
 
@@ -387,7 +394,7 @@ def test_main500m_mode_gate_cannot_cross_preflight_and_main_boundaries(
         max_steps=61_036,
         run_dir=tmp_path / "main",
     )
-    with pytest.raises(RuntimeError, match="MONITORING_POLICY_APPROVAL_PENDING"):
+    with pytest.raises(RuntimeError, match="MAIN_500M_NOT_AUTHORIZED"):
         _authorize_main500m_mode(draft, main_args)
 
     skip_args = copy.copy(main_args)
