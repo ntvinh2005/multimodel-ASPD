@@ -98,16 +98,16 @@ source models.
 
 | ID | Result | Current state | Remaining gate |
 |---|---|---|---|
-| 1. Preflight authorization | Separate bounded-preflight and main authorization implemented and tested. | `FIXED_TESTED` | Populate only after exact model-3/alignment approval. |
+| 1. Preflight authorization | Separate bounded-preflight and main authorization implemented and tested; exact four-step `/blue` preflight is authorized. | `FIXED_TESTED` | Execute once; it cannot transition to main. |
 | 2. Model 3 | Exact Granite contract approved, populated, pinned, and CPU-tested. | `FIXED_TESTED` | Alignment and real source execution remain separate gates. |
 | 3. Alignment | Exact canonical-text prefix validation passed on 512 real documents with pinned tokenizers. | `FIXED_TESTED` | Continue source/domain monitoring during execution. |
 | 4. Storage | Exact approved cleanup completed; dedicated `/blue` root has 1.245 TB free. | `FIXED_TESTED` | Continue runtime reserve monitoring. |
-| 5. Real GPU preflight | Launcher and evidence schema prepared. | `THREE_MODEL_GPU_PREFLIGHT_PENDING` | Approved model 3, alignment, storage, and bounded GPU authorization. |
+| 5. Real GPU preflight | Exact Granite/alignment/manifests and four-step authorization are ready; no real three-model run yet. | `IN_PROGRESS` | Execute bounded three-B200 preflight. |
 | 6. Exact resume | Synthetic three-rank deterministic resume evidence exists; recovery is self-contained and fail closed. | `RESUME_BLOCKED` | Real three-model uninterrupted-versus-resumed update and interruption test. |
 | 7. Monitoring | Stateful sustained-failure policy and controlled pause implemented and CPU-tested. | `FIXED_TESTED`, approval pending | Researcher approval of policy v1 and real-run metric coverage. |
 | 8. Milestones | Exact exposure boundaries, atomic checkpoint, immutable review, and continuation authorization implemented. | `FIXED_TESTED`, approval pending | Researcher approval of staged policy v1. |
 | 9. Human evidence | Valid package exists; zero researcher response exports and no decision were found. | `HUMAN_INTERPRETABILITY_APPROVAL_PENDING` | Complete human analysis or explicitly accept documented semantic uncertainty. |
-| 10. Slurm/runtime | Main/preflight launch contracts and static tests complete. | `BLOCKED_EXTERNAL_DEPENDENCY` | Bounded scheduled signal/requeue test and final-composition timing. |
+| 10. Slurm/runtime | Main/preflight launch contracts and static tests complete; bounded preflight is authorized. | `IN_PROGRESS` | Execute scheduled preflight and bounded signal/requeue test. |
 | 11. Specification/metadata | Canonical notation, alignment identifiers, config fingerprints, and evaluation states synchronized. | `FIXED_TESTED` | Regenerate fingerprints after any approved configuration decision. |
 
 ## Model-3 decision package
@@ -231,24 +231,24 @@ bash -n slurm/multimodel/aspd_v3_500m_main_PROPOSAL.sbatch
 ```
 
 The existing multi-process Gloo retry remains inconclusive and is not included as passing evidence.
-The checked-in draft main validator exits 2 with `submission_permitted=false`; the bounded-preflight
-validator stops on model-3, alignment, and authorization gates before CUDA/source loading.
+The checked-in draft main validator exits 2 with `submission_permitted=false`. The exact four-step
+bounded-preflight authorization is now populated; its real scheduled execution is pending.
 
 ## Required researcher decisions
 
-Before any real-model preflight:
+The four-step preflight in the exact fresh `/blue` namespace is already authorized by the
+researcher's instruction to verify unresolved evidence. It does not require the later main-only
+monitoring, milestone, or human-interpretability decisions and cannot transition to main.
 
-1. approve monitoring policy v1 and staged-milestone policy v1; and
+Before final main authorization, the researcher must:
+
+1. approve monitoring policy v1 and staged-milestone policy v1;
 2. complete the human response/analysis decision, or explicitly accept the documented remaining
-   semantic uncertainty.
-
-Before final main authorization:
-
-3. approve the exact bounded preflight namespace and 3--20 step budget;
-4. review passing 168-target hook/parity, GPU, checkpoint/resume,
+   semantic uncertainty;
+3. review passing 168-target hook/parity, GPU, checkpoint/resume,
    source-immutability, signal/requeue, throughput, and storage evidence;
-5. regenerate and approve all configuration/manifest fingerprints after those decisions; and
-6. issue a separate explicit authorization for the 500M submission and the first staged interval.
+4. regenerate and approve all configuration/manifest fingerprints after those decisions; and
+5. issue a separate explicit authorization for the 500M submission and the first staged interval.
 
 ## Direct answers
 

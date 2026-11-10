@@ -220,10 +220,10 @@ approvals:
   monitoring_policy: PENDING_RESEARCHER_APPROVAL
   milestone_policy: PENDING_RESEARCHER_APPROVAL
   bounded_preflight:
-    status: PENDING_RESEARCHER_APPROVAL
-    optimizer_steps: null
-    output_namespace: null
-    authorization_reference: null
+    status: AUTHORIZED
+    optimizer_steps: 4
+    output_namespace: /blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/preflight
+    authorization_reference: researcher_message_2026-11-09_verify_unverified_bounded_engineering
   three_model_gpu_preflight:
     status: PENDING_MODEL_THREE
     artifact_path: null

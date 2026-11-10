@@ -259,7 +259,14 @@ def test_main500m_human_gate_distinguishes_evidence_from_accepted_uncertainty(
 def test_main500m_bounded_preflight_has_independent_fail_closed_authorization(
     tmp_path: Path,
 ) -> None:
-    draft = _main500m_config()
+    payload = _main500m_config().payload()
+    payload["approvals"]["bounded_preflight"] = {
+        "status": "PENDING_RESEARCHER_APPROVAL",
+        "optimizer_steps": None,
+        "output_namespace": None,
+        "authorization_reference": None,
+    }
+    draft = V31Main500MConfig.model_validate(payload)
     with pytest.raises(RuntimeError, match="BOUNDED_PREFLIGHT_NOT_AUTHORIZED"):
         draft.require_preflight_authorized(
             optimizer_steps=4,

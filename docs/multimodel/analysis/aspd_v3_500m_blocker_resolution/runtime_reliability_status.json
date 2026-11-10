@@ -36,9 +36,9 @@
     "cuda_build": "12.8"
   },
   "contracts": {
-    "configuration_fingerprint": "a3aa46b3c13e8930d7c4d123f747f2352275e2b7752fec00f64a483ddd76917f",
+    "configuration_fingerprint": "193f1b78fdb5e36167f38855af3ec5399727441bd3705763fd8db29362d2cc41",
     "execution_contract_fingerprint": "45f8b159d737e1096ef0dda78300484667926e2307800969d3fc800802e24944",
-    "configuration_sha256": "e0175b16a6e3114b3decc136d36c2630a0570f93c9930b4ec1c7b703657490f3",
+    "configuration_sha256": "113e7cbb2f0262162ea94c8eb0debf45fcf33d28a7a926a1011a834d51c33c40",
     "main_slurm_sha256": "aac2e25744d48db0121e220ff24c3f68a89569d4fbfc68b2a4511098d98e5fb5",
     "preflight_slurm_sha256": "531adff3b6e8cd5c22f7913ba644e580906b1822068bfe6e6f088a9c2a131a85"
   },
@@ -58,9 +58,9 @@
     "bash_syntax": "PASS_BOTH_PROPOSALS",
     "focused_cpu": "17_PASSED_17_DESELECTED",
     "main_draft_validation": "EXPECTED_FAIL_CLOSED_EXIT_2",
-    "preflight_draft_validation": "EXPECTED_FAIL_CLOSED_MODEL3_ALIGNMENT_AUTHORIZATION",
-    "real_slurm_signal_requeue": "NOT_RUN_NO_JOB_SUBMISSION_AUTHORIZATION",
-    "real_final_three_model_throughput": "NOT_RUN_PENDING_MODEL3_AND_PREFLIGHT"
+    "preflight_authorization_validation": "PASS_EXACT_FOUR_STEP_FRESH_NAMESPACE",
+    "real_slurm_signal_requeue": "NOT_RUN",
+    "real_final_three_model_throughput": "NOT_RUN_AUTHORIZED_PREFLIGHT_PENDING"
   },
-  "evidence_boundary": "Static shell and CPU contract validation only. No Slurm job was submitted, no signal was delivered to a scheduled process, and no final three-model throughput was measured."
+  "evidence_boundary": "Static shell and CPU contract validation plus immutable production manifests. The exact four-step preflight is authorized but has not yet been submitted; no signal has been delivered to a scheduled process and no final three-model throughput has been measured."
 }

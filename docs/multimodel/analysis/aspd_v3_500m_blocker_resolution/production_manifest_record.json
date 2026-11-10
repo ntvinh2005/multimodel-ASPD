@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "status": "PASS",
+  "generated_at": "2026-11-09",
+  "dataset_manifest": {
+    "path": "/blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/data/pile_uncopyrighted/manifest.json",
+    "file_sha256": "0c93d70fd20bd1e0718517c8b6f3fbc1c8c59ed2031229706ee73f0ba3f53021",
+    "manifest_sha256": "a258974d21ceac3457529644be07459518fde7bc28501abde5c67e5e3719286f",
+    "dataset_id": "monology/pile-uncopyrighted",
+    "requested_revision": "3be90335b66f24456a5d6659d9c8d208c0357119",
+    "resolved_revision": "3be90335b66f24456a5d6659d9c8d208c0357119",
+    "data_file_count": 30,
+    "data_file_bytes": 334664485567,
+    "internal_fingerprint_verified": true
+  },
+  "alignment_manifest": {
+    "path": "/blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/data/pile_uncopyrighted/alignment_manifest.json",
+    "file_sha256": "b641939e392b82f7ce81e5f9da5bfe4c0899b12c5f0d933c17698f26474e5f7e",
+    "manifest_sha256": "44e9301642275e6175124ed79e209b089d47f133cfc51a45079fd3c5301f685e",
+    "schema_version": 4,
+    "model_order": ["gemma", "smol", "granite"],
+    "alignment": "exact_fast_tokenizer_offsets_and_exact_prefix_roundtrip_v2",
+    "alignment_acceptance": "intersection_of_exact_canonical_text_boundaries",
+    "internal_fingerprint_verified": true
+  },
+  "immutability": "write_json_immutable",
+  "main_training_authorized": false
+}
