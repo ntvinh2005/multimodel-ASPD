@@ -214,8 +214,12 @@ approvals:
     scientific_limitations:
       - No researcher response export or graded human analysis exists.
       - A single-evaluator result would remain exploratory and would not establish inter-rater reliability.
-      - The validated package compares the matched two-model control and z-score checkpoints, not the unresolved three-model main system.
-  exact_resume: SYNTHETIC_VALIDATED_REAL_THREE_MODEL_PENDING
+      - The validated package compares the matched two-model control and z-score checkpoints; it does not directly evaluate the approved three-model main composition.
+  exact_resume: VALIDATED_THREE_MODEL_GPU
+  exact_resume_artifact: /blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/resume_validation_job_50550194/benchmark_report.json
+  exact_resume_artifact_sha256: a588215b907644593a91fc0e034bedd1f1efa24b6eb9b8eaef1799431a3d72d3
+  exact_resume_source_commit: c15096768ab89295f43f28225969108805fad1a1
+  exact_resume_contract_sha256: 70e094c9b2a9b10494e77864e34d35dd9311127351e91c78d3daf0b0c3cfe6e0
   storage_reservation: APPROVED
   monitoring_policy: PENDING_RESEARCHER_APPROVAL
   milestone_policy: PENDING_RESEARCHER_APPROVAL
@@ -227,9 +231,9 @@ approvals:
   three_model_gpu_preflight:
     status: PASSED
     artifact_path: /blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/preflight/preflight_report.json
-    artifact_sha256: 051cce5ee7770d8e40146aaa119793985a7e7eb4e1c2d154321eca0fcfdc31d0
+    artifact_sha256: 74cd3454f5e84f07d7cae11bf367cc28381a5e464b55cb0d04b8c878a318d7a6
     execution_contract_fingerprint: 45f8b159d737e1096ef0dda78300484667926e2307800969d3fc800802e24944
-    source_commit: db71f4a98617e9a00d46049f96c2373c42b6fa3e
+    source_commit: f518cd954b4c56c1736c56c8c9f66b8319b8d8a2
     optimizer_steps: 4
   full_training: MAIN_500M_NOT_AUTHORIZED
 

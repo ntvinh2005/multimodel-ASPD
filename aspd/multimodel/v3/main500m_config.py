@@ -508,6 +508,16 @@ class Main500MApprovals(BaseModel):
         "SYNTHETIC_VALIDATED_REAL_THREE_MODEL_PENDING",
         "VALIDATED_THREE_MODEL_GPU",
     ]
+    exact_resume_artifact: str | None = None
+    exact_resume_artifact_sha256: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
+    exact_resume_source_commit: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{40}$"
+    )
+    exact_resume_contract_sha256: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
     storage_reservation: Literal["STORAGE_BLOCKED", "APPROVED"]
     monitoring_policy: Literal["PENDING_RESEARCHER_APPROVAL", "APPROVED"]
     milestone_policy: Literal["PENDING_RESEARCHER_APPROVAL", "APPROVED"]
@@ -666,7 +676,16 @@ class V31Main500MConfig(BaseModel):
             blockers.append("MODEL_THREE_BLOCKED")
         if self.approvals.three_way_alignment != "APPROVED":
             blockers.append("ALIGNMENT_BLOCKED")
-        if self.approvals.exact_resume != "VALIDATED_THREE_MODEL_GPU":
+        exact_resume_evidence = (
+            self.approvals.exact_resume_artifact,
+            self.approvals.exact_resume_artifact_sha256,
+            self.approvals.exact_resume_source_commit,
+            self.approvals.exact_resume_contract_sha256,
+        )
+        if self.approvals.exact_resume != "VALIDATED_THREE_MODEL_GPU" or any(
+            value is None or not str(value).strip()
+            for value in exact_resume_evidence
+        ):
             blockers.append("RESUME_BLOCKED")
         if self.approvals.storage_reservation != "APPROVED":
             blockers.append("STORAGE_BLOCKED")
@@ -811,6 +830,76 @@ class V31Main500MConfig(BaseModel):
             raise RuntimeError(f"THREE_MODEL_GPU_PREFLIGHT_EVIDENCE_INVALID: {mismatch}")
         return report
 
+    def validate_exact_resume_evidence(self) -> dict[str, Any]:
+        approvals = self.approvals
+        if approvals.exact_resume != "VALIDATED_THREE_MODEL_GPU":
+            raise RuntimeError("RESUME_BLOCKED")
+        assert approvals.exact_resume_artifact is not None
+        assert approvals.exact_resume_artifact_sha256 is not None
+        assert approvals.exact_resume_source_commit is not None
+        assert approvals.exact_resume_contract_sha256 is not None
+        artifact = Path(approvals.exact_resume_artifact)
+        if not artifact.is_file():
+            raise RuntimeError("EXACT_RESUME_ARTIFACT_MISSING")
+        if hashlib.sha256(artifact.read_bytes()).hexdigest() != (
+            approvals.exact_resume_artifact_sha256
+        ):
+            raise RuntimeError("EXACT_RESUME_ARTIFACT_HASH_MISMATCH")
+        report = json.loads(artifact.read_text(encoding="utf-8"))
+        expected = {
+            "status": "PASS",
+            "mode": "resume_validation",
+            "strategy": "model_owned",
+            "git_sha": approvals.exact_resume_source_commit,
+            "world_size": 3,
+            "logical_target_count": 168,
+            "optimizer_steps": 4,
+            "accepted_exposures": 32_768,
+            "uninterrupted_vs_resumed_next_update": "BITWISE_EXACT",
+            "dcp_save_reload_resume_update": "PASS",
+            "resume_validation_contract_sha256": (
+                approvals.exact_resume_contract_sha256
+            ),
+        }
+        mismatch = {
+            key: {"expected": value, "observed": report.get(key)}
+            for key, value in expected.items()
+            if report.get(key) != value
+        }
+        reference = report.get("uninterrupted_state_sha256_by_rank")
+        resumed = report.get("resumed_state_sha256_by_rank")
+        if (
+            not isinstance(reference, list)
+            or len(reference) != 3
+            or resumed != reference
+        ):
+            mismatch["state_sha256_by_rank"] = {
+                "uninterrupted": reference,
+                "resumed": resumed,
+            }
+        data = report.get("exact_data_replay")
+        if not isinstance(data, dict) or any(
+            data.get(key) != value
+            for key, value in {
+                "step": 4,
+                "accepted_exposures": 32_768,
+                "unique_anchors": 32_768,
+                "repeated_exposures": 0,
+            }.items()
+        ):
+            mismatch["exact_data_replay"] = data
+        source = report.get("source_state_immutability_by_rank")
+        if not isinstance(source, list) or len(source) != 3 or any(
+            not isinstance(item, dict)
+            or item.get("status") != "PASS"
+            or item.get("initial_sha256") != item.get("final_sha256")
+            for item in source
+        ):
+            mismatch["source_state_immutability_by_rank"] = source
+        if mismatch:
+            raise RuntimeError(f"EXACT_RESUME_EVIDENCE_INVALID: {mismatch}")
+        return report
+
     def validate_three_way_alignment_evidence(self) -> dict[str, Any]:
         if self.approvals.three_way_alignment != "APPROVED":
             raise RuntimeError("ALIGNMENT_BLOCKED")
@@ -943,6 +1032,7 @@ class V31Main500MConfig(BaseModel):
             )
         self.validate_three_way_alignment_evidence()
         self.validate_preflight_evidence()
+        self.validate_exact_resume_evidence()
         self.validate_human_interpretability_artifact()
 
     def require_execution_authorized(self) -> None:

@@ -146,14 +146,70 @@ def test_main500m_draft_preserves_zscore_math_and_fails_closed() -> None:
     )
     assert not config.approvals.human_interpretability.permits_main_authorization()
     assert "MODEL_THREE_BLOCKED" not in report["blockers"]
+    assert "RESUME_BLOCKED" not in report["blockers"]
     assert "MILESTONE_POLICY_APPROVAL_PENDING" in report["blockers"]
-    with pytest.raises(RuntimeError, match="RESUME_BLOCKED"):
+    with pytest.raises(RuntimeError, match="MONITORING_POLICY_APPROVAL_PENDING"):
         config.require_execution_authorized()
 
     invalid = config.payload()
     invalid["approvals"]["human_interpretability"]["researcher_decision"] = "APPROVE"
     with pytest.raises(ValueError, match="cannot claim a decision"):
         V31Main500MConfig.model_validate(invalid)
+
+
+def test_main500m_exact_resume_evidence_is_hash_pinned_and_semantic(
+    tmp_path: Path,
+) -> None:
+    payload = _main500m_config().payload()
+    approvals = payload["approvals"]
+    approvals["exact_resume_source_commit"] = "a" * 40
+    approvals["exact_resume_contract_sha256"] = "b" * 64
+    report = {
+        "status": "PASS",
+        "mode": "resume_validation",
+        "strategy": "model_owned",
+        "git_sha": approvals["exact_resume_source_commit"],
+        "world_size": 3,
+        "logical_target_count": 168,
+        "optimizer_steps": 4,
+        "accepted_exposures": 32_768,
+        "uninterrupted_vs_resumed_next_update": "BITWISE_EXACT",
+        "dcp_save_reload_resume_update": "PASS",
+        "resume_validation_contract_sha256": approvals[
+            "exact_resume_contract_sha256"
+        ],
+        "uninterrupted_state_sha256_by_rank": ["rank0", "rank1", "rank2"],
+        "resumed_state_sha256_by_rank": ["rank0", "rank1", "rank2"],
+        "exact_data_replay": {
+            "step": 4,
+            "accepted_exposures": 32_768,
+            "unique_anchors": 32_768,
+            "repeated_exposures": 0,
+        },
+        "source_state_immutability_by_rank": [
+            {"status": "PASS", "initial_sha256": key, "final_sha256": key}
+            for key in ("gemma", "smollm2", "granite")
+        ],
+    }
+    artifact = tmp_path / "resume_report.json"
+    artifact.write_text(json.dumps(report, sort_keys=True), encoding="utf-8")
+    approvals["exact_resume_artifact"] = str(artifact)
+    approvals["exact_resume_artifact_sha256"] = hashlib.sha256(
+        artifact.read_bytes()
+    ).hexdigest()
+    config = V31Main500MConfig.model_validate(payload)
+    assert config.validate_exact_resume_evidence() == report
+
+    report["exact_data_replay"]["repeated_exposures"] = 1
+    artifact.write_text(json.dumps(report, sort_keys=True), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="EXACT_RESUME_ARTIFACT_HASH_MISMATCH"):
+        config.validate_exact_resume_evidence()
+    approvals["exact_resume_artifact_sha256"] = hashlib.sha256(
+        artifact.read_bytes()
+    ).hexdigest()
+    invalid = V31Main500MConfig.model_validate(payload)
+    with pytest.raises(RuntimeError, match="EXACT_RESUME_EVIDENCE_INVALID"):
+        invalid.validate_exact_resume_evidence()
 
 
 def test_main500m_slurm_proposals_separate_preflight_and_main() -> None:
@@ -331,7 +387,7 @@ def test_main500m_mode_gate_cannot_cross_preflight_and_main_boundaries(
         max_steps=61_036,
         run_dir=tmp_path / "main",
     )
-    with pytest.raises(RuntimeError, match="RESUME_BLOCKED"):
+    with pytest.raises(RuntimeError, match="MONITORING_POLICY_APPROVAL_PENDING"):
         _authorize_main500m_mode(draft, main_args)
 
     skip_args = copy.copy(main_args)
@@ -394,6 +450,9 @@ def test_main500m_preflight_evidence_is_pinned_and_semantically_validated(
     tmp_path: Path,
 ) -> None:
     payload = _main500m_config().payload()
+    payload["approvals"]["exact_resume"] = (
+        "SYNTHETIC_VALIDATED_REAL_THREE_MODEL_PENDING"
+    )
     preflight_root = (
         tmp_path / "aspd_v3" / "main500m_preparation_v1" / "preflight"
     )
