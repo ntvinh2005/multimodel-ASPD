@@ -37,7 +37,7 @@ detached binary internal support. No main-training job has been submitted.
 | 7 | Sustained-collapse protection | The monitor was stateless; a collapse alert could not cause a recoverable controlled pause, and scheduled diagnostic completeness was not enforced. | `main500m_monitoring.py`, `main500m_config.py`, runner, draft YAML, tests. | Nine focused main-500M CPU tests; Ruff. | `FIXED_TESTED` | Researcher must approve the versioned v1 thresholds/actions before main authorization; the draft remains pending. |
 | 8 | Staged milestones | Milestones existed only as YAML values; the runner neither forced diagnostics/checkpoints nor required an explicit continuation decision. | Runner, `main500m_continuation.py`, config/schema, authorization template, tests. | Thirteen focused main-500M CPU tests; Ruff; Python compilation. | `FIXED_TESTED` | Researcher must approve policy v1 and provide a checkpoint-pinned decision after each staged review; draft approval remains pending. |
 | 9 | Human interpretability | The validated package exists, but no researcher response, graded human analysis, or decision artifact exists; the main schema could not distinguish these stages or accepted uncertainty. | Main config/schema, draft YAML, status artifact, decision template, tests. | Live read-only package/hash/status audit; focused main-500M tests; Ruff. | `BLOCKED_RESEARCHER_DECISION` | Researcher must complete responses and decide, or explicitly accept remaining semantic uncertainty in a hash-pinned decision artifact. |
-| 10 | Slurm/runtime reliability | In addition to the historical launch gaps, read-only audit found the proposal forwards `USR1` to the entire torchrun process group and assumes worker exit 99 is preserved by torchrun; neither assumption is valid. The unconditional 1 TiB restart check can also reject a valid resume after a checkpoint consumes space. | Persistent-worktree bounded launcher is validated; file-backed stop/requeue protocol and fresh-vs-resume storage checks are the next minimal fix. | Both scripts pass static syntax; job 50542075 validates ordinary launch only. Real signal/requeue is not yet safe or executed. | `IN_PROGRESS` | Fix the signal/requeue contract, run a bounded one-requeue CPU harness, then exercise isolated real-model external resume; main is unauthorized. |
+| 10 | Slurm/runtime reliability | In addition to the historical launch gaps, read-only audit found the proposal forwarded `USR1` to the entire torchrun process group, assumed worker exit 99 survived torchrun, and applied the 1 TiB fresh-start threshold unchanged to resume. | Replaced it with a file-backed stop request, verified COMPLETE checkpoint artifact, zero-exit torchrun contract, fresh-vs-resume storage thresholds, and a one-requeue CPU harness. | Job 50550768 completed `0:0` after exactly one requeue: checkpoint hash/cursor restored, next anchor advanced, duplicate count zero. Static shell/Ruff/focused tests PASS. | `IN_PROGRESS` | Exercise the same runner path in isolated real three-model external resume; main is unauthorized. |
 | 11 | Specification/metadata consistency | Canonical alignment was absent from the formal notation; legacy policy identifiers diverged; raw/normalized logits and Latin u versus Greek nu needed an explicit map; readiness metadata was stale. | Canonical specification, stream/manifest code, tests, consistency artifact; readiness refresh remains part of final audit. | Focused z-score/target/alignment tests, production-policy test, Ruff. | `FIXED_TESTED` | No scientific choice was made; real model-3 evidence remains independently blocked. |
 
 ## Blocker 1 resolution record
@@ -279,13 +279,11 @@ unambiguous and fail closed on mismatched metadata.
 
 ## Blocker 10 Slurm and runtime reliability record
 
-Follow-up audit supersedes the earlier static signal-path assessment below: the current proposal is
-**not production-safe for requeue**. Sending `USR1` to the complete `setsid` process group also
-targets `torchrun`, whose launcher has no `USR1` handler, and a worker `SystemExit(99)` is surfaced
-by torchrun as a launcher failure rather than a stable shell return-code contract. In addition, the
-1 TiB fresh-start check cannot be applied unchanged after a 127 GB checkpoint already exists. The
-main script remains a proposal and must not be submitted until these three defects are fixed and a
-bounded one-requeue harness passes.
+Follow-up audit found the previous proposal was not production-safe for requeue. Sending `USR1` to
+the complete `setsid` process group also targeted `torchrun`, whose launcher has no `USR1` handler,
+and a worker `SystemExit(99)` was surfaced as a launcher failure rather than a stable shell return
+code. The 1 TiB fresh-start check also could not be applied unchanged after a 127 GB checkpoint
+already existed.
 
 What was wrong: the original main proposal resolved its environment and virtualenv relative to a
 different checkout, did not pin the reviewed Git commit, did not enforce the 1 TiB startup reserve,
@@ -300,9 +298,19 @@ reserve. Preflight requires a new dedicated namespace and 3--20 authorized steps
 existing run to contain both its immutable manifest and a complete checkpoint, while an external
 resume checkpoint must contain `COMPLETE` and `manifest.json`. In-place recovery deliberately uses
 the runner's latest complete checkpoint. Milestone continuation authorization is passed explicitly.
-The main script requeues only after Slurm `USR1` is forwarded to the trainer and the trainer exits
-99 after its atomic recovery checkpoint; controlled health and milestone exits 86/87 are not
+The corrected main proposal writes an atomic stop-request file instead of signalling the torchrun
+process group. Rank 0 broadcasts that request at the next step boundary; the runner writes a
+COMPLETE checkpoint and a hash-pinned signal-completion artifact, then exits zero. The shell
+requeues only after independently checking that artifact and manifest hash. Resume requires free
+space for one additional atomic checkpoint plus the configured 200 GiB reserve; only a fresh run
+requires the full 1 TiB startup reservation. Controlled health and milestone exits 86/87 are not
 automatically requeued.
+
+CPU-only Slurm job `50550768` exercised the bounded control path with one automatic requeue. Slurm
+recorded `Restarts=1` and final exit `0:0`; the second attempt restored cursor 3, advanced to cursor
+4 / `anchor-000004`, reported zero duplicate anchors, and matched checkpoint SHA-256
+`7224ea4f200d299d49acc7180001bcfb020b6112482322151598bd6162dbb581`. This validates the scheduler
+and shell contract, not real three-model DCP; the latter remains part of Blocker 6.
 
 Live scheduler metadata at `2026-11-09T19:39:08-05:00` showed account `thai`, partition
 `hpg-b200` UP with 60 eight-B200 nodes and a 14-day partition limit. This is inventory, not an
@@ -327,11 +335,8 @@ PASS
 All checks passed
 ```
 
-The main draft validator exited 2 with `submission_permitted=false`. The preflight validator stopped
-with the four expected blockers: model 3 missing, model-3 approval pending, alignment missing, and
-bounded-preflight authorization missing. A real scheduled signal/requeue test was not run because
-this task does not authorize job submission. It remains required before main authorization and is
-not represented as passing evidence. The machine-readable evidence boundary is in
+The main draft validator still exits with `submission_permitted=false`. The machine-readable
+evidence boundary is in
 `analysis/aspd_v3_500m_blocker_resolution/runtime_reliability_status.json`.
 
 Scientific semantics changed: no. These changes affect launch authorization, provenance, storage,

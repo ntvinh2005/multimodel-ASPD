@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "measured_at": "2026-11-09T19:39:08-05:00",
-  "status": "STATIC_RUNTIME_GUARDS_PASS_REAL_SIGNAL_TEST_PENDING",
+  "status": "CPU_SIGNAL_REQUEUE_PASS_REAL_THREE_MODEL_EXTERNAL_RESUME_PENDING",
   "slurm": {
     "account": "thai",
     "account_association_observed": true,
@@ -16,7 +16,7 @@
       "hwgui"
     ],
     "safe_fallback": "WAIT_FOR_B200_UNLESS_A_SEPARATE_BOUNDED_MEMORY_PREFLIGHT_APPROVES_ANOTHER_GPU_CLASS",
-    "submitted_by_this_audit": false,
+    "submitted_by_this_audit": true,
     "cancelled_by_this_audit": false,
     "other_user_jobs_observed": [
       {
@@ -52,16 +52,19 @@
     "main_existing_run_requires_manifest_and_complete_checkpoint",
     "external_resume_requires_complete_checkpoint_and_manifest",
     "milestone_continuation_authorization_is_forwarded",
-    "requeue_occurs_only_after_USR1_and_trainer_exit_99"
+    "slurm_usr1_creates_a_file_backed_stop_request_without_signalling_torchrun",
+    "requeue_requires_zero_exit_and_a_verified_complete_checkpoint_artifact",
+    "resume_storage_requires_one_atomic_checkpoint_plus_the_200_gibibyte_reserve"
   ],
   "tests": {
     "bash_syntax": "PASS_BOTH_PROPOSALS",
     "focused_cpu": "17_PASSED_17_DESELECTED",
     "main_draft_validation": "EXPECTED_FAIL_CLOSED_EXIT_2",
     "preflight_authorization_validation": "PASS_EXACT_FOUR_STEP_FRESH_NAMESPACE",
-    "real_slurm_signal_requeue": "NOT_RUN",
+    "cpu_slurm_signal_requeue": "PASS_JOB_50550768_ONE_RESTART_ZERO_DUPLICATES",
+    "real_three_model_external_resume": "PENDING",
     "real_three_model_preflight": "PASS_JOB_50542075",
     "real_final_three_model_throughput": "AGGREGATE_FOUR_STEP_MEASURED_PROFILED_BREAKDOWN_PENDING"
   },
-  "evidence_boundary": "Static shell and CPU validation, immutable production manifests, and the real four-step three-B200 preflight passed. A profiled timing breakdown, uninterrupted-versus-resumed comparison, and real signal/requeue test remain pending."
+  "evidence_boundary": "The scheduler/shell signal and one-requeue contract passed in CPU-only job 50550768. This does not replace the pending isolated real three-model external-resume comparison. Main training remains unauthorized."
 }
