@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "status": "HUMAN_INTERPRETABILITY_PACKAGE_COMPLETE_RESPONSES_PENDING",
+  "observed_date": "2026-11-09",
+  "package_manifest": {
+    "path": "/orange/thai/vinhnguyen1/aspd_v3/human_interpretability_v1/package/audit/preparation_manifest.json",
+    "sha256": "40a508cb821b319890fb49c6a44e47d4642a79275ef564fcebadbb3c1b98fe98",
+    "reported_status": "HUMAN_INTERPRETABILITY_PACKAGE_COMPLETE"
+  },
+  "public_dataset": {
+    "path": "/orange/thai/vinhnguyen1/aspd_v3/human_interpretability_v1/package/public/blinded_items.json",
+    "sha256": "d6bb4fcdc032a3cb322f979aff36afccc8750bd2d2c5fcd463f9f207a5a91f4a"
+  },
+  "response_template": {
+    "path": "/orange/thai/vinhnguyen1/aspd_v3/human_interpretability_v1/package/public/response_template.json",
+    "sha256": "c4ece73b0152fe438c846de2154fca3fbd2d8b846627d88927db0ccbf684ba46"
+  },
+  "package_validation": {
+    "anchor_span_offsets": "PASS",
+    "intruder_document_disjointness": "PASS",
+    "matched_anchors": "PASS",
+    "natural_gate_only": "PASS",
+    "public_blinding": "PASS",
+    "source_weights_unchanged": "PASS",
+    "target_document_distinctness": "PASS",
+    "target_inactivity_at_intruder": "PASS"
+  },
+  "researcher_response_exports_found": 0,
+  "graded_human_analysis_found": false,
+  "researcher_decision_found": false,
+  "main_readiness": "HUMAN_INTERPRETABILITY_APPROVAL_PENDING"
+}

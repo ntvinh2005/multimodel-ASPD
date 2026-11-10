@@ -204,10 +204,14 @@ approvals:
   third_model: PENDING_RESEARCHER_APPROVAL
   three_way_alignment: PENDING_THIRD_TOKENIZER_VALIDATION
   human_interpretability:
-    status: PENDING_RESEARCHER_DECISION
-    artifact_path: null
-    artifact_sha256: null
+    status: PENDING_RESEARCHER_RESPONSES
+    artifact_path: /orange/thai/vinhnguyen1/aspd_v3/human_interpretability_v1/package/audit/preparation_manifest.json
+    artifact_sha256: 40a508cb821b319890fb49c6a44e47d4642a79275ef564fcebadbb3c1b98fe98
     researcher_decision: null
+    scientific_limitations:
+      - No researcher response export or graded human analysis exists.
+      - A single-evaluator result would remain exploratory and would not establish inter-rater reliability.
+      - The validated package compares the matched two-model control and z-score checkpoints, not the unresolved three-model main system.
   exact_resume: SYNTHETIC_VALIDATED_REAL_THREE_MODEL_PENDING
   storage_reservation: STORAGE_BLOCKED
   monitoring_policy: PENDING_RESEARCHER_APPROVAL
@@ -225,4 +229,4 @@ approvals:
     optimizer_steps: null
   full_training: MAIN_500M_NOT_AUTHORIZED
 
-evaluation_status: HUMAN_INTERPRETABILITY_DECISION_PENDING
+evaluation_status: HUMAN_INTERPRETABILITY_PACKAGE_COMPLETE_RESPONSES_PENDING

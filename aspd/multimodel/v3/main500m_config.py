@@ -419,25 +419,45 @@ class HumanInterpretabilityApproval(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    status: Literal["PENDING_RESEARCHER_DECISION", "APPROVED"]
+    status: Literal[
+        "PENDING_RESEARCHER_RESPONSES",
+        "ANALYSIS_COMPLETE_PENDING_RESEARCHER_DECISION",
+        "APPROVED_HUMAN_EVIDENCE",
+        "APPROVED_SEMANTIC_UNCERTAINTY_ACCEPTED",
+        "REJECTED",
+    ]
     artifact_path: str | None = None
     artifact_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     researcher_decision: str | None = None
+    scientific_limitations: tuple[str, ...]
 
     @model_validator(mode="after")
     def validate_gate(self) -> HumanInterpretabilityApproval:
-        evidence = (self.artifact_path, self.artifact_sha256, self.researcher_decision)
-        if self.status == "PENDING_RESEARCHER_DECISION":
-            if any(value is not None for value in evidence):
-                raise ValueError(
-                    "pending human-interpretability gate must not contain approval evidence"
-                )
-        elif any(value is None or not str(value).strip() for value in evidence):
+        artifact = (self.artifact_path, self.artifact_sha256)
+        if any(value is None or not str(value).strip() for value in artifact):
+            raise ValueError("human-interpretability status requires a pinned artifact")
+        if not self.scientific_limitations or any(
+            not limitation.strip() for limitation in self.scientific_limitations
+        ):
+            raise ValueError("human-interpretability limitations must be explicit")
+        decision_required = self.status in {
+            "APPROVED_HUMAN_EVIDENCE",
+            "APPROVED_SEMANTIC_UNCERTAINTY_ACCEPTED",
+            "REJECTED",
+        }
+        if decision_required and not str(self.researcher_decision or "").strip():
             raise ValueError(
-                "approved human-interpretability gate requires artifact path, SHA-256, "
-                "and researcher decision"
+                "final human-interpretability status requires a researcher decision"
             )
+        if not decision_required and self.researcher_decision is not None:
+            raise ValueError("pending human-interpretability status cannot claim a decision")
         return self
+
+    def permits_main_authorization(self) -> bool:
+        return self.status in {
+            "APPROVED_HUMAN_EVIDENCE",
+            "APPROVED_SEMANTIC_UNCERTAINTY_ACCEPTED",
+        }
 
 
 class Main500MApprovals(BaseModel):
@@ -474,7 +494,13 @@ class V31Main500MConfig(BaseModel):
     monitoring: Main500MMonitoring
     runtime: Main500MRuntime
     approvals: Main500MApprovals
-    evaluation_status: Literal["HUMAN_INTERPRETABILITY_DECISION_PENDING"]
+    evaluation_status: Literal[
+        "HUMAN_INTERPRETABILITY_PACKAGE_COMPLETE_RESPONSES_PENDING",
+        "HUMAN_INTERPRETABILITY_ANALYSIS_COMPLETE_DECISION_PENDING",
+        "HUMAN_INTERPRETABILITY_APPROVED",
+        "SEMANTIC_UNCERTAINTY_EXPLICITLY_ACCEPTED",
+        "HUMAN_INTERPRETABILITY_REJECTED",
+    ]
 
     @model_validator(mode="after")
     def validate_contract(self) -> V31Main500MConfig:
@@ -495,6 +521,23 @@ class V31Main500MConfig(BaseModel):
                 raise ValueError("third-model approval cannot precede a complete source contract")
         elif third.approval_status != "APPROVED" or self.approvals.third_model != "APPROVED":
             raise ValueError("the third model requires explicit researcher approval")
+        expected_evaluation_status = {
+            "PENDING_RESEARCHER_RESPONSES": (
+                "HUMAN_INTERPRETABILITY_PACKAGE_COMPLETE_RESPONSES_PENDING"
+            ),
+            "ANALYSIS_COMPLETE_PENDING_RESEARCHER_DECISION": (
+                "HUMAN_INTERPRETABILITY_ANALYSIS_COMPLETE_DECISION_PENDING"
+            ),
+            "APPROVED_HUMAN_EVIDENCE": "HUMAN_INTERPRETABILITY_APPROVED",
+            "APPROVED_SEMANTIC_UNCERTAINTY_ACCEPTED": (
+                "SEMANTIC_UNCERTAINTY_EXPLICITLY_ACCEPTED"
+            ),
+            "REJECTED": "HUMAN_INTERPRETABILITY_REJECTED",
+        }[self.approvals.human_interpretability.status]
+        if self.evaluation_status != expected_evaluation_status:
+            raise ValueError(
+                "human-interpretability approval and evaluation status disagree"
+            )
         preflight = self.approvals.bounded_preflight
         if preflight.status == "AUTHORIZED":
             if preflight.output_namespace != self.runtime.preflight_output_root:
@@ -548,7 +591,7 @@ class V31Main500MConfig(BaseModel):
             blockers.append("MONITORING_POLICY_APPROVAL_PENDING")
         if self.approvals.milestone_policy != "APPROVED":
             blockers.append("MILESTONE_POLICY_APPROVAL_PENDING")
-        if self.approvals.human_interpretability.status != "APPROVED":
+        if not self.approvals.human_interpretability.permits_main_authorization():
             blockers.append("HUMAN_INTERPRETABILITY_APPROVAL_PENDING")
         if self.approvals.three_model_gpu_preflight.status != "PASSED":
             blockers.append("THREE_MODEL_GPU_PREFLIGHT_PENDING")
@@ -659,6 +702,55 @@ class V31Main500MConfig(BaseModel):
             raise RuntimeError(f"THREE_MODEL_GPU_PREFLIGHT_EVIDENCE_INVALID: {mismatch}")
         return report
 
+    def validate_human_interpretability_artifact(self) -> dict[str, Any]:
+        human = self.approvals.human_interpretability
+        if not human.permits_main_authorization():
+            raise RuntimeError("HUMAN_INTERPRETABILITY_APPROVAL_PENDING")
+        assert human.artifact_path is not None and human.artifact_sha256 is not None
+        artifact = Path(human.artifact_path)
+        if not artifact.is_file():
+            raise RuntimeError("HUMAN_INTERPRETABILITY_ARTIFACT_MISSING")
+        observed = hashlib.sha256(artifact.read_bytes()).hexdigest()
+        if observed != human.artifact_sha256:
+            raise RuntimeError("HUMAN_INTERPRETABILITY_ARTIFACT_HASH_MISMATCH")
+        decision = json.loads(artifact.read_text(encoding="utf-8"))
+        expected_decision = {
+            "APPROVED_HUMAN_EVIDENCE": "APPROVE_HUMAN_EVIDENCE",
+            "APPROVED_SEMANTIC_UNCERTAINTY_ACCEPTED": "ACCEPT_SEMANTIC_UNCERTAINTY",
+        }[human.status]
+        expected = {
+            "schema_version": 1,
+            "status": "HUMAN_INTERPRETABILITY_RESEARCHER_DECISION",
+            "decision": expected_decision,
+            "researcher_decision": human.researcher_decision,
+            "scientific_limitations": list(human.scientific_limitations),
+        }
+        mismatch = {
+            key: {"expected": value, "observed": decision.get(key)}
+            for key, value in expected.items()
+            if decision.get(key) != value
+        }
+        evidence_path = decision.get("evaluation_artifact_path")
+        evidence_sha256 = decision.get("evaluation_artifact_sha256")
+        if not isinstance(evidence_path, str) or not isinstance(evidence_sha256, str):
+            mismatch["evaluation_artifact"] = "path and SHA-256 are required"
+        else:
+            evidence = Path(evidence_path)
+            if not evidence.is_file():
+                mismatch["evaluation_artifact"] = "missing"
+            elif hashlib.sha256(evidence.read_bytes()).hexdigest() != evidence_sha256:
+                mismatch["evaluation_artifact"] = "SHA-256 mismatch"
+            elif human.status == "APPROVED_HUMAN_EVIDENCE":
+                evaluation = json.loads(evidence.read_text(encoding="utf-8"))
+                if evaluation.get("status") != "HUMAN_INTERPRETABILITY_ANALYSIS_COMPLETE":
+                    mismatch["evaluation_artifact.status"] = {
+                        "expected": "HUMAN_INTERPRETABILITY_ANALYSIS_COMPLETE",
+                        "observed": evaluation.get("status"),
+                    }
+        if mismatch:
+            raise RuntimeError(f"HUMAN_INTERPRETABILITY_DECISION_INVALID: {mismatch}")
+        return decision
+
     def require_main_authorized(self) -> None:
         blockers = self.readiness_blockers()
         if blockers:
@@ -666,20 +758,7 @@ class V31Main500MConfig(BaseModel):
                 "ASPD v3.1 main 500M execution is fail-closed: " + ", ".join(blockers)
             )
         self.validate_preflight_evidence()
-        human = self.approvals.human_interpretability
-        assert human.artifact_path is not None and human.artifact_sha256 is not None
-        artifact = Path(human.artifact_path)
-        if not artifact.is_file():
-            raise RuntimeError(
-                "ASPD v3.1 main 500M execution is fail-closed: "
-                "HUMAN_INTERPRETABILITY_ARTIFACT_MISSING"
-            )
-        observed = hashlib.sha256(artifact.read_bytes()).hexdigest()
-        if observed != human.artifact_sha256:
-            raise RuntimeError(
-                "ASPD v3.1 main 500M execution is fail-closed: "
-                "HUMAN_INTERPRETABILITY_ARTIFACT_HASH_MISMATCH"
-            )
+        self.validate_human_interpretability_artifact()
 
     def require_execution_authorized(self) -> None:
         """Backward-compatible alias for full main authorization only."""

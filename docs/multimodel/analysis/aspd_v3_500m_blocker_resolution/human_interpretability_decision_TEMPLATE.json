@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "status": "PENDING_RESEARCHER_DECISION",
+  "decision": null,
+  "researcher_decision": null,
+  "scientific_limitations": [
+    "Record the evaluator count and whether inter-rater reliability was measured.",
+    "Record whether the decision relies on human evidence or explicitly accepts remaining semantic uncertainty.",
+    "Record that the matched human package evaluates the two-model control and z-score checkpoints rather than the unresolved three-model main system."
+  ],
+  "evaluation_artifact_path": null,
+  "evaluation_artifact_sha256": null
+}

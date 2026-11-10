@@ -130,19 +130,83 @@ def test_main500m_draft_preserves_zscore_math_and_fails_closed() -> None:
     assert config.data.optimizer_steps == 61_036
     assert config.data.planned_accepted_anchor_exposures == 500_006_912
     assert config.approvals.human_interpretability.status == (
-        "PENDING_RESEARCHER_DECISION"
+        "PENDING_RESEARCHER_RESPONSES"
     )
+    assert config.evaluation_status == (
+        "HUMAN_INTERPRETABILITY_PACKAGE_COMPLETE_RESPONSES_PENDING"
+    )
+    assert not config.approvals.human_interpretability.permits_main_authorization()
     assert "MODEL_THREE_BLOCKED" in report["blockers"]
     assert "MILESTONE_POLICY_APPROVAL_PENDING" in report["blockers"]
     with pytest.raises(RuntimeError, match="MODEL_THREE_BLOCKED"):
         config.require_execution_authorized()
 
     invalid = config.payload()
-    invalid["approvals"]["human_interpretability"]["artifact_path"] = (
-        "/immutable/human-evaluation/decision.json"
-    )
-    with pytest.raises(ValueError, match="pending human-interpretability gate"):
+    invalid["approvals"]["human_interpretability"]["researcher_decision"] = "APPROVE"
+    with pytest.raises(ValueError, match="cannot claim a decision"):
         V31Main500MConfig.model_validate(invalid)
+
+
+def test_main500m_human_gate_distinguishes_evidence_from_accepted_uncertainty(
+    tmp_path: Path,
+) -> None:
+    payload = _main500m_config().payload()
+    gate = payload["approvals"]["human_interpretability"]
+    evaluation_path = tmp_path / "package_manifest.json"
+    evaluation_path.write_text(
+        json.dumps({"status": "HUMAN_INTERPRETABILITY_PACKAGE_COMPLETE"}),
+        encoding="utf-8",
+    )
+    researcher_decision = (
+        "Proceed while explicitly accepting single-rater semantic uncertainty."
+    )
+    decision_path = tmp_path / "researcher_decision.json"
+    decision_payload = {
+        "schema_version": 1,
+        "status": "HUMAN_INTERPRETABILITY_RESEARCHER_DECISION",
+        "decision": "ACCEPT_SEMANTIC_UNCERTAINTY",
+        "researcher_decision": researcher_decision,
+        "scientific_limitations": gate["scientific_limitations"],
+        "evaluation_artifact_path": str(evaluation_path),
+        "evaluation_artifact_sha256": hashlib.sha256(
+            evaluation_path.read_bytes()
+        ).hexdigest(),
+    }
+    decision_path.write_text(json.dumps(decision_payload), encoding="utf-8")
+    gate.update(
+        {
+            "status": "APPROVED_SEMANTIC_UNCERTAINTY_ACCEPTED",
+            "artifact_path": str(decision_path),
+            "artifact_sha256": hashlib.sha256(decision_path.read_bytes()).hexdigest(),
+            "researcher_decision": researcher_decision,
+        }
+    )
+    payload["evaluation_status"] = "SEMANTIC_UNCERTAINTY_EXPLICITLY_ACCEPTED"
+    accepted = V31Main500MConfig.model_validate(payload)
+    assert accepted.approvals.human_interpretability.permits_main_authorization()
+    assert accepted.validate_human_interpretability_artifact() == decision_payload
+
+    decision_payload["decision"] = "APPROVE_HUMAN_EVIDENCE"
+    decision_payload["researcher_decision"] = "Approve based on completed human evidence."
+    decision_path.write_text(json.dumps(decision_payload), encoding="utf-8")
+    gate.update(
+        {
+            "status": "APPROVED_HUMAN_EVIDENCE",
+            "artifact_sha256": hashlib.sha256(decision_path.read_bytes()).hexdigest(),
+            "researcher_decision": decision_payload["researcher_decision"],
+        }
+    )
+    payload["evaluation_status"] = "HUMAN_INTERPRETABILITY_APPROVED"
+    unsupported_claim = V31Main500MConfig.model_validate(payload)
+    with pytest.raises(RuntimeError, match="evaluation_artifact.status"):
+        unsupported_claim.validate_human_interpretability_artifact()
+
+    gate["status"] = "REJECTED"
+    gate["researcher_decision"] = "Do not proceed on current semantic evidence."
+    payload["evaluation_status"] = "HUMAN_INTERPRETABILITY_REJECTED"
+    rejected = V31Main500MConfig.model_validate(payload)
+    assert not rejected.approvals.human_interpretability.permits_main_authorization()
+    assert "HUMAN_INTERPRETABILITY_APPROVAL_PENDING" in rejected.readiness_blockers()
 
 
 def test_main500m_bounded_preflight_has_independent_fail_closed_authorization(

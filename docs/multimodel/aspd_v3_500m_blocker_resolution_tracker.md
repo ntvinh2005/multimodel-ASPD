@@ -36,7 +36,7 @@ detached binary internal support. No main-training job has been submitted.
 | 6 | Exact checkpoint resume | Synthetic three-rank resume passed previously; real three-model GPU resume remains untested. | None yet | Not run in this branch. | `BLOCKED_EXTERNAL_DEPENDENCY` | Real-model preflight prerequisites and bounded GPU authorization. |
 | 7 | Sustained-collapse protection | The monitor was stateless; a collapse alert could not cause a recoverable controlled pause, and scheduled diagnostic completeness was not enforced. | `main500m_monitoring.py`, `main500m_config.py`, runner, draft YAML, tests. | Nine focused main-500M CPU tests; Ruff. | `FIXED_TESTED` | Researcher must approve the versioned v1 thresholds/actions before main authorization; the draft remains pending. |
 | 8 | Staged milestones | Milestones existed only as YAML values; the runner neither forced diagnostics/checkpoints nor required an explicit continuation decision. | Runner, `main500m_continuation.py`, config/schema, authorization template, tests. | Thirteen focused main-500M CPU tests; Ruff; Python compilation. | `FIXED_TESTED` | Researcher must approve policy v1 and provide a checkpoint-pinned decision after each staged review; draft approval remains pending. |
-| 9 | Human interpretability | Interface/protocol exist, but no versioned researcher response or decision artifact is present; completion status schema is too narrow. | None yet | Preparation tests exist; no scientific response evidence. | `BLOCKED_RESEARCHER_DECISION` | Researcher completion and explicit semantic-risk decision. |
+| 9 | Human interpretability | The validated package exists, but no researcher response, graded human analysis, or decision artifact exists; the main schema could not distinguish these stages or accepted uncertainty. | Main config/schema, draft YAML, status artifact, decision template, tests. | Live read-only package/hash/status audit; focused main-500M tests; Ruff. | `BLOCKED_RESEARCHER_DECISION` | Researcher must complete responses and decide, or explicitly accept remaining semantic uncertainty in a hash-pinned decision artifact. |
 | 10 | Slurm/runtime reliability | Main proposal exists; preflight proposal and bounded signal/requeue evidence remain incomplete. | None yet | Shell/runtime audit pending. | `AUDITING` | No main submission authorization exists. |
 | 11 | Specification/metadata consistency | Confirmed alignment policy-name mismatch and human-status limitation; broader notation/config/runtime comparison remains in progress. | None yet | Audit in progress. | `AUDITING` | Documentation corrections do not require scientific approval; semantic changes would. |
 
@@ -186,3 +186,36 @@ approval.
 Scientific semantics changed: no. Staging controls execution and review only. It does not change
 the z-score gate, BatchTopK, AuxK, objectives, optimizer, or exposure ledger. The draft adds
 `MILESTONE_POLICY_APPROVAL_PENDING`, so implementation does not manufacture approval.
+
+## Blocker 9 audit and schema resolution record
+
+What was wrong: the main contract represented human interpretation as only pending or approved and
+could not distinguish package preparation, completed responses, graded analysis, evidence-based
+approval, explicit acceptance of semantic uncertainty, or rejection. It also did not require a
+decision artifact to identify the underlying evaluation evidence and limitations.
+
+What was observed: the live read-only package manifest reports
+`HUMAN_INTERPRETABILITY_PACKAGE_COMPLETE`; all eight package-integrity checks are PASS. The
+manifest SHA-256 is `40a508cb821b319890fb49c6a44e47d4642a79275ef564fcebadbb3c1b98fe98`.
+The public dataset and response template are present with their recorded hashes. No researcher
+response export, graded human `analysis.json`, or researcher decision artifact was found. This is
+package readiness, not completed human evaluation.
+
+What changed: the draft now records
+`HUMAN_INTERPRETABILITY_PACKAGE_COMPLETE_RESPONSES_PENDING`, the exact package manifest path and
+hash, and three explicit scientific limitations. The schema separately represents analysis pending
+decision, approval from human evidence, explicit acceptance of remaining semantic uncertainty, and
+rejection. Only the two explicit approval states permit main authorization. A final approval must
+be a hash-pinned researcher-decision JSON that pins the underlying evaluation artifact and its
+SHA-256; evidence-based approval additionally requires an analysis artifact whose status is
+`HUMAN_INTERPRETABILITY_ANALYSIS_COMPLETE`. The pending template cannot accidentally validate as
+an approval.
+
+Machine-readable audit:
+`analysis/aspd_v3_500m_blocker_resolution/human_interpretability_status.json`.
+Decision template:
+`analysis/aspd_v3_500m_blocker_resolution/human_interpretability_decision_TEMPLATE.json`.
+
+Scientific semantics changed: no. No response was fabricated, no human score was inferred from the
+automated Llama output, and no interpretability approval was granted. The main contract remains
+`HUMAN_INTERPRETABILITY_APPROVAL_PENDING`.
