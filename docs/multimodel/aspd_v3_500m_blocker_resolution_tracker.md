@@ -325,3 +325,14 @@ not represented as passing evidence. The machine-readable evidence boundary is i
 Scientific semantics changed: no. These changes affect launch authorization, provenance, storage,
 recovery, and scheduling control only; the Transformer, z-score gate, BatchTopK, losses, C, K,
 target registration, and exposure accounting are unchanged.
+
+## Final readiness decision
+
+`MAIN_BLOCKED`
+
+Independent engineering preparation is complete to the current authorization boundary. Remaining
+work requires researcher decisions, storage capacity, or real approved third-model/Slurm execution:
+model 3, three-way tokenizer alignment, storage, real 168-target GPU preflight, real exact resume,
+scheduled signal/requeue, final-composition throughput, human interpretation, policy approvals, and
+final submission authorization. The complete evidence-boundary audit is in
+`aspd_v3_500m_final_readiness_audit.md`.

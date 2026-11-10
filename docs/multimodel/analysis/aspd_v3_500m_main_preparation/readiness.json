@@ -3,6 +3,7 @@
   "generated_at": "2026-11-09",
   "experiment_family": "aspd_v3_1_three_model_main500m",
   "scientific_status": "MAIN_500M_NOT_AUTHORIZED",
+  "final_readiness_decision": "MAIN_BLOCKED",
   "submission_permitted": false,
   "reference": {
     "branch": "main",
@@ -145,6 +146,8 @@
     "MILESTONE_POLICY_APPROVAL_PENDING",
     "HUMAN_INTERPRETABILITY_APPROVAL_PENDING",
     "THREE_MODEL_GPU_PREFLIGHT_PENDING",
+    "REAL_SLURM_SIGNAL_REQUEUE_PENDING",
+    "FINAL_COMPOSITION_THROUGHPUT_UNMEASURED",
     "MAIN_500M_NOT_AUTHORIZED"
   ],
   "slurm": {
