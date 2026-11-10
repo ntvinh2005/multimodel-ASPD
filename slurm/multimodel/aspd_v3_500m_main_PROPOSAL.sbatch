@@ -67,6 +67,7 @@ fi
 RUN_ROOT="$("${PYTHON}" -c 'import sys,yaml; print(yaml.safe_load(open(sys.argv[1]))["runtime"]["output_root"])' "${CONFIG}")"
 CHECKPOINT_ROOT="$("${PYTHON}" -c 'import sys,yaml; print(yaml.safe_load(open(sys.argv[1]))["runtime"]["checkpoint_root"])' "${CONFIG}")"
 REQUIRED_STARTUP_BYTES="$("${PYTHON}" -c 'import sys,yaml; print(yaml.safe_load(open(sys.argv[1]))["runtime"]["startup_storage_required_bytes"])' "${CONFIG}")"
+STORAGE_RESERVE_BYTES="$("${PYTHON}" -c 'import sys,yaml; print(yaml.safe_load(open(sys.argv[1]))["monitoring"]["storage_reserve_bytes"])' "${CONFIG}")"
 if [[ "${CHECKPOINT_ROOT}" != "${RUN_ROOT}" ]]; then
   echo "Runner requires checkpoint_root to equal output_root" >&2
   exit 2
@@ -75,13 +76,9 @@ if [[ ! -d "${RUN_ROOT}" || ! -w "${RUN_ROOT}" ]]; then
   echo "Approved run/storage root must already exist and be writable: ${RUN_ROOT}" >&2
   exit 2
 fi
-AVAILABLE_BYTES=$(df -PB1 "${RUN_ROOT}" | awk 'NR==2 {print $4}')
-if [[ -z "${AVAILABLE_BYTES}" || "${AVAILABLE_BYTES}" -lt "${REQUIRED_STARTUP_BYTES}" ]]; then
-  echo "Insufficient startup storage: available=${AVAILABLE_BYTES:-unknown}, required=${REQUIRED_STARTUP_BYTES}" >&2
-  exit 2
-fi
 RUN_ID=aspd_v3_1_three_model_168targets_c8192_k32_500m_v1
 RUN_DIR="${RUN_ROOT}/${RUN_ID}"
+RESUME_SOURCE_CHECKPOINT=""
 if [[ -e "${RUN_DIR}" ]]; then
   if [[ ! -f "${RUN_DIR}/run_manifest.json" ]]; then
     echo "Refusing an existing output namespace without a run manifest: ${RUN_DIR}" >&2
@@ -98,11 +95,23 @@ if [[ -e "${RUN_DIR}" ]]; then
     echo "Existing run has no complete checkpoint and cannot be resumed: ${RUN_DIR}" >&2
     exit 2
   fi
+  RESUME_SOURCE_CHECKPOINT=${LATEST_COMPLETE_CHECKPOINT}
 elif [[ -n "${RESUME_CHECKPOINT:-}" ]]; then
   if [[ ! -f "${RESUME_CHECKPOINT}/COMPLETE" || ! -f "${RESUME_CHECKPOINT}/manifest.json" ]]; then
     echo "External resume checkpoint must be complete and manifested: ${RESUME_CHECKPOINT}" >&2
     exit 2
   fi
+  RESUME_SOURCE_CHECKPOINT=${RESUME_CHECKPOINT}
+fi
+AVAILABLE_BYTES=$(df -PB1 "${RUN_ROOT}" | awk 'NR==2 {print $4}')
+REQUIRED_BYTES=${REQUIRED_STARTUP_BYTES}
+if [[ -n "${RESUME_SOURCE_CHECKPOINT}" ]]; then
+  CHECKPOINT_BYTES=$(du -sb "${RESUME_SOURCE_CHECKPOINT}" | awk '{print $1}')
+  REQUIRED_BYTES=$((CHECKPOINT_BYTES + STORAGE_RESERVE_BYTES))
+fi
+if [[ -z "${AVAILABLE_BYTES}" || "${AVAILABLE_BYTES}" -lt "${REQUIRED_BYTES}" ]]; then
+  echo "Insufficient storage: available=${AVAILABLE_BYTES:-unknown}, required=${REQUIRED_BYTES}" >&2
+  exit 2
 fi
 
 echo "git_sha=${CURRENT_GIT_SHA}"
@@ -114,13 +123,18 @@ nvidia-smi
 
 SIGNALLED=0
 TRAINER_PID=""
-forward_checkpoint_signal() {
+RESTART_COUNT=${SLURM_RESTART_COUNT:-0}
+export ASPD_STOP_REQUEST_FILE="${RUN_DIR}/.slurm-stop-request-${SLURM_JOB_ID}-${RESTART_COUNT}"
+export ASPD_SIGNAL_COMPLETION_ARTIFACT="${RUN_DIR}/signal_checkpoint_complete-${SLURM_JOB_ID}-${RESTART_COUNT}.json"
+request_checkpoint_stop() {
   SIGNALLED=1
-  if [[ -n "${TRAINER_PID}" ]]; then
-    kill -USR1 -- "-${TRAINER_PID}" 2>/dev/null || true
+  if [[ -d "${RUN_DIR}" ]]; then
+    STOP_TMP="${ASPD_STOP_REQUEST_FILE}.tmp.$$"
+    date --iso-8601=seconds > "${STOP_TMP}"
+    mv "${STOP_TMP}" "${ASPD_STOP_REQUEST_FILE}"
   fi
 }
-trap forward_checkpoint_signal USR1
+trap request_checkpoint_stop USR1
 
 RESUME_ARGS=()
 if [[ -n "${RESUME_CHECKPOINT:-}" ]]; then
@@ -148,10 +162,31 @@ setsid "${TORCHRUN}" \
 TRAINER_PID=$!
 
 set +e
-wait "${TRAINER_PID}"
-TRAINER_RC=$?
+while true; do
+  wait "${TRAINER_PID}"
+  TRAINER_RC=$?
+  if kill -0 "${TRAINER_PID}" 2>/dev/null; then
+    continue
+  fi
+  break
+done
 set -e
-if [[ "${SIGNALLED}" -eq 1 && "${TRAINER_RC}" -eq 99 ]]; then
+if [[ "${SIGNALLED}" -eq 1 && "${TRAINER_RC}" -eq 0 ]]; then
+  "${PYTHON}" - "${ASPD_SIGNAL_COMPLETION_ARTIFACT}" <<'PY'
+import hashlib
+import json
+import pathlib
+import sys
+
+artifact = pathlib.Path(sys.argv[1])
+payload = json.loads(artifact.read_text(encoding="utf-8"))
+if payload.get("status") != "SIGNAL_CHECKPOINT_COMPLETE":
+    raise SystemExit("signal completion artifact is not complete")
+manifest = pathlib.Path(payload["checkpoint_path"]) / "manifest.json"
+observed = hashlib.sha256(manifest.read_bytes()).hexdigest()
+if observed != payload.get("checkpoint_manifest_sha256"):
+    raise SystemExit("signal checkpoint manifest hash mismatch")
+PY
   echo "Verified complete signal checkpoint; requeueing ${SLURM_JOB_ID}"
   scontrol requeue "${SLURM_JOB_ID}"
   exit 0

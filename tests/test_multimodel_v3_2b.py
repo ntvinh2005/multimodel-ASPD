@@ -179,6 +179,12 @@ def test_main500m_slurm_proposals_separate_preflight_and_main() -> None:
     assert "  --mode preflight \\\n" not in main
     assert "#SBATCH --signal=B:USR1@300" in main
     assert "scontrol requeue" in main
+    assert "ASPD_STOP_REQUEST_FILE" in main
+    assert "ASPD_SIGNAL_COMPLETION_ARTIFACT" in main
+    assert "SIGNAL_CHECKPOINT_COMPLETE" in main
+    assert "kill -USR1" not in main
+    assert '"${TRAINER_RC}" -eq 99' not in main
+    assert "CHECKPOINT_BYTES + STORAGE_RESERVE_BYTES" in main
 
     assert "--mode preflight" in preflight
     assert "--require-preflight-ready" in preflight
