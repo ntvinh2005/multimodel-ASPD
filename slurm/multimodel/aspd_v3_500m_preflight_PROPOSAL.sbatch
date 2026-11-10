@@ -98,4 +98,5 @@ exec "${TORCHRUN}" \
   --run-dir "${PREFLIGHT_DIR}" \
   --max-steps "${PREFLIGHT_STEPS}" \
   --warmup-steps 0 \
+  --profile-stages \
   --local-files-only

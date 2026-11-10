@@ -754,6 +754,8 @@ class V31Main500MConfig(BaseModel):
             "dcp_save_reload_resume_update": "PASS",
             "checkpoint_parameter_and_adam_restore_probe": "PASS",
         }
+        if self.approvals.exact_resume == "VALIDATED_THREE_MODEL_GPU":
+            expected["uninterrupted_vs_resumed_next_update"] = "BITWISE_EXACT"
         mismatch = {
             key: {"expected": value, "observed": report.get(key)}
             for key, value in expected.items()
@@ -778,6 +780,27 @@ class V31Main500MConfig(BaseModel):
                     }.items()
                 ):
                     mismatch[f"source_correctness[{index}]"] = source
+        if self.approvals.exact_resume == "VALIDATED_THREE_MODEL_GPU":
+            exact_data_replay = report.get("exact_data_replay")
+            if not isinstance(exact_data_replay, dict) or any(
+                exact_data_replay.get(key) != value
+                for key, value in {
+                    "step": evidence.optimizer_steps,
+                    "accepted_exposures": evidence.optimizer_steps * 8192,
+                    "repeated_exposures": 0,
+                }.items()
+            ):
+                mismatch["exact_data_replay"] = exact_data_replay
+            source_immutability = report.get("source_state_immutability_by_rank")
+            if not isinstance(source_immutability, list) or len(source_immutability) != 3:
+                mismatch["source_state_immutability_by_rank"] = source_immutability
+            elif any(
+                not isinstance(item, dict)
+                or item.get("status") != "PASS"
+                or item.get("initial_sha256") != item.get("final_sha256")
+                for item in source_immutability
+            ):
+                mismatch["source_state_immutability_by_rank"] = source_immutability
         checkpoint_manifest = report.get("checkpoint_manifest")
         if not isinstance(checkpoint_manifest, dict) or any(
             checkpoint_manifest.get(key) != value

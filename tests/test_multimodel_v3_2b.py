@@ -16,6 +16,8 @@ from torch import nn
 
 from aspd.multimodel.cli.train_aspd_v3_2b import (
     _authorize_main500m_mode,
+    _canonical_metric_rows,
+    _exact_training_state_digest,
     _PoolPrefetcher,
     _record_continuation_authorization,
     _validate_main500m_alignment_manifest,
@@ -380,6 +382,7 @@ def test_main500m_preflight_evidence_is_pinned_and_semantically_validated(
         "git_sha": "1" * 40,
         "dcp_save_reload_resume_update": "PASS",
         "checkpoint_parameter_and_adam_restore_probe": "PASS",
+        "uninterrupted_vs_resumed_next_update": "BITWISE_EXACT",
         "source_correctness": [
             {
                 "status": "PASS",
@@ -396,6 +399,45 @@ def test_main500m_preflight_evidence_is_pinned_and_semantically_validated(
     )
     valid = V31Main500MConfig.model_validate(payload)
     assert valid.validate_preflight_evidence() == report
+
+    report.pop("uninterrupted_vs_resumed_next_update")
+    evidence_path.write_text(json.dumps(report, sort_keys=True), encoding="utf-8")
+    payload["approvals"]["three_model_gpu_preflight"]["artifact_sha256"] = (
+        hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+    )
+    legacy_preflight = V31Main500MConfig.model_validate(payload)
+    assert legacy_preflight.validate_preflight_evidence() == report
+    payload["approvals"]["exact_resume"] = "VALIDATED_THREE_MODEL_GPU"
+    exact_resume_claim = V31Main500MConfig.model_validate(payload)
+    with pytest.raises(RuntimeError, match="EVIDENCE_INVALID"):
+        exact_resume_claim.validate_preflight_evidence()
+    report["uninterrupted_vs_resumed_next_update"] = "BITWISE_EXACT"
+    report["exact_data_replay"] = {
+        "step": 4,
+        "accepted_exposures": 32768,
+        "unique_anchors": 32768,
+        "repeated_exposures": 0,
+        "ordered_anchor_ids_sha256": "3" * 64,
+    }
+    report["source_state_immutability_by_rank"] = [
+        {
+            "rank": rank,
+            "model": model,
+            "initial_sha256": "4" * 64,
+            "final_sha256": "4" * 64,
+            "status": "PASS",
+        }
+        for rank, model in enumerate(("gemma", "smol", "granite"))
+    ]
+    evidence_path.write_text(json.dumps(report, sort_keys=True), encoding="utf-8")
+    payload["approvals"]["three_model_gpu_preflight"]["artifact_sha256"] = (
+        hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+    )
+    exact_valid = V31Main500MConfig.model_validate(payload)
+    assert exact_valid.validate_preflight_evidence() == report
+    payload["approvals"]["exact_resume"] = (
+        "SYNTHETIC_VALIDATED_REAL_THREE_MODEL_PENDING"
+    )
 
     report["git_sha"] = "2" * 40
     evidence_path.write_text(json.dumps(report, sort_keys=True), encoding="utf-8")
@@ -422,6 +464,61 @@ def test_main500m_source_contract_rejects_qwen() -> None:
     payload["models"][2]["model_id"] = "Qwen/forbidden-new-experiment"
     with pytest.raises(ValueError, match="Qwen is forbidden"):
         V31Main500MConfig.model_validate(payload)
+
+
+def test_exact_training_state_digest_is_stable_and_mutation_sensitive() -> None:
+    torch.manual_seed(7)
+    model = nn.Linear(4, 3)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda _step: 1.0)
+    loss = model(torch.randn(2, 4)).square().mean()
+    loss.backward()
+    optimizer.step()
+    scheduler.step()
+    baseline = _exact_training_state_digest(model, optimizer, scheduler)
+    assert _exact_training_state_digest(model, optimizer, scheduler) == baseline
+    parameter = next(model.parameters())
+    adam_tensor = optimizer.state[parameter]["exp_avg"]
+    with torch.no_grad():
+        adam_tensor.reshape(-1)[0].add_(1)
+    assert _exact_training_state_digest(model, optimizer, scheduler) != baseline
+    with torch.no_grad():
+        adam_tensor.reshape(-1)[0].sub_(1)
+    scheduler.last_epoch += 1
+    assert _exact_training_state_digest(model, optimizer, scheduler) != baseline
+    scheduler.last_epoch -= 1
+    torch.rand(1)
+    after_rng_mutation = _exact_training_state_digest(model, optimizer, scheduler)
+    assert after_rng_mutation != baseline
+    with torch.no_grad():
+        next(model.parameters()).reshape(-1)[0].add_(1)
+    assert _exact_training_state_digest(model, optimizer, scheduler) != after_rng_mutation
+
+
+def test_canonical_metric_rows_requires_exact_single_step_replay() -> None:
+    def row(step: int, digest: str) -> dict[str, object]:
+        return {
+            "step": step,
+            "ordered_anchor_ids_sha256": digest,
+            "accepted_exposures": step * 8192,
+            "unique_anchors": step * 8192,
+            "repeated_exposures": 0,
+        }
+
+    raw = [row(1, "a"), row(2, "b"), row(2, "b")]
+    rows, evidence = _canonical_metric_rows(raw, exact_replay_step=2)
+    assert [item["step"] for item in rows] == [1, 2]
+    assert evidence == {
+        "step": 2,
+        "ordered_anchor_ids_sha256": "b",
+        "accepted_exposures": 16384,
+        "unique_anchors": 16384,
+        "repeated_exposures": 0,
+    }
+    with pytest.raises(RuntimeError, match="data replay mismatch"):
+        _canonical_metric_rows([row(1, "a"), row(2, "b"), row(2, "c")], exact_replay_step=2)
+    with pytest.raises(RuntimeError, match="multiplicity mismatch"):
+        _canonical_metric_rows([row(1, "a"), row(1, "a"), row(2, "b")], exact_replay_step=2)
 
 
 def test_main500m_approved_granite_contract_is_immutable() -> None:

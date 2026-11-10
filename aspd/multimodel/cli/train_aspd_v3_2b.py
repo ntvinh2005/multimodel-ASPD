@@ -37,7 +37,10 @@ from aspd.multimodel.v3.data import (
     SQLiteExposureLedger,
     write_json_immutable,
 )
-from aspd.multimodel.v3.distributed_checkpoint import MainV1DistributedCheckpoint
+from aspd.multimodel.v3.distributed_checkpoint import (
+    MainV1DistributedCheckpoint,
+    capture_rng_state,
+)
 from aspd.multimodel.v3.encoder_auxk_factorial_config import (
     EXPERIMENT_FAMILY as ENCODER_AUXK_FACTORIAL_FAMILY,
 )
@@ -913,6 +916,95 @@ def _timed(profile: bool, values: dict[str, float], name: str):
     return Timer()
 
 
+def _update_exact_state_digest(digest: Any, value: Any, path: str) -> None:
+    """Hash nested training state without materializing whole GPU tensors on CPU."""
+
+    digest.update(path.encode("utf-8"))
+    digest.update(b"\0")
+    if isinstance(value, torch.Tensor):
+        tensor = value.detach().contiguous()
+        digest.update(str(tensor.dtype).encode("ascii"))
+        digest.update(json.dumps(list(tensor.shape), separators=(",", ":")).encode())
+        raw = tensor.reshape(-1).view(torch.uint8).reshape(-1)
+        chunk_bytes = 64 * 1024 * 1024
+        for start in range(0, raw.numel(), chunk_bytes):
+            chunk = raw[start : start + chunk_bytes].cpu().numpy()
+            digest.update(memoryview(chunk))
+        return
+    if isinstance(value, dict):
+        for key in sorted(value, key=lambda item: (type(item).__name__, repr(item))):
+            _update_exact_state_digest(digest, value[key], f"{path}/{key!r}")
+        return
+    if isinstance(value, (list, tuple)):
+        for index, item in enumerate(value):
+            _update_exact_state_digest(digest, item, f"{path}/{index}")
+        return
+    digest.update(json.dumps(value, sort_keys=True, default=repr).encode("utf-8"))
+
+
+def _exact_training_state_digest(
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scheduler: Any,
+) -> str:
+    digest = hashlib.sha256()
+    _update_exact_state_digest(digest, model.state_dict(), "model")
+    _update_exact_state_digest(digest, optimizer.state_dict(), "optimizer")
+    _update_exact_state_digest(digest, scheduler.state_dict(), "scheduler")
+    _update_exact_state_digest(digest, capture_rng_state(), "rng")
+    return digest.hexdigest()
+
+
+def _module_state_digest(module: torch.nn.Module) -> str:
+    digest = hashlib.sha256()
+    _update_exact_state_digest(digest, module.state_dict(), "module")
+    return digest.hexdigest()
+
+
+def _canonical_metric_rows(
+    raw_rows: list[dict[str, Any]],
+    *,
+    exact_replay_step: int | None,
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    if not raw_rows:
+        raise RuntimeError("training produced no metric rows")
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    for row in raw_rows:
+        grouped.setdefault(int(row["step"]), []).append(row)
+    replay_evidence = None
+    if exact_replay_step is not None:
+        unexpected = {
+            step: len(rows)
+            for step, rows in grouped.items()
+            if len(rows) != (2 if step == exact_replay_step else 1)
+        }
+        if unexpected or exact_replay_step not in grouped:
+            raise RuntimeError(
+                "exact-resume metric replay multiplicity mismatch: "
+                f"expected_step={exact_replay_step}, observed={unexpected}"
+            )
+        reference, resumed = grouped[exact_replay_step]
+        compared_fields = (
+            "ordered_anchor_ids_sha256",
+            "accepted_exposures",
+            "unique_anchors",
+            "repeated_exposures",
+        )
+        mismatch = {
+            field: {"uninterrupted": reference.get(field), "resumed": resumed.get(field)}
+            for field in compared_fields
+            if reference.get(field) != resumed.get(field)
+        }
+        if mismatch:
+            raise RuntimeError(f"exact-resume data replay mismatch: {mismatch}")
+        replay_evidence = {
+            "step": exact_replay_step,
+            **{field: resumed[field] for field in compared_fields},
+        }
+    rows = [grouped[step][-1] for step in sorted(grouped)]
+    return rows, replay_evidence
+
+
 def main() -> None:
     args = _parse_args()
     git_sha = _require_clean_worktree()
@@ -1266,6 +1358,7 @@ def main() -> None:
     local_source_smoke = _real_source_correctness_smoke(
         local_key, tokenizer, loaded, registry, device
     )
+    initial_source_state_sha256 = _module_state_digest(loaded.forward_model)
     source_smokes = [None] * world
     dist.all_gather_object(source_smokes, local_source_smoke)
 
@@ -1662,6 +1755,18 @@ def main() -> None:
     checkpoint_path: Path | None = None
     checkpoint_manifest = None
     resumed = False
+    exact_resume_parity_enabled = bool(
+        args.mode == "preflight"
+        and config.experiment_family == MAIN500M_EXPERIMENT_FAMILY
+    )
+    exact_resume_replay = False
+    exact_resume_reference_digests: list[str] | None = None
+    exact_resume_replayed_digests: list[str] | None = None
+    exact_resume_parity = "NOT_RUN"
+    checkpoint_probe_parameter = None
+    checkpoint_probe_parameter_value = None
+    checkpoint_probe_optimizer_key = None
+    checkpoint_probe_optimizer_value = None
     health_pause_requested = False
     milestone_pause_requested = False
     diagnostic_steps = {1, 2, 10, 50, 128, 256, 300, 500, 800, 1000, 1221}
@@ -2087,7 +2192,28 @@ def main() -> None:
                 )
             checkpoint_save_seconds = time.perf_counter() - save_started
             checkpoint_path = args.run_dir / "checkpoints" / f"step-{completed_steps:09d}"
-            if preflight_reload_due:
+            if preflight_reload_due and exact_resume_parity_enabled:
+                checkpoint_probe_parameter = next(model.parameters())
+                checkpoint_probe_parameter_value = (
+                    checkpoint_probe_parameter.detach().reshape(-1)[0].clone()
+                )
+                optimizer_state = optimizer.state.get(checkpoint_probe_parameter, {})
+                optimizer_probes = [
+                    (key, value)
+                    for key, value in optimizer_state.items()
+                    if isinstance(value, torch.Tensor) and value.numel() > 1
+                ]
+                if not optimizer_probes:
+                    raise RuntimeError(
+                        "preflight found no materialized Adam tensor to restore"
+                    )
+                checkpoint_probe_optimizer_key, checkpoint_probe_optimizer = (
+                    optimizer_probes[0]
+                )
+                checkpoint_probe_optimizer_value = (
+                    checkpoint_probe_optimizer.detach().reshape(-1)[0].clone()
+                )
+            elif preflight_reload_due:
                 probe_parameter = next(model.parameters())
                 probe_parameter_value = probe_parameter.detach().reshape(-1)[0].clone()
                 optimizer_state = optimizer.state.get(probe_parameter, {})
@@ -2142,6 +2268,7 @@ def main() -> None:
                     )
                 dist.barrier()
                 checkpoint_reload_seconds = time.perf_counter() - reload_started
+                checkpoint_seconds += checkpoint_reload_seconds
                 if not torch.equal(
                     probe_parameter.detach().reshape(-1)[0], probe_parameter_value
                 ) or not torch.equal(
@@ -2157,6 +2284,87 @@ def main() -> None:
                 checkpoint_manager.prune_after_verified_replacement()
             torch.cuda.synchronize()
             checkpoint_seconds = time.perf_counter() - checkpoint_started
+        if exact_resume_parity_enabled and completed_steps == args.max_steps:
+            local_digest = _exact_training_state_digest(model, optimizer, scheduler)
+            gathered_digests = [None] * world
+            dist.all_gather_object(gathered_digests, local_digest)
+            if not exact_resume_replay:
+                exact_resume_reference_digests = gathered_digests
+                if (
+                    checkpoint_path is None
+                    or checkpoint_probe_parameter is None
+                    or checkpoint_probe_parameter_value is None
+                    or checkpoint_probe_optimizer_key is None
+                    or checkpoint_probe_optimizer_value is None
+                ):
+                    raise RuntimeError(
+                        "exact-resume parity probe has no step-before-final checkpoint"
+                    )
+                with torch.no_grad():
+                    checkpoint_probe_parameter.reshape(-1)[0].add_(1)
+                    optimizer.state[checkpoint_probe_parameter][
+                        checkpoint_probe_optimizer_key
+                    ].reshape(-1)[0].add_(1)
+                reload_started = time.perf_counter()
+                restored_runtime, _ = checkpoint_manager.load(
+                    path=checkpoint_path,
+                    model=model,
+                    optimizer=optimizer,
+                    scheduler=scheduler,
+                    config_fingerprint=config.fingerprint(),
+                    config_file_sha256=config_sha,
+                    dataset_manifest_sha256=dataset_manifest["manifest_sha256"],
+                    expected_model_key=local_key,
+                )
+                if int(restored_runtime["completed_steps"]) != args.max_steps - 1:
+                    raise RuntimeError("exact-resume probe restored the wrong step")
+                if rank == 0:
+                    if health_monitor is not None:
+                        health_state = restored_runtime.get("health_monitor")
+                        if not isinstance(health_state, dict):
+                            raise RuntimeError(
+                                "preflight checkpoint omitted sustained health-monitor state"
+                            )
+                        health_monitor.load_state_dict(health_state)
+                    stream.load_state_dict(restored_runtime["stream"])
+                    prefetcher.restore(restored_runtime.get("prefetched_pool"))
+                    ledger.recover_to_receipt(
+                        ExposureLedgerReceipt.from_payload(
+                            restored_runtime["ledger_receipt"]
+                        )
+                    )
+                dist.barrier()
+                checkpoint_reload_seconds = time.perf_counter() - reload_started
+                checkpoint_seconds += checkpoint_reload_seconds
+                if not torch.equal(
+                    checkpoint_probe_parameter.detach().reshape(-1)[0],
+                    checkpoint_probe_parameter_value,
+                ) or not torch.equal(
+                    optimizer.state[checkpoint_probe_parameter][
+                        checkpoint_probe_optimizer_key
+                    ]
+                    .detach()
+                    .reshape(-1)[0],
+                    checkpoint_probe_optimizer_value,
+                ):
+                    raise RuntimeError(
+                        "DCP reload did not restore the perturbed parameter/Adam probe"
+                    )
+                checkpoint_restore_probe = "PASS"
+                resumed = True
+                exact_resume_replay = True
+                completed_steps = int(restored_runtime["completed_steps"])
+                health_pause_requested = False
+                milestone_pause_requested = False
+                continue
+            exact_resume_replayed_digests = gathered_digests
+            if exact_resume_replayed_digests != exact_resume_reference_digests:
+                raise RuntimeError(
+                    "real three-model uninterrupted/resumed state digests differ: "
+                    f"reference={exact_resume_reference_digests}, "
+                    f"resumed={exact_resume_replayed_digests}"
+                )
+            exact_resume_parity = "BITWISE_EXACT"
         if stop_requested or health_pause_requested or milestone_pause_requested:
             break
         if profiler is not None:
@@ -2188,8 +2396,34 @@ def main() -> None:
             final_decoder_norms_by_rank, model.activation_decoder_norm_report()
         )
 
+    final_source_state_sha256 = _module_state_digest(loaded.forward_model)
+    local_source_state = {
+        "rank": rank,
+        "model": local_key,
+        "initial_sha256": initial_source_state_sha256,
+        "final_sha256": final_source_state_sha256,
+        "status": (
+            "PASS"
+            if final_source_state_sha256 == initial_source_state_sha256
+            else "FAIL"
+        ),
+    }
+    source_state_immutability = [None] * world
+    dist.all_gather_object(source_state_immutability, local_source_state)
+    if any(item["status"] != "PASS" for item in source_state_immutability):
+        raise RuntimeError(
+            f"frozen source-model state changed during training: {source_state_immutability}"
+        )
+
     if rank == 0:
-        rows = [json.loads(line) for line in metrics_path.read_text().splitlines()]
+        raw_rows = [json.loads(line) for line in metrics_path.read_text().splitlines()]
+        # Resume validation deliberately records the uninterrupted step and then its
+        # resumed replay. Preserve both raw rows on disk, but report the final occurrence
+        # for each optimizer step so exposure/throughput summaries are not double counted.
+        rows, exact_data_replay = _canonical_metric_rows(
+            raw_rows,
+            exact_replay_step=(args.max_steps if exact_resume_parity_enabled else None),
+        )
         measured = [row for row in rows if not row["warmup"]]
         step_times = sorted(row["seconds"] for row in measured)
 
@@ -2246,9 +2480,21 @@ def main() -> None:
             "checkpoint_seconds_save": checkpoint_save_seconds,
             "checkpoint_seconds_reload": checkpoint_reload_seconds,
             "checkpoint_parameter_and_adam_restore_probe": checkpoint_restore_probe,
+            "uninterrupted_vs_resumed_next_update": exact_resume_parity,
+            "uninterrupted_state_sha256_by_rank": exact_resume_reference_digests,
+            "resumed_state_sha256_by_rank": exact_resume_replayed_digests,
+            "exact_data_replay": exact_data_replay,
+            "source_state_immutability_by_rank": source_state_immutability,
             "checkpoint_manifest": checkpoint_manifest,
             "dcp_save_reload_resume_update": (
-                "PASS" if resumed and completed_steps == args.max_steps else "NOT_RUN"
+                "PASS"
+                if resumed
+                and completed_steps == args.max_steps
+                and (
+                    not exact_resume_parity_enabled
+                    or exact_resume_parity == "BITWISE_EXACT"
+                )
+                else "NOT_RUN"
             ),
             "peak_gpu_memory_by_rank": rows[-1]["gpu_memory"],
             "stage_seconds_mean": {
