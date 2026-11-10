@@ -174,6 +174,8 @@ monitoring:
   sustained_gate_failure_diagnostics: 3
   sustained_reconstruction_failure_diagnostics: 2
   reconstruction_pause_minimum_exposures: 10002432
+  milestone_policy_version: v1
+  require_researcher_continuation: true
   staged_milestone_exposures: [10002432, 25001984, 50003968, 100007936, 250003456, 500006912]
 
 runtime:
@@ -192,6 +194,7 @@ runtime:
   checkpoint_root: /orange/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/checkpoints
   dataset_manifest: /orange/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/data/pile_uncopyrighted/manifest.json
   alignment_manifest: /orange/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/data/pile_uncopyrighted/alignment_manifest.json
+  continuation_authorization_root: /orange/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/continuation_authorizations
   preflight_output_root: /orange/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/preflight
   preflight_evidence: /orange/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/preflight/preflight_report.json
   max_preflight_steps: 20
@@ -208,6 +211,7 @@ approvals:
   exact_resume: SYNTHETIC_VALIDATED_REAL_THREE_MODEL_PENDING
   storage_reservation: STORAGE_BLOCKED
   monitoring_policy: PENDING_RESEARCHER_APPROVAL
+  milestone_policy: PENDING_RESEARCHER_APPROVAL
   bounded_preflight:
     status: PENDING_RESEARCHER_APPROVAL
     optimizer_steps: null

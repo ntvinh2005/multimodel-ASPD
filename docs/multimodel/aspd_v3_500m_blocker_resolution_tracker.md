@@ -35,7 +35,7 @@ detached binary internal support. No main-training job has been submitted.
 | 5 | Real three-model GPU preflight | Synthetic distributed tests do not validate three real source models. | None yet | Not run. | `BLOCKED_RESEARCHER_DECISION` | Model 3, alignment, and bounded preflight authorization. |
 | 6 | Exact checkpoint resume | Synthetic three-rank resume passed previously; real three-model GPU resume remains untested. | None yet | Not run in this branch. | `BLOCKED_EXTERNAL_DEPENDENCY` | Real-model preflight prerequisites and bounded GPU authorization. |
 | 7 | Sustained-collapse protection | The monitor was stateless; a collapse alert could not cause a recoverable controlled pause, and scheduled diagnostic completeness was not enforced. | `main500m_monitoring.py`, `main500m_config.py`, runner, draft YAML, tests. | Nine focused main-500M CPU tests; Ruff. | `FIXED_TESTED` | Researcher must approve the versioned v1 thresholds/actions before main authorization; the draft remains pending. |
-| 8 | Staged milestones | Milestones are configured but the runner does not enforce checkpointed review pauses. | None yet | No enforcement test yet. | `AUDITING` | Continuation decisions at configured milestones. |
+| 8 | Staged milestones | Milestones existed only as YAML values; the runner neither forced diagnostics/checkpoints nor required an explicit continuation decision. | Runner, `main500m_continuation.py`, config/schema, authorization template, tests. | Thirteen focused main-500M CPU tests; Ruff; Python compilation. | `FIXED_TESTED` | Researcher must approve policy v1 and provide a checkpoint-pinned decision after each staged review; draft approval remains pending. |
 | 9 | Human interpretability | Interface/protocol exist, but no versioned researcher response or decision artifact is present; completion status schema is too narrow. | None yet | Preparation tests exist; no scientific response evidence. | `BLOCKED_RESEARCHER_DECISION` | Researcher completion and explicit semantic-risk decision. |
 | 10 | Slurm/runtime reliability | Main proposal exists; preflight proposal and bounded signal/requeue evidence remain incomplete. | None yet | Shell/runtime audit pending. | `AUDITING` | No main submission authorization exists. |
 | 11 | Specification/metadata consistency | Confirmed alignment policy-name mismatch and human-status limitation; broader notation/config/runtime comparison remains in progress. | None yet | Audit in progress. | `AUDITING` | Documentation corrections do not require scientific approval; semantic changes would. |
@@ -139,3 +139,50 @@ Scientific semantics changed: no. The policy changes only observation and fail-s
 it does not alter z-score normalization, ReLU, BatchTopK, AuxK, loss weights, decoder constraints,
 dictionary size, or sparse coefficients. The checked-in approval is
 `PENDING_RESEARCHER_APPROVAL`, so the main run remains fail-closed.
+
+## Blocker 8 resolution record
+
+What was wrong: the six accepted-exposure milestones were passive YAML metadata. The runner could
+cross 10M, 25M, 50M, 100M, and 250M without producing a milestone diagnostic, a consistent
+checkpoint, or a researcher continuation decision.
+
+What changed: the schema now pins the exact step-aligned exposure sequence
+10,002,432; 25,001,984; 50,003,968; 100,007,936; 250,003,456; and 500,006,912.
+Each boundary forces a complete diagnostic. The first five boundaries force an atomic recovery
+checkpoint, an immutable scientific-review artifact, and controlled exit 87; the final boundary
+completes normally. The review artifact retains all six model/site gate groups, all 48 activation
+full-FVU values, all 168 internal-FVU values, the health decision, ordered-anchor digest, and
+checkpoint-manifest SHA-256.
+
+Continuation is fail-closed. The resumed checkpoint carries a `pending_review` record and cannot
+perform another optimizer update without `--continuation-authorization`. The authorization must be
+a JSON file directly under the configured authorization root and must pin the exact pause reasons,
+accepted exposure, next review boundary, execution-contract fingerprint, and checkpoint-manifest
+SHA-256. Consumed decisions are stored in later checkpoints and an idempotent append-only audit
+log; conflicting decisions for the same exposure fail. The unfilled machine-readable template is
+`analysis/aspd_v3_500m_blocker_resolution/continuation_authorization_TEMPLATE.json` and is
+deliberately invalid until the researcher supplies a decision.
+
+Tests run:
+
+```text
+/blue/thai/vinhnguyen1/multimodel-ASPD/repo/.venv/bin/pytest -q \
+  tests/test_multimodel_v3_2b.py -k 'main500m'
+13 passed, 17 deselected
+
+/blue/thai/vinhnguyen1/multimodel-ASPD/repo/.venv/bin/ruff check \
+  aspd/multimodel/v3/main500m_continuation.py \
+  aspd/multimodel/v3/main500m_config.py \
+  aspd/multimodel/cli/train_aspd_v3_2b.py \
+  tests/test_multimodel_v3_2b.py
+All checks passed
+```
+
+The tests cover exact step boundaries, final-boundary completion, checkpoint/contract provenance,
+wrong-checkpoint rejection, idempotent audit logging, conflict rejection, and complete diagnostic
+materialization. The GPU runner path remains unexecuted pending model-3 and bounded-preflight
+approval.
+
+Scientific semantics changed: no. Staging controls execution and review only. It does not change
+the z-score gate, BatchTopK, AuxK, objectives, optimizer, or exposure ledger. The draft adds
+`MILESTONE_POLICY_APPROVAL_PENDING`, so implementation does not manufacture approval.

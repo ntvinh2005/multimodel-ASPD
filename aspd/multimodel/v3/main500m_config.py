@@ -285,7 +285,27 @@ class Main500MMonitoring(BaseModel):
     sustained_gate_failure_diagnostics: int = Field(ge=2)
     sustained_reconstruction_failure_diagnostics: int = Field(ge=2)
     reconstruction_pause_minimum_exposures: int = Field(ge=0)
+    milestone_policy_version: Literal["v1"]
+    require_researcher_continuation: Literal[True]
     staged_milestone_exposures: tuple[int, ...]
+
+    @model_validator(mode="after")
+    def validate_milestones(self) -> Main500MMonitoring:
+        expected = (
+            10_002_432,
+            25_001_984,
+            50_003_968,
+            100_007_936,
+            250_003_456,
+            500_006_912,
+        )
+        if self.staged_milestone_exposures != expected:
+            raise ValueError("main 500M staged exposure milestones changed")
+        if self.reconstruction_pause_minimum_exposures != expected[0]:
+            raise ValueError("reconstruction escalation must begin at the first review milestone")
+        if any(exposures % 8192 for exposures in self.staged_milestone_exposures):
+            raise ValueError("every staged milestone must fall on an optimizer-step boundary")
+        return self
 
 
 class Main500MRuntime(BaseModel):
@@ -308,6 +328,7 @@ class Main500MRuntime(BaseModel):
     checkpoint_root: str
     dataset_manifest: str
     alignment_manifest: str
+    continuation_authorization_root: str
     preflight_output_root: str
     preflight_evidence: str
     max_preflight_steps: int = Field(gt=0, le=20)
@@ -320,6 +341,7 @@ class Main500MRuntime(BaseModel):
             self.checkpoint_root,
             self.dataset_manifest,
             self.alignment_manifest,
+            self.continuation_authorization_root,
             self.preflight_output_root,
             self.preflight_evidence,
         )
@@ -431,6 +453,7 @@ class Main500MApprovals(BaseModel):
     ]
     storage_reservation: Literal["STORAGE_BLOCKED", "APPROVED"]
     monitoring_policy: Literal["PENDING_RESEARCHER_APPROVAL", "APPROVED"]
+    milestone_policy: Literal["PENDING_RESEARCHER_APPROVAL", "APPROVED"]
     bounded_preflight: Main500MBoundedPreflightAuthorization
     three_model_gpu_preflight: Main500MGPUPreflightEvidence
     full_training: Literal["MAIN_500M_NOT_AUTHORIZED", "AUTHORIZED"]
@@ -523,6 +546,8 @@ class V31Main500MConfig(BaseModel):
             blockers.append("STORAGE_BLOCKED")
         if self.approvals.monitoring_policy != "APPROVED":
             blockers.append("MONITORING_POLICY_APPROVAL_PENDING")
+        if self.approvals.milestone_policy != "APPROVED":
+            blockers.append("MILESTONE_POLICY_APPROVAL_PENDING")
         if self.approvals.human_interpretability.status != "APPROVED":
             blockers.append("HUMAN_INTERPRETABILITY_APPROVAL_PENDING")
         if self.approvals.three_model_gpu_preflight.status != "PASSED":

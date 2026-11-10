@@ -17,12 +17,20 @@ from torch import nn
 from aspd.multimodel.cli.train_aspd_v3_2b import (
     _authorize_main500m_mode,
     _PoolPrefetcher,
+    _record_continuation_authorization,
 )
 from aspd.multimodel.components import RankOneComponents
 from aspd.multimodel.v3.data import SQLiteExposureLedger
 from aspd.multimodel.v3.encoder import FeatureReadout, pack_cross_model_tokens
 from aspd.multimodel.v3.gating import V3BatchTopK
 from aspd.multimodel.v3.main500m_config import V31Main500MConfig, load_main500m_config
+from aspd.multimodel.v3.main500m_continuation import (
+    load_continuation_authorization,
+    milestone_diagnostic_due,
+    milestone_pause_due,
+    milestone_scientific_summary,
+    next_review_exposure,
+)
 from aspd.multimodel.v3.main500m_monitoring import (
     SustainedMain500MHealthMonitor,
     evaluate_main500m_health,
@@ -125,6 +133,7 @@ def test_main500m_draft_preserves_zscore_math_and_fails_closed() -> None:
         "PENDING_RESEARCHER_DECISION"
     )
     assert "MODEL_THREE_BLOCKED" in report["blockers"]
+    assert "MILESTONE_POLICY_APPROVAL_PENDING" in report["blockers"]
     with pytest.raises(RuntimeError, match="MODEL_THREE_BLOCKED"):
         config.require_execution_authorized()
 
@@ -403,6 +412,7 @@ def _complete_main500m_diagnostic(
         "accepted_exposures": accepted_exposures,
         "repeated_exposures": 0,
         "diagnostic_parameter_step": diagnostic_step,
+        "ordered_anchor_ids_sha256": "c" * 64,
         "loss": loss,
         "gradient_norms_by_rank": [
             {"rank": rank, "l2": {"shared_encoder": 1.0, "rank_one": 1.0}}
@@ -502,6 +512,102 @@ def test_main500m_reconstruction_pause_starts_only_after_first_review_milestone(
     assert "SUSTAINED_RECONSTRUCTION_FAILURE" in {
         event["code"] for event in second["events"]
     }
+
+
+def test_main500m_milestones_are_exact_step_boundaries_and_final_is_not_a_pause() -> None:
+    milestones = _main500m_config().monitoring.staged_milestone_exposures
+    assert all(exposures % 8192 == 0 for exposures in milestones)
+    assert milestone_diagnostic_due(milestones[0], milestones)
+    assert milestone_pause_due(milestones[0], milestones)
+    assert milestone_diagnostic_due(milestones[-1], milestones)
+    assert not milestone_pause_due(milestones[-1], milestones)
+    assert next_review_exposure(milestones[0], milestones) == milestones[1]
+    with pytest.raises(ValueError, match="beyond the final"):
+        next_review_exposure(milestones[-1], milestones)
+
+
+def test_main500m_continuation_authorization_is_checkpoint_and_contract_pinned(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "authorizations"
+    root.mkdir()
+    path = root / "continue_after_10m.json"
+    payload = {
+        "schema_version": 1,
+        "status": "APPROVED",
+        "decision": "CONTINUE",
+        "policy_version": "v1",
+        "reasons": ["MILESTONE"],
+        "accepted_exposures": 10_002_432,
+        "approved_through_exposures": 25_001_984,
+        "execution_contract_fingerprint": "a" * 64,
+        "checkpoint_manifest_sha256": "b" * 64,
+        "researcher": "unit-test researcher",
+        "decided_at": "2026-11-09T20:00:00-05:00",
+        "scientific_limitations_acknowledged": "synthetic unit-test decision only",
+    }
+    path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+    validated = load_continuation_authorization(
+        path,
+        authorization_root=root,
+        pending_review={
+            "policy_version": "v1",
+            "reasons": ["MILESTONE"],
+            "accepted_exposures": 10_002_432,
+        },
+        execution_contract_fingerprint="a" * 64,
+        checkpoint_manifest_sha256="b" * 64,
+        approved_through_exposures=25_001_984,
+    )
+    assert validated["artifact_path"] == str(path.resolve())
+    assert len(validated["artifact_sha256"]) == 64
+
+    payload["checkpoint_manifest_sha256"] = "d" * 64
+    path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+    with pytest.raises(ValueError, match="provenance mismatch"):
+        load_continuation_authorization(
+            path,
+            authorization_root=root,
+            pending_review={
+                "policy_version": "v1",
+                "reasons": ["MILESTONE"],
+                "accepted_exposures": 10_002_432,
+            },
+            execution_contract_fingerprint="a" * 64,
+            checkpoint_manifest_sha256="b" * 64,
+            approved_through_exposures=25_001_984,
+        )
+
+
+def test_main500m_continuation_audit_log_is_idempotent_and_rejects_conflicts(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "continuation_authorizations.jsonl"
+    record = {
+        "accepted_exposures": 10_002_432,
+        "artifact_sha256": "a" * 64,
+        "decision": "CONTINUE",
+    }
+    _record_continuation_authorization(path, record)
+    _record_continuation_authorization(path, record)
+    assert len(path.read_text(encoding="utf-8").splitlines()) == 1
+
+    conflicting = {**record, "artifact_sha256": "b" * 64}
+    with pytest.raises(ValueError, match="conflicting continuation"):
+        _record_continuation_authorization(path, conflicting)
+
+
+def test_main500m_milestone_report_preserves_complete_scientific_diagnostics() -> None:
+    metrics = _complete_main500m_diagnostic(
+        diagnostic_step=1220,
+        accepted_exposures=10_002_432,
+    )
+    metrics["health"] = {"status": "PASS", "events": []}
+    summary = milestone_scientific_summary(metrics)
+    assert summary["accepted_exposures"] == 10_002_432
+    assert summary["activation_full_fvu_summary"]["count"] == 48
+    assert summary["internal_fvu_summary"]["count"] == 168
+    assert len(summary["gate_metrics"]) == 60
 
 
 def test_approved_third_model_contract_registers_exactly_168_unique_targets() -> None:

@@ -59,6 +59,13 @@ from aspd.multimodel.v3.main500m_config import (
     EXPERIMENT_FAMILY as MAIN500M_EXPERIMENT_FAMILY,
 )
 from aspd.multimodel.v3.main500m_config import load_main500m_config
+from aspd.multimodel.v3.main500m_continuation import (
+    load_continuation_authorization,
+    milestone_diagnostic_due,
+    milestone_pause_due,
+    milestone_scientific_summary,
+    next_review_exposure,
+)
 from aspd.multimodel.v3.main500m_monitoring import SustainedMain500MHealthMonitor
 from aspd.multimodel.v3.main_2b_config import (
     MODEL_ORDER_2B,
@@ -184,6 +191,11 @@ def _parse_args() -> argparse.Namespace:
         "--resume-checkpoint",
         type=Path,
         help="immutable external checkpoint directory for exact cross-namespace resume",
+    )
+    parser.add_argument(
+        "--continuation-authorization",
+        type=Path,
+        help="immutable researcher decision for a checkpointed health/milestone pause",
     )
     return parser.parse_args()
 
@@ -339,6 +351,22 @@ def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:
         handle.write(json.dumps(payload, sort_keys=True, allow_nan=False) + "\n")
         handle.flush()
         os.fsync(handle.fileno())
+
+
+def _record_continuation_authorization(path: Path, payload: dict[str, Any]) -> None:
+    """Append one decision exactly once, rejecting conflicting audit records."""
+
+    existing = []
+    if path.is_file():
+        existing = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    for record in existing:
+        if record.get("artifact_sha256") == payload["artifact_sha256"]:
+            if record != payload:
+                raise ValueError("continuation authorization audit record changed")
+            return
+        if record.get("accepted_exposures") == payload["accepted_exposures"]:
+            raise ValueError("conflicting continuation authorization for one paused exposure")
+    _append_jsonl(path, payload)
 
 
 def _start_gpu_telemetry(path: Path) -> tuple[subprocess.Popen[str], Any]:
@@ -858,6 +886,10 @@ def main() -> None:
     if config.experiment_family == MAIN500M_EXPERIMENT_FAMILY:
         # This happens before NCCL initialization or any source-model/tokenizer load.
         _authorize_main500m_mode(config, args)
+    elif args.continuation_authorization is not None:
+        raise ValueError(
+            "--continuation-authorization is valid only for ASPD v3.1 main execution"
+        )
     rank, world, device = _init_distributed()
     if config.experiment_family in {
         "aspd_v3_granite_normalized_target_v1",
@@ -1418,6 +1450,8 @@ def main() -> None:
     )
     completed_steps = 0
     restored_prefetched_pool = None
+    consumed_continuation_authorizations: list[dict[str, Any]] = []
+    pending_review: dict[str, Any] | None = None
     initial_runtime_path = args.run_dir / "initial_runtime.json"
     checkpoints = (
         [args.resume_checkpoint]
@@ -1461,6 +1495,10 @@ def main() -> None:
             if mismatch:
                 raise ValueError(f"controlled checkpoint resume provenance mismatch: {mismatch}")
         completed_steps = int(restored_runtime["completed_steps"])
+        consumed_continuation_authorizations = list(
+            restored_runtime.get("consumed_continuation_authorizations", [])
+        )
+        pending_review = restored_runtime.get("pending_review")
         if rank == 0:
             if health_monitor is not None:
                 health_state = restored_runtime.get("health_monitor")
@@ -1474,6 +1512,47 @@ def main() -> None:
             ledger.recover_to_receipt(
                 ExposureLedgerReceipt.from_payload(restored_runtime["ledger_receipt"])
             )
+        if config.experiment_family == MAIN500M_EXPERIMENT_FAMILY:
+            continuation_record = None
+            if pending_review is not None and completed_steps < args.max_steps:
+                if args.mode != "main":
+                    raise RuntimeError(
+                        "a paused ASPD v3.1 checkpoint can continue only in main mode"
+                    )
+                if args.continuation_authorization is None:
+                    raise RuntimeError(
+                        "paused ASPD v3.1 checkpoint requires --continuation-authorization"
+                    )
+                if rank == 0:
+                    continuation_record = load_continuation_authorization(
+                        args.continuation_authorization,
+                        authorization_root=Path(
+                            config.runtime.continuation_authorization_root
+                        ),
+                        pending_review=pending_review,
+                        execution_contract_fingerprint=(
+                            config.execution_contract_fingerprint()
+                        ),
+                        checkpoint_manifest_sha256=_sha256(latest / "manifest.json"),
+                        approved_through_exposures=next_review_exposure(
+                            int(pending_review["accepted_exposures"]),
+                            config.monitoring.staged_milestone_exposures,
+                        ),
+                    )
+                continuation_record = _broadcast_object(continuation_record)
+                consumed_continuation_authorizations.append(continuation_record)
+                if rank == 0:
+                    _record_continuation_authorization(
+                        args.run_dir / "continuation_authorizations.jsonl",
+                        continuation_record,
+                    )
+                pending_review = None
+            elif args.continuation_authorization is not None:
+                raise ValueError(
+                    "continuation authorization supplied without a pending checkpoint review"
+                )
+    elif args.continuation_authorization is not None:
+        raise ValueError("continuation authorization cannot be used for a fresh run")
     elif rank == 0:
         if initial_runtime_path.is_file():
             initial = json.loads(initial_runtime_path.read_text(encoding="utf-8"))
@@ -1543,6 +1622,7 @@ def main() -> None:
     checkpoint_manifest = None
     resumed = False
     health_pause_requested = False
+    milestone_pause_requested = False
     diagnostic_steps = {1, 2, 10, 50, 128, 256, 300, 500, 800, 1000, 1221}
     diagnostic_parameter_steps = set(
         getattr(config.runtime, "diagnostic_parameter_steps", ())
@@ -1575,12 +1655,26 @@ def main() -> None:
         stage: dict[str, float] = {}
         step_anchor_ids: list[str] = []
         pool_losses: list[dict[str, float]] = []
+        milestone_diagnostics_required = bool(
+            config.experiment_family == MAIN500M_EXPERIMENT_FAMILY
+            and milestone_diagnostic_due(
+                (completed_steps + 1) * 8192,
+                config.monitoring.staged_milestone_exposures,
+            )
+        )
         if diagnostic_parameter_steps:
-            collect_step_diagnostics = completed_steps in diagnostic_parameter_steps
+            collect_step_diagnostics = (
+                completed_steps in diagnostic_parameter_steps
+                or milestone_diagnostics_required
+            )
             diagnostic_parameter_step = completed_steps if collect_step_diagnostics else None
         elif getattr(config, "monitoring", None) is not None:
             interval = int(config.monitoring.monitor_every_steps)
-            collect_step_diagnostics = completed_steps == 0 or completed_steps % interval == 0
+            collect_step_diagnostics = (
+                completed_steps == 0
+                or completed_steps % interval == 0
+                or milestone_diagnostics_required
+            )
             diagnostic_parameter_step = completed_steps if collect_step_diagnostics else None
         else:
             collect_step_diagnostics = completed_steps + 1 in diagnostic_steps
@@ -1818,10 +1912,33 @@ def main() -> None:
         health_pause_requested = bool(
             health is not None and health["action"] == "CHECKPOINT_AND_PAUSE"
         )
+        milestone_pause_requested = bool(
+            config.experiment_family == MAIN500M_EXPERIMENT_FAMILY
+            and args.mode == "main"
+            and milestone_pause_due(
+                counter_payload["accepted"],
+                config.monitoring.staged_milestone_exposures,
+            )
+        )
+        pause_reasons = [
+            reason
+            for reason, requested in (
+                ("HEALTH", health_pause_requested),
+                ("MILESTONE", milestone_pause_requested),
+            )
+            if requested
+        ]
+        if pause_reasons:
+            pending_review = {
+                "policy_version": config.monitoring.milestone_policy_version,
+                "reasons": pause_reasons,
+                "accepted_exposures": int(counter_payload["accepted"]),
+            }
 
         preflight_reload_due = args.mode == "preflight" and completed_steps == args.max_steps - 1
         checkpoint_due = not args.skip_checkpoint and (
             health_pause_requested
+            or milestone_pause_requested
             or preflight_reload_due
             or (
                 args.mode in {"main", "controlled", "pilot"}
@@ -1864,6 +1981,10 @@ def main() -> None:
                 "stream": stream_state,
                 "prefetched_pool": prefetched_pool,
                 "health_monitor": health_monitor_state,
+                "pending_review": pending_review,
+                "consumed_continuation_authorizations": (
+                    consumed_continuation_authorizations
+                ),
             }
             save_started = time.perf_counter()
             if args.strategy == "model_owned":
@@ -1995,7 +2116,7 @@ def main() -> None:
                 checkpoint_manager.prune_after_verified_replacement()
             torch.cuda.synchronize()
             checkpoint_seconds = time.perf_counter() - checkpoint_started
-        if stop_requested or health_pause_requested:
+        if stop_requested or health_pause_requested or milestone_pause_requested:
             break
         if profiler is not None:
             profiler.step()
@@ -2043,7 +2164,13 @@ def main() -> None:
         report = {
             "schema_version": 1,
             "status": (
-                "PAUSED_HEALTH_REVIEW" if health_pause_requested else "PASS"
+                "PAUSED_HEALTH_AND_MILESTONE_REVIEW"
+                if health_pause_requested and milestone_pause_requested
+                else "PAUSED_HEALTH_REVIEW"
+                if health_pause_requested
+                else "PAUSED_MILESTONE_REVIEW"
+                if milestone_pause_requested
+                else "PASS"
             ),
             "mode": args.mode,
             "strategy": args.strategy,
@@ -2093,7 +2220,24 @@ def main() -> None:
             "initial_activation_decoder_norms_by_rank": initial_decoder_norms_by_rank,
             "final_reconstruction_scales_by_rank": rows[-1]["reconstruction_scales_by_rank"],
             "final_activation_decoder_norms_by_rank": final_decoder_norms_by_rank,
+            "pending_review": pending_review,
+            "consumed_continuation_authorizations": (
+                consumed_continuation_authorizations
+            ),
         }
+        if health_pause_requested or milestone_pause_requested:
+            report["scientific_review"] = milestone_scientific_summary(rows[-1])
+            report["recovery_checkpoint"] = {
+                "path": None if checkpoint_path is None else str(checkpoint_path),
+                "manifest_sha256": (
+                    None
+                    if checkpoint_path is None
+                    else _sha256(checkpoint_path / "manifest.json")
+                ),
+                "status": (
+                    None if checkpoint_manifest is None else checkpoint_manifest.get("status")
+                ),
+            }
         if controlled is not None:
             report["controlled_retrain"] = {
                 "arm": controlled.arm,
@@ -2111,12 +2255,16 @@ def main() -> None:
                 "optimizer_state": controlled.optimizer_state,
             }
         report_path = (
-            args.run_dir / f"health_pause_step_{completed_steps:09d}.json"
-            if health_pause_requested
+            args.run_dir / f"continuation_review_step_{completed_steps:09d}.json"
+            if health_pause_requested or milestone_pause_requested
             else args.run_dir / "benchmark_report.json"
         )
         write_json_immutable(report_path, report)
-        if args.mode == "preflight" and not health_pause_requested:
+        if (
+            args.mode == "preflight"
+            and not health_pause_requested
+            and not milestone_pause_requested
+        ):
             expected_preflight = Path(config.runtime.preflight_evidence)
             if args.run_dir != expected_preflight.parent:
                 raise ValueError(
@@ -2131,6 +2279,8 @@ def main() -> None:
     dist.destroy_process_group()
     if health_pause_requested:
         raise SystemExit(86)
+    if milestone_pause_requested:
+        raise SystemExit(87)
     if stop_requested:
         raise SystemExit(99)
 
