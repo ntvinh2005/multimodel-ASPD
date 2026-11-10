@@ -13,8 +13,8 @@
   "blocker_resolution_branch": "aspd-v3.1-main500m-blocker-resolution",
   "config": {
     "path": "configs/multimodel/aspd_v3/main500m_preparation_v1.yaml",
-    "fingerprint": "af976c9ee5a1dadac7e5b915cc2fbc277eee22df3a1b029ec5318a55b99303c0",
-    "execution_contract_fingerprint": "d42977392a791a8c0844fbe477178fa288b19d47304a17c4f046b828db7c65be",
+    "fingerprint": "ec4361f7017adc539e5cbd75861602854c1aa0c4ced1c5a261f5547206c66f5f",
+    "execution_contract_fingerprint": "c37e8999ed31767638041d05ad4e5311243db3fddb439bfcb2c260e8ab01e2f6",
     "status": "DRAFT_FAIL_CLOSED"
   },
   "architecture": {
@@ -22,8 +22,8 @@
     "selected_layers_per_model": 8,
     "logical_matrices_per_layer": 7,
     "logical_target_slots": 168,
-    "approved_physical_targets": 112,
-    "pending_physical_targets": 56,
+    "approved_physical_targets": 168,
+    "pending_physical_targets": 0,
     "encoder": "hierarchical_transformer",
     "gate": "per_anchor_feature_zscore_relu_pool_wide_batchtopk",
     "zscore_axis": "feature",
@@ -138,7 +138,6 @@
     }
   ],
   "blockers": [
-    "MODEL_THREE_BLOCKED",
     "ALIGNMENT_BLOCKED",
     "STORAGE_BLOCKED",
     "RESUME_BLOCKED",

@@ -85,43 +85,12 @@ def _main500m_config():
     )
 
 
-def _with_approved_synthetic_third(payload: dict) -> dict:
-    payload["models"][2] = {
-        "key": "third",
-        "approval_status": "APPROVED",
-        "model_id": "synthetic/third-model",
-        "revision": "a" * 40,
-        "tokenizer_id": "synthetic/third-model",
-        "tokenizer_revision": "a" * 40,
-        "family": "synthetic_transformer",
-        "license": "test-only",
-        "access": "local-test",
-        "checkpoint_parameter_count": 2_000_000_000,
-        "selected_layers": list(range(4, 12)),
-        "hidden_size": 32,
-        "intermediate_size": 64,
-        "num_hidden_layers": 16,
-        "num_attention_heads": 4,
-        "num_key_value_heads": 2,
-        "head_dim": 8,
-        "layer_prefixes": ["model.layers"],
-        "residual_pre_suffix": "input_layernorm",
-        "residual_mid_suffix": "post_attention_layernorm",
-        "fused_qkv": False,
-        "fused_gate_up": False,
-        "frozen": True,
-    }
-    payload["architecture"]["model_order"] = ["gemma", "smol", "third"]
-    payload["approvals"]["third_model"] = "APPROVED"
-    return payload
-
-
 def test_main500m_draft_preserves_zscore_math_and_fails_closed() -> None:
     config = _main500m_config()
     report = config.structural_report()
     assert report["logical_target_slots"] == 168
-    assert report["approved_physical_targets"] == 112
-    assert report["pending_physical_targets"] == 56
+    assert report["approved_physical_targets"] == 168
+    assert report["pending_physical_targets"] == 0
     assert config.objective.gate_logit_normalization == "per_anchor_feature_zscore"
     assert config.objective.gate_logit_normalization_epsilon == 1e-5
     assert config.objective.activation_objective_mode == "full_only"
@@ -139,9 +108,9 @@ def test_main500m_draft_preserves_zscore_math_and_fails_closed() -> None:
         "HUMAN_INTERPRETABILITY_PACKAGE_COMPLETE_RESPONSES_PENDING"
     )
     assert not config.approvals.human_interpretability.permits_main_authorization()
-    assert "MODEL_THREE_BLOCKED" in report["blockers"]
+    assert "MODEL_THREE_BLOCKED" not in report["blockers"]
     assert "MILESTONE_POLICY_APPROVAL_PENDING" in report["blockers"]
-    with pytest.raises(RuntimeError, match="MODEL_THREE_BLOCKED"):
+    with pytest.raises(RuntimeError, match="ALIGNMENT_BLOCKED"):
         config.require_execution_authorized()
 
     invalid = config.payload()
@@ -256,13 +225,13 @@ def test_main500m_bounded_preflight_has_independent_fail_closed_authorization(
     tmp_path: Path,
 ) -> None:
     draft = _main500m_config()
-    with pytest.raises(RuntimeError, match="MODEL_THREE_BLOCKED"):
+    with pytest.raises(RuntimeError, match="ALIGNMENT_BLOCKED"):
         draft.require_preflight_authorized(
             optimizer_steps=4,
             run_dir=tmp_path / "unapproved",
         )
 
-    payload = _with_approved_synthetic_third(draft.payload())
+    payload = draft.payload()
     preflight_root = (
         tmp_path / "aspd_v3" / "main500m_preparation_v1" / "preflight"
     )
@@ -312,7 +281,7 @@ def test_main500m_mode_gate_cannot_cross_preflight_and_main_boundaries(
         max_steps=61_036,
         run_dir=tmp_path / "main",
     )
-    with pytest.raises(RuntimeError, match="MODEL_THREE_BLOCKED"):
+    with pytest.raises(RuntimeError, match="ALIGNMENT_BLOCKED"):
         _authorize_main500m_mode(draft, main_args)
 
     skip_args = copy.copy(main_args)
@@ -329,7 +298,7 @@ def test_main500m_mode_gate_cannot_cross_preflight_and_main_boundaries(
 def test_main500m_preflight_evidence_is_pinned_and_semantically_validated(
     tmp_path: Path,
 ) -> None:
-    payload = _with_approved_synthetic_third(_main500m_config().payload())
+    payload = _main500m_config().payload()
     preflight_root = (
         tmp_path / "aspd_v3" / "main500m_preparation_v1" / "preflight"
     )
@@ -395,9 +364,16 @@ def test_main500m_preflight_evidence_is_pinned_and_semantically_validated(
 
 
 def test_main500m_source_contract_rejects_qwen() -> None:
-    payload = _with_approved_synthetic_third(_main500m_config().payload())
+    payload = _main500m_config().payload()
     payload["models"][2]["model_id"] = "Qwen/forbidden-new-experiment"
     with pytest.raises(ValueError, match="Qwen is forbidden"):
+        V31Main500MConfig.model_validate(payload)
+
+
+def test_main500m_approved_granite_contract_is_immutable() -> None:
+    payload = _main500m_config().payload()
+    payload["models"][2]["selected_layers"] = list(range(15, 23))
+    with pytest.raises(ValueError, match="approved Granite model-3 contract changed"):
         V31Main500MConfig.model_validate(payload)
 
 
@@ -718,11 +694,11 @@ def test_main500m_milestone_report_preserves_complete_scientific_diagnostics() -
 
 
 def test_approved_third_model_contract_registers_exactly_168_unique_targets() -> None:
-    payload = _with_approved_synthetic_third(_main500m_config().payload())
+    payload = _main500m_config().payload()
     config = V31Main500MConfig.model_validate(payload)
     registry = build_model_registry_2b(config)
     targets = [target for layout in registry.values() for target in layout.targets()]
-    assert tuple(registry) == ("gemma", "smol", "third")
+    assert tuple(registry) == ("gemma", "smol", "granite")
     assert len(targets) == len({target.key for target in targets}) == 168
     assert {target.logical_name for target in targets} == {
         "q",
@@ -736,7 +712,7 @@ def test_approved_third_model_contract_registers_exactly_168_unique_targets() ->
 
 
 def test_main500m_alignment_manifest_uses_the_canonical_policy_identifier() -> None:
-    payload = _with_approved_synthetic_third(_main500m_config().payload())
+    payload = _main500m_config().payload()
     config = V31Main500MConfig.model_validate(payload)
     manifest = {
         "schema_version": 4,

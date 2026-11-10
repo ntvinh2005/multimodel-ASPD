@@ -29,7 +29,7 @@ detached binary internal support. No main-training job has been submitted.
 | ID | Blocker | Root cause | Files changed | Tests | Status | Approval needed |
 |---|---|---|---|---|---|---|
 | 1 | Preflight authorization deadlock | Main authorization, including prior preflight PASS, ran before mode dispatch; preflight had no independent bounded authorization or pinned result schema. | `main500m_config.py`, `train_aspd_v3_2b.py`, draft YAML, `test_multimodel_v3_2b.py` | Six authorization-focused tests; all 31 non-distributed file tests pass; distributed retry remains inconclusive. | `FIXED_TESTED` | Researcher must later authorize an exact model-3 preflight budget and namespace; the checked-in draft remains pending. |
-| 2 | Third-model selection | Exact model, revision, tokenizer, layers, and hook layout are not approved. | Model-3 decision package and machine-readable recommendation. | Official config/model-card/source comparison plus read-only historical metadata cross-check; no model execution. | `BLOCKED_RESEARCHER_DECISION` | Approve or reject the proposed Granite ID/revision/layers, license, residual semantics and subsequent bounded tests. |
+| 2 | Third-model selection | The exact source contract was previously unapproved. | Model-3 decision package, immutable researcher approval, pinned Granite config, schema and tests. | Exact contract loads; 168 unique targets register; mutation and Qwen rejection tests pass. | `FIXED_TESTED` | None for selection. Alignment, source hooks, GPU preflight and main submission remain separate gates. |
 | 3 | Three-way alignment | Exact-prefix contract is implemented, but no approved third tokenizer has been tested; stream/manifests previously used inconsistent legacy and canonical policy names. | Canonical spec, stream provenance, runner manifest validation, manifest preparer, tests. | Canonical-policy CPU/provenance tests pass; real three-tokenizer evidence absent. | `BLOCKED_EXTERNAL_DEPENDENCY` | Model 3 first, then authorization for bounded tokenizer validation and acceptance/bias measurement. |
 | 4 | Storage capacity | Live free space is below the 1 TiB reservation. A dry-run inventory identifies a narrowly sufficient `/blue` Tier A, but no deletion or dedicated reservation is approved. | Storage proposal and machine-readable inventory. | Live `df`/inode/quota, exact `du`, COMPLETE markers, report and manifest SHA-256 checks. | `BLOCKED_STORAGE` | Exact deletion targets or additional capacity, then remeasurement and path approval. |
 | 5 | Real three-model GPU preflight | Synthetic distributed tests do not validate three real source models. | None yet | Not run. | `BLOCKED_RESEARCHER_DECISION` | Model 3, alignment, and bounded preflight authorization. |
@@ -336,3 +336,15 @@ model 3, three-way tokenizer alignment, storage, real 168-target GPU preflight, 
 scheduled signal/requeue, final-composition throughput, human interpretation, policy approvals, and
 final submission authorization. The complete evidence-boundary audit is in
 `aspd_v3_500m_final_readiness_audit.md`.
+
+## Model-3 approval update
+
+On 2026-11-09 the researcher approved the exact Granite recommendation. The main contract now pins
+`ibm-granite/granite-3.3-2b-instruct@707f574c62054322f6b5b04b6d075f0a8f05e0f0`, tokenizer at
+the same revision, layers 16--23, and the approved physical layout. Registry validation now reports
+168 approved physical targets and zero pending target slots. The source contract rejects any drift
+from those values and continues to reject Qwen. The selection approval does not manufacture
+alignment, physical-hook, GPU, resume, or throughput evidence.
+
+Decision record:
+`analysis/aspd_v3_500m_blocker_resolution/model3_researcher_approval.json`.

@@ -4,8 +4,8 @@ Status date: 2026-11-09 (America/New_York)
 
 Decision: **`MAIN_BLOCKED`**
 
-No 500M job was submitted. No third model was downloaded or executed. No storage artifact was
-deleted. The implementation package is substantially prepared, but the main experiment is not yet
+No 500M job was submitted. No storage artifact was deleted. The implementation package is
+substantially prepared, but the main experiment is not yet
 scientifically or operationally authorized.
 
 ## Evidence boundary
@@ -81,10 +81,11 @@ The draft requires exactly three frozen source models. Gemma and SmolLM2 remain 
 - `google/gemma-2-2b-it@299a8560bedf22ed1c72a8a11e7dce4a7f9f51f8`, layers 9--16;
 - `HuggingFaceTB/SmolLM2-1.7B-Instruct@31b70e2e869a7173562077fd711b654946d38674`,
   layers 8--15; and
-- an explicit fail-closed model-3 placeholder.
+- `ibm-granite/granite-3.3-2b-instruct@707f574c62054322f6b5b04b6d075f0a8f05e0f0`,
+  layers 16--23, approved on 2026-11-09.
 
-The registry and configuration represent all 168 logical slots. The two approved models account
-for 112 physical targets; the unresolved third model accounts for the remaining 56. Tests cover
+The registry and configuration represent all 168 logical slots and all 168 approved physical
+targets. Tests cover
 three-model shapes, shared component indices, PRE/MID target grouping, separators and identity
 channels, rank-one shapes, z-score/BatchTopK semantics, detached gradient routing, duplicate/missing
 target detection, and finite synthetic forward/backward behavior.
@@ -98,7 +99,7 @@ source models.
 | ID | Result | Current state | Remaining gate |
 |---|---|---|---|
 | 1. Preflight authorization | Separate bounded-preflight and main authorization implemented and tested. | `FIXED_TESTED` | Populate only after exact model-3/alignment approval. |
-| 2. Model 3 | Granite 3.3 2B recommendation package complete; no selection or execution occurred. | `MODEL_THREE_BLOCKED` | Researcher approval of exact model/revision/tokenizer/layers/hooks/license. |
+| 2. Model 3 | Exact Granite contract approved, populated, pinned, and CPU-tested. | `FIXED_TESTED` | Alignment and real source execution remain separate gates. |
 | 3. Alignment | Exact canonical-text prefix-boundary schema and fail-closed manifest validation implemented. | `ALIGNMENT_BLOCKED` | Real three-tokenizer acceptance, failure, exhaustion, reproducibility, and bias study. |
 | 4. Storage | Live capacity and deletion dry run quantified; nothing deleted. | `STORAGE_BLOCKED` | At least 1 TiB authorized free space with operational margin. |
 | 5. Real GPU preflight | Launcher and evidence schema prepared. | `THREE_MODEL_GPU_PREFLIGHT_PENDING` | Approved model 3, alignment, storage, and bounded GPU authorization. |
@@ -118,8 +119,8 @@ separate seven-matrix layout, direct PRE/MID sites, public Apache-2.0 access, an
 memory. Its residual scaling and GQA add scientifically useful diversity without redefining the
 physical parameter target.
 
-This is a recommendation only. The exact comparison, alternatives, source links, and required
-decision fields are in
+This recommendation was approved on 2026-11-09. The exact comparison, alternatives, source links,
+decision fields, and immutable approval record are in
 [`aspd_v3_500m_model3_decision_package.md`](aspd_v3_500m_model3_decision_package.md). Qwen remains
 forbidden for any new experiment.
 
@@ -259,10 +260,10 @@ Before final main authorization:
 1. **Is the v3.1 architecture preserved?** Yes, at specification, configuration, and tested CPU
    implementation level; no scientific objective or gate/loss invariant was changed.
 2. **Is N=3 technically prepared?** Static and synthetic infrastructure: yes. Real final source
-   integration: no, pending model 3.
-3. **Are 168 targets represented?** Yes as logical slots, with 112 approved physical targets and
-   56 fail-closed model-3 slots. Real physical validation of all 168 is pending.
-4. **Is model 3 unresolved?** Yes. Granite is recommended but not selected.
+   integration remains pending alignment and GPU evidence.
+3. **Are 168 targets represented?** Yes as logical and approved physical slots. Real physical-hook
+   validation of all 168 is pending.
+4. **Is model 3 unresolved?** No. The exact Granite source contract is approved and pinned.
 5. **Is exact resume validated?** Synthetic three-rank recovery: yes. Real final three-model exact
    resume: no.
 6. **Is storage sufficient?** No. `STORAGE_BLOCKED` remains correct.
@@ -287,7 +288,6 @@ This command is documented only and was not executed.
 
 Exact remaining blockers:
 
-- `MODEL_THREE_BLOCKED`
 - `ALIGNMENT_BLOCKED`
 - `STORAGE_BLOCKED`
 - `RESUME_BLOCKED`

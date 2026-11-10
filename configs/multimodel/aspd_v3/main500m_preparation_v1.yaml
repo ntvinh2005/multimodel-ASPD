@@ -50,33 +50,33 @@ models:
     fused_qkv: false
     fused_gate_up: false
     frozen: true
-  - key: model3_pending
-    approval_status: PENDING_RESEARCHER_APPROVAL
-    model_id: null
-    revision: null
-    tokenizer_id: null
-    tokenizer_revision: null
-    family: null
-    license: null
-    access: null
-    checkpoint_parameter_count: null
-    selected_layers: null
-    hidden_size: null
-    intermediate_size: null
-    num_hidden_layers: null
-    num_attention_heads: null
-    num_key_value_heads: null
-    head_dim: null
-    layer_prefixes: null
-    residual_pre_suffix: null
-    residual_mid_suffix: null
-    fused_qkv: null
-    fused_gate_up: null
-    frozen: null
+  - key: granite
+    approval_status: APPROVED
+    model_id: ibm-granite/granite-3.3-2b-instruct
+    revision: 707f574c62054322f6b5b04b6d075f0a8f05e0f0
+    tokenizer_id: ibm-granite/granite-3.3-2b-instruct
+    tokenizer_revision: 707f574c62054322f6b5b04b6d075f0a8f05e0f0
+    family: granite
+    license: apache-2.0
+    access: public
+    checkpoint_parameter_count: 2533539840
+    selected_layers: [16, 17, 18, 19, 20, 21, 22, 23]
+    hidden_size: 2048
+    intermediate_size: 8192
+    num_hidden_layers: 40
+    num_attention_heads: 32
+    num_key_value_heads: 8
+    head_dim: 64
+    layer_prefixes: [model.layers]
+    residual_pre_suffix: input_layernorm
+    residual_mid_suffix: post_attention_layernorm
+    fused_qkv: false
+    fused_gate_up: false
+    frozen: true
 
 architecture:
   required_model_count: 3
-  model_order: [gemma, smol, model3_pending]
+  model_order: [gemma, smol, granite]
   selected_layers_per_model: 8
   logical_matrices: [q, k, v, o, mlp_gate, mlp_up, mlp_down]
   dictionary_size: 8192
@@ -202,7 +202,7 @@ runtime:
   max_preflight_minutes: 45
 
 approvals:
-  third_model: PENDING_RESEARCHER_APPROVAL
+  third_model: APPROVED
   three_way_alignment: PENDING_THIRD_TOKENIZER_VALIDATION
   human_interpretability:
     status: PENDING_RESEARCHER_RESPONSES

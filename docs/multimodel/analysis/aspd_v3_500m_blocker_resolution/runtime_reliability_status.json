@@ -36,9 +36,9 @@
     "cuda_build": "12.8"
   },
   "contracts": {
-    "configuration_fingerprint": "af976c9ee5a1dadac7e5b915cc2fbc277eee22df3a1b029ec5318a55b99303c0",
-    "execution_contract_fingerprint": "d42977392a791a8c0844fbe477178fa288b19d47304a17c4f046b828db7c65be",
-    "configuration_sha256": "3bc57ddf8ec9fd687776789ca5c31bc696315a5dfa53e5d1974bb1fc1ffdd5df",
+    "configuration_fingerprint": "ec4361f7017adc539e5cbd75861602854c1aa0c4ced1c5a261f5547206c66f5f",
+    "execution_contract_fingerprint": "c37e8999ed31767638041d05ad4e5311243db3fddb439bfcb2c260e8ab01e2f6",
+    "configuration_sha256": "d51763267b5a02593011f8a399f798690859ac8841fa685982ca1850abedf751",
     "main_slurm_sha256": "aac2e25744d48db0121e220ff24c3f68a89569d4fbfc68b2a4511098d98e5fb5",
     "preflight_slurm_sha256": "531adff3b6e8cd5c22f7913ba644e580906b1822068bfe6e6f088a9c2a131a85"
   },

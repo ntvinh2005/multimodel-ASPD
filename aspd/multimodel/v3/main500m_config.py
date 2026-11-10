@@ -29,6 +29,30 @@ RETAINED_MODELS = {
         "selected_layers": tuple(range(8, 16)),
     },
 }
+APPROVED_THIRD_MODEL = {
+    "key": "granite",
+    "model_id": "ibm-granite/granite-3.3-2b-instruct",
+    "revision": "707f574c62054322f6b5b04b6d075f0a8f05e0f0",
+    "tokenizer_id": "ibm-granite/granite-3.3-2b-instruct",
+    "tokenizer_revision": "707f574c62054322f6b5b04b6d075f0a8f05e0f0",
+    "family": "granite",
+    "license": "apache-2.0",
+    "access": "public",
+    "checkpoint_parameter_count": 2_533_539_840,
+    "selected_layers": tuple(range(16, 24)),
+    "hidden_size": 2_048,
+    "intermediate_size": 8_192,
+    "num_hidden_layers": 40,
+    "num_attention_heads": 32,
+    "num_key_value_heads": 8,
+    "head_dim": 64,
+    "layer_prefixes": ("model.layers",),
+    "residual_pre_suffix": "input_layernorm",
+    "residual_mid_suffix": "post_attention_layernorm",
+    "fused_qkv": False,
+    "fused_gate_up": False,
+    "frozen": True,
+}
 
 
 class Main500MSource(BaseModel):
@@ -527,6 +551,12 @@ class V31Main500MConfig(BaseModel):
                 raise ValueError("third-model approval cannot precede a complete source contract")
         elif third.approval_status != "APPROVED" or self.approvals.third_model != "APPROVED":
             raise ValueError("the third model requires explicit researcher approval")
+        else:
+            observed_third = {
+                key: getattr(third, key) for key in APPROVED_THIRD_MODEL
+            }
+            if observed_third != APPROVED_THIRD_MODEL:
+                raise ValueError("approved Granite model-3 contract changed")
         expected_evaluation_status = {
             "PENDING_RESEARCHER_RESPONSES": (
                 "HUMAN_INTERPRETABILITY_PACKAGE_COMPLETE_RESPONSES_PENDING"
@@ -772,13 +802,17 @@ class V31Main500MConfig(BaseModel):
         self.require_main_authorized()
 
     def structural_report(self) -> dict[str, Any]:
+        approved_models = sum(
+            model.approval_status in {"RETAINED_APPROVED", "APPROVED"}
+            for model in self.models
+        )
         return {
             "status": "DRAFT_FAIL_CLOSED",
             "config_fingerprint": self.fingerprint(),
             "required_model_count": 3,
             "logical_target_slots": 3 * 8 * 7,
-            "approved_physical_targets": 2 * 8 * 7,
-            "pending_physical_targets": 8 * 7,
+            "approved_physical_targets": approved_models * 8 * 7,
+            "pending_physical_targets": (3 - approved_models) * 8 * 7,
             "optimizer_steps": self.data.optimizer_steps,
             "target_accepted_anchor_exposures": self.data.target_accepted_anchor_exposures,
             "planned_accepted_anchor_exposures": self.data.planned_accepted_anchor_exposures,

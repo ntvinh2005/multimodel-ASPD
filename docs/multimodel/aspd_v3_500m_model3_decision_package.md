@@ -1,9 +1,12 @@
 # ASPD v3.1 model-3 decision package
 
-Status: `MODEL_THREE_BLOCKED — RECOMMENDATION ONLY`
+Status: `MODEL_THREE_APPROVED — EXECUTION EVIDENCE PENDING`
 
-This document recommends a model for researcher review. It does not select model 3, change the
-main configuration, authorize a download, or authorize tokenizer/model execution. Qwen is excluded.
+This document originally recommended a model for researcher review. On 2026-11-09 the researcher
+approved that exact recommendation. The immutable decision record is
+`analysis/aspd_v3_500m_blocker_resolution/model3_researcher_approval.json`. This approval selects
+the source contract and authorizes bounded engineering verification; it does not approve the main
+500M submission. Qwen remains excluded.
 
 ## Recommendation
 
@@ -101,8 +104,8 @@ The researcher must explicitly approve or reject all of the following as one ver
 7. authorization for a bounded tokenizer-only alignment audit, followed separately by at most a
    20-step real three-model GPU preflight.
 
-Only after approval may the implementation populate the fail-closed model-3 slot. The required
-evidence sequence is metadata/hash verification, fast-tokenizer exact-prefix audit, acceptance and
+The implementation now populates the fail-closed model-3 slot. The required evidence sequence is
+metadata/hash verification, fast-tokenizer exact-prefix audit, acceptance and
 bias report, physical-hook/native-output parity, frozen-weight verification, bounded GPU preflight,
 and real exact-resume validation. Historical Granite experiments are supporting engineering
 evidence only; they are not approval and not a v3.1 main-preflight PASS.
