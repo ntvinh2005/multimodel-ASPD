@@ -17,8 +17,8 @@ This audit distinguishes three claims:
    checkpoint state machinery, launch guards, and machine-readable readiness artifacts.
 2. **Historically or synthetically tested:** three-rank distributed mechanics and deterministic
    checkpoint resume. These do not prove the final source-model composition.
-3. **Not yet executed:** the approved third tokenizer, real three-way alignment, real three-model
-   physical-hook/GPU preflight, real three-model exact resume, scheduled signal/requeue test, and
+3. **Not yet executed:** real three-model physical-hook/GPU preflight, real three-model exact
+   resume, scheduled signal/requeue test, and
    final-composition throughput measurement.
 
 Accordingly, neither compilation nor synthetic tests are treated as main readiness.
@@ -100,7 +100,7 @@ source models.
 |---|---|---|---|
 | 1. Preflight authorization | Separate bounded-preflight and main authorization implemented and tested. | `FIXED_TESTED` | Populate only after exact model-3/alignment approval. |
 | 2. Model 3 | Exact Granite contract approved, populated, pinned, and CPU-tested. | `FIXED_TESTED` | Alignment and real source execution remain separate gates. |
-| 3. Alignment | Exact canonical-text prefix-boundary schema and fail-closed manifest validation implemented. | `ALIGNMENT_BLOCKED` | Real three-tokenizer acceptance, failure, exhaustion, reproducibility, and bias study. |
+| 3. Alignment | Exact canonical-text prefix validation passed on 512 real documents with pinned tokenizers. | `FIXED_TESTED` | Continue source/domain monitoring during execution. |
 | 4. Storage | Live capacity and deletion dry run quantified; nothing deleted. | `STORAGE_BLOCKED` | At least 1 TiB authorized free space with operational margin. |
 | 5. Real GPU preflight | Launcher and evidence schema prepared. | `THREE_MODEL_GPU_PREFLIGHT_PENDING` | Approved model 3, alignment, storage, and bounded GPU authorization. |
 | 6. Exact resume | Synthetic three-rank deterministic resume evidence exists; recovery is self-contained and fail closed. | `RESUME_BLOCKED` | Real three-model uninterrupted-versus-resumed update and interruption test. |
@@ -133,10 +133,11 @@ offsets, canonical prefix digest, tokenizer IDs/revisions, and per-model token p
 be recorded. Any non-roundtripping, interior-token, normalization-changing, or inconsistent
 boundary is rejected; no nearest-position approximation is permitted.
 
-After model-3 approval, the validation must measure acceptance rate and categorized rejection rate,
-prove deterministic stream replay, estimate dataset exhaustion before 500M non-repeated accepted
-exposures, and quantify source/domain selection bias. Synthetic tokenizer fixtures are not approval
-evidence.
+The real bounded validation measured 72.10% boundary-weighted acceptance across 154,868 anchors,
+zero zero-anchor documents, exact repeatability, dataset-prefix replay, and alignment-filter source
+TV 0.0284. The lower-95% yield requires about 1.72M documents; the retained Pile-CC component alone
+has an estimated 32x capacity margin. The immutable evidence is documented in
+`aspd_v3_500m_three_way_alignment_validation.md`.
 
 ## Checkpoint, exposure, and staged continuation
 
@@ -238,22 +239,19 @@ validator stops on model-3, alignment, and authorization gates before CUDA/sourc
 
 Before any real-model preflight:
 
-1. approve or reject the exact Granite recommendation, including revision, tokenizer, layers
-   16--23, PRE/MID semantics, residual scaling disposition, license, and parameter count;
-2. authorize the bounded tokenizer alignment audit;
-3. approve an authorized storage root with at least 1 TiB free plus margin, or approve exact
+1. approve an authorized storage root with at least 1 TiB free plus margin, or approve exact
    deletion targets from the dry-run proposal;
-4. approve monitoring policy v1 and staged-milestone policy v1; and
-5. complete the human response/analysis decision, or explicitly accept the documented remaining
+2. approve monitoring policy v1 and staged-milestone policy v1; and
+3. complete the human response/analysis decision, or explicitly accept the documented remaining
    semantic uncertainty.
 
 Before final main authorization:
 
-6. approve the exact bounded preflight namespace and 3--20 step budget;
-7. review passing real three-model alignment, 168-target hook/parity, GPU, checkpoint/resume,
+4. approve the exact bounded preflight namespace and 3--20 step budget;
+5. review passing 168-target hook/parity, GPU, checkpoint/resume,
    source-immutability, signal/requeue, throughput, and storage evidence;
-8. regenerate and approve all configuration/manifest fingerprints after those decisions; and
-9. issue a separate explicit authorization for the 500M submission and the first staged interval.
+6. regenerate and approve all configuration/manifest fingerprints after those decisions; and
+7. issue a separate explicit authorization for the 500M submission and the first staged interval.
 
 ## Direct answers
 
@@ -288,7 +286,6 @@ This command is documented only and was not executed.
 
 Exact remaining blockers:
 
-- `ALIGNMENT_BLOCKED`
 - `STORAGE_BLOCKED`
 - `RESUME_BLOCKED`
 - `THREE_MODEL_GPU_PREFLIGHT_PENDING`

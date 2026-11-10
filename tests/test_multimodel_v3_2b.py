@@ -85,6 +85,41 @@ def _main500m_config():
     )
 
 
+def _pin_test_alignment_evidence(payload: dict, path: Path) -> None:
+    payload["approvals"]["three_way_alignment"] = "APPROVED"
+    payload["approvals"]["three_way_alignment_artifact"] = str(path)
+    payload["approvals"]["three_way_alignment_artifact_sha256"] = "0" * 64
+    provisional = V31Main500MConfig.model_validate(payload)
+    report = {
+        "status": "PASS",
+        "execution_contract_fingerprint": (
+            provisional.execution_contract_fingerprint()
+        ),
+        "alignment_policy": provisional.data.canonical_text_policy,
+        "alignment_acceptance": provisional.data.alignment_acceptance,
+        "model_order": list(provisional.architecture.model_order),
+        "tokenizers": [
+            {
+                "model_key": model.key,
+                "id": model.tokenizer_id,
+                "revision": model.tokenizer_revision,
+            }
+            for model in provisional.models
+        ],
+        "audit": {
+            "boundary_invariants": "PASS",
+            "within_process_repeatability": "PASS",
+            "dataset_stream_prefix_replay": "PASS",
+        },
+        "selection_bias": {"status": "PASS"},
+        "capacity": {"status": "PASS"},
+    }
+    path.write_text(json.dumps(report, sort_keys=True), encoding="utf-8")
+    payload["approvals"]["three_way_alignment_artifact_sha256"] = (
+        hashlib.sha256(path.read_bytes()).hexdigest()
+    )
+
+
 def test_main500m_draft_preserves_zscore_math_and_fails_closed() -> None:
     config = _main500m_config()
     report = config.structural_report()
@@ -110,7 +145,7 @@ def test_main500m_draft_preserves_zscore_math_and_fails_closed() -> None:
     assert not config.approvals.human_interpretability.permits_main_authorization()
     assert "MODEL_THREE_BLOCKED" not in report["blockers"]
     assert "MILESTONE_POLICY_APPROVAL_PENDING" in report["blockers"]
-    with pytest.raises(RuntimeError, match="ALIGNMENT_BLOCKED"):
+    with pytest.raises(RuntimeError, match="RESUME_BLOCKED"):
         config.require_execution_authorized()
 
     invalid = config.payload()
@@ -225,7 +260,7 @@ def test_main500m_bounded_preflight_has_independent_fail_closed_authorization(
     tmp_path: Path,
 ) -> None:
     draft = _main500m_config()
-    with pytest.raises(RuntimeError, match="ALIGNMENT_BLOCKED"):
+    with pytest.raises(RuntimeError, match="BOUNDED_PREFLIGHT_NOT_AUTHORIZED"):
         draft.require_preflight_authorized(
             optimizer_steps=4,
             run_dir=tmp_path / "unapproved",
@@ -239,7 +274,7 @@ def test_main500m_bounded_preflight_has_independent_fail_closed_authorization(
     payload["runtime"]["preflight_evidence"] = str(
         preflight_root / "preflight_report.json"
     )
-    payload["approvals"]["three_way_alignment"] = "APPROVED"
+    _pin_test_alignment_evidence(payload, tmp_path / "alignment.json")
     payload["approvals"]["bounded_preflight"] = {
         "status": "AUTHORIZED",
         "optimizer_steps": 4,
@@ -281,7 +316,7 @@ def test_main500m_mode_gate_cannot_cross_preflight_and_main_boundaries(
         max_steps=61_036,
         run_dir=tmp_path / "main",
     )
-    with pytest.raises(RuntimeError, match="ALIGNMENT_BLOCKED"):
+    with pytest.raises(RuntimeError, match="RESUME_BLOCKED"):
         _authorize_main500m_mode(draft, main_args)
 
     skip_args = copy.copy(main_args)
@@ -375,6 +410,28 @@ def test_main500m_approved_granite_contract_is_immutable() -> None:
     payload["models"][2]["selected_layers"] = list(range(15, 23))
     with pytest.raises(ValueError, match="approved Granite model-3 contract changed"):
         V31Main500MConfig.model_validate(payload)
+
+
+def test_main500m_three_way_alignment_evidence_is_pinned_and_validated(
+    tmp_path: Path,
+) -> None:
+    config = _main500m_config()
+    report = config.validate_three_way_alignment_evidence()
+    assert report["status"] == "PASS"
+    assert report["audit"]["boundary_invariants"] == "PASS"
+
+    payload = config.payload()
+    invalid_path = tmp_path / "invalid_alignment.json"
+    invalid_report = copy.deepcopy(report)
+    invalid_report["audit"]["dataset_stream_prefix_replay"] = "FAIL"
+    invalid_path.write_text(json.dumps(invalid_report), encoding="utf-8")
+    payload["approvals"]["three_way_alignment_artifact"] = str(invalid_path)
+    payload["approvals"]["three_way_alignment_artifact_sha256"] = hashlib.sha256(
+        invalid_path.read_bytes()
+    ).hexdigest()
+    invalid = V31Main500MConfig.model_validate(payload)
+    with pytest.raises(RuntimeError, match="THREE_WAY_ALIGNMENT_EVIDENCE_INVALID"):
+        invalid.validate_three_way_alignment_evidence()
 
 
 def test_three_model_zscore_and_separator_contract_matches_notation() -> None:

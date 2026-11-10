@@ -86,13 +86,27 @@ def inspect_v3_model_config(layout: ModelFamilyLayout, *, local_files_only: bool
 
 
 def load_v3_tokenizer(layout: ModelFamilyLayout, *, local_files_only: bool = False):
+    from huggingface_hub import snapshot_download
     from transformers import AutoTokenizer
 
+    tokenizer_source = layout.tokenizer_id
+    if local_files_only:
+        # Passing a Hub ID can still trigger Transformers' Mistral-regex model-card
+        # lookup. Resolve the exact cached revision to a local directory first.
+        tokenizer_source = snapshot_download(
+            repo_id=layout.tokenizer_id,
+            revision=layout.tokenizer_revision,
+            local_files_only=True,
+        )
     tokenizer = AutoTokenizer.from_pretrained(
-        layout.tokenizer_id,
-        revision=layout.tokenizer_revision,
+        tokenizer_source,
+        revision=None if local_files_only else layout.tokenizer_revision,
         local_files_only=local_files_only,
         use_fast=True,
+        # Transformers otherwise performs an online model-card lookup to guess
+        # whether a Mistral regex migration applies, even with local_files_only.
+        # None of the pinned v3 source tokenizers is a base Mistral tokenizer.
+        fix_mistral_regex=False,
     )
     if not tokenizer.is_fast:
         raise ValueError(f"{layout.key} tokenizer must expose deterministic offset mappings")

@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "status": "PASS",
+  "decision": "THREE_WAY_ALIGNMENT_ENGINEERING_VALIDATED",
+  "model_order": ["gemma", "smol", "granite"],
+  "execution_contract_fingerprint": "c37e8999ed31767638041d05ad4e5311243db3fddb439bfcb2c260e8ab01e2f6",
+  "alignment_policy": "exact_fast_tokenizer_offsets_and_exact_prefix_roundtrip_v2",
+  "alignment_acceptance": "intersection_of_exact_canonical_text_boundaries",
+  "audit": {
+    "path": "docs/multimodel/analysis/aspd_v3_500m_blocker_resolution/three_way_alignment_audit.json",
+    "file_sha256": "6dec94cf8d0f9302874b77ae06f2e7aceefe113c6e2d028f3936483a20044298",
+    "internal_report_sha256": "c2ad4814876517eaf88504b5077af3ead108a056a559f384eb900a3753748761",
+    "scan_documents": 2000,
+    "sample_documents": 512,
+    "accepted_anchors": 154868,
+    "candidate_boundaries": 214808,
+    "boundary_weighted_acceptance_rate": 0.7209601132173848,
+    "zero_anchor_document_fraction": 0.0,
+    "boundary_invariants": "PASS",
+    "within_process_repeatability": "PASS",
+    "dataset_stream_prefix_replay": "PASS"
+  },
+  "selection_bias": {
+    "status": "PASS",
+    "alignment_filter_total_variation": 0.028386493722963452,
+    "document_to_accepted_total_variation": 0.05138468728207247,
+    "source_groups_in_scan": 14,
+    "source_groups_in_sample": 13,
+    "engineering_thresholds": {
+      "maximum_alignment_filter_total_variation": 0.1,
+      "maximum_zero_anchor_document_fraction": 0.01,
+      "minimum_boundary_weighted_acceptance_rate": 0.5
+    }
+  },
+  "capacity": {
+    "status": "PASS",
+    "mean_accepted_anchors_per_document": 302.4765625,
+    "lower95_accepted_anchors_per_document": 291.34855945077794,
+    "documents_required_at_lower95_for_500m": 1716158,
+    "conservative_reference_component": "Pile-CC",
+    "reference_raw_size_gib": 227.12,
+    "reference_mean_document_size_kib": 4.33,
+    "reference_implied_documents": 55000596,
+    "reference_capacity_multiple": 32.0486785608415,
+    "reason": "The pinned dataset README removes Books3, BookCorpus2, OpenSubtitles, YoutubeSubtitles, and OpenWebText2 but retains Pile-CC. Pile-CC alone exceeds the lower-95% required document estimate by about 32x under the source paper table statistics."
+  },
+  "tokenizers": [
+    {
+      "model_key": "gemma",
+      "id": "google/gemma-2-2b-it",
+      "revision": "299a8560bedf22ed1c72a8a11e7dce4a7f9f51f8",
+      "class": "GemmaTokenizerFast"
+    },
+    {
+      "model_key": "smol",
+      "id": "HuggingFaceTB/SmolLM2-1.7B-Instruct",
+      "revision": "31b70e2e869a7173562077fd711b654946d38674",
+      "class": "GPT2TokenizerFast"
+    },
+    {
+      "model_key": "granite",
+      "id": "ibm-granite/granite-3.3-2b-instruct",
+      "revision": "707f574c62054322f6b5b04b6d075f0a8f05e0f0",
+      "class": "GPT2TokenizerFast"
+    }
+  ],
+  "primary_capacity_sources": [
+    {
+      "description": "Pinned Pile Uncopyrighted README",
+      "url": "https://huggingface.co/datasets/monology/pile-uncopyrighted/blob/3be90335b66f24456a5d6659d9c8d208c0357119/README.md",
+      "sha256": "e8133c95c779219ec724fe311253ca019bb29b4e9c6473f36cc8d96de2d4d86a"
+    },
+    {
+      "description": "EleutherAI Pile composition table",
+      "url": "https://github.com/EleutherAI/the-pile"
+    }
+  ],
+  "limitations": [
+    "The dataset API does not expose an exact train-row count for this script-based pinned revision.",
+    "Bias metrics use a deterministic 512-document sample selected from the first 2000 stream rows, not a full-corpus census.",
+    "The capacity check combines the measured lower-95% alignment yield with the official Pile-CC size and mean-document statistics rather than counting every JSONL row."
+  ]
+}

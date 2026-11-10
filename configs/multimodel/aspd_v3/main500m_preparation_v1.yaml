@@ -203,7 +203,9 @@ runtime:
 
 approvals:
   third_model: APPROVED
-  three_way_alignment: PENDING_THIRD_TOKENIZER_VALIDATION
+  three_way_alignment: APPROVED
+  three_way_alignment_artifact: docs/multimodel/analysis/aspd_v3_500m_blocker_resolution/three_way_alignment_approval.json
+  three_way_alignment_artifact_sha256: b969b3240a31397308f3c8586ffdffc2e8c0006dcd829a333a10fb5f223d5001
   human_interpretability:
     status: PENDING_RESEARCHER_RESPONSES
     artifact_path: /orange/thai/vinhnguyen1/aspd_v3/human_interpretability_v1/package/audit/preparation_manifest.json

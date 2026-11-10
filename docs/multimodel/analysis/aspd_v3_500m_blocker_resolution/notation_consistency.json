@@ -7,7 +7,7 @@
   },
   "configuration": {
     "path": "configs/multimodel/aspd_v3/main500m_preparation_v1.yaml",
-    "fingerprint": "ec4361f7017adc539e5cbd75861602854c1aa0c4ced1c5a261f5547206c66f5f",
+    "fingerprint": "ee90f3e5848b1f204c23c40645ffb735548ddbb0191e83cb25b3f8063660c6fa",
     "execution_contract_fingerprint": "c37e8999ed31767638041d05ad4e5311243db3fddb439bfcb2c260e8ab01e2f6"
   },
   "verified_invariants": {
@@ -44,7 +44,8 @@
     "policy": "exact_fast_tokenizer_offsets_and_exact_prefix_roundtrip_v2",
     "acceptance": "intersection_of_exact_canonical_text_boundaries",
     "manifest_schema_version": 4,
-    "real_three_tokenizer_validation": "PENDING_MODEL_THREE"
+    "real_three_tokenizer_validation": "PASS_BOUNDED_512_DOCUMENT_AUDIT",
+    "validation_artifact": "docs/multimodel/analysis/aspd_v3_500m_blocker_resolution/three_way_alignment_approval.json"
   },
   "evidence_boundary": "CPU equations, schemas, provenance names, and synthetic contracts only; no unapproved third model or real three-model GPU path was executed."
 }

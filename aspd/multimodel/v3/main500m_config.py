@@ -495,6 +495,11 @@ class Main500MApprovals(BaseModel):
 
     third_model: Literal["PENDING_RESEARCHER_APPROVAL", "APPROVED"]
     three_way_alignment: Literal["PENDING_THIRD_TOKENIZER_VALIDATION", "APPROVED"]
+    three_way_alignment_artifact: str | None = None
+    three_way_alignment_artifact_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
     human_interpretability: HumanInterpretabilityApproval
     exact_resume: Literal[
         "PENDING_ENGINEERING_VALIDATION",
@@ -557,6 +562,19 @@ class V31Main500MConfig(BaseModel):
             }
             if observed_third != APPROVED_THIRD_MODEL:
                 raise ValueError("approved Granite model-3 contract changed")
+        alignment_evidence = (
+            self.approvals.three_way_alignment_artifact,
+            self.approvals.three_way_alignment_artifact_sha256,
+        )
+        if self.approvals.three_way_alignment == "APPROVED":
+            if any(value is None or not str(value).strip() for value in alignment_evidence):
+                raise ValueError(
+                    "approved three-way alignment requires a pinned validation artifact"
+                )
+        elif any(value is not None for value in alignment_evidence):
+            raise ValueError(
+                "pending three-way alignment cannot contain approval evidence"
+            )
         expected_evaluation_status = {
             "PENDING_RESEARCHER_RESPONSES": (
                 "HUMAN_INTERPRETABILITY_PACKAGE_COMPLETE_RESPONSES_PENDING"
@@ -660,6 +678,7 @@ class V31Main500MConfig(BaseModel):
             raise RuntimeError(
                 "ASPD v3.1 bounded preflight is fail-closed: " + ", ".join(blockers)
             )
+        self.validate_three_way_alignment_evidence()
         assert authorization.optimizer_steps is not None
         assert authorization.output_namespace is not None
         if optimizer_steps != authorization.optimizer_steps:
@@ -738,6 +757,81 @@ class V31Main500MConfig(BaseModel):
             raise RuntimeError(f"THREE_MODEL_GPU_PREFLIGHT_EVIDENCE_INVALID: {mismatch}")
         return report
 
+    def validate_three_way_alignment_evidence(self) -> dict[str, Any]:
+        if self.approvals.three_way_alignment != "APPROVED":
+            raise RuntimeError("ALIGNMENT_BLOCKED")
+        artifact_path = self.approvals.three_way_alignment_artifact
+        expected_sha256 = self.approvals.three_way_alignment_artifact_sha256
+        assert artifact_path is not None
+        assert expected_sha256 is not None
+        artifact = Path(artifact_path)
+        if not artifact.is_file():
+            raise RuntimeError("THREE_WAY_ALIGNMENT_ARTIFACT_MISSING")
+        observed_sha256 = hashlib.sha256(artifact.read_bytes()).hexdigest()
+        if observed_sha256 != expected_sha256:
+            raise RuntimeError("THREE_WAY_ALIGNMENT_ARTIFACT_HASH_MISMATCH")
+        report = json.loads(artifact.read_text(encoding="utf-8"))
+        expected_tokenizers = [
+            {
+                "model_key": model.key,
+                "id": model.tokenizer_id,
+                "revision": model.tokenizer_revision,
+            }
+            for model in self.models
+        ]
+        observed_tokenizers = [
+            {
+                "model_key": row.get("model_key"),
+                "id": row.get("id"),
+                "revision": row.get("revision"),
+            }
+            for row in report.get("tokenizers", [])
+        ]
+        expected = {
+            "status": "PASS",
+            "execution_contract_fingerprint": self.execution_contract_fingerprint(),
+            "alignment_policy": self.data.canonical_text_policy,
+            "alignment_acceptance": self.data.alignment_acceptance,
+            "model_order": list(self.architecture.model_order),
+            "tokenizers": expected_tokenizers,
+            "audit.boundary_invariants": "PASS",
+            "audit.within_process_repeatability": "PASS",
+            "audit.dataset_stream_prefix_replay": "PASS",
+            "selection_bias.status": "PASS",
+            "capacity.status": "PASS",
+        }
+        observed = {
+            "status": report.get("status"),
+            "execution_contract_fingerprint": report.get(
+                "execution_contract_fingerprint"
+            ),
+            "alignment_policy": report.get("alignment_policy"),
+            "alignment_acceptance": report.get("alignment_acceptance"),
+            "model_order": report.get("model_order"),
+            "tokenizers": observed_tokenizers,
+            "audit.boundary_invariants": report.get("audit", {}).get(
+                "boundary_invariants"
+            ),
+            "audit.within_process_repeatability": report.get("audit", {}).get(
+                "within_process_repeatability"
+            ),
+            "audit.dataset_stream_prefix_replay": report.get("audit", {}).get(
+                "dataset_stream_prefix_replay"
+            ),
+            "selection_bias.status": report.get("selection_bias", {}).get("status"),
+            "capacity.status": report.get("capacity", {}).get("status"),
+        }
+        mismatches = {
+            key: {"expected": expected[key], "observed": observed[key]}
+            for key in expected
+            if observed[key] != expected[key]
+        }
+        if mismatches:
+            raise RuntimeError(
+                f"THREE_WAY_ALIGNMENT_EVIDENCE_INVALID: {mismatches}"
+            )
+        return report
+
     def validate_human_interpretability_artifact(self) -> dict[str, Any]:
         human = self.approvals.human_interpretability
         if not human.permits_main_authorization():
@@ -793,6 +887,7 @@ class V31Main500MConfig(BaseModel):
             raise RuntimeError(
                 "ASPD v3.1 main 500M execution is fail-closed: " + ", ".join(blockers)
             )
+        self.validate_three_way_alignment_evidence()
         self.validate_preflight_evidence()
         self.validate_human_interpretability_artifact()
 

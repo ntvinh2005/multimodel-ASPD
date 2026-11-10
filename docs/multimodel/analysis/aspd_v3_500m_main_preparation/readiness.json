@@ -13,7 +13,7 @@
   "blocker_resolution_branch": "aspd-v3.1-main500m-blocker-resolution",
   "config": {
     "path": "configs/multimodel/aspd_v3/main500m_preparation_v1.yaml",
-    "fingerprint": "ec4361f7017adc539e5cbd75861602854c1aa0c4ced1c5a261f5547206c66f5f",
+    "fingerprint": "ee90f3e5848b1f204c23c40645ffb735548ddbb0191e83cb25b3f8063660c6fa",
     "execution_contract_fingerprint": "c37e8999ed31767638041d05ad4e5311243db3fddb439bfcb2c260e8ab01e2f6",
     "status": "DRAFT_FAIL_CLOSED"
   },
@@ -51,7 +51,12 @@
     "acceptance": "intersection_of_exact_canonical_text_boundaries",
     "manifest_schema_version": 4,
     "policy_identifier_consistency": "PASS",
-    "three_way_source_validation": "PENDING_MODEL_THREE"
+    "three_way_source_validation": "PASS_BOUNDED_REAL_TOKENIZERS",
+    "validation_artifact_sha256": "b969b3240a31397308f3c8586ffdffc2e8c0006dcd829a333a10fb5f223d5001",
+    "sample_documents": 512,
+    "accepted_anchors": 154868,
+    "boundary_weighted_acceptance_rate": 0.7209601132173848,
+    "alignment_filter_total_variation": 0.028386493722963452
   },
   "monitoring": {
     "policy_version": "v1",
@@ -138,7 +143,6 @@
     }
   ],
   "blockers": [
-    "ALIGNMENT_BLOCKED",
     "STORAGE_BLOCKED",
     "RESUME_BLOCKED",
     "MONITORING_POLICY_APPROVAL_PENDING",

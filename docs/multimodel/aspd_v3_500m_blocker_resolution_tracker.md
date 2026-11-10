@@ -30,7 +30,7 @@ detached binary internal support. No main-training job has been submitted.
 |---|---|---|---|---|---|---|
 | 1 | Preflight authorization deadlock | Main authorization, including prior preflight PASS, ran before mode dispatch; preflight had no independent bounded authorization or pinned result schema. | `main500m_config.py`, `train_aspd_v3_2b.py`, draft YAML, `test_multimodel_v3_2b.py` | Six authorization-focused tests; all 31 non-distributed file tests pass; distributed retry remains inconclusive. | `FIXED_TESTED` | Researcher must later authorize an exact model-3 preflight budget and namespace; the checked-in draft remains pending. |
 | 2 | Third-model selection | The exact source contract was previously unapproved. | Model-3 decision package, immutable researcher approval, pinned Granite config, schema and tests. | Exact contract loads; 168 unique targets register; mutation and Qwen rejection tests pass. | `FIXED_TESTED` | None for selection. Alignment, source hooks, GPU preflight and main submission remain separate gates. |
-| 3 | Three-way alignment | Exact-prefix contract is implemented, but no approved third tokenizer has been tested; stream/manifests previously used inconsistent legacy and canonical policy names. | Canonical spec, stream provenance, runner manifest validation, manifest preparer, tests. | Canonical-policy CPU/provenance tests pass; real three-tokenizer evidence absent. | `BLOCKED_EXTERNAL_DEPENDENCY` | Model 3 first, then authorization for bounded tokenizer validation and acceptance/bias measurement. |
+| 3 | Three-way alignment | The exact-prefix contract had not been tested with the approved Granite tokenizer or real pinned dataset rows. | Real audit CLI, offline tokenizer fix, raw/approval artifacts, validation report, pinned config evidence, tests. | 512 real documents, 154,868 anchors, invariants/repeatability/replay PASS, filter TV 0.0284; 4 audit unit tests. | `FIXED_TESTED` | Continue source/domain monitoring during training; no additional alignment approval is pending. |
 | 4 | Storage capacity | Live free space is below the 1 TiB reservation. A dry-run inventory identifies a narrowly sufficient `/blue` Tier A, but no deletion or dedicated reservation is approved. | Storage proposal and machine-readable inventory. | Live `df`/inode/quota, exact `du`, COMPLETE markers, report and manifest SHA-256 checks. | `BLOCKED_STORAGE` | Exact deletion targets or additional capacity, then remeasurement and path approval. |
 | 5 | Real three-model GPU preflight | Synthetic distributed tests do not validate three real source models. | None yet | Not run. | `BLOCKED_RESEARCHER_DECISION` | Model 3, alignment, and bounded preflight authorization. |
 | 6 | Exact checkpoint resume | Synthetic three-rank resume passed previously; real three-model GPU resume remains untested. | None yet | Not run in this branch. | `BLOCKED_EXTERNAL_DEPENDENCY` | Real-model preflight prerequisites and bounded GPU authorization. |
@@ -348,3 +348,20 @@ alignment, physical-hook, GPU, resume, or throughput evidence.
 
 Decision record:
 `analysis/aspd_v3_500m_blocker_resolution/model3_researcher_approval.json`.
+
+## Blocker 3 alignment resolution record
+
+The exact approved Gemma, SmolLM2 and Granite fast tokenizers were run on a deterministic sample of
+512 train documents selected from 2,000 rows of the pinned Pile Uncopyrighted revision. The audit
+accepted 154,868 of 214,808 candidate boundaries (72.10%), found zero zero-anchor documents and zero
+character/UTF-8/prefix-hash invariant failures, and passed both repeat alignment and independent
+dataset-prefix replay. Alignment filtering changed the source-group distribution by TV 0.0284.
+
+The lower-95% yield requires about 1.72M documents for 500M non-repeated anchors. The retained
+Pile-CC component alone has an official size/mean-document estimate corresponding to roughly 55.0M
+documents, a 32x margin. The dataset API lacks an exact row count, so this is explicitly recorded as
+a conservative capacity estimate rather than a census.
+
+The config now pins the validation artifact and revalidates its hash, tokenizer revisions,
+execution-contract fingerprint, boundary/replay statuses, capacity and bias before bounded
+preflight. Full report: `aspd_v3_500m_three_way_alignment_validation.md`.
