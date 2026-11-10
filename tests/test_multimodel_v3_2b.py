@@ -257,6 +257,8 @@ def test_main500m_slurm_proposals_separate_preflight_and_main() -> None:
     assert "kill -USR1" not in main
     assert '"${TRAINER_RC}" -eq 99' not in main
     assert "CHECKPOINT_BYTES + STORAGE_RESERVE_BYTES" in main
+    assert "ASPD_RUN_ID" in main
+    assert "one safe path component" in main
 
     assert "--mode preflight" in preflight
     assert "--require-preflight-ready" in preflight

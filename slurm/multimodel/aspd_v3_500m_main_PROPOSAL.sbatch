@@ -76,7 +76,11 @@ if [[ ! -d "${RUN_ROOT}" || ! -w "${RUN_ROOT}" ]]; then
   echo "Approved run/storage root must already exist and be writable: ${RUN_ROOT}" >&2
   exit 2
 fi
-RUN_ID=aspd_v3_1_three_model_168targets_c8192_k32_500m_v1
+RUN_ID=${ASPD_RUN_ID:-aspd_v3_1_three_model_168targets_c8192_k32_500m_v1}
+if [[ ! "${RUN_ID}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]]; then
+  echo "ASPD_RUN_ID must be one safe path component of at most 128 characters" >&2
+  exit 2
+fi
 RUN_DIR="${RUN_ROOT}/${RUN_ID}"
 RESUME_SOURCE_CHECKPOINT=""
 if [[ -e "${RUN_DIR}" ]]; then

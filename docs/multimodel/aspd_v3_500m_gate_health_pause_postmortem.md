@@ -93,6 +93,8 @@ or source models.
 
 The immutable step-321 checkpoint must be resumed into a new output namespace through the
 existing external exact-resume path and a checkpoint-pinned continuation authorization.
+The Slurm launcher accepts that dedicated namespace only through the validated
+single-component `ASPD_RUN_ID` override; the historical run ID remains the default.
 The original run directory and checkpoint remain unchanged. The first required scientific
 reviews are the diagnostics measuring parameter steps 512 and 768. Recovery is not assumed:
 if the three-model trajectory stays below threshold after the calibrated boundary, the
