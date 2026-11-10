@@ -101,13 +101,13 @@ source models.
 | 1. Preflight authorization | Separate bounded-preflight and main authorization implemented and tested; exact four-step `/blue` preflight is authorized. | `FIXED_TESTED` | Execute once; it cannot transition to main. |
 | 2. Model 3 | Exact Granite contract approved, populated, pinned, and CPU-tested. | `FIXED_TESTED` | Alignment and real source execution remain separate gates. |
 | 3. Alignment | Exact canonical-text prefix validation passed on 512 real documents with pinned tokenizers. | `FIXED_TESTED` | Continue source/domain monitoring during execution. |
-| 4. Storage | Exact approved cleanup completed; dedicated `/blue` root has 1.245 TB free. | `FIXED_TESTED` | Continue runtime reserve monitoring. |
-| 5. Real GPU preflight | Exact Granite/alignment/manifests and four-step authorization are ready; no real three-model run yet. | `IN_PROGRESS` | Execute bounded three-B200 preflight. |
-| 6. Exact resume | Synthetic three-rank deterministic resume evidence exists; recovery is self-contained and fail closed. | `RESUME_BLOCKED` | Real three-model uninterrupted-versus-resumed update and interruption test. |
+| 4. Storage | Exact approved cleanup completed; after retaining the real preflight checkpoint, `/blue` has 1.119 TB free. | `FIXED_TESTED`, narrow margin | Continue runtime reserve monitoring; margin over 1 TiB is 19.66 GB. |
+| 5. Real GPU preflight | Job 50542075 passed on three B200s with 168 targets, exact source parity, frozen sources, finite updates, generic ledger and checkpoint restore probe. | `FIXED_TESTED` | No main authorization implied. |
+| 6. Exact resume | Real save/reload/next-update and ledger continuity passed. | `IN_PROGRESS` | Real uninterrupted-versus-resumed comparison and interruption/requeue test. |
 | 7. Monitoring | Stateful sustained-failure policy and controlled pause implemented and CPU-tested. | `FIXED_TESTED`, approval pending | Researcher approval of policy v1 and real-run metric coverage. |
 | 8. Milestones | Exact exposure boundaries, atomic checkpoint, immutable review, and continuation authorization implemented. | `FIXED_TESTED`, approval pending | Researcher approval of staged policy v1. |
 | 9. Human evidence | Valid package exists; zero researcher response exports and no decision were found. | `HUMAN_INTERPRETABILITY_APPROVAL_PENDING` | Complete human analysis or explicitly accept documented semantic uncertainty. |
-| 10. Slurm/runtime | Main/preflight launch contracts and static tests complete; bounded preflight is authorized. | `IN_PROGRESS` | Execute scheduled preflight and bounded signal/requeue test. |
+| 10. Slurm/runtime | Main/preflight contracts and real bounded launcher passed. | `IN_PROGRESS` | Execute bounded signal/requeue and profiled timing tests. |
 | 11. Specification/metadata | Canonical notation, alignment identifiers, config fingerprints, and evaluation states synchronized. | `FIXED_TESTED` | Regenerate fingerprints after any approved configuration decision. |
 
 ## Model-3 decision package

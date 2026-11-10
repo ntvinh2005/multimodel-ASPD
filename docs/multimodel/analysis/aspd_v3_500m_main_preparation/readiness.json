@@ -13,7 +13,7 @@
   "blocker_resolution_branch": "aspd-v3.1-main500m-blocker-resolution",
   "config": {
     "path": "configs/multimodel/aspd_v3/main500m_preparation_v1.yaml",
-    "fingerprint": "e43e967bfc0730f76c67622ef4740c0e0856201467854bf163e6d2e2d36ef098",
+    "fingerprint": "5a86d01c66af5713f97b69f580625bcc103f893ecc92a2067d21ae1590e1271c",
     "execution_contract_fingerprint": "45f8b159d737e1096ef0dda78300484667926e2307800969d3fc800802e24944",
     "status": "DRAFT_FAIL_CLOSED"
   },
@@ -67,17 +67,17 @@
     "record": "docs/multimodel/analysis/aspd_v3_500m_blocker_resolution/production_manifest_record.json"
   },
   "bounded_preflight": {
-    "status": "AUTHORIZED_NOT_YET_RUN",
+    "status": "PASSED",
     "optimizer_steps": 4,
     "output_namespace": "/blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/preflight",
     "automatic_transition_to_main": false,
     "attempts_record": "docs/multimodel/analysis/aspd_v3_500m_blocker_resolution/bounded_preflight_attempts.json",
     "last_attempt": {
-      "slurm_job_id": "50538957",
-      "state": "COMPLETED_REJECTED_BY_POST_RUN_AUDIT",
+      "slurm_job_id": "50542075",
+      "state": "PASSED",
       "optimizer_steps_completed": 4,
-      "scientific_evidence": "PARTIAL_ENGINEERING_EVIDENCE_ONLY_NOT_MAIN_AUTHORIZATION_EVIDENCE",
-      "rejection_reason": "legacy model-specific raw-token SQL columns"
+      "scientific_evidence": "REAL_THREE_MODEL_GPU_PREFLIGHT_PASS",
+      "report_sha256": "051cce5ee7770d8e40146aaa119793985a7e7eb4e1c2d154321eca0fcfdc31d0"
     }
   },
   "monitoring": {
@@ -105,7 +105,8 @@
     "optimizer_and_scheduler_state": "PASS",
     "ledger_and_stream_external_restore": "PASS",
     "corrupt_snapshot_rejection": "PASS",
-    "real_three_model_gpu": "PARTIAL_PASS_RERUN_REQUIRED_AFTER_LEDGER_SCHEMA_FIX"
+    "real_three_model_save_reload_next_update": "PASS",
+    "real_three_model_uninterrupted_vs_resumed_comparison": "PENDING"
   },
   "storage": {
     "measured_at": "2026-11-09",
@@ -117,8 +118,8 @@
     },
     "blue_thai": {
       "size_bytes": 5497558138880,
-      "used_bytes": 5116136005632,
-      "available_bytes": 1244881256448,
+      "used_bytes": 4378386628608,
+      "available_bytes": 1119171510272,
       "inode_use_percent": 72
     },
     "estimated_required_free_bytes_low": 821000000000,
@@ -127,17 +128,21 @@
     "approved_root": "/blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1",
     "reclaimed_targets": 8,
     "observed_free_space_increase_bytes": 863636385792,
-    "margin_over_reservation_bytes": 145369628672,
+    "margin_over_reservation_bytes": 19659882496,
     "status": "APPROVED"
   },
   "throughput": {
-    "final_three_model_v3_1_measured": false,
+    "final_three_model_v3_1_measured": true,
+    "measurement_scope": "four_step_bounded_preflight_aggregate_only",
+    "measured_step_seconds_p50": 1.332268547732383,
+    "measured_step_seconds_p95": 3.83574057277292,
+    "measured_accepted_anchors_per_second": 4064.5220036484943,
+    "stage_breakdown": "PENDING_PROFILE_STAGES_MEASUREMENT",
     "historical_different_composition_b200_step_p50_seconds": 1.445,
     "historical_different_composition_accepted_anchors_per_second": 6256.6,
-    "projected_wall_hours_low": 24,
-    "projected_wall_hours_high": 30,
-    "projected_b200_gpu_hours_low": 72,
-    "projected_b200_gpu_hours_high": 90
+    "projected_wall_hours_from_short_preflight": 34.17,
+    "projected_b200_gpu_hours_from_short_preflight": 102.52,
+    "projection_warning": "Only four steps were measured; use a longer profiled benchmark before reservation."
   },
   "tests": [
     {
@@ -166,6 +171,10 @@
     {
       "scope": "canonical_alignment_policy_provenance",
       "result": "PASS"
+    },
+    {
+      "scope": "generic_exposure_ledger_and_real_three_model_preflight",
+      "result": "74 passed, 1 distributed test deselected; Slurm job 50542075 completed 0:0"
     }
   ],
   "blockers": [
@@ -173,9 +182,8 @@
     "MONITORING_POLICY_APPROVAL_PENDING",
     "MILESTONE_POLICY_APPROVAL_PENDING",
     "HUMAN_INTERPRETABILITY_APPROVAL_PENDING",
-    "THREE_MODEL_GPU_PREFLIGHT_PENDING",
     "REAL_SLURM_SIGNAL_REQUEUE_PENDING",
-    "FINAL_COMPOSITION_THROUGHPUT_UNMEASURED",
+    "FINAL_COMPOSITION_PROFILED_THROUGHPUT_PENDING",
     "MAIN_500M_NOT_AUTHORIZED"
   ],
   "slurm": {

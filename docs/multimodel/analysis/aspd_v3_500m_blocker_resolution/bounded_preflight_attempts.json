@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-09T22:30:00-05:00",
+  "updated_at": "2026-11-09T22:35:00-05:00",
   "authorized_contract": {
     "optimizer_steps": 4,
     "world_size": 3,
@@ -54,6 +54,41 @@
       "removed_checkpoint_payload_bytes": 127271503532,
       "removal_authorization": "explicit_exact_target_tool_approval_2026-11-09",
       "fresh_preflight_namespace_absent_after_cleanup": true
+    },
+    {
+      "slurm_job_id": "50542075",
+      "state": "PASSED",
+      "elapsed": "00:03:46",
+      "exit_code": "0:0",
+      "node": "c1101a-s5",
+      "source_commit": "db71f4a98617e9a00d46049f96c2373c42b6fa3e",
+      "report_sha256": "051cce5ee7770d8e40146aaa119793985a7e7eb4e1c2d154321eca0fcfdc31d0",
+      "checkpoint_manifest_sha256": "042668596966f7c06f2e785fd09e23f21db90238ce4b4fe3138a482ddadcd175",
+      "optimizer_steps_completed": 4,
+      "accepted_exposures": 32768,
+      "logical_targets": 168,
+      "targets_per_model": 56,
+      "maximum_native_projection_absolute_error": 0.0,
+      "source_frozen": "PASS",
+      "finite_forward_backward": "PASS",
+      "checkpoint_parameter_and_adam_restore_probe": "PASS",
+      "dcp_save_reload_resume_update": "PASS",
+      "ledger_schema_version": 6,
+      "ledger_model_order": ["gemma", "smol", "granite"],
+      "ledger_generic_raw_token_slots": "PASS",
+      "repeated_anchor_exposures": 0,
+      "cross_rank_duplicates": 0,
+      "checkpoint_bytes": 127271274389,
+      "aggregate_accepted_anchors_per_second": 4064.5220036484943,
+      "step_seconds_p50": 1.332268547732383,
+      "step_seconds_p95": 3.83574057277292,
+      "peak_allocated_bytes_by_model": {
+        "gemma": 81547941888,
+        "smol": 75237262848,
+        "granite": 72855057920
+      },
+      "scientific_evidence": "REAL_THREE_MODEL_GPU_PREFLIGHT_PASS",
+      "evidence_boundary": "The save/reload/next-update probe passed. A separate uninterrupted-versus-resumed numerical comparison is still required for the stronger exact-resume claim."
     }
   ]
 }

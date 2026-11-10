@@ -36,9 +36,9 @@
     "cuda_build": "12.8"
   },
   "contracts": {
-    "configuration_fingerprint": "e43e967bfc0730f76c67622ef4740c0e0856201467854bf163e6d2e2d36ef098",
+    "configuration_fingerprint": "5a86d01c66af5713f97b69f580625bcc103f893ecc92a2067d21ae1590e1271c",
     "execution_contract_fingerprint": "45f8b159d737e1096ef0dda78300484667926e2307800969d3fc800802e24944",
-    "configuration_sha256": "0a9401b09bae91a6cf11b2e7988dfc1bc9705231fab2cb969b1fad8c45fa8ff7",
+    "configuration_sha256": "8d25993f2786036e66cebdd31874f60309d52b207ba8f6dc550e4b4a5b9d988c",
     "main_slurm_sha256": "aac2e25744d48db0121e220ff24c3f68a89569d4fbfc68b2a4511098d98e5fb5",
     "preflight_slurm_sha256": "531adff3b6e8cd5c22f7913ba644e580906b1822068bfe6e6f088a9c2a131a85"
   },
@@ -60,7 +60,8 @@
     "main_draft_validation": "EXPECTED_FAIL_CLOSED_EXIT_2",
     "preflight_authorization_validation": "PASS_EXACT_FOUR_STEP_FRESH_NAMESPACE",
     "real_slurm_signal_requeue": "NOT_RUN",
-    "real_final_three_model_throughput": "NOT_RUN_AUTHORIZED_PREFLIGHT_PENDING"
+    "real_three_model_preflight": "PASS_JOB_50542075",
+    "real_final_three_model_throughput": "AGGREGATE_FOUR_STEP_MEASURED_PROFILED_BREAKDOWN_PENDING"
   },
-  "evidence_boundary": "Static shell and CPU contract validation plus immutable production manifests. The exact four-step preflight is authorized but has not yet been submitted; no signal has been delivered to a scheduled process and no final three-model throughput has been measured."
+  "evidence_boundary": "Static shell and CPU validation, immutable production manifests, and the real four-step three-B200 preflight passed. A profiled timing breakdown, uninterrupted-versus-resumed comparison, and real signal/requeue test remain pending."
 }

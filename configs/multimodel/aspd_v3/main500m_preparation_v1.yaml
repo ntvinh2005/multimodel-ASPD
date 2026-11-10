@@ -225,12 +225,12 @@ approvals:
     output_namespace: /blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/preflight
     authorization_reference: researcher_message_2026-11-09_verify_unverified_bounded_engineering
   three_model_gpu_preflight:
-    status: PENDING_MODEL_THREE
-    artifact_path: null
-    artifact_sha256: null
-    execution_contract_fingerprint: null
-    source_commit: null
-    optimizer_steps: null
+    status: PASSED
+    artifact_path: /blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/preflight/preflight_report.json
+    artifact_sha256: 051cce5ee7770d8e40146aaa119793985a7e7eb4e1c2d154321eca0fcfdc31d0
+    execution_contract_fingerprint: 45f8b159d737e1096ef0dda78300484667926e2307800969d3fc800802e24944
+    source_commit: db71f4a98617e9a00d46049f96c2373c42b6fa3e
+    optimizer_steps: 4
   full_training: MAIN_500M_NOT_AUTHORIZED
 
 evaluation_status: HUMAN_INTERPRETABILITY_PACKAGE_COMPLETE_RESPONSES_PENDING
