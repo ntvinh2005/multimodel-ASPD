@@ -1,34 +1,30 @@
 # ASPD v3.1 — 500M main-training preparation
 
-Prepared: 2026-11-09  
-Preparation branch: `aspd-v3.1-main500m-preparation`  
-Reference: `aspd-v3.1-intruder-final-validation@4c84161bcd2496f22969133a5451b3ca258b934b`  
+Prepared: 2026-11-09; blocker-resolution evidence updated 2026-11-10
+
+Preparation branch: `aspd-v3.1-main500m-preparation`
+
+Reference: `aspd-v3.1-intruder-final-validation@4c84161bcd2496f22969133a5451b3ca258b934b`
+
 Experiment status: **`MAIN_500M_NOT_AUTHORIZED`**
 
 ## Executive decision
 
 The successful hierarchical Transformer + per-anchor feature-axis z-score + ReLU +
 pool-wide BatchTopK architecture is preserved. The model-owned runtime is structurally
-generalized to three ranks, the draft reserves all 168 logical targets, and a synthetic
-three-rank test validates shared-gradient, optimizer, checkpoint, and deterministic
-resume mechanics.
+generalized to three ranks, the draft reserves all 168 logical targets, and both synthetic
+three-rank tests and bounded real-model runs validate shared-gradient, optimizer, checkpoint,
+and deterministic resume mechanics.
 
-The main experiment is **not ready to submit**. Current blockers are:
+The main experiment is **not authorized to submit**, but the independent engineering gates are now
+resolved. Granite 3.3 2B is approved and pinned, real three-way alignment passed, `/blue/thai` has
+the required 1 TiB startup reservation, three-B200 job `50550194` validated all 168 targets and
+profiled the final composition, and isolated job `50611663` reproduced the uninterrupted step-4
+state bitwise from the immutable step-3 checkpoint. The remaining blockers are researcher approval
+of monitoring policy v1, researcher approval of milestone policy v1, a human-interpretability
+decision (or explicit acceptance of semantic uncertainty), and separate final-run authorization.
 
-- **`MODEL_THREE_BLOCKED`** — no third source model, tokenizer, revision, layer range,
-  license decision, or hook contract has been approved.
-- **`ALIGNMENT_BLOCKED`** — the exact-prefix three-way contract cannot be validated
-  until the approved third tokenizer is available.
-- **`STORAGE_BLOCKED`** — `/orange/thai` has 200 GiB free and `/blue/thai` has 356 GiB
-  free; neither satisfies the recommended 1 TiB free reservation for one atomic output
-  namespace.
-- **`RESUME_BLOCKED`** — exact resume passes a synthetic three-rank test, but it has not
-  been executed with the final three real source models on GPU.
-- Human-interpretability approval, real three-model GPU preflight, and explicit main-run
-  authorization remain pending.
-
-No full training, third-model download, third-model inference, or Slurm submission was
-performed.
+No full 500M training was submitted.
 
 The canonical v3.1 equations are now consolidated in
 [`aspd_v3_1_mathematical_specification.md`](aspd_v3_1_mathematical_specification.md).
@@ -88,10 +84,10 @@ Each approved model contributes eight layers and seven logical matrices per laye
 | Total | seven | 56 | **168** |
 
 Logical registration is independent of physical fusion. A fused `qkv_proj` is split into
-three registered output slices, and a fused `gate_up_proj` into two. The synthetic
-approved-third-model fixture asserts 168 unique keys, all seven names, and correct
-rank-one input/output shapes. The draft currently has 112 physically specified retained
-targets and 56 intentionally unresolved slots for model 3.
+three registered output slices, and a fused `gate_up_proj` into two. Synthetic fixtures assert
+168 unique keys, all seven names, and correct rank-one input/output shapes. The approved Granite
+contract now supplies the final 56 slots, and job `50550194` validated all 168 physical targets
+against native matrix outputs with no missing or duplicated target.
 
 ### A.3 Parameter decomposition and losses
 
@@ -151,7 +147,7 @@ worktree was modified.
 | Required models | 3 |
 | Retained model 1 | `google/gemma-2-2b-it@299a8560bedf22ed1c72a8a11e7dce4a7f9f51f8`, layers 9–16 |
 | Retained model 2 | `HuggingFaceTB/SmolLM2-1.7B-Instruct@31b70e2e869a7173562077fd711b654946d38674`, layers 8–15 |
-| Model 3 | null placeholder; researcher approval required |
+| Model 3 | `ibm-granite/granite-3.3-2b-instruct@707f574c62054322f6b5b04b6d075f0a8f05e0f0`, layers 16–23 |
 | Logical targets | \(3\times8\times7=168\) |
 | Encoder | learned packers; 2 intra-model Transformer layers; 2 cross-model Transformer layers; MeanPool; linear readout |
 | Dictionary | \(C=8192\) |
@@ -169,12 +165,16 @@ worktree was modified.
 
 The draft YAML is
 [`configs/multimodel/aspd_v3/main500m_preparation_v1.yaml`](../../configs/multimodel/aspd_v3/main500m_preparation_v1.yaml).
-Its null model-3 fields are schema-enforced: a pending slot may not contain an invented
-model ID, revision, tokenizer, dimensions, hooks, or license.
+Its model-3 fields are schema-enforced and pinned to the approved Granite source contract;
+revision, tokenizer, dimensions, hooks, license, or layer drift fails closed.
 
-### B.2 Third-model candidates — proposal only
+### B.2 Third-model decision record
 
-No candidate was downloaded or executed. Qwen was not considered for a new experiment.
+The candidate comparison below records the decision basis. The researcher subsequently approved
+Granite 3.3 2B Instruct at revision
+`707f574c62054322f6b5b04b6d075f0a8f05e0f0`, with layers 16--23. Its tokenizer, projections,
+PRE/MID hooks, memory, and native matrix-output parity were then validated in the bounded workflow.
+No Qwen model was used in any new experiment.
 
 | Candidate | Compatibility and hooks | License/access | Scale and compute | Diversity and scientific fit | Recommendation |
 |---|---|---|---|---|---|
@@ -183,10 +183,9 @@ No candidate was downloaded or executed. Qwen was not considered for a new exper
 | [Meta Llama 3.2 3B Instruct](https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct) | Standard separate projections and familiar residual hooks; 28 layers provide many valid eight-layer windows. | Custom Llama 3.2 Community License; access/license approval required. | 3.21B and therefore above target; memory/compute higher than Granite. | Technically low risk, but SmolLM2 is already Llama-family, so this gives less architectural diversity for separating shared and model-specific mechanisms. | Reliable fallback if license and lower diversity are acceptable. |
 | [StableLM 2 1.6B Chat](https://huggingface.co/stabilityai/stablelm-2-1_6b-chat) | 24 layers and separate projections. Parallel-residual behavior must be audited because it can change the scientific meaning of MID grounding rather than merely its module path. | Stability AI non-commercial license; approval required. | 1.6B is close in size and memory-efficient. Its tokenizer family also adds alignment diversity. | License restriction and possible MID-methodology change outweigh the size advantage. | Deprioritize unless the other candidates fail. |
 
-For every candidate, approval must name the exact model and tokenizer revisions, the
-eight-layer window, license/access disposition, physical projection layout, PRE/MID hook
-semantics, and measured three-way alignment acceptance. A recommendation is not a
-selection.
+The immutable approval names the exact model and tokenizer revisions, eight-layer window,
+license/access disposition, physical projection layout, and PRE/MID hook semantics. The later
+alignment and GPU evidence are independent validation gates rather than consequences of selection.
 
 ## C. Training implementation
 
@@ -209,8 +208,10 @@ the same canonical text prefix while allowing different token IDs and positions.
 Fail closed on a slow tokenizer, malformed or duplicate offset, prefix-roundtrip
 mismatch, byte-boundary disagreement, absence of a shared boundary, manifest/model-order
 mismatch, or dataset exhaustion. No incompatible positions are resampled or combined.
-Because model 3 is unresolved, three-way acceptance rate and tokenizer-specific failure
-modes are unmeasured; therefore `ALIGNMENT_BLOCKED` remains correct.
+The approved three-tokenizer audit subsequently passed on 512 real documents and 154,868 accepted
+anchors, with 72.10% boundary-weighted acceptance, deterministic replay, zero zero-anchor
+documents, and alignment-filter source total variation 0.0284. This resolves the bounded alignment
+gate while preserving runtime source/domain monitoring.
 
 ### C.2 Distributed execution
 
@@ -289,23 +290,32 @@ Command and observed result:
 1 passed, 18 deselected in 220.42s
 ```
 
-This validates synthetic three-rank resume mechanics. A deterministic resumed update
-with the final three real source models remains a mandatory GPU preflight gate, so the
-readiness status remains `RESUME_BLOCKED` rather than overstating the evidence.
+The synthetic result was subsequently superseded by real final-composition evidence. Job
+`50550194` saved step 3, ran step 4 uninterrupted, restored step 3 and reproduced step 4 bitwise
+in process. Job `50611663` then loaded that immutable checkpoint in a fresh torchrun process and
+again matched model, Adam, scheduler and RNG state bitwise, with identical ordered-anchor digest,
+32,768 unique exposures, zero repeats and unchanged Gemma/SmolLM2/Granite source weights. Exact
+resume is therefore `VALIDATED_THREE_MODEL_GPU`; the pinned report SHA-256 is
+`a588215b907644593a91fc0e034bedd1f1efa24b6eb9b8eaef1799431a3d72d3`.
 
 ## E. Storage budget
 
 ### E.1 Live measurements
 
-Measured 2026-11-09:
+Initial measurements on 2026-11-09 were superseded by approved reclamation and a dedicated
+`/blue/thai` namespace. After retaining the real 127,271,274,517-byte recovery checkpoint, the
+2026-11-10 measurement is:
 
 | Filesystem | Size | Used | Available | Use | Inodes used |
 |---|---:|---:|---:|---:|---:|
 | `/orange/thai` | 2.0 TiB | 1.9 TiB | **200 GiB** | 91% | 42% |
-| `/blue/thai` | 5.0 TiB | 4.7 TiB | **356 GiB** | 94% | 72% |
+| `/blue/thai` | 5.0 TiB | 3.98 TiB | **1,119,127,543,808 bytes** | 80% | 72% |
 
 Lustre group quota reports no explicit byte or inode hard limit for group `thai`, but
-filesystem free space is the binding constraint. No files were deleted.
+filesystem free space is the binding constraint. Eight exact, researcher-approved regenerable or
+redundant targets were removed only after manifests/reports were preserved. Current free space is
+19,615,916,032 bytes above the 1 TiB startup reservation; runtime reserve monitoring remains
+mandatory because this margin is narrow.
 
 Historical evidence provides two useful bounds:
 
@@ -313,11 +323,12 @@ Historical evidence provides two useful bounds:
 - the historical three-model ASPD checkpoint estimate was 123,235,000,320 bytes before
   self-contained ledger/stream snapshots.
 
-The approved third model is unknown, so the new trainable+Adam state is an analytical
-range, not a measurement. Based on the candidate dimensions above, use 124–141 GB
-(decimal) for the DCP portion. The historical compact ledger measurement projects to
-approximately 51 GB at 500M anchor IDs; reserve another 5 GB for stream dedup. Thus one
-self-contained complete checkpoint is estimated at **180–197 GB**.
+The approved final composition produced a measured 127,271,274,517-byte bounded checkpoint. The
+500M ledger and stream-dedup growth remain projected: the historical compact ledger measurement
+projects to approximately 51 GB at 500M anchor IDs, with another 5 GB reserved for stream dedup.
+The planning range of **180–197 GB** per mature self-contained checkpoint therefore remains a
+conservative capacity estimate rather than a claim that the four-step checkpoint already includes
+500M-scale databases.
 
 ### E.2 Required reservation
 
@@ -330,40 +341,28 @@ self-contained complete checkpoint is estimated at **180–197 GB**.
 | Failure/recovery margin | 200 GB |
 | **Total required free space** | **821–872 GB** |
 
-Reserve **at least 1 TiB free** in one authorized project filesystem before preflight.
+Reserve **at least 1 TiB free** in one authorized project filesystem before main startup.
 The headroom must be measured again immediately before submission and the checkpoint
-write must stay on the same filesystem for atomic rename. Neither current filesystem is
-sufficient independently; unused space from two mounts is not a safe substitute for one
-atomic checkpoint namespace. Therefore the correct decision is `STORAGE_BLOCKED`.
-
-Recommended resolution: obtain a dedicated `/orange` or equivalent project allocation
-with at least 1 TiB free, then update the versioned paths only after approval. HOME must
-not hold model, dataset, or checkpoint artifacts.
+write must stay on the same filesystem for atomic rename. After the exact approved reclamation and
+retention of the real preflight checkpoint, `/blue/thai` has 1,119,127,543,808 bytes free, or
+19,615,916,032 bytes above the gate. Storage is therefore startup-ready but has a narrow margin;
+the launch guard and runtime reserve checks remain mandatory. HOME must not hold model, dataset,
+or checkpoint artifacts.
 
 ## F. GPU resource and throughput plan
 
 ### F.1 Evidence boundary
 
-No new third-model GPU benchmark was run because no third model is approved. No new GPU
-job was submitted. A live `squeue` query showed no active jobs for the user at the audit
-instant; that observation is ephemeral and must be repeated before every job.
+Final-composition three-B200 job `50550194` measured 4,150.67 accepted anchors/s, step p50
+1.3147 s and p95 3.6914 s. Mean profiled stage times were 0.6599 s data/alignment/broadcast,
+0.1543 s frozen-backbone capture, 0.8250 s trainable forward/backward, 0.0363 s gradient
+sync/validation/normalization, and 0.2160 s Adam/post-normalization. Peak allocated memory was
+81.55 GB Gemma, 75.24 GB SmolLM2 and 72.86 GB Granite. The complete checkpoint is 127.27 GB.
 
-Historical measured three-B200 evidence from the old, scientifically failed composition
-reported post-AuxK median step time 1.445 s and 6,256.6 accepted anchors/s, with peak
-rank memory approximately 62.6, 78.5, and 72.2 GB. Historical complete checkpoint save
-and reload were approximately 60.34 s and 58.11 s. These are measurements of a different
-model composition/objective and are **not confirmed v3.1 throughput**.
-
-The arithmetic projections are:
-
-- \(61{,}036\times1.445\text{ s}=24.5\) h from recorded median step time;
-- \(500{,}000{,}000/6256.6=22.2\) h from recorded effective throughput;
-- after z-score diagnostics, checkpointing, startup, and recovery margin: **24–30 h**;
-- at three GPUs: **72–90 B200 GPU-hours**.
-
-These values remain unverified assumptions until the approved three-model 20-step
-preflight reports stage timers, p50/p90/p99 step time, accepted anchors/s, communication
-time, and peak memory.
+The direct short-run extrapolation is **33.46 wall-hours** and **100.39 B200 GPU-hours** for
+500M accepted exposures. This is measured final-composition throughput but remains a provisional
+projection because only four steps were sampled; staged checkpoints provide the correction points
+for the production walltime estimate.
 
 ### F.2 Slurm plan
 
@@ -451,51 +450,49 @@ preflight never automatically submits or continues the full run.
 |---|---|---|
 | Interpretability | Mechanistic gate/reconstruction results improved, but the existing semantic judge failed its controls and does not establish component interpretability. | Researcher must make an explicit human-interpretability decision and attach its artifact/hash to the main manifest. |
 | Mechanistic validity | Z-score repairs candidate availability and firing diversity without forced activation, but longer-horizon causal meaning is unproven. | Keep rank-one/binary-support semantics fixed; evaluate causal and dictionary-health milestones before continuation. |
-| Third-model selection | Unresolved; candidates have distinct licenses, fusion patterns, tokenizers, and scale. | Approve exact model/tokenizer revisions, layer window, license, hooks, and parameter count. |
-| Cross-model token alignment | Existing algorithm supports three tokenizers, but acceptance and bias are unknown for model 3. | Run held-out three-way alignment audit and approve failure/coverage statistics. |
+| Third-model selection | Granite 3.3 2B Instruct is approved at its exact revision; 56 physical targets and PRE/MID hooks passed real parity. | Preserve the pinned contract; reject revision/layout drift and Qwen. |
+| Cross-model token alignment | Real pinned-tokenizer audit passed on 512 documents and 154,868 accepted anchors; filter TV was 0.0284. | Preserve exact canonical-prefix semantics and monitor source/domain selection throughout training. |
 | Longer-horizon stability | Successful evidence covers 10M-scale matched pilots, not 500M. | Use staged milestones, immutable checkpoints, and abort thresholds; do not infer 500M stability from the pilot. |
-| Compute | New three-model throughput is estimated from a different historical run. | Run bounded 20-step real preflight and replace estimates with measured p50/p90/p99 and memory. |
-| Storage | Live free space is materially below the safe budget. | Reserve at least 1 TiB free in one authorized project filesystem and rerun peak-write test. |
-| Resume | Synthetic three-rank exact update passes; final model composition is untested. | Perform save/reload/resumed-update comparison in the real three-model GPU preflight. |
+| Compute | Final-composition throughput is measured over only four steps. | Use the measured 33.46 h projection provisionally and refine it at staged milestones. |
+| Storage | `/blue/thai` satisfies the 1 TiB startup gate by only 19.62 GB after retaining the real checkpoint. | Keep runtime reserve aborts, atomic pruning and no unapproved artifact growth. |
+| Resume | In-process and isolated external three-model step-4 comparisons are bitwise exact with zero repeated anchors. | Preserve the pinned artifacts and file-backed signal/requeue protocol. |
 
 ## J. Approval checklist
 
 Before the proposal script may be made executable for the main run, the researcher must
 explicitly approve:
 
-- [ ] exact third model ID, pinned 40-character revision, tokenizer ID/revision, license
+- [x] exact third model ID, pinned 40-character revision, tokenizer ID/revision, license
   and access disposition;
-- [ ] its eight selected layers, all seven physical/logical mappings, and PRE/MID hooks;
-- [ ] held-out three-way exact-prefix alignment coverage and failure distribution;
+- [x] its eight selected layers, all seven physical/logical mappings, and PRE/MID hooks;
+- [x] held-out three-way exact-prefix alignment coverage and failure distribution;
 - [ ] human-interpretability decision and immutable artifact hash;
 - [ ] the provisional monitoring thresholds and staged continuation/abort policy;
-- [ ] at least 1 TiB free authorized storage and final output/checkpoint paths;
-- [ ] successful real three-model GPU preflight, including peak memory and throughput;
-- [ ] real three-model exact-resume evidence;
+- [x] at least 1 TiB free authorized storage and final output/checkpoint paths;
+- [x] successful real three-model GPU preflight, including peak memory and throughput;
+- [x] real three-model exact-resume evidence;
 - [ ] final config fingerprint, source commit, dataset/alignment manifests, Slurm
   account/partition, resource request, and explicit full-training authorization.
 
 The human-interpretability agent's output is integrated only as an immutable manifest
 input, for example `human_interpretability_approval: {status, artifact_path, sha256,
-researcher_decision}`. The main validator must require `status: APPROVED` and a matching
-hash. This preparation branch does not modify or merge that agent's work.
+researcher_decision}`. The main validator requires either hash-pinned approval from completed human
+evidence or an explicit hash-pinned researcher acceptance of remaining semantic uncertainty. This
+preparation branch does not modify or merge the human-evaluation artifacts.
 
 ## Validation evidence
 
 Executed from the isolated worktree:
 
 ```text
-pytest -q tests/test_multimodel_v3_2b.py \
+pytest -q tests/test_multimodel_v3_2b.py tests/test_multimodel_v3_production.py \
+  tests/test_multimodel_v3_correctness.py \
   -k 'not model_owned_distributed_gradients_optimizer_and_checkpoint'
-18 passed, 1 deselected, 1 warning in 19.52s
+67 passed, 1 deselected in 9.51s
 
 pytest -q tests/test_multimodel_v3_2b.py \
   -k model_owned_distributed_gradients_optimizer_and_checkpoint
 1 passed, 18 deselected in 220.42s
-
-pytest -q tests/test_multimodel_v3_gate_collapse_recovery.py \
-  tests/test_multimodel_v3_correctness.py tests/test_multimodel_v3_production.py
-31 passed, 3 warnings in 12.83s
 
 ruff check <changed Python files>
 All checks passed!
@@ -504,14 +501,17 @@ python -m compileall -q <changed modules>
 PASS
 
 bash -n slurm/multimodel/aspd_v3_500m_main_PROPOSAL.sbatch
+bash -n slurm/multimodel/aspd_v3_500m_preflight_PROPOSAL.sbatch
+bash -n slurm/multimodel/aspd_v3_500m_resume_validation_PROPOSAL.sbatch
 PASS
 
 git diff --check
 PASS
 ```
 
-Warnings were PyTorch's existing sparse-CSR beta warning and single-process distributed
-checkpoint compatibility warnings; no test failed.
+Warnings were PyTorch's existing sparse-CSR beta warning, single-process distributed checkpoint
+compatibility warnings, and a sandbox-only pytest cache-write warning; no test failed. The earlier
+three-process Gloo test passed and was not repeated after the evidence-schema-only change.
 
 ## Final readiness answers
 
@@ -519,35 +519,29 @@ checkpoint compatibility warnings; no test failed.
    feature-axis z-score, ReLU, pool-wide BatchTopK, \(C=8192\), \(K=32\), full-only
    normalized activation FVU, post-ReLU AuxK, and detached binary internal support are
    explicit invariants.
-2. **Is the N=3 training framework technically prepared?** Structurally and
-   synthetically yes; final real-model integration is pending.
-3. **Are the 168 matrix targets correctly represented?** Yes as 168 logical slots and in
-   a synthetic approved-three-model registry test. Only 112 have approved real physical
-   layouts; model 3's 56 remain intentionally unresolved.
-4. **Is the third-model requirement still unresolved?** Yes: `MODEL_THREE_BLOCKED`.
-5. **Is exact checkpoint resume validated?** Exact synthetic three-rank resume is
-   validated; real final-composition GPU resume is pending: `RESUME_BLOCKED`.
-6. **Is sufficient storage available?** No: `STORAGE_BLOCKED`; reserve at least 1 TiB
-   free in one filesystem.
-7. **Is throughput measured or only estimated?** Historical different-composition
-   throughput is measured; v3.1 final-three-model throughput is only extrapolated.
+2. **Is the N=3 training framework technically prepared?** Yes: real three-model GPU forward,
+   backward, optimizer, source hooks, shared gradients and checkpoint restore passed.
+3. **Are the 168 matrix targets correctly represented?** Yes: 56 per approved model, with no
+   missing or duplicated physical/logical targets.
+4. **Is the third-model requirement still unresolved?** No. Granite 3.3 2B Instruct is pinned at
+   revision `707f574c62054322f6b5b04b6d075f0a8f05e0f0`, layers 16--23.
+5. **Is exact checkpoint resume validated?** Yes. In-process and isolated new-process step-4
+   trajectories match bitwise, including model, Adam, scheduler, RNG and ordered anchors.
+6. **Is sufficient storage available?** Yes for startup: `/blue/thai` is 19.62 GB above the 1 TiB
+   gate after retaining the real checkpoint; the narrow margin is monitored fail-closed.
+7. **Is throughput measured or only estimated?** Final-composition throughput is measured over a
+   four-step preflight; the 33.46-hour 500M projection remains provisional due to the short sample.
 8. **Are monitoring and abort mechanisms implemented?** Yes in code and synthetic
    tests; provisional thresholds still require approval and real-run validation.
-9. **What approvals are needed?** Model 3 and hooks, three-way alignment, human
-   interpretability, monitoring thresholds, storage, real GPU preflight/resume, resources,
-   final manifest/config fingerprint, and explicit full-run authorization.
+9. **What approvals are needed?** Monitoring policy v1, milestone policy v1, human
+   interpretability (or explicit acceptance of remaining semantic uncertainty), and explicit
+   full-run authorization with the final commit/config fingerprint.
 10. **What exact command submits after approval?** `sbatch
     slurm/multimodel/aspd_v3_500m_main_PROPOSAL.sbatch`; it must remain unexecuted until
     every gate above is encoded as approved.
 
-Final preparation decision:
-
-```text
-MODEL_THREE_BLOCKED
-ALIGNMENT_BLOCKED
-STORAGE_BLOCKED
-RESUME_BLOCKED
-```
+Final preparation decision: `MAIN_BLOCKED` pending the three researcher decisions above and a
+separate final submission authorization.
 
 This is an engineering preparation package, not evidence that the full scientific
 experiment is ready or authorized.

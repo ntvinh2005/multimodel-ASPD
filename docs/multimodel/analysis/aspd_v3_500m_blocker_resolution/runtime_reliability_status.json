@@ -1,7 +1,8 @@
 {
   "schema_version": 1,
   "measured_at": "2026-11-09T19:39:08-05:00",
-  "status": "CPU_SIGNAL_REQUEUE_PASS_REAL_THREE_MODEL_EXTERNAL_RESUME_PENDING",
+  "updated_at": "2026-11-10T07:51:47-05:00",
+  "status": "RUNTIME_RELIABILITY_VALIDATED_MAIN_AUTHORIZATION_PENDING",
   "slurm": {
     "account": "thai",
     "account_association_observed": true,
@@ -36,11 +37,12 @@
     "cuda_build": "12.8"
   },
   "contracts": {
-    "configuration_fingerprint": "5a86d01c66af5713f97b69f580625bcc103f893ecc92a2067d21ae1590e1271c",
+    "configuration_fingerprint": "a44a4a6faf0ab08ccd92db0c07bf56c6120c721d403c672afaafd2d363278487",
     "execution_contract_fingerprint": "45f8b159d737e1096ef0dda78300484667926e2307800969d3fc800802e24944",
-    "configuration_sha256": "8d25993f2786036e66cebdd31874f60309d52b207ba8f6dc550e4b4a5b9d988c",
-    "main_slurm_sha256": "aac2e25744d48db0121e220ff24c3f68a89569d4fbfc68b2a4511098d98e5fb5",
-    "preflight_slurm_sha256": "531adff3b6e8cd5c22f7913ba644e580906b1822068bfe6e6f088a9c2a131a85"
+    "configuration_sha256": "d8dad214aa57ef62b8ccfdc51390aa6e14f8c49797c88e0dadeeaf2170df2f2c",
+    "main_slurm_sha256": "e673aada1d253c6d6cfaba92e2486d514d905ea12e7c21d950ea72b294be0d03",
+    "preflight_slurm_sha256": "7d01ba92137d56374d327df520526936192130864945f51606ba84f9e2bdbae1",
+    "resume_validation_slurm_sha256": "708bdcfe99d5b398be723d00cdfb28ea4d1dabf803480019ea13fcd6abe6d900"
   },
   "verified_guards": [
     "main_and_preflight_have_separate_mode_specific_authorization",
@@ -57,14 +59,14 @@
     "resume_storage_requires_one_atomic_checkpoint_plus_the_200_gibibyte_reserve"
   ],
   "tests": {
-    "bash_syntax": "PASS_BOTH_PROPOSALS",
-    "focused_cpu": "17_PASSED_17_DESELECTED",
+    "bash_syntax": "PASS_MAIN_PREFLIGHT_RESUME_VALIDATION_PROPOSALS",
+    "focused_cpu": "67_PASSED_1_DESELECTED",
     "main_draft_validation": "EXPECTED_FAIL_CLOSED_EXIT_2",
     "preflight_authorization_validation": "PASS_EXACT_FOUR_STEP_FRESH_NAMESPACE",
     "cpu_slurm_signal_requeue": "PASS_JOB_50550768_ONE_RESTART_ZERO_DUPLICATES",
-    "real_three_model_external_resume": "PENDING",
-    "real_three_model_preflight": "PASS_JOB_50542075",
-    "real_final_three_model_throughput": "AGGREGATE_FOUR_STEP_MEASURED_PROFILED_BREAKDOWN_PENDING"
+    "real_three_model_external_resume": "PASS_JOB_50611663_BITWISE_EXACT_ZERO_DUPLICATES",
+    "real_three_model_preflight": "PASS_JOB_50550194_168_TARGETS_NATIVE_PARITY",
+    "real_final_three_model_throughput": "PASS_JOB_50550194_PROFILED_4150.668_ACCEPTED_ANCHORS_PER_SECOND"
   },
-  "evidence_boundary": "The scheduler/shell signal and one-requeue contract passed in CPU-only job 50550768. This does not replace the pending isolated real three-model external-resume comparison. Main training remains unauthorized."
+  "evidence_boundary": "The scheduler/shell signal and one-requeue contract passed in CPU-only job 50550768. Isolated three-B200 job 50611663 restored step 3 and reproduced step 4 bitwise with identical ordered anchors, zero repeats and immutable source weights. Monitoring, milestone, human-interpretability and final main-run approvals remain pending."
 }

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-09T22:35:00-05:00",
+  "updated_at": "2026-11-10T07:16:36-05:00",
   "authorized_contract": {
     "optimizer_steps": 4,
     "world_size": 3,
@@ -89,6 +89,38 @@
       },
       "scientific_evidence": "REAL_THREE_MODEL_GPU_PREFLIGHT_PASS",
       "evidence_boundary": "The save/reload/next-update probe passed. A separate uninterrupted-versus-resumed numerical comparison is still required for the stronger exact-resume claim."
+    },
+    {
+      "slurm_job_id": "50550194",
+      "state": "PASSED",
+      "elapsed": "00:05:18",
+      "exit_code": "0:0",
+      "node": "c1001a-s5",
+      "source_commit": "f518cd954b4c56c1736c56c8c9f66b8319b8d8a2",
+      "report_sha256": "74cd3454f5e84f07d7cae11bf367cc28381a5e464b55cb0d04b8c878a318d7a6",
+      "checkpoint_manifest_sha256": "9d71d00c76ddfc03983121eed39dd7cf6101bfea98b1f2956ffcb46918ff454e",
+      "optimizer_steps_completed": 4,
+      "accepted_exposures": 32768,
+      "logical_targets": 168,
+      "targets_per_model": 56,
+      "uninterrupted_vs_resumed_next_update": "BITWISE_EXACT",
+      "ordered_anchor_ids_sha256": "d4ac6e41093400904afdd4be0e958aa2bfdd73af680a054cbdb122cc61aa9eea",
+      "source_state_immutability": "PASS_ALL_THREE_MODELS",
+      "repeated_anchor_exposures": 0,
+      "checkpoint_bytes": 127271274517,
+      "aggregate_accepted_anchors_per_second": 4150.668195669409,
+      "step_seconds_p50": 1.3147347019985318,
+      "step_seconds_p95": 3.691400615964085,
+      "scientific_evidence": "REAL_THREE_MODEL_GPU_PREFLIGHT_AND_IN_PROCESS_BITWISE_REPLAY_PASS",
+      "external_resume_validation": {
+        "slurm_job_id": "50611663",
+        "state": "PASSED",
+        "report_sha256": "a588215b907644593a91fc0e034bedd1f1efa24b6eb9b8eaef1799431a3d72d3",
+        "dcp_save_reload_resume_update": "PASS",
+        "state_parity": "BITWISE_EXACT",
+        "ordered_anchor_replay": "PASS",
+        "repeated_anchor_exposures": 0
+      }
     }
   ]
 }

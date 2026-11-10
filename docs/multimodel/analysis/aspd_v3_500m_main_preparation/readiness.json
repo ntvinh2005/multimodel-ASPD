@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-11-09",
+  "generated_at": "2026-11-10",
   "experiment_family": "aspd_v3_1_three_model_main500m",
   "scientific_status": "MAIN_500M_NOT_AUTHORIZED",
   "final_readiness_decision": "MAIN_BLOCKED",
@@ -13,7 +13,7 @@
   "blocker_resolution_branch": "aspd-v3.1-main500m-blocker-resolution",
   "config": {
     "path": "configs/multimodel/aspd_v3/main500m_preparation_v1.yaml",
-    "fingerprint": "5a86d01c66af5713f97b69f580625bcc103f893ecc92a2067d21ae1590e1271c",
+    "fingerprint": "a44a4a6faf0ab08ccd92db0c07bf56c6120c721d403c672afaafd2d363278487",
     "execution_contract_fingerprint": "45f8b159d737e1096ef0dda78300484667926e2307800969d3fc800802e24944",
     "status": "DRAFT_FAIL_CLOSED"
   },
@@ -73,11 +73,11 @@
     "automatic_transition_to_main": false,
     "attempts_record": "docs/multimodel/analysis/aspd_v3_500m_blocker_resolution/bounded_preflight_attempts.json",
     "last_attempt": {
-      "slurm_job_id": "50542075",
+      "slurm_job_id": "50550194",
       "state": "PASSED",
       "optimizer_steps_completed": 4,
       "scientific_evidence": "REAL_THREE_MODEL_GPU_PREFLIGHT_PASS",
-      "report_sha256": "051cce5ee7770d8e40146aaa119793985a7e7eb4e1c2d154321eca0fcfdc31d0"
+      "report_sha256": "74cd3454f5e84f07d7cae11bf367cc28381a5e464b55cb0d04b8c878a318d7a6"
     }
   },
   "monitoring": {
@@ -106,10 +106,15 @@
     "ledger_and_stream_external_restore": "PASS",
     "corrupt_snapshot_rejection": "PASS",
     "real_three_model_save_reload_next_update": "PASS",
-    "real_three_model_uninterrupted_vs_resumed_comparison": "PENDING"
+    "real_three_model_uninterrupted_vs_resumed_comparison": "BITWISE_EXACT_PASS",
+    "external_resume_slurm_job_id": "50611663",
+    "external_resume_report_sha256": "a588215b907644593a91fc0e034bedd1f1efa24b6eb9b8eaef1799431a3d72d3",
+    "ordered_anchor_replay": "PASS",
+    "repeated_exposures": 0,
+    "source_weight_immutability": "PASS"
   },
   "storage": {
-    "measured_at": "2026-11-09",
+    "measured_at": "2026-11-10T07:51:47-05:00",
     "orange_thai": {
       "size_bytes": 2199023255552,
       "used_bytes": 1985201668096,
@@ -118,8 +123,8 @@
     },
     "blue_thai": {
       "size_bytes": 5497558138880,
-      "used_bytes": 4378386628608,
-      "available_bytes": 1119171510272,
+      "used_bytes": 4378430595072,
+      "available_bytes": 1119127543808,
       "inode_use_percent": 72
     },
     "estimated_required_free_bytes_low": 821000000000,
@@ -128,27 +133,33 @@
     "approved_root": "/blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1",
     "reclaimed_targets": 8,
     "observed_free_space_increase_bytes": 863636385792,
-    "margin_over_reservation_bytes": 19659882496,
+    "margin_over_reservation_bytes": 19615916032,
     "status": "APPROVED"
   },
   "throughput": {
     "final_three_model_v3_1_measured": true,
-    "measurement_scope": "four_step_bounded_preflight_aggregate_only",
-    "measured_step_seconds_p50": 1.332268547732383,
-    "measured_step_seconds_p95": 3.83574057277292,
-    "measured_accepted_anchors_per_second": 4064.5220036484943,
-    "stage_breakdown": "PENDING_PROFILE_STAGES_MEASUREMENT",
+    "measurement_scope": "four_step_bounded_preflight_with_profiled_stage_breakdown",
+    "measured_step_seconds_p50": 1.3147347019985318,
+    "measured_step_seconds_p95": 3.691400615964085,
+    "measured_accepted_anchors_per_second": 4150.668195669409,
+    "stage_seconds_mean": {
+      "data_alignment_and_broadcast": 0.6598622504388914,
+      "frozen_backbone_and_capture": 0.15430950722657144,
+      "trainable_forward_backward": 0.8250206805532798,
+      "gradient_sync_validation_normalization": 0.03626876266207546,
+      "adam_and_post_normalization": 0.21598523494321853
+    },
     "historical_different_composition_b200_step_p50_seconds": 1.445,
     "historical_different_composition_accepted_anchors_per_second": 6256.6,
-    "projected_wall_hours_from_short_preflight": 34.17,
-    "projected_b200_gpu_hours_from_short_preflight": 102.52,
-    "projection_warning": "Only four steps were measured; use a longer profiled benchmark before reservation."
+    "projected_wall_hours_from_short_preflight": 33.46,
+    "projected_b200_gpu_hours_from_short_preflight": 100.39,
+    "projection_warning": "Only four steps were measured; projection remains provisional despite final-composition stage profiling."
   },
   "tests": [
     {
-      "scope": "v3_2b_non_distributed",
-      "result": "31 passed, 1 deselected",
-      "seconds": 6.65
+      "scope": "final_non_distributed_v3_2b_production_correctness",
+      "result": "67 passed, 1 deselected",
+      "seconds": 9.51
     },
     {
       "scope": "three_rank_exact_resume",
@@ -174,16 +185,17 @@
     },
     {
       "scope": "generic_exposure_ledger_and_real_three_model_preflight",
-      "result": "74 passed, 1 distributed test deselected; Slurm job 50542075 completed 0:0"
+      "result": "Slurm job 50550194 completed 0:0 with bitwise in-process replay"
+    },
+    {
+      "scope": "real_three_model_external_exact_resume",
+      "result": "Slurm job 50611663 completed 0:0; bitwise state and ordered-anchor replay PASS"
     }
   ],
   "blockers": [
-    "RESUME_BLOCKED",
     "MONITORING_POLICY_APPROVAL_PENDING",
     "MILESTONE_POLICY_APPROVAL_PENDING",
     "HUMAN_INTERPRETABILITY_APPROVAL_PENDING",
-    "REAL_THREE_MODEL_EXTERNAL_RESUME_PENDING",
-    "FINAL_COMPOSITION_PROFILED_THROUGHPUT_PENDING",
     "MAIN_500M_NOT_AUTHORIZED"
   ],
   "slurm": {
@@ -197,7 +209,11 @@
       "duplicate_anchors": 0,
       "checkpoint_sha256": "7224ea4f200d299d49acc7180001bcfb020b6112482322151598bd6162dbb581"
     },
-    "real_three_model_external_resume": "PENDING",
+    "real_three_model_external_resume": {
+      "status": "BITWISE_EXACT_PASS",
+      "slurm_job_id": "50611663",
+      "report_sha256": "a588215b907644593a91fc0e034bedd1f1efa24b6eb9b8eaef1799431a3d72d3"
+    },
     "preferred_account": "thai",
     "preferred_partition": "hpg-b200",
     "startup_storage_required_bytes": 1099511627776,

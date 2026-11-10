@@ -1,25 +1,25 @@
 # ASPD v3.1 three-model 500M final readiness audit
 
-Status date: 2026-11-09 (America/New_York)
+Status date: 2026-11-10 (America/New_York)
 
 Decision: **`MAIN_BLOCKED`**
 
-No 500M job was submitted. No storage artifact was deleted. The implementation package is
-substantially prepared, but the main experiment is not yet
-scientifically or operationally authorized.
+No 500M job was submitted. Exact researcher-approved storage targets were reclaimed only after
+their reproducibility records were preserved. Engineering validation is complete; the main
+experiment remains fail-closed on researcher policy, human-evidence and final-run decisions.
 
 ## Evidence boundary
 
 This audit distinguishes three claims:
 
-1. **Implemented and CPU-tested:** fail-closed authorization, N-model tensor/registry contracts,
+1. **Implemented and tested:** fail-closed authorization, N-model tensor/registry contracts,
    canonical notation and alignment schemas, sustained-health control, staged-review pauses,
    checkpoint state machinery, launch guards, and machine-readable readiness artifacts.
-2. **Historically or synthetically tested:** three-rank distributed mechanics and deterministic
-   checkpoint resume. These do not prove the final source-model composition.
-3. **Not yet executed:** real three-model physical-hook/GPU preflight, real three-model exact
-   resume, scheduled signal/requeue test, and
-   final-composition throughput measurement.
+2. **Real final-composition GPU-tested:** all 168 physical hooks, frozen-source parity, finite
+   forward/backward, shared gradients, profiled throughput, atomic checkpoint recovery, in-process
+   bitwise replay and isolated new-process bitwise resume.
+3. **Still researcher-owned:** monitoring/milestone policy approval, the human-interpretability
+   decision (or explicit acceptance of semantic uncertainty), and final 500M authorization.
 
 Accordingly, neither compilation nor synthetic tests are treated as main readiness.
 
@@ -90,24 +90,23 @@ three-model shapes, shared component indices, PRE/MID target grouping, separator
 channels, rank-one shapes, z-score/BatchTopK semantics, detached gradient routing, duplicate/missing
 target detection, and finite synthetic forward/backward behavior.
 
-This supports the statement **N=3 framework prepared at static/synthetic level**. It does not
-support the stronger statement that 168 physical targets have been validated against three real
-source models.
+This supports the stronger statement **N=3 framework and all 168 physical targets validated with
+the three real pinned source models**.
 
 ## Blocker disposition
 
 | ID | Result | Current state | Remaining gate |
 |---|---|---|---|
-| 1. Preflight authorization | Separate bounded-preflight and main authorization implemented and tested; exact four-step `/blue` preflight is authorized. | `FIXED_TESTED` | Execute once; it cannot transition to main. |
+| 1. Preflight authorization | Separate bounded-preflight, resume-validation and main authorization implemented and tested. | `FIXED_TESTED` | No engineering gate remains; neither bounded mode can transition to main. |
 | 2. Model 3 | Exact Granite contract approved, populated, pinned, and CPU-tested. | `FIXED_TESTED` | Alignment and real source execution remain separate gates. |
 | 3. Alignment | Exact canonical-text prefix validation passed on 512 real documents with pinned tokenizers. | `FIXED_TESTED` | Continue source/domain monitoring during execution. |
-| 4. Storage | Exact approved cleanup completed; after retaining the real preflight checkpoint, `/blue` has 1.119 TB free. | `FIXED_TESTED`, narrow margin | Continue runtime reserve monitoring; margin over 1 TiB is 19.66 GB. |
-| 5. Real GPU preflight | Job 50542075 passed on three B200s with 168 targets, exact source parity, frozen sources, finite updates, generic ledger and checkpoint restore probe. | `FIXED_TESTED` | No main authorization implied. |
-| 6. Exact resume | Real save/reload/next-update and ledger continuity passed. | `IN_PROGRESS` | Real uninterrupted-versus-resumed comparison and interruption/requeue test. |
+| 4. Storage | Exact approved cleanup completed; after retaining the real preflight checkpoint, `/blue` has 1.119 TB free. | `FIXED_TESTED`, narrow margin | Continue runtime reserve monitoring; margin over 1 TiB is 19.62 GB. |
+| 5. Real GPU preflight | Job 50550194 passed on three B200s with 168 targets, exact source parity, frozen sources, finite updates, generic ledger, profiled timings and in-process bitwise replay. | `FIXED_TESTED` | No main authorization implied. |
+| 6. Exact resume | Job 50611663 restored step 3 in a new process and reproduced step 4 bitwise, including optimizer/scheduler/RNG and ordered anchors, with zero repeats. | `FIXED_TESTED` | Preserve the pinned evidence. |
 | 7. Monitoring | Stateful sustained-failure policy and controlled pause implemented and CPU-tested. | `FIXED_TESTED`, approval pending | Researcher approval of policy v1 and real-run metric coverage. |
 | 8. Milestones | Exact exposure boundaries, atomic checkpoint, immutable review, and continuation authorization implemented. | `FIXED_TESTED`, approval pending | Researcher approval of staged policy v1. |
 | 9. Human evidence | Valid package exists; zero researcher response exports and no decision were found. | `HUMAN_INTERPRETABILITY_APPROVAL_PENDING` | Complete human analysis or explicitly accept documented semantic uncertainty. |
-| 10. Slurm/runtime | Main/preflight contracts and real bounded launcher passed. | `IN_PROGRESS` | Execute bounded signal/requeue and profiled timing tests. |
+| 10. Slurm/runtime | File-backed signal/checkpoint/requeue passed CPU job 50550768; isolated real-model resume and profiled timing also passed. | `FIXED_TESTED` | Final main submission remains separately unauthorized. |
 | 11. Specification/metadata | Canonical notation, alignment identifiers, config fingerprints, and evaluation states synchronized. | `FIXED_TESTED` | Regenerate fingerprints after any approved configuration decision. |
 
 ## Model-3 decision package
@@ -160,17 +159,18 @@ The first five step-aligned review boundaries are 10,002,432; 25,001,984; 50,003
 and controlled exit. A checkpoint- and contract-pinned researcher decision is required to continue.
 The final boundary is 500,006,912.
 
-Real three-model exact resume is still required: compare the next uninterrupted update with the
-restored update, including optimizer tensors, sparse support, ordered anchor IDs, exposure count,
-and source-weight immutability. Numerical equality must be reported as bitwise exact or with a
-predeclared justified tolerance.
+Real three-model exact resume passed. Job `50550194` compared uninterrupted and in-process restored
+step 4 bitwise. Job `50611663` independently loaded the immutable step-3 checkpoint in a new
+torchrun process and reproduced model, Adam, scheduler, RNG and ordered-anchor state bitwise; all
+32,768 exposures were unique and source weights were unchanged.
 
 ## Storage decision
 
 The original snapshot found neither filesystem met the 1,099,511,627,776-byte startup reservation.
 After exact approval, eight documented targets were deleted from `/blue/thai`. The dedicated root
-now has 1,244,881,256,448 bytes free, 145,369,628,672 bytes above the reservation. Estimated
-checkpoint and recovery requirements remain 821--872 GB before a final preflight measurement.
+had 1,244,881,256,448 bytes free immediately after cleanup. After retaining the measured
+127,271,274,517-byte preflight checkpoint it has 1,119,127,543,808 bytes free, 19,615,916,032 bytes
+above the 1 TiB startup reservation. Runtime reserve enforcement remains mandatory.
 
 The executed set combined the seven Tier-A candidates with the historical Llama judge cache. The
 exact paths, preserved metadata, observed reclamation and recovery limitations are in
@@ -200,11 +200,10 @@ partition limit is 14 days. Main and bounded preflight have distinct proposal sc
 cross modes. Existing runs require a valid manifest and complete checkpoint; fresh preflight
 namespaces cannot exist.
 
-Historical different-composition evidence measured 1.445 s median step time, 6,256.6 accepted
-anchors/s, and approximately 62.6/78.5/72.2 GB peak rank memory. It suggests 24--30 wall hours and
-72--90 B200 GPU-hours, but **this is not measured v3.1 final-composition throughput**. The real
-preflight must replace it with forward/backward/optimizer/data/communication time distributions,
-peak memory, accepted anchors/s, and checkpoint save/reload timing.
+Final-composition job `50550194` measured 4,150.67 accepted anchors/s, step p50 1.3147 s, p95
+3.6914 s, and peak allocated memory 81.55/75.24/72.86 GB for Gemma/SmolLM2/Granite. Mean stage
+times are pinned in `readiness.json`. The four-step projection is 33.46 wall-hours and 100.39 B200
+GPU-hours; it remains provisional because the sample is short and should be refined at milestones.
 
 No advertised non-B200 partition is a safe fallback yet. The fail-closed fallback is to wait for
 B200 capacity unless a separate bounded memory/throughput preflight approves another GPU class.
@@ -214,12 +213,10 @@ B200 capacity unless a separate bounded memory/throughput preflight approves ano
 ```bash
 /blue/thai/vinhnguyen1/multimodel-ASPD/repo/.venv/bin/pytest -q \
   tests/test_multimodel_v3_2b.py \
+  tests/test_multimodel_v3_production.py \
+  tests/test_multimodel_v3_correctness.py \
   -k 'not model_owned_distributed_gradients_optimizer_and_checkpoint'
-# 33 passed, 1 deselected
-
-/blue/thai/vinhnguyen1/multimodel-ASPD/repo/.venv/bin/pytest -q \
-  tests/test_multimodel_v3_production.py
-# 9 passed
+# 67 passed, 1 deselected in 9.51 s
 
 /blue/thai/vinhnguyen1/multimodel-ASPD/repo/.venv/bin/ruff check \
   aspd/multimodel/cli/validate_aspd_v3_main500m.py \
@@ -228,47 +225,48 @@ B200 capacity unless a separate bounded memory/throughput preflight approves ano
 
 bash -n slurm/multimodel/aspd_v3_500m_preflight_PROPOSAL.sbatch
 bash -n slurm/multimodel/aspd_v3_500m_main_PROPOSAL.sbatch
+bash -n slurm/multimodel/aspd_v3_500m_resume_validation_PROPOSAL.sbatch
 ```
 
-The existing multi-process Gloo retry remains inconclusive and is not included as passing evidence.
-The checked-in draft main validator exits 2 with `submission_permitted=false`. The exact four-step
-bounded-preflight authorization is now populated; its real scheduled execution is pending.
+The three-process Gloo checkpoint test previously passed in 302.80 s and was not repeated after the
+evidence-schema-only change. The final 67-test non-distributed regression, Ruff, JSON parsing,
+`git diff --check`, and all three Slurm scripts passed. Real jobs `50550194`, `50550768`, and
+`50611663` provide the GPU preflight,
+signal/requeue, and isolated exact-resume evidence respectively. The checked-in draft main
+validator remains fail-closed because researcher decisions and final authorization are pending.
 
 ## Required researcher decisions
 
-The four-step preflight in the exact fresh `/blue` namespace is already authorized by the
-researcher's instruction to verify unresolved evidence. It does not require the later main-only
-monitoring, milestone, or human-interpretability decisions and cannot transition to main.
+The bounded preflight and isolated resume validations are complete. They cannot transition to main.
 
 Before final main authorization, the researcher must:
 
 1. approve monitoring policy v1 and staged-milestone policy v1;
 2. complete the human response/analysis decision, or explicitly accept the documented remaining
    semantic uncertainty;
-3. review passing 168-target hook/parity, GPU, checkpoint/resume,
+3. review the passing 168-target hook/parity, GPU, checkpoint/resume,
    source-immutability, signal/requeue, throughput, and storage evidence;
 4. regenerate and approve all configuration/manifest fingerprints after those decisions; and
 5. issue a separate explicit authorization for the 500M submission and the first staged interval.
 
 ## Direct answers
 
-1. **Is the v3.1 architecture preserved?** Yes, at specification, configuration, and tested CPU
-   implementation level; no scientific objective or gate/loss invariant was changed.
-2. **Is N=3 technically prepared?** Static and synthetic infrastructure: yes. Real final source
-   integration remains pending alignment and GPU evidence.
-3. **Are 168 targets represented?** Yes as logical and approved physical slots. Real physical-hook
-   validation of all 168 is pending.
+1. **Is the v3.1 architecture preserved?** Yes. No scientific objective, gate, loss or
+   parameter-decomposition invariant changed.
+2. **Is N=3 technically prepared?** Yes, including real final-source GPU execution and isolated
+   recovery.
+3. **Are 168 targets represented?** Yes; all 168 real physical hooks passed native parity with no
+   missing or duplicate target.
 4. **Is model 3 unresolved?** No. The exact Granite source contract is approved and pinned.
-5. **Is exact resume validated?** Synthetic three-rank recovery: yes. Real final three-model exact
-   resume: no.
-6. **Is storage sufficient?** Yes at the current snapshot: 1.245 TB free on the dedicated `/blue`
-   filesystem, with runtime reserve monitoring still required.
-7. **Is throughput measured?** Only for a historical different composition; final v3.1 throughput
-   is estimated, not measured.
+5. **Is exact resume validated?** Yes, bitwise in process and in an isolated new process.
+6. **Is storage sufficient?** Yes at startup, with 1.119 TB free and a narrow 19.62 GB margin over
+   the 1 TiB gate; runtime monitoring is required.
+7. **Is throughput measured?** Yes for the final composition over four steps; the 500M projection
+   remains provisional because the sample is short.
 8. **Are monitoring and aborts implemented?** Yes and CPU-tested; threshold approval and real-run
    coverage are pending.
-9. **Which approvals remain?** Model 3, alignment audit, storage, monitoring, milestones, human
-   interpretation, bounded real preflight, evidence review, and final main authorization.
+9. **Which approvals remain?** Monitoring v1, milestone v1, human interpretation (or explicit
+   semantic-uncertainty acceptance), evidence review, and final main authorization.
 10. **What command would submit after every approval?** From the clean, reviewed, approved commit:
 
 ```bash
@@ -284,10 +282,6 @@ This command is documented only and was not executed.
 
 Exact remaining blockers:
 
-- `RESUME_BLOCKED`
-- `THREE_MODEL_GPU_PREFLIGHT_PENDING`
-- `REAL_SLURM_SIGNAL_REQUEUE_PENDING`
-- `FINAL_COMPOSITION_THROUGHPUT_UNMEASURED`
 - `MONITORING_POLICY_APPROVAL_PENDING`
 - `MILESTONE_POLICY_APPROVAL_PENDING`
 - `HUMAN_INTERPRETABILITY_APPROVAL_PENDING`

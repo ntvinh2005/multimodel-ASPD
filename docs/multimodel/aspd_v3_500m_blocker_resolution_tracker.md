@@ -1,6 +1,6 @@
 # ASPD v3.1 500M blocker-resolution tracker
 
-Status date: 2026-11-09 (America/New_York)
+Status date: 2026-11-10 (America/New_York)
 
 Branch: `aspd-v3.1-main500m-blocker-resolution`
 
@@ -10,7 +10,7 @@ The canonical scientific contract remains the three-model hierarchical Transform
 per-anchor feature-axis z-score, ReLU, pool-wide BatchTopK, continuous activation code, and
 detached binary internal support. No main-training job has been submitted.
 
-## Live audit snapshot
+## Initial audit snapshot (2026-11-09; superseded where noted below)
 
 - Slurm query at `2026-11-09T18:32:46-05:00`: no jobs owned by the researcher were queued or
   running. The sandboxed query failed, so this statement uses the subsequent live scheduler
@@ -24,6 +24,11 @@ detached binary internal support. No main-training job has been submitted.
 - User and numeric group-3059 quota queries reported usage but no explicit soft/hard byte or inode
   limits. Filesystem-wide free capacity is the current constraint.
 
+The final audit supersedes the initial storage and execution state: after the exact approved
+reclamation and retention of the real preflight checkpoint, `/blue/thai` had
+1,119,127,543,808 bytes free. Jobs `50550194`, `50550768`, and `50611663` subsequently passed the
+real three-model preflight, scheduler requeue harness, and isolated exact-resume validation.
+
 ## Blockers
 
 | ID | Blocker | Root cause | Files changed | Tests | Status | Approval needed |
@@ -32,13 +37,13 @@ detached binary internal support. No main-training job has been submitted.
 | 2 | Third-model selection | The exact source contract was previously unapproved. | Model-3 decision package, immutable researcher approval, pinned Granite config, schema and tests. | Exact contract loads; 168 unique targets register; mutation and Qwen rejection tests pass. | `FIXED_TESTED` | None for selection. Alignment, source hooks, GPU preflight and main submission remain separate gates. |
 | 3 | Three-way alignment | The exact-prefix contract had not been tested with the approved Granite tokenizer or real pinned dataset rows. | Real audit CLI, offline tokenizer fix, raw/approval artifacts, validation report, pinned config evidence, tests. | 512 real documents, 154,868 anchors, invariants/repeatability/replay PASS, filter TV 0.0284; 4 audit unit tests. | `FIXED_TESTED` | Continue source/domain monitoring during training; no additional alignment approval is pending. |
 | 4 | Storage capacity | Both filesystems were below the 1 TiB reservation. | Proposal, committed metadata record, exact eight-target cleanup, dedicated `/blue` namespace, config/readiness update. | Exact target absence, protected artifact presence, write probe, `df`/inode remeasurement. | `FIXED_TESTED` | No additional approval; runtime reserve monitoring remains mandatory. |
-| 5 | Real three-model GPU preflight | Synthetic distributed tests did not validate three real source models. | Exact source/alignment/manifests, generic ledger schema, source-commit-pinned evidence, and four-step launcher. | Job 50542075 completed `0:0`: 168 targets, exact native parity, frozen sources, finite updates, generic ledger, 0 repeated anchors, checkpoint restore probe PASS. | `FIXED_TESTED` | None for bounded GPU preflight; main remains independently unauthorized. |
-| 6 | Exact checkpoint resume | Synthetic three-rank resume passed previously; real job 50542075 proved reload/next-update but did not compare the uninterrupted and replayed states. | Added fail-closed in-process parity: SHA-256 over trainable model, Adam, scheduler and RNG; exact ordered-anchor/counter replay; and frozen-source state hashes. The report keeps raw replay rows but canonicalizes only the one expected duplicated step. | 51 focused/local tests PASS, one three-rank Gloo checkpoint test PASS; real three-model rerun remains pending. | `IN_PROGRESS` | Run the strengthened three-model preflight, then validate an isolated external process restart/requeue before claiming full exact resume. |
+| 5 | Real three-model GPU preflight | Synthetic distributed tests did not validate three real source models. | Exact source/alignment/manifests, generic ledger schema, source-commit-pinned evidence, four-step launcher and profiled stage timings. | Job 50550194 completed `0:0`: 168 targets, exact native parity, frozen sources, finite updates, generic ledger, 0 repeated anchors, checkpoint restore PASS and bitwise in-process replay. | `FIXED_TESTED` | None for bounded GPU preflight; main remains independently unauthorized. |
+| 6 | Exact checkpoint resume | Earlier real evidence reloaded state but did not compare an uninterrupted update with an isolated new-process resume. | Added SHA-256 parity over trainable model, Adam, scheduler and RNG; exact ordered-anchor/counter replay; source-state hashes; bounded cross-process authorization; and pinned evidence validation in the main manifest. | Job 50550194 passed in-process bitwise replay; isolated job 50611663 restored step 3 and reproduced step 4 bitwise with identical anchor digest, 0 repeats and immutable source weights. | `FIXED_TESTED` | None for exact resume. Main remains independently unauthorized. |
 | 7 | Sustained-collapse protection | The monitor was stateless; a collapse alert could not cause a recoverable controlled pause, and scheduled diagnostic completeness was not enforced. | `main500m_monitoring.py`, `main500m_config.py`, runner, draft YAML, tests. | Nine focused main-500M CPU tests; Ruff. | `FIXED_TESTED` | Researcher must approve the versioned v1 thresholds/actions before main authorization; the draft remains pending. |
 | 8 | Staged milestones | Milestones existed only as YAML values; the runner neither forced diagnostics/checkpoints nor required an explicit continuation decision. | Runner, `main500m_continuation.py`, config/schema, authorization template, tests. | Thirteen focused main-500M CPU tests; Ruff; Python compilation. | `FIXED_TESTED` | Researcher must approve policy v1 and provide a checkpoint-pinned decision after each staged review; draft approval remains pending. |
 | 9 | Human interpretability | The validated package exists, but no researcher response, graded human analysis, or decision artifact exists; the main schema could not distinguish these stages or accepted uncertainty. | Main config/schema, draft YAML, status artifact, decision template, tests. | Live read-only package/hash/status audit; focused main-500M tests; Ruff. | `BLOCKED_RESEARCHER_DECISION` | Researcher must complete responses and decide, or explicitly accept remaining semantic uncertainty in a hash-pinned decision artifact. |
-| 10 | Slurm/runtime reliability | In addition to the historical launch gaps, read-only audit found the proposal forwarded `USR1` to the entire torchrun process group, assumed worker exit 99 survived torchrun, and applied the 1 TiB fresh-start threshold unchanged to resume. | Replaced it with a file-backed stop request, verified COMPLETE checkpoint artifact, zero-exit torchrun contract, fresh-vs-resume storage thresholds, and a one-requeue CPU harness. | Job 50550768 completed `0:0` after exactly one requeue: checkpoint hash/cursor restored, next anchor advanced, duplicate count zero. Static shell/Ruff/focused tests PASS. | `IN_PROGRESS` | Exercise the same runner path in isolated real three-model external resume; main is unauthorized. |
-| 11 | Specification/metadata consistency | Canonical alignment was absent from the formal notation; legacy policy identifiers diverged; raw/normalized logits and Latin u versus Greek nu needed an explicit map; readiness metadata was stale. | Canonical specification, stream/manifest code, tests, consistency artifact; readiness refresh remains part of final audit. | Focused z-score/target/alignment tests, production-policy test, Ruff. | `FIXED_TESTED` | No scientific choice was made; real model-3 evidence remains independently blocked. |
+| 10 | Slurm/runtime reliability | The proposal forwarded `USR1` to torchrun, assumed worker exit 99 survived the launcher, and applied a fresh-start storage threshold to resume. | Replaced it with a file-backed stop request, verified COMPLETE checkpoint artifact, zero-exit torchrun contract, fresh-vs-resume storage thresholds, one-requeue CPU harness and isolated real-model resume launcher. | Job 50550768 passed one scheduler requeue with zero duplicates; job 50611663 passed isolated three-model resume bitwise. Static shell/Ruff/focused tests PASS. | `FIXED_TESTED` | None for engineering reliability; monitoring/milestone/human/final-run approvals remain separate. |
+| 11 | Specification/metadata consistency | Canonical alignment was absent from the formal notation; legacy policy identifiers diverged; raw/normalized logits and Latin u versus Greek nu needed an explicit map; readiness metadata was stale. | Canonical specification, stream/manifest code, tests, consistency artifact and final readiness refresh. | Focused z-score/target/alignment tests, production-policy test, Ruff. | `FIXED_TESTED` | No scientific choice was made; pinned real-model evidence is represented separately. |
 
 ## Blocker 1 resolution record
 
@@ -184,8 +189,8 @@ All checks passed
 
 The tests cover exact step boundaries, final-boundary completion, checkpoint/contract provenance,
 wrong-checkpoint rejection, idempotent audit logging, conflict rejection, and complete diagnostic
-materialization. The GPU runner path remains unexecuted pending model-3 and bounded-preflight
-approval.
+materialization. At this implementation stage the GPU runner path was unexecuted; later job
+`50550194` exercised it with the approved three-model contract.
 
 Scientific semantics changed: no. Staging controls execution and review only. It does not change
 the z-score gate, BatchTopK, AuxK, objectives, optimizer, or exposure ledger. The draft adds
@@ -229,8 +234,8 @@ automated Llama output, and no interpretability approval was granted. The main c
 The canonical source remains `aspd_v3_1_mathematical_specification.md`. It now defines the
 three-way exact canonical-text boundary contract formally, including character offsets, exact
 whole-prefix decode equality, UTF-8 byte boundaries, intersection across all three tokenizer
-families, and fail-closed rejection conditions. This does not claim that the unresolved third
-tokenizer passed the contract.
+families, and fail-closed rejection conditions. The later bounded real-tokenizer audit passed this
+contract for the approved Granite tokenizer together with Gemma and SmolLM2.
 
 The notation-to-code map now makes these distinctions explicit:
 
@@ -252,7 +257,8 @@ The production stream now accepts the canonical policy identifier explicitly, an
 requires a schema-v4 alignment manifest whose dataset hash, model order, tokenizer IDs/revisions,
 sequence length, policy, and acceptance rule match the approved execution contract. Historical
 families retain their old policy identifiers by default. The manifest preparer has a separate
-`--main500m` route that fails while model 3 is pending rather than inventing tokenizer metadata.
+`--main500m` route that failed closed while model 3 was pending and now requires the exact approved
+source/tokenizer contract rather than inventing metadata.
 
 Machine-readable map:
 `analysis/aspd_v3_500m_blocker_resolution/notation_consistency.json`.
@@ -310,7 +316,8 @@ CPU-only Slurm job `50550768` exercised the bounded control path with one automa
 recorded `Restarts=1` and final exit `0:0`; the second attempt restored cursor 3, advanced to cursor
 4 / `anchor-000004`, reported zero duplicate anchors, and matched checkpoint SHA-256
 `7224ea4f200d299d49acc7180001bcfb020b6112482322151598bd6162dbb581`. This validates the scheduler
-and shell contract, not real three-model DCP; the latter remains part of Blocker 6.
+and shell contract, not real three-model DCP; the latter was subsequently validated by jobs
+`50550194` and `50611663` under Blocker 6.
 
 Live scheduler metadata at `2026-11-09T19:39:08-05:00` showed account `thai`, partition
 `hpg-b200` UP with 60 eight-B200 nodes and a 14-day partition limit. This is inventory, not an
@@ -343,15 +350,36 @@ Scientific semantics changed: no. These changes affect launch authorization, pro
 recovery, and scheduling control only; the Transformer, z-score gate, BatchTopK, losses, C, K,
 target registration, and exposure accounting are unchanged.
 
+## Blockers 5 and 6 real preflight and exact-resume record
+
+Three-B200 job `50550194` completed four optimizer steps at source commit `f518cd9` with exactly
+32,768 accepted exposures and 168 registered targets. It saved the step-3 self-contained recovery
+checkpoint, ran step 4 uninterrupted, restored step 3 in process, and replayed step 4. SHA-256 over
+the trainable model, Adam moments, scheduler and RNG was bitwise identical on all three ranks. The
+ordered-anchor digest was
+`d4ac6e41093400904afdd4be0e958aa2bfdd73af680a054cbdb122cc61aa9eea` in both trajectories;
+unique anchors were 32,768 and repeated exposures were zero. Gemma, SmolLM2 and Granite source
+state hashes were unchanged. The report SHA-256 is
+`74cd3454f5e84f07d7cae11bf367cc28381a5e464b55cb0d04b8c878a318d7a6`.
+
+Isolated three-B200 job `50611663` then loaded the immutable step-3 checkpoint into a fresh output
+namespace and reproduced step 4 in a new torchrun process. Model/Adam/scheduler/RNG digests again
+matched the uninterrupted reference bitwise, the same ordered-anchor digest and counters were
+recovered, source weights remained unchanged, and `dcp_save_reload_resume_update=PASS`. Its report
+SHA-256 is `a588215b907644593a91fc0e034bedd1f1efa24b6eb9b8eaef1799431a3d72d3`.
+Both artifacts are pinned and revalidated by the main configuration. Scientific semantics changed:
+no.
+
 ## Final readiness decision
 
 `MAIN_BLOCKED`
 
-Independent engineering preparation is complete to the current authorization boundary. Remaining
-work requires researcher decisions, storage capacity, or real approved third-model/Slurm execution:
-model 3, three-way tokenizer alignment, storage, real 168-target GPU preflight, real exact resume,
-scheduled signal/requeue, final-composition throughput, human interpretation, policy approvals, and
-final submission authorization. The complete evidence-boundary audit is in
+Independent engineering preparation is complete to the current authorization boundary. Model 3,
+three-way alignment, storage, the real 168-target GPU preflight, profiled final-composition
+throughput, exact in-process replay, isolated external resume, and the scheduler requeue contract
+are now validated. Remaining blockers are researcher approval of monitoring v1, researcher
+approval of staged milestones v1, the human-interpretability decision (or explicit acceptance of
+semantic uncertainty), and separate final submission authorization. The complete audit is in
 `aspd_v3_500m_final_readiness_audit.md`.
 
 ## Model-3 approval update
