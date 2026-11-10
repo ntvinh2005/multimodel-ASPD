@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-11-09T22:05:00-05:00",
+  "authorized_contract": {
+    "optimizer_steps": 4,
+    "world_size": 3,
+    "gpu_type": "b200",
+    "output_namespace": "/blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/preflight",
+    "main_training_authorized": false
+  },
+  "attempts": [
+    {
+      "slurm_job_id": "50526600",
+      "state": "FAILED",
+      "elapsed": "00:00:04",
+      "exit_code": "128:0",
+      "node": "c0910a-s15",
+      "start": "2026-11-09T20:39:59-05:00",
+      "end": "2026-11-09T20:40:03-05:00",
+      "failure_class": "SUBMISSION_WORKTREE_DISAPPEARED_BEFORE_BATCH_START",
+      "model_loading_started": false,
+      "optimizer_steps_completed": 0,
+      "output_namespace_created": false,
+      "scientific_evidence": "NONE",
+      "remediation": "Recreated the same reviewed branch at a persistent /blue worktree before any retry."
+    }
+  ]
+}

@@ -70,7 +70,14 @@
     "status": "AUTHORIZED_NOT_YET_RUN",
     "optimizer_steps": 4,
     "output_namespace": "/blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/preflight",
-    "automatic_transition_to_main": false
+    "automatic_transition_to_main": false,
+    "attempts_record": "docs/multimodel/analysis/aspd_v3_500m_blocker_resolution/bounded_preflight_attempts.json",
+    "last_attempt": {
+      "slurm_job_id": "50526600",
+      "state": "FAILED_BEFORE_MODEL_LOADING",
+      "optimizer_steps_completed": 0,
+      "scientific_evidence": "NONE"
+    }
   },
   "monitoring": {
     "policy_version": "v1",
