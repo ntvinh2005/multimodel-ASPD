@@ -28,10 +28,12 @@ if [ ! -x "${VLLM_ENV}/bin/vllm" ]; then
   "${VLLM_ENV}/bin/pip" install --upgrade pip
   "${VLLM_ENV}/bin/pip" install 'vllm==0.11.0'
 fi
+"${VLLM_ENV}/bin/pip" install 'transformers==4.57.1'
 
 "${VLLM_ENV}/bin/hf" download "${MODEL_ID}" --revision "${REVISION}" --max-workers 1
 SNAPSHOT="${HF_ROOT}/hub/models--unsloth--Llama-3.3-70B-Instruct/snapshots/${REVISION}"
 test -s "${SNAPSHOT}/model.safetensors.index.json"
 "${VLLM_ENV}/bin/python" -c 'import vllm; print(vllm.__version__)'
+"${VLLM_ENV}/bin/python" -c 'import transformers; assert transformers.__version__ == "4.57.1"; print(transformers.__version__)'
 echo "ASPD_PAPER_JUDGE_CACHE_COMPLETE model=${MODEL_ID} revision=${REVISION} snapshot=${SNAPSHOT}"
 
