@@ -29,7 +29,7 @@ if [ ! -x "${VLLM_ENV}/bin/vllm" ]; then
   "${VLLM_ENV}/bin/pip" install 'vllm==0.11.0'
 fi
 
-"${VLLM_ENV}/bin/hf" download "${MODEL_ID}" --revision "${REVISION}"
+"${VLLM_ENV}/bin/hf" download "${MODEL_ID}" --revision "${REVISION}" --max-workers 1
 SNAPSHOT="${HF_ROOT}/hub/models--unsloth--Llama-3.3-70B-Instruct/snapshots/${REVISION}"
 test -s "${SNAPSHOT}/model.safetensors.index.json"
 "${VLLM_ENV}/bin/python" -c 'import vllm; print(vllm.__version__)'
