@@ -59,6 +59,11 @@ for _attempt in $(seq 1 180); do
     ready=1
     break
   fi
+  if ! kill -0 "${VLLM_PID}" 2>/dev/null; then
+    echo "vLLM exited before its OpenAI-compatible endpoint became ready" >&2
+    tail -100 "${OUTPUT_DIR}/vllm.log" >&2
+    exit 3
+  fi
   sleep 10
 done
 test "${ready}" -eq 1
