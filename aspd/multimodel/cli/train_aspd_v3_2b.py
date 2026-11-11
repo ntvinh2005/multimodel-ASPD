@@ -146,6 +146,26 @@ def _checkpoint_storage_ready(
     return free_bytes >= checkpoint_bytes + growth_margin_bytes + reserve_bytes
 
 
+def _checkpoint_storage_free_bytes(checkpoint_root: Path) -> int:
+    """Measure capacity before the first checkpoint directory exists.
+
+    An external resume starts in a fresh run namespace, so the checkpoint manager's
+    root is intentionally absent until its first atomic save.  Capacity belongs to
+    the containing filesystem; probe the nearest existing ancestor without creating
+    a directory or weakening the checkpoint overwrite guard.
+    """
+
+    probe = checkpoint_root
+    while not probe.exists():
+        parent = probe.parent
+        if parent == probe:
+            raise FileNotFoundError(
+                f"checkpoint storage has no existing ancestor: {checkpoint_root}"
+            )
+        probe = parent
+    return shutil.disk_usage(probe).free
+
+
 class _PoolPrefetcher:
     """One-pool deterministic rank-zero lookahead with checkpointable buffering."""
 
@@ -2289,7 +2309,7 @@ def main() -> None:
                     CHECKPOINT_GROWTH_MINIMUM_BYTES,
                     estimated_checkpoint_bytes // 10,
                 )
-                free_bytes = shutil.disk_usage(checkpoint_manager.root).free
+                free_bytes = _checkpoint_storage_free_bytes(checkpoint_manager.root)
                 reserve_bytes = int(config.monitoring.storage_reserve_bytes)
                 storage_preflight = {
                     "step": completed_steps,

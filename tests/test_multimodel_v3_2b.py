@@ -18,6 +18,7 @@ from torch import nn
 from aspd.multimodel.cli.train_aspd_v3_2b import (
     _authorize_main500m_mode,
     _canonical_metric_rows,
+    _checkpoint_storage_free_bytes,
     _checkpoint_storage_ready,
     _effective_external_resume_lineage,
     _exact_training_state_digest,
@@ -151,6 +152,25 @@ def test_checkpoint_storage_gate_accounts_for_new_checkpoint_and_reserve() -> No
             checkpoint_bytes=132 * gib,
             reserve_bytes=200 * gib,
         )
+
+
+def test_checkpoint_storage_probe_accepts_absent_first_checkpoint_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    checkpoint_root = tmp_path / "fresh-resume" / "checkpoints"
+    run_root = checkpoint_root.parent
+    run_root.mkdir()
+    observed: list[Path] = []
+
+    def fake_disk_usage(path: str | os.PathLike[str]) -> SimpleNamespace:
+        observed.append(Path(path))
+        return SimpleNamespace(free=987_654_321)
+
+    monkeypatch.setattr(shutil, "disk_usage", fake_disk_usage)
+
+    assert _checkpoint_storage_free_bytes(checkpoint_root) == 987_654_321
+    assert observed == [run_root]
+    assert not checkpoint_root.exists()
 
 
 def test_model_owned_checkpoint_prunes_oldest_before_atomic_replacement(
