@@ -8,7 +8,9 @@
 #SBATCH --time=2-00:00:00
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=96G
-#SBATCH --signal=B:USR1@300
+# Production model-owned checkpoints have taken 17-18 minutes on Lustre. Leave a
+# conservative 45-minute window for an atomic checkpoint before walltime requeue.
+#SBATCH --signal=B:USR1@2700
 #SBATCH --requeue
 #SBATCH --open-mode=append
 #SBATCH --output=slurm/logs/aspd-v3.1-main500m-%j.out

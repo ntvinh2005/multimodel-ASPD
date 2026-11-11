@@ -343,7 +343,7 @@ def test_main500m_slurm_proposals_separate_preflight_and_main() -> None:
     assert "--continuation-authorization" in main
     assert "LATEST_COMPLETE_CHECKPOINT" in main
     assert "  --mode preflight \\\n" not in main
-    assert "#SBATCH --signal=B:USR1@300" in main
+    assert "#SBATCH --signal=B:USR1@2700" in main
     assert "scontrol requeue" in main
     assert "ASPD_STOP_REQUEST_FILE" in main
     assert "ASPD_SIGNAL_COMPLETION_ARTIFACT" in main
