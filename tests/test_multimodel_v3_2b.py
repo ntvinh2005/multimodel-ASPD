@@ -1974,6 +1974,11 @@ def _distributed_model_owned_worker(
 
     update()
     manager = ModelOwnedCheckpoint(checkpoint_root, keep_complete=2)
+    if rank == 0:
+        # A fresh external-resume namespace has no checkpoint root until its first
+        # atomic save. Exercise the production storage-probe ordering before save.
+        assert not Path(checkpoint_root).exists()
+        assert _checkpoint_storage_free_bytes(Path(checkpoint_root)) > 0
     saved_parameter = next(model.parameters()).detach().clone()
     recovery_root = Path(checkpoint_root).parent / "live-recovery"
     recovery_databases = None

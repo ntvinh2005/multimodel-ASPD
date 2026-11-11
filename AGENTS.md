@@ -35,6 +35,21 @@ constraints without weakening these rules.
 - For ASPD experiment infrastructure, also read
   `.agents/skills/aspd-experiments/SKILL.md` when it exists.
 
+## Project storage ceiling
+
+- Keep total local storage attributable to this project at or below **1 TB**
+  (`1,000,000,000,000` bytes), counted across all project-owned artifact, checkpoint,
+  cache, staging, and temporary-output roots on every authorized filesystem.
+- Before any large write, checkpoint export, upload staging operation, or new training
+  namespace, measure current usage and include worst-case temporary/atomic-write
+  overhead in the projection. Fail closed if the projected total can exceed 1 TB.
+- Do not evade the ceiling by moving artifacts between `/blue`, `/orange`, HOME, or
+  another filesystem. Hardlinks count once physically; remote verified copies do not
+  count toward local usage.
+- Preserve at least one complete exact-resume checkpoint and its immutable provenance.
+  Reclaim only artifacts that are explicitly approved, reproducible, remotely verified,
+  or incomplete/temporary; never delete scientific evidence merely to satisfy the cap.
+
 ## ASPD v3 boundary
 
 ASPD v3 is a separate, fail-closed experiment family. Its current evaluation status is
