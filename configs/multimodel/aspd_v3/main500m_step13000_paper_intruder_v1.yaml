@@ -1,0 +1,27 @@
+schema_version: 1
+experiment_family: aspd_v3_1_paper_intruder_v1
+status: RESEARCHER_AUTHORIZED_EVALUATION
+training_authorized_by_this_contract: false
+source_config_sha256: f7a6d87436304956ca0baca955ec2e0e929a7207142f57fc35362369822f63be
+checkpoint_step: 13000
+checkpoint_manifest_sha256: e87e32d62137c879d14f26a321fb0b009e4373a0075a9a67e58256616731549e
+accepted_training_exposures: 106496000
+model_order: [gemma, smol, granite]
+forbidden_model_substrings: [qwen]
+selected_split: test
+accepted_evaluation_anchors: 100352
+pool_anchors: 2048
+display_model_key: gemma
+context_tokens_per_side: 20
+activation_examples_per_target: 400
+minimum_examples_per_component: 5
+n_subsample: 200
+seed: 0
+n_real: 4
+n_trials: 10
+density_tolerance: 0.05
+chance_accuracy: 0.2
+judge_model_id: unsloth/Llama-3.3-70B-Instruct
+judge_revision: 99cd0d2c829e92a67c844f9144c2509632e5c87f
+judge_quantization: none
+judge_backend: vllm_openai_compatible
