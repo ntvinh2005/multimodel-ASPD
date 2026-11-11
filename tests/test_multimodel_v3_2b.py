@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import sqlite3
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -18,6 +19,7 @@ from aspd.multimodel.cli.train_aspd_v3_2b import (
     _authorize_main500m_mode,
     _canonical_metric_rows,
     _exact_training_state_digest,
+    _init_distributed,
     _PoolPrefetcher,
     _record_continuation_authorization,
     _validate_main500m_alignment_manifest,
@@ -985,6 +987,40 @@ def test_main500m_milestones_are_exact_step_boundaries_and_final_is_not_a_pause(
     assert next_review_exposure(milestones[0], milestones) == milestones[1]
     with pytest.raises(ValueError, match="beyond the final"):
         next_review_exposure(milestones[-1], milestones)
+
+
+def test_model_owned_distributed_timeout_covers_slow_exact_resume_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[tuple[object, ...]] = []
+    monkeypatch.setenv("LOCAL_RANK", "2")
+    monkeypatch.setattr(
+        torch.cuda,
+        "set_device",
+        lambda device: events.append(("device", device)),
+    )
+    monkeypatch.setattr(
+        torch.distributed,
+        "init_process_group",
+        lambda backend, **kwargs: events.append(("init", backend, kwargs)),
+    )
+    monkeypatch.setattr(torch.distributed, "get_rank", lambda: 2)
+    monkeypatch.setattr(torch.distributed, "get_world_size", lambda: 3)
+
+    rank, world, device = _init_distributed()
+
+    assert (rank, world, device) == (2, 3, torch.device("cuda", 2))
+    assert events == [
+        ("device", torch.device("cuda", 2)),
+        (
+            "init",
+            "nccl",
+            {
+                "device_id": torch.device("cuda", 2),
+                "timeout": timedelta(hours=1),
+            },
+        ),
+    ]
 
 
 def test_main500m_continuation_authorization_is_checkpoint_and_contract_pinned(

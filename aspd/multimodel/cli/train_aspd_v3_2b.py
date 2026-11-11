@@ -18,6 +18,7 @@ import socket
 import subprocess
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -410,7 +411,10 @@ def _init_distributed() -> tuple[int, int, torch.device]:
     local_rank = int(os.environ["LOCAL_RANK"])
     device = torch.device("cuda", local_rank)
     torch.cuda.set_device(device)
-    dist.init_process_group("nccl", device_id=device)
+    # Rank 0 transactionally snapshots the exact-resume SQLite state while the
+    # other owners wait at a barrier.  Lustre latency can exceed NCCL's default
+    # ten-minute timeout even though checkpoint progress is healthy.
+    dist.init_process_group("nccl", device_id=device, timeout=timedelta(hours=1))
     return dist.get_rank(), dist.get_world_size(), device
 
 
