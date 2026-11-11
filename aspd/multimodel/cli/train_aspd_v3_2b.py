@@ -112,6 +112,7 @@ from aspd.multimodel.v3.two_model_matryoshka_config import (
 )
 
 SOURCE_RANK = {key: index for index, key in enumerate(MODEL_ORDER_2B)}
+CHECKPOINT_GROWTH_MINIMUM_BYTES = 16 * 1024**3
 
 
 def _effective_external_resume_lineage(
@@ -129,6 +130,20 @@ def _effective_external_resume_lineage(
     """
 
     return existing if in_place_resume else proposed
+
+
+def _checkpoint_storage_ready(
+    *,
+    free_bytes: int,
+    checkpoint_bytes: int,
+    reserve_bytes: int,
+    growth_margin_bytes: int = 0,
+) -> bool:
+    """Return whether an atomic replacement can preserve the recovery reserve."""
+
+    if min(free_bytes, checkpoint_bytes, reserve_bytes, growth_margin_bytes) < 0:
+        raise ValueError("checkpoint storage accounting cannot use negative byte counts")
+    return free_bytes >= checkpoint_bytes + growth_margin_bytes + reserve_bytes
 
 
 class _PoolPrefetcher:
@@ -1879,6 +1894,7 @@ def main() -> None:
     checkpoint_probe_parameter_value = None
     checkpoint_probe_optimizer_key = None
     checkpoint_probe_optimizer_value = None
+    checkpoint_retry_pending = False
     health_pause_requested = False
     milestone_pause_requested = False
     diagnostic_steps = {1, 2, 10, 50, 128, 256, 300, 500, 800, 1000, 1221}
@@ -2222,8 +2238,17 @@ def main() -> None:
             }
 
         preflight_reload_due = args.mode == "preflight" and completed_steps == args.max_steps - 1
-        checkpoint_due = not args.skip_checkpoint and (
+        checkpoint_boundary_required = bool(
             health_pause_requested
+            or milestone_pause_requested
+            or milestone_diagnostic_requested
+            or preflight_reload_due
+            or completed_steps == args.max_steps
+            or stop_requested
+        )
+        checkpoint_due = not args.skip_checkpoint and (
+            checkpoint_retry_pending
+            or health_pause_requested
             or milestone_pause_requested
             or milestone_diagnostic_requested
             or preflight_reload_due
@@ -2236,6 +2261,70 @@ def main() -> None:
                 )
             )
         )
+        if (
+            checkpoint_due
+            and args.strategy == "model_owned"
+            and args.mode == "main"
+        ):
+            checkpoint_manager.prune_before_atomic_replacement()
+            storage_preflight = None
+            if rank == 0:
+                complete = checkpoint_manager.complete_checkpoints()
+                storage_reference = (
+                    complete[-1]
+                    if complete
+                    else args.resume_checkpoint
+                )
+                if storage_reference is None:
+                    raise RuntimeError(
+                        "main checkpoint replacement has no complete recovery source"
+                    )
+                latest_manifest = json.loads(
+                    (storage_reference / "manifest.json").read_text(encoding="utf-8")
+                )
+                estimated_checkpoint_bytes = int(
+                    latest_manifest["bytes_before_manifest"]
+                )
+                growth_margin_bytes = max(
+                    CHECKPOINT_GROWTH_MINIMUM_BYTES,
+                    estimated_checkpoint_bytes // 10,
+                )
+                free_bytes = shutil.disk_usage(checkpoint_manager.root).free
+                reserve_bytes = int(config.monitoring.storage_reserve_bytes)
+                storage_preflight = {
+                    "step": completed_steps,
+                    "storage_reference": str(storage_reference),
+                    "free_bytes": free_bytes,
+                    "estimated_checkpoint_bytes": estimated_checkpoint_bytes,
+                    "growth_margin_bytes": growth_margin_bytes,
+                    "reserve_bytes": reserve_bytes,
+                    "required_free_bytes": (
+                        estimated_checkpoint_bytes
+                        + growth_margin_bytes
+                        + reserve_bytes
+                    ),
+                    "ready": _checkpoint_storage_ready(
+                        free_bytes=free_bytes,
+                        checkpoint_bytes=estimated_checkpoint_bytes,
+                        reserve_bytes=reserve_bytes,
+                        growth_margin_bytes=growth_margin_bytes,
+                    ),
+                }
+                _append_jsonl(
+                    args.run_dir / "checkpoint_storage_preflight.jsonl",
+                    storage_preflight,
+                )
+            storage_preflight = _broadcast_object(storage_preflight)
+            if not bool(storage_preflight["ready"]):
+                if checkpoint_boundary_required:
+                    raise RuntimeError(
+                        "mandatory checkpoint lacks atomic-write headroom: "
+                        f"{storage_preflight}"
+                    )
+                checkpoint_retry_pending = True
+                checkpoint_due = False
+            else:
+                checkpoint_retry_pending = False
         if checkpoint_due:
             torch.cuda.synchronize()
             checkpoint_started = time.perf_counter()

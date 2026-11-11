@@ -18,6 +18,7 @@ from torch import nn
 from aspd.multimodel.cli.train_aspd_v3_2b import (
     _authorize_main500m_mode,
     _canonical_metric_rows,
+    _checkpoint_storage_ready,
     _effective_external_resume_lineage,
     _exact_training_state_digest,
     _init_distributed,
@@ -128,6 +129,45 @@ def test_in_place_resume_preserves_original_external_resume_lineage() -> None:
         )
         == replacement
     )
+
+
+def test_checkpoint_storage_gate_accounts_for_new_checkpoint_and_reserve() -> None:
+    gib = 1024**3
+    assert not _checkpoint_storage_ready(
+        free_bytes=292 * gib,
+        checkpoint_bytes=132 * gib,
+        reserve_bytes=200 * gib,
+        growth_margin_bytes=16 * gib,
+    )
+    assert _checkpoint_storage_ready(
+        free_bytes=424 * gib,
+        checkpoint_bytes=132 * gib,
+        reserve_bytes=200 * gib,
+        growth_margin_bytes=16 * gib,
+    )
+    with pytest.raises(ValueError, match="negative"):
+        _checkpoint_storage_ready(
+            free_bytes=-1,
+            checkpoint_bytes=132 * gib,
+            reserve_bytes=200 * gib,
+        )
+
+
+def test_model_owned_checkpoint_prunes_oldest_before_atomic_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manager = ModelOwnedCheckpoint(tmp_path, keep_complete=2)
+    for step in (1, 2, 3):
+        checkpoint = tmp_path / f"step-{step:09d}"
+        checkpoint.mkdir()
+        (checkpoint / "COMPLETE").write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(manager, "_rank_world", lambda: (0, 3))
+    monkeypatch.setattr(torch.distributed, "barrier", lambda: None)
+
+    removed = manager.prune_before_atomic_replacement()
+
+    assert [path.name for path in removed] == ["step-000000001", "step-000000002"]
+    assert [path.name for path in manager.complete_checkpoints()] == ["step-000000003"]
 
 
 def _pin_test_alignment_evidence(payload: dict, path: Path) -> None:
