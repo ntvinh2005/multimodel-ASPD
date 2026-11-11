@@ -9,8 +9,11 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from param_decomp_lab.harvest.db import HarvestDB
+
 from aspd.eval.intruder_db import intruder_harvest_db
 from aspd.eval.judge import JudgeConfig
+from aspd.multimodel.cli.prepare_aspd_v3_paper_intruder import _component
 from aspd.multimodel.v3.diagnostic import sha256_file
 from aspd.multimodel.v3.paper_intruder import PaperIntruderContract
 
@@ -18,6 +21,7 @@ from aspd.multimodel.v3.paper_intruder import PaperIntruderContract
 def _args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--protocol", type=Path, required=True)
+    parser.add_argument("--extraction-dir", type=Path, required=True)
     parser.add_argument("--harvest-dir", type=Path, required=True)
     parser.add_argument("--tokenizer", required=True)
     parser.add_argument("--judge-base-url", required=True)
@@ -68,6 +72,72 @@ def _position_audit(db_path: Path) -> dict[str, Any]:
     }
 
 
+def _validate_components_against_extraction(
+    extraction_dir: Path,
+    db_path: Path,
+    *,
+    expected_count: int,
+) -> None:
+    """Prove judge resume did not mutate any scientific component input."""
+
+    contexts_path = extraction_dir / "component_contexts.jsonl"
+    manifest_path = extraction_dir / "experiment_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("component_contexts_sha256") != sha256_file(contexts_path):
+        raise ValueError("extraction component-context hash mismatch before judge resume")
+    expected_rows = [
+        _component(json.loads(line))
+        for line in contexts_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    if len(expected_rows) != expected_count:
+        raise ValueError("extraction component count changed before judge resume")
+    db = HarvestDB(db_path, readonly=True)
+    try:
+        if db.get_component_count() != expected_count:
+            raise ValueError("harvest component count changed before judge resume")
+        for start in range(0, len(expected_rows), 256):
+            batch = expected_rows[start : start + 256]
+            observed = db.get_components_bulk([row.component_key for row in batch])
+            for expected in batch:
+                if observed.get(expected.component_key) != expected:
+                    raise ValueError(
+                        f"harvest component changed before judge resume: {expected.component_key}"
+                    )
+    finally:
+        db.close()
+
+
+def _validate_existing_scores(
+    db_path: Path,
+    *,
+    sampled_keys: set[str],
+    n_trials: int,
+) -> int:
+    """Validate every resumable score row written by the paper scorer."""
+
+    with sqlite3.connect(db_path) as connection:
+        rows = connection.execute(
+            "SELECT component_key, score_type, score, details FROM scores"
+        ).fetchall()
+    for key, score_type, score, details in rows:
+        if score_type != "intruder" or key not in sampled_keys:
+            raise ValueError("harvest DB contains an unexpected judge score")
+        payload = json.loads(details)
+        trials = payload.get("trials")
+        if (
+            payload.get("component_key") != key
+            or payload.get("n_errors") != 0
+            or not isinstance(trials, list)
+            or len(trials) != n_trials
+        ):
+            raise ValueError(f"resumable score details are incomplete: {key}")
+        observed_score = sum(bool(trial["is_correct"]) for trial in trials) / n_trials
+        if abs(float(score) - observed_score) > 1e-12:
+            raise ValueError(f"resumable score value disagrees with its trials: {key}")
+    return len(rows)
+
+
 def main() -> None:
     args = _args()
     protocol = PaperIntruderContract.load(args.protocol)
@@ -88,7 +158,6 @@ def main() -> None:
         "checkpoint_manifest_sha256": protocol.checkpoint_manifest_sha256,
         "protocol_fingerprint": protocol.fingerprint(),
         "sampled_component_count": protocol.n_subsample,
-        "harvest_db_sha256_before_judging": sha256_file(db_path),
     }
     mismatch = {
         key: {"expected": value, "observed": meta.get(key)}
@@ -97,6 +166,22 @@ def main() -> None:
     }
     if mismatch:
         raise ValueError(f"prepared harvest provenance mismatch: {mismatch}")
+    sampled_keys = set(meta["sampled_keys"])
+    current_db_sha256 = sha256_file(db_path)
+    existing_score_count = 0
+    if current_db_sha256 != meta.get("harvest_db_sha256_before_judging"):
+        _validate_components_against_extraction(
+            args.extraction_dir,
+            db_path,
+            expected_count=int(meta["component_count"]),
+        )
+        existing_score_count = _validate_existing_scores(
+            db_path,
+            sampled_keys=sampled_keys,
+            n_trials=protocol.n_trials,
+        )
+        if existing_score_count == 0:
+            raise ValueError("harvest DB hash changed without any valid resumable scores")
     if args.output_dir.exists():
         raise FileExistsError(f"refusing to overwrite judge output: {args.output_dir}")
     args.output_dir.mkdir(parents=True)
@@ -148,6 +233,7 @@ def main() -> None:
             },
             "intruder_mean": summary["mean"],
             "n_scored": summary["n_scored"],
+            "existing_scores_validated_before_resume": existing_score_count,
             "intruder_summary_sha256": sha256_file(summary_path),
             "position_audit_sha256": sha256_file(args.output_dir / "position_audit.json"),
             "harvest_db_sha256_after_judging": sha256_file(db_path),

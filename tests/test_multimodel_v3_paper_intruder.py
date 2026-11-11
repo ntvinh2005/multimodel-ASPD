@@ -14,7 +14,10 @@ pytest.importorskip("param_decomp_lab")
 from aspd.multimodel.cli.extract_aspd_v3_paper_intruder import (
     _context_rows_for_feature,
 )
-from aspd.multimodel.cli.judge_aspd_v3_paper_intruder import _position_audit
+from aspd.multimodel.cli.judge_aspd_v3_paper_intruder import (
+    _position_audit,
+    _validate_existing_scores,
+)
 from aspd.multimodel.cli.prepare_aspd_v3_paper_intruder import _component
 from aspd.multimodel.v3.paper_intruder import PaperIntruderContract, component_key
 from aspd.multimodel.v3.production_stream import AlignedAnchorPool, ModelPoolInputs
@@ -152,3 +155,35 @@ def test_position_audit_reports_true_and_predicted_counts(tmp_path: Path) -> Non
     assert audit["true_position_counts"]["1"] == 1
     assert audit["predicted_position_counts"]["1"] == 2
     assert audit["accuracy_by_true_position"]["2"] == 0.0
+
+
+def test_resume_accepts_only_complete_paper_score_rows(tmp_path: Path) -> None:
+    db_path = tmp_path / "harvest.db"
+    trials = [
+        {"correct_answer": 1, "predicted": 1, "is_correct": True, "reasoning": "x"}
+        for _ in range(10)
+    ]
+    details = {
+        "component_key": "pre/0001",
+        "score": 1.0,
+        "trials": trials,
+        "n_errors": 0,
+    }
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "CREATE TABLE scores (component_key TEXT, score_type TEXT, score REAL, details TEXT)"
+        )
+        connection.execute(
+            "INSERT INTO scores VALUES (?, ?, ?, ?)",
+            ("pre/0001", "intruder", 1.0, json.dumps(details)),
+        )
+    assert (
+        _validate_existing_scores(
+            db_path, sampled_keys={"pre/0001"}, n_trials=10
+        )
+        == 1
+    )
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("UPDATE scores SET score = 0.9")
+    with pytest.raises(ValueError, match="disagrees with its trials"):
+        _validate_existing_scores(db_path, sampled_keys={"pre/0001"}, n_trials=10)

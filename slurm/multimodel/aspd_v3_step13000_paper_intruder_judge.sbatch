@@ -70,6 +70,7 @@ test "${ready}" -eq 1
 
 "${PYTHON}" -m aspd.multimodel.cli.judge_aspd_v3_paper_intruder \
   --protocol "${PROTOCOL}" \
+  --extraction-dir "${EXTRACTION_DIR}" \
   --harvest-dir "${HARVEST_DIR}" \
   --tokenizer "${TOKENIZER}" \
   --judge-base-url "http://127.0.0.1:${PORT}/v1" \
