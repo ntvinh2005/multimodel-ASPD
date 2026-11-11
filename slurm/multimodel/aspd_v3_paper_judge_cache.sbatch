@@ -4,7 +4,7 @@
 #SBATCH --partition=hpg-default
 #SBATCH --time=06:00:00
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=32G
+#SBATCH --mem=8G
 #SBATCH --output=slurm/logs/aspd-paper-judge-cache-%j.out
 #SBATCH --error=slurm/logs/aspd-paper-judge-cache-%j.err
 
