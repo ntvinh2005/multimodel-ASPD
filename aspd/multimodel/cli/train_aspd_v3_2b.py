@@ -114,6 +114,23 @@ from aspd.multimodel.v3.two_model_matryoshka_config import (
 SOURCE_RANK = {key: index for index, key in enumerate(MODEL_ORDER_2B)}
 
 
+def _effective_external_resume_lineage(
+    *,
+    proposed: dict[str, Any] | None,
+    existing: dict[str, Any] | None,
+    in_place_resume: bool,
+) -> dict[str, Any] | None:
+    """Preserve the immutable origin of an in-place resumed run.
+
+    ``--resume-checkpoint`` is used only when a run namespace is first created.
+    Later launches select the latest complete checkpoint inside that namespace, so
+    their command line correctly omits the flag.  The originating external-resume
+    record nevertheless remains part of the run's immutable provenance.
+    """
+
+    return existing if in_place_resume else proposed
+
+
 class _PoolPrefetcher:
     """One-pool deterministic rank-zero lookahead with checkpointable buffering."""
 
@@ -1640,6 +1657,11 @@ def main() -> None:
             }
         if run_manifest_path.is_file():
             existing_manifest = json.loads(run_manifest_path.read_text(encoding="utf-8"))
+            run_manifest["external_resume"] = _effective_external_resume_lineage(
+                proposed=run_manifest["external_resume"],
+                existing=existing_manifest.get("external_resume"),
+                in_place_resume=args.resume_checkpoint is None,
+            )
             for key in (
                 "strategy",
                 "git_sha",

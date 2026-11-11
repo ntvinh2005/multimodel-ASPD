@@ -18,6 +18,7 @@ from torch import nn
 from aspd.multimodel.cli.train_aspd_v3_2b import (
     _authorize_main500m_mode,
     _canonical_metric_rows,
+    _effective_external_resume_lineage,
     _exact_training_state_digest,
     _init_distributed,
     _PoolPrefetcher,
@@ -97,6 +98,36 @@ def _deauthorize_main500m_payload(payload: dict) -> dict:
     payload["full_training_authorized"] = False
     payload["approvals"]["full_training"] = "MAIN_500M_NOT_AUTHORIZED"
     return payload
+
+
+def test_in_place_resume_preserves_original_external_resume_lineage() -> None:
+    original = {
+        "checkpoint": "/immutable/step-000010000",
+        "manifest_sha256": "a" * 64,
+        "step": 10_000,
+    }
+    assert (
+        _effective_external_resume_lineage(
+            proposed=None,
+            existing=original,
+            in_place_resume=True,
+        )
+        == original
+    )
+
+    replacement = {
+        "checkpoint": "/other/step-000014000",
+        "manifest_sha256": "b" * 64,
+        "step": 14_000,
+    }
+    assert (
+        _effective_external_resume_lineage(
+            proposed=replacement,
+            existing=original,
+            in_place_resume=False,
+        )
+        == replacement
+    )
 
 
 def _pin_test_alignment_evidence(payload: dict, path: Path) -> None:
