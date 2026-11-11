@@ -12,7 +12,6 @@ set -euo pipefail
 ulimit -c 0
 
 WORKTREE=/blue/thai/vinhnguyen1/multimodel-ASPD/repo/.codex_runtime/step13000-paper-intruder
-HF=/blue/thai/vinhnguyen1/multimodel-ASPD/repo/.venv/bin/hf
 HF_ROOT=/blue/thai/vinhnguyen1/multimodel-ASPD/cache/huggingface
 VLLM_ENV=/blue/thai/vinhnguyen1/multimodel-ASPD/envs/vllm-paper-0.11.0
 MODEL_ID=unsloth/Llama-3.3-70B-Instruct
@@ -30,7 +29,7 @@ if [ ! -x "${VLLM_ENV}/bin/vllm" ]; then
   "${VLLM_ENV}/bin/pip" install 'vllm==0.11.0'
 fi
 
-"${HF}" download "${MODEL_ID}" --revision "${REVISION}"
+"${VLLM_ENV}/bin/hf" download "${MODEL_ID}" --revision "${REVISION}"
 SNAPSHOT="${HF_ROOT}/hub/models--unsloth--Llama-3.3-70B-Instruct/snapshots/${REVISION}"
 test -s "${SNAPSHOT}/model.safetensors.index.json"
 "${VLLM_ENV}/bin/python" -c 'import vllm; print(vllm.__version__)'
