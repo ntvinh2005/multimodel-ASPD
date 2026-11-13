@@ -143,6 +143,8 @@ def _context_rows_for_feature(
     feature_positions: np.ndarray,
     feature_values: np.ndarray,
     tokens_per_side: int,
+    pool_anchor_offset: int = 0,
+    tokenizer: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Create one strongest annotated context per source document in this pool."""
 
@@ -170,19 +172,26 @@ def _context_rows_for_feature(
         firings = [value > 0 for value in activations]
         if not any(firings):
             raise RuntimeError("retained Intruder context lost its natural firing anchor")
-        rows.append(
-            {
+        token_ids = [int(value) for value in document_tokens[lower:upper]]
+        row = {
                 "activation": float(feature_values[peak_event]),
+                "anchor_index": pool_anchor_offset + peak_position,
                 "anchor_id": pool.anchor_ids[peak_position],
                 "document_id": pool.document_ids[document_index],
                 "source_group": pool.source_observations[document_index].get(
                     "source_group", "unknown"
                 ),
-                "token_ids": [int(value) for value in document_tokens[lower:upper]],
+                "token_ids": token_ids,
                 "firings": firings,
                 "activations": activations,
             }
-        )
+        if tokenizer is not None:
+            row["context"] = tokenizer.decode(
+                token_ids,
+                skip_special_tokens=True,
+                clean_up_tokenization_spaces=False,
+            ).strip()
+        rows.append(row)
     return rows
 
 
@@ -195,6 +204,8 @@ def _retain_contexts(
     tokens_per_side: int,
     limit: int,
     allowed_features: set[int] | None,
+    pool_anchor_offset: int = 0,
+    tokenizer: Any | None = None,
 ) -> np.ndarray:
     position, feature = (code > 0).nonzero(as_tuple=True)
     values = code[position, feature]
@@ -218,6 +229,8 @@ def _retain_contexts(
                 feature_positions=position_np[group],
                 feature_values=values_np[group],
                 tokens_per_side=tokens_per_side,
+                pool_anchor_offset=pool_anchor_offset,
+                tokenizer=tokenizer,
             )
             by_document = retained[feature_id]
             for row in rows:

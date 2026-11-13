@@ -19,8 +19,14 @@ from aspd.multimodel.cli.judge_aspd_v3_paper_intruder import (
     _validate_existing_scores,
 )
 from aspd.multimodel.cli.prepare_aspd_v3_paper_intruder import _component
-from aspd.multimodel.v3.paper_intruder import PaperIntruderContract, component_key
+from aspd.multimodel.v3.paper_intruder import (
+    PaperIntruderContract,
+    QuickIntruderJaccardContract,
+    component_key,
+)
 from aspd.multimodel.v3.production_stream import AlignedAnchorPool, ModelPoolInputs
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _contract() -> PaperIntruderContract:
@@ -67,6 +73,22 @@ def test_contract_pins_paper_intruder_defaults_and_v3_gate_budget() -> None:
         contract.model_copy(update={"n_trials": 9}).model_validate(
             contract.model_copy(update={"n_trials": 9}).model_dump()
         )
+
+
+def test_quick_500m_contract_pins_checkpoint_and_matched_jaccard_protocol() -> None:
+    contract = QuickIntruderJaccardContract.load(
+        ROOT / "configs/multimodel/aspd_v3/main500m_quick_intruder_jaccard_v1.yaml"
+    )
+    assert contract.checkpoint_step == 61_036
+    assert contract.checkpoint_manifest_sha256 == (
+        "735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969"
+    )
+    assert contract.model_order == ("gemma", "smol", "granite")
+    assert contract.features_per_site == 100
+    assert contract.accepted_evaluation_anchors == 100_352
+    assert contract.jaccard_pairs_per_stratum == 20_000
+    assert contract.minhash_permutations == 32
+    assert contract.near_duplicate_threshold == 0.5
 
 
 def test_context_rows_preserve_natural_multi_token_firings() -> None:
