@@ -22,10 +22,14 @@ def _args() -> argparse.Namespace:
     parser.add_argument("--protocol", type=Path, required=True)
     parser.add_argument("--analysis-dir", type=Path, required=True)
     parser.add_argument("--judge-dir", type=Path, required=True)
+    parser.add_argument("--baseline-preparation", type=Path, required=True)
+    parser.add_argument("--baseline-answer-key", type=Path, required=True)
+    parser.add_argument("--baseline-judge-dir", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--extraction-job-id", required=True)
     parser.add_argument("--analysis-job-id", required=True)
     parser.add_argument("--judge-job-id", required=True)
+    parser.add_argument("--baseline-judge-job-id", required=True)
     return parser.parse_args()
 
 
@@ -154,12 +158,56 @@ def main() -> None:
         + intruder["mid"]["evaluated_features"],
         "rotations": intruder["pre"]["rotations"] + intruder["mid"]["rotations"],
     }
+    baseline_preparation = _json(args.baseline_preparation)
+    baseline_answers = [
+        row
+        for row in _jsonl(args.baseline_answer_key)
+        if row["arm"] == "per_anchor_zscore"
+    ]
+    baseline_parent_ids = {str(row["trial_id"]) for row in baseline_answers}
+    baseline_rotations = [
+        row
+        for row in _jsonl(args.baseline_judge_dir / "rotation_results.jsonl")
+        if str(row["parent_trial_id"]) in baseline_parent_ids
+    ]
+    baseline_parents = _parents(baseline_answers, baseline_rotations)
+    baseline_grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in baseline_parents:
+        baseline_grouped[str(row["site"])].append(row)
+    baseline_rng = np.random.default_rng(contract.bootstrap_seed + 1)
+    matched_baseline: dict[str, Any] = {}
+    matched_bootstraps: dict[str, np.ndarray] = {}
+    for site in ("pre", "mid"):
+        matched_baseline[site], matched_bootstraps[site] = _site_intruder(
+            baseline_grouped[site],
+            baseline_preparation["groups"][f"per_anchor_zscore.{site}"],
+            rng=baseline_rng,
+            replicates=contract.bootstrap_replicates,
+        )
+    matched_macro_bootstrap = 0.5 * (
+        matched_bootstraps["pre"] + matched_bootstraps["mid"]
+    )
+    matched_baseline["macro"] = {
+        "accuracy": 0.5
+        * (matched_baseline["pre"]["accuracy"] + matched_baseline["mid"]["accuracy"]),
+        "ci95": [
+            float(value)
+            for value in np.quantile(matched_macro_bootstrap, [0.025, 0.975])
+        ],
+        "evaluated_features": matched_baseline["pre"]["evaluated_features"]
+        + matched_baseline["mid"]["evaluated_features"],
+        "rotations": matched_baseline["pre"]["rotations"]
+        + matched_baseline["mid"]["rotations"],
+    }
+    baseline_judge_summary = _json(args.baseline_judge_dir / "judge_summary.json")
     position_status = str(judge_summary["status"])
-    semantic_validated = position_status == "SCIENTIFIC_JUDGE_RUN_COMPLETE"
+    semantic_validated = (
+        position_status == "SCIENTIFIC_JUDGE_RUN_COMPLETE"
+        and baseline_judge_summary["status"] == "SCIENTIFIC_JUDGE_RUN_COMPLETE"
+    )
     baseline_intruder = {
-        "pre": contract.baseline_intruder_pre,
-        "mid": contract.baseline_intruder_mid,
-        "macro": contract.baseline_intruder_macro,
+        site: float(matched_baseline[site]["accuracy"])
+        for site in ("pre", "mid", "macro")
     }
     comparisons = {
         "intruder": {
@@ -223,14 +271,22 @@ def main() -> None:
         "git_sha": _git_sha(),
         "checkpoint_step": contract.checkpoint_step,
         "checkpoint_manifest_sha256": contract.checkpoint_manifest_sha256,
-        "baseline": contract.baseline_label,
+        "baseline": "10M z-score, judge-matched public Llama rerun",
+        "previously_reported_intruder_baseline": {
+            "pre": contract.baseline_intruder_pre,
+            "mid": contract.baseline_intruder_mid,
+            "macro": contract.baseline_intruder_macro,
+        },
+        "judge_matched_intruder_baseline": matched_baseline,
         "jobs": {
             "extraction": args.extraction_job_id,
             "analysis": args.analysis_job_id,
             "judge": args.judge_job_id,
+            "baseline_judge": args.baseline_judge_job_id,
         },
         "intruder": intruder,
         "judge_position_diagnostics": judge_summary,
+        "baseline_judge_position_diagnostics": baseline_judge_summary,
         "judge_bias_caveat": "Biased forced-choice accuracy is exploratory, not validated semantic interpretability.",
         "diversity": diversity,
         "comparisons": comparisons,
@@ -282,7 +338,7 @@ def main() -> None:
         "",
         "## Comparison",
         "",
-        "| Metric | 10M z-score | 500M z-score | Change |",
+        "| Metric | 10M z-score (judge-matched rerun) | 500M z-score | Change |",
         "|---|---:|---:|---:|",
     ]
     for label, site in (("PRE Intruder", "pre"), ("MID Intruder", "mid"), ("Macro Intruder", "macro")):
@@ -303,12 +359,32 @@ def main() -> None:
     lines.extend(
         [
             "",
+            "The Intruder baseline in the table is the required judge-matched rerun. For continuity, the previously reported unmatched values were:",
+            "",
+            "| Metric | Previously reported 10M | 500M under public Llama | Change (non-matched) |",
+            "|---|---:|---:|---:|",
+        ]
+    )
+    for label, site, old_value in (
+        ("PRE Intruder", "pre", contract.baseline_intruder_pre),
+        ("MID Intruder", "mid", contract.baseline_intruder_mid),
+        ("Macro Intruder", "macro", contract.baseline_intruder_macro),
+    ):
+        lines.append(
+            f"| {label} | {_pct(old_value)} | {_pct(intruder[site]['accuracy'])} | {100 * (intruder[site]['accuracy'] - old_value):+.1f} pp |"
+        )
+    lines.extend(
+        [
+            "",
             "## Intruder uncertainty and diagnostics",
             "",
             f"- PRE: {intruder['pre']['evaluated_features']} features, {intruder['pre']['rotations']} rotations, 95% feature-bootstrap CI [{_pct(intruder['pre']['ci95'][0])}, {_pct(intruder['pre']['ci95'][1])}].",
             f"- MID: {intruder['mid']['evaluated_features']} features, {intruder['mid']['rotations']} rotations, 95% feature-bootstrap CI [{_pct(intruder['mid']['ci95'][0])}, {_pct(intruder['mid']['ci95'][1])}].",
             f"- Macro 95% CI: [{_pct(intruder['macro']['ci95'][0])}, {_pct(intruder['macro']['ci95'][1])}].",
             f"- Judge position status: `{position_status}`. These scores are exploratory and are not validated semantic interpretability.",
+            f"- Judge-matched 10M rerun: PRE {matched_baseline['pre']['evaluated_features']} features/{matched_baseline['pre']['rotations']} rotations; MID {matched_baseline['mid']['evaluated_features']} features/{matched_baseline['mid']['rotations']} rotations.",
+            f"- Judge-matched 10M position status: `{baseline_judge_summary['status']}`.",
+            f"- Previously reported unmatched 10M point estimates were PRE {_pct(contract.baseline_intruder_pre)}, MID {_pct(contract.baseline_intruder_mid)}, macro {_pct(contract.baseline_intruder_macro)}.",
             "",
             "## Diversity denominators",
             "",
@@ -333,6 +409,7 @@ def main() -> None:
             f"- Extraction job: `{args.extraction_job_id}`",
             f"- CPU analysis job: `{args.analysis_job_id}`",
             f"- Llama judge job: `{args.judge_job_id}`",
+            f"- Judge-matched 10M rerun job: `{args.baseline_judge_job_id}`",
             f"- Analysis input SHA-256: `{sha256_file(args.analysis_dir / 'preparation_manifest.json')}`",
             f"- Judge result SHA-256: `{sha256_file(args.judge_dir / 'rotation_results.jsonl')}`",
         ]
