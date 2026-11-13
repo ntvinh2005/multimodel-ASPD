@@ -398,6 +398,26 @@ def main() -> None:
     lines.extend(
         [
             "",
+            "## Frequency-stratified diversity",
+            "",
+            "| Site | Firing stratum | Eligible features | Sampled pairs | Mean Jaccard | Mean excess coactivation rate |",
+            "|---|---|---:|---:|---:|---:|",
+        ]
+    )
+    for site in ("pre", "mid"):
+        strata = diversity["sites"][site]["jaccard_pair_sample"]["frequency_strata"]
+        for stratum in ("low", "medium", "high"):
+            row = strata[stratum]
+            lines.append(
+                f"| {site.upper()} | {stratum} | {row['eligible_features']} | {row['sampled_pairs']} | {row['mean_jaccard']:.6f} | {row['mean_excess_coactivation_rate']:.8f} |"
+            )
+        overall = diversity["sites"][site]["jaccard_pair_sample"]
+        lines.append(
+            f"| {site.upper()} | overall | {diversity['sites'][site]['eligible_features']} | {overall['rows']} | {overall['mean']:.6f} | {overall['mean_excess_coactivation_rate']:.8f} |"
+        )
+    lines.extend(
+        [
+            "",
             "## Conclusion",
             "",
             conclusion["overall_answer"],
