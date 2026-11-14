@@ -7,6 +7,9 @@ from aspd.multimodel.cli.analyze_aspd_v3_interpretability_clusters import (
     _fit_feature,
     adjusted_rand,
 )
+from aspd.multimodel.cli.analyze_aspd_v3_interpretability_heldout import (
+    aggregate_feature_rows,
+)
 from aspd.multimodel.cli.embed_aspd_v3_interpretability_contexts import _signature
 from aspd.multimodel.cli.prepare_aspd_v3_interpretability_stage2 import (
     choose_clustering_keys,
@@ -100,3 +103,29 @@ def test_adjusted_rand_is_permutation_invariant() -> None:
     left = np.asarray([0, 0, 1, 1, 2, 2])
     right = np.asarray([2, 2, 0, 0, 1, 1])
     assert adjusted_rand(left, right) == 1.0
+
+
+def test_heldout_feature_aggregation_preserves_shared_gate_and_sums_models() -> None:
+    rows = [
+        {
+            "model": model,
+            "site": "pre",
+            "feature": 7,
+            "heldout_fires": 10,
+            "heldout_firing_rate": 0.1,
+            "activation_rms_when_fired": 0.5,
+            "matrix_component_events": 20,
+            "matrix_contribution_l2_mean": contribution,
+            "conditional_matrix_residual_l2_mean": residual,
+        }
+        for model, contribution, residual in (
+            ("gemma", 1.0, 2.0),
+            ("smol", 2.0, 3.0),
+            ("granite", 3.0, 4.0),
+        )
+    ]
+    result = aggregate_feature_rows(rows)
+    assert len(result) == 1
+    assert result[0]["activation_code_energy_proxy"] == 2.5
+    assert result[0]["internal_contribution_l2_total"] == 120.0
+    assert result[0]["conditional_matrix_residual_l2_mean"] == 3.0
