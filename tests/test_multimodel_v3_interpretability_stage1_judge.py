@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
-from aspd.multimodel.cli.judge_aspd_v3_interpretability_stage1 import _summarize
+from pathlib import Path
+
+from aspd.multimodel.cli.judge_aspd_v3_interpretability_stage1 import (
+    _summarize,
+)
+from aspd.multimodel.v3.mechanistic_validation import FinalIntruderJudgeContract
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _row(component: str, site: str, position: int, correct: bool) -> dict:
@@ -46,3 +53,12 @@ def test_rotation_summary_requires_all_five_correct() -> None:
     )
     assert summary["rotation_consistency"]["fraction_all_five_correct"] == 1.0
     assert summary["rotation_consistency"]["mean_correct_rotations"] == 5.0
+
+
+def test_stage1_mistral_calibration_contract_is_pinned() -> None:
+    contract = FinalIntruderJudgeContract.load(
+        ROOT
+        / "configs/multimodel/aspd_v3/interpretability_stage1_mistral_calibration_v1.yaml"
+    )
+    assert contract.judge_model_id == "mistralai/Mistral-Nemo-Instruct-2407"
+    assert contract.paid_api is False

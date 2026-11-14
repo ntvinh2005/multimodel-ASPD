@@ -391,10 +391,12 @@ class FinalIntruderJudgeContract(BaseModel):
     judge_model_id: Literal[
         "meta-llama/Llama-3.3-70B-Instruct",
         "unsloth/Llama-3.3-70B-Instruct",
+        "mistralai/Mistral-Nemo-Instruct-2407",
     ]
     judge_revision: Literal[
         "6f6073b423013f6a7d4d9f39144961bfbfbc386b",
         "99cd0d2c829e92a67c844f9144c2509632e5c87f",
+        "04d8a90549d23fc6bd7f642064003592df51e9b3",
     ]
     local_files_only: Literal[True]
     paid_api: Literal[False]
@@ -426,6 +428,9 @@ class FinalIntruderJudgeContract(BaseModel):
             ),
             "unsloth/Llama-3.3-70B-Instruct": (
                 "99cd0d2c829e92a67c844f9144c2509632e5c87f"
+            ),
+            "mistralai/Mistral-Nemo-Instruct-2407": (
+                "04d8a90549d23fc6bd7f642064003592df51e9b3"
             ),
         }
         if self.judge_revision != expected[self.judge_model_id]:
