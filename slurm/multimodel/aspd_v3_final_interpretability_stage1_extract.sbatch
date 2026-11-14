@@ -20,6 +20,8 @@ CHECKPOINT=/blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/runs/aspd_v3_1
 OUTPUT_ROOT=/blue/thai/vinhnguyen1/aspd_v3/evaluation/interpretability_failure_v1
 OUTPUT_DIR="${OUTPUT_ROOT}/extraction/job_${SLURM_JOB_ID}"
 HARVEST_DIR="${OUTPUT_DIR}/harvest/h-step061036"
+TOKENIZER=/blue/thai/vinhnguyen1/multimodel-ASPD/cache/huggingface/hub/models--google--gemma-2-2b-it/snapshots/299a8560bedf22ed1c72a8a11e7dce4a7f9f51f8
+TASK_DIR="${OUTPUT_DIR}/frozen_tasks"
 
 cd "${WORKTREE}"
 module load conda
@@ -56,6 +58,13 @@ nvidia-smi
   --extraction-dir "${OUTPUT_DIR}" \
   --harvest-dir "${HARVEST_DIR}"
 
+"${PYTHON}" -m aspd.multimodel.cli.prepare_aspd_v3_interpretability_stage1_tasks \
+  --protocol "${PROTOCOL}" \
+  --extraction-dir "${OUTPUT_DIR}" \
+  --tokenizer "${TOKENIZER}" \
+  --output-dir "${TASK_DIR}"
+
 test -s "${OUTPUT_DIR}/COMPLETE"
 test -s "${HARVEST_DIR}/PREPARED"
+test -s "${TASK_DIR}/FROZEN"
 echo "ASPD_V3_FINAL_STAGE1_EXTRACTION_COMPLETE output=${OUTPUT_DIR}"
