@@ -441,7 +441,23 @@ def main() -> None:
             raise RuntimeError(
                 f"only {len(eligible_keys)} components are paper-Intruder eligible"
             )
-        sampled_keys = sample_keys(eligible_keys, protocol.n_subsample, protocol.seed)
+        if protocol.components_per_site is None:
+            sampled_keys = sample_keys(eligible_keys, protocol.n_subsample, protocol.seed)
+        else:
+            sampled_keys = []
+            for site_index, site in enumerate(("pre", "mid")):
+                site_keys = [key for key in eligible_keys if key.startswith(f"{site}/")]
+                if len(site_keys) < protocol.components_per_site:
+                    raise RuntimeError(
+                        f"only {len(site_keys)} {site.upper()} components are eligible"
+                    )
+                sampled_keys.extend(
+                    sample_keys(
+                        site_keys,
+                        protocol.components_per_site,
+                        protocol.seed + site_index,
+                    )
+                )
         allowed = {"pre": set(), "mid": set()}
         for key in sampled_keys:
             site, feature = key.split("/", 1)
@@ -535,6 +551,10 @@ def main() -> None:
             "dictionary_size_per_site": n_features,
             "eligible_components": eligible_count,
             "sampled_components": len(sampled_keys),
+            "sampled_components_by_site": {
+                site: sum(key.startswith(f"{site}/") for key in sampled_keys)
+                for site in ("pre", "mid")
+            },
             "display_model_key": protocol.display_model_key,
             "source_model_provenance": {
                 key: {
@@ -557,7 +577,7 @@ def main() -> None:
             "rank_reports": rank_reports,
             "paper_exact": {
                 "intruder_trial_shape": True,
-                "component_subsample": True,
+                "component_subsample": protocol.components_per_site is None,
                 "seed": True,
                 "density_matching": True,
                 "context_window": True,
@@ -571,6 +591,11 @@ def main() -> None:
                 "split": "document-disjoint test rather than paper training harvest",
                 "evaluation_anchor_budget": protocol.accepted_evaluation_anchors,
                 "donor_example_cap": protocol.minimum_examples_per_component,
+                "component_sampling": (
+                    "200 components per site (400 total), a preregistered v3.1 extension"
+                    if protocol.components_per_site is not None
+                    else "paper 200-component pooled subsample"
+                ),
             },
             "software": {
                 "python": platform.python_version(),

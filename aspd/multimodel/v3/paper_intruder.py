@@ -15,8 +15,11 @@ class PaperIntruderContract(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[1]
-    experiment_family: Literal["aspd_v3_1_paper_intruder_v1"]
+    schema_version: Literal[1, 2]
+    experiment_family: Literal[
+        "aspd_v3_1_paper_intruder_v1",
+        "aspd_v3_1_interpretability_stage1_v1",
+    ]
     status: Literal["RESEARCHER_AUTHORIZED_EVALUATION"]
     training_authorized_by_this_contract: Literal[False]
     source_config_sha256: str
@@ -34,6 +37,10 @@ class PaperIntruderContract(BaseModel):
     minimum_examples_per_component: int
     n_subsample: int
     seed: int
+    components_per_site: int | None = None
+    task_seed: int | None = None
+    bootstrap_seed: int | None = None
+    bootstrap_replicates: int | None = None
     n_real: int
     n_trials: int
     density_tolerance: float
@@ -57,8 +64,6 @@ class PaperIntruderContract(BaseModel):
             "context_tokens_per_side": 20,
             "activation_examples_per_target": 400,
             "minimum_examples_per_component": 5,
-            "n_subsample": 200,
-            "seed": 0,
             "n_real": 4,
             "n_trials": 10,
             "density_tolerance": 0.05,
@@ -72,6 +77,44 @@ class PaperIntruderContract(BaseModel):
         }
         if mismatch:
             raise ValueError(f"paper Intruder protocol changed: {mismatch}")
+        if self.experiment_family == "aspd_v3_1_paper_intruder_v1":
+            historical = {
+                "schema_version": 1,
+                "n_subsample": 200,
+                "seed": 0,
+                "components_per_site": None,
+                "task_seed": None,
+                "bootstrap_seed": None,
+                "bootstrap_replicates": None,
+            }
+            mismatch = {
+                key: {"expected": value, "observed": getattr(self, key)}
+                for key, value in historical.items()
+                if getattr(self, key) != value
+            }
+            if mismatch:
+                raise ValueError(f"historical paper Intruder contract changed: {mismatch}")
+        else:
+            stage1 = {
+                "schema_version": 2,
+                "checkpoint_step": 61_036,
+                "accepted_training_exposures": 500_006_912,
+                "n_subsample": 400,
+                "seed": 20_261_114,
+                "components_per_site": 200,
+                "task_seed": 20_261_115,
+                "bootstrap_seed": 20_261_116,
+                "bootstrap_replicates": 5_000,
+            }
+            mismatch = {
+                key: {"expected": value, "observed": getattr(self, key)}
+                for key, value in stage1.items()
+                if getattr(self, key) != value
+            }
+            if mismatch:
+                raise ValueError(f"Stage-1 Intruder contract changed: {mismatch}")
+            if self.n_subsample != 2 * self.components_per_site:
+                raise ValueError("Stage-1 total sample must equal PRE plus MID samples")
         if self.chance_accuracy != 1.0 / (self.n_real + 1):
             raise ValueError("Intruder chance accuracy disagrees with trial arity")
         if any("qwen" in value.lower() for value in self.model_order):

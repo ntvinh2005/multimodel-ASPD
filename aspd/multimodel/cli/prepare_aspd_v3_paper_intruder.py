@@ -113,7 +113,8 @@ def main() -> None:
     db.save_config(
         HarvestConfig(
             method_config=ParamDecompHarvestConfig(
-                wandb_path="local/aspdv3/p-00130000", activation_threshold=0.0
+                wandb_path=f"local/aspdv3/p-{protocol.checkpoint_step:08d}",
+                activation_threshold=0.0,
             ),
             n_batches=protocol.accepted_evaluation_anchors // protocol.pool_anchors,
             batch_size=16,

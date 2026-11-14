@@ -75,6 +75,31 @@ def test_contract_pins_paper_intruder_defaults_and_v3_gate_budget() -> None:
         )
 
 
+def test_stage1_contract_pins_balanced_per_site_sample() -> None:
+    contract = _contract().model_copy(
+        update={
+            "schema_version": 2,
+            "experiment_family": "aspd_v3_1_interpretability_stage1_v1",
+            "checkpoint_step": 61_036,
+            "checkpoint_manifest_sha256": "d" * 64,
+            "accepted_training_exposures": 500_006_912,
+            "n_subsample": 400,
+            "seed": 20_261_114,
+            "components_per_site": 200,
+            "task_seed": 20_261_115,
+            "bootstrap_seed": 20_261_116,
+            "bootstrap_replicates": 5_000,
+        }
+    )
+    validated = PaperIntruderContract.model_validate(contract.model_dump())
+    assert validated.n_subsample == 400
+    assert validated.components_per_site == 200
+    with pytest.raises(ValueError, match="Stage-1 Intruder contract changed"):
+        PaperIntruderContract.model_validate(
+            validated.model_copy(update={"components_per_site": 199}).model_dump()
+        )
+
+
 def test_quick_500m_contract_pins_checkpoint_and_matched_jaccard_protocol() -> None:
     contract = QuickIntruderJaccardContract.load(
         ROOT / "configs/multimodel/aspd_v3/main500m_quick_intruder_jaccard_v1.yaml"
