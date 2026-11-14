@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import numpy as np
+import torch
 
+from aspd.multimodel.cli.embed_aspd_v3_interpretability_contexts import _signature
 from aspd.multimodel.cli.prepare_aspd_v3_interpretability_stage2 import (
     choose_clustering_keys,
     threshold_coverage,
@@ -60,3 +62,11 @@ def test_clustering_sample_is_balanced_and_reproducible() -> None:
     for row in left:
         observed[(row["site"], row["frequency_stratum"])] += 1
     assert set(observed.values()) == {5}
+
+
+def test_embedding_signature_detects_parameter_changes() -> None:
+    model = torch.nn.Linear(3, 2)
+    before = _signature(model)
+    with torch.no_grad():
+        model.weight.add_(1)
+    assert _signature(model) != before
