@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from aspd.multimodel.cli.judge_aspd_v3_interpretability_stage1 import (
     _summarize,
 )
+from aspd.multimodel.cli.judge_aspd_v3_intruder_final import _load_model
 from aspd.multimodel.v3.mechanistic_validation import FinalIntruderJudgeContract
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -62,3 +64,23 @@ def test_stage1_mistral_calibration_contract_is_pinned() -> None:
     )
     assert contract.judge_model_id == "mistralai/Mistral-Nemo-Instruct-2407"
     assert contract.paid_api is False
+
+
+def test_mistral_loader_enables_tokenizer_regex_fix() -> None:
+    contract = FinalIntruderJudgeContract.load(
+        ROOT
+        / "configs/multimodel/aspd_v3/interpretability_stage1_mistral_calibration_v1.yaml"
+    )
+    tokenizer = MagicMock()
+    tokenizer.pad_token_id = 0
+    model = MagicMock()
+    with (
+        patch(
+            "aspd.multimodel.cli.judge_aspd_v3_intruder_final._snapshot_path",
+            return_value=ROOT,
+        ),
+        patch("transformers.AutoTokenizer.from_pretrained", return_value=tokenizer) as load_tok,
+        patch("transformers.AutoModelForCausalLM.from_pretrained", return_value=model),
+    ):
+        _load_model(contract)
+    assert load_tok.call_args.kwargs["fix_mistral_regex"] is True
