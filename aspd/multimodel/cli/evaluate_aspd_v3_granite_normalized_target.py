@@ -46,6 +46,10 @@ from aspd.multimodel.v3.granite_normalized_config import (
     load_granite_normalized_target_config,
 )
 from aspd.multimodel.v3.hooks import assert_frozen_backbone, logical_weight_bias
+from aspd.multimodel.v3.main500m_config import (
+    EXPERIMENT_FAMILY as MAIN500M_FAMILY,
+)
+from aspd.multimodel.v3.main500m_config import load_main500m_config
 from aspd.multimodel.v3.model_owned import ModelOwnedMain2B
 from aspd.multimodel.v3.model_owned_checkpoint import ModelOwnedCheckpoint
 from aspd.multimodel.v3.models import load_frozen_v3_model, load_v3_tokenizer
@@ -92,6 +96,39 @@ def _broadcast(value: Any) -> Any:
 
 def _load_contract(path: Path) -> dict[str, Any]:
     payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if payload.get("experiment_family") == "aspd_v3_1_main500m_final_heldout_v1":
+        expected = {
+            "schema_version": 1,
+            "status": "RESEARCHER_AUTHORIZED_READ_ONLY_FINAL_HELDOUT",
+            "authorized_by": "researcher",
+            "authorized_on": "2026-11-14",
+            "experiment_family": "aspd_v3_1_main500m_final_heldout_v1",
+            "source_experiment_family": MAIN500M_FAMILY,
+            "split": "validation",
+            "split_unit": "document",
+            "accepted_anchors": 100_352,
+            "pool_anchors": 2_048,
+            "pool_count": 49,
+            "bootstrap_unit": "source_document",
+            "bootstrap_replicates": 2_000,
+            "bootstrap_seed": 20261117,
+            "jaccard_top_features": 256,
+            "jaccard_min_fires": 4,
+            "checkpoint_steps": 61_036,
+            "checkpoint_manifest_sha256": (
+                "735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969"
+            ),
+            "accepted_training_exposures": 500_006_912,
+            "model_order": ["gemma", "smol", "granite"],
+            "gpu_count": 3,
+            "gpu_type": "b200",
+            "read_only": True,
+            "training_authorized_by_this_contract": False,
+            "forbidden_model_substrings": ["qwen"],
+        }
+        if payload != expected:
+            raise ValueError("main500m final held-out evaluation contract changed")
+        return payload
     if payload.get("experiment_family") == GATE_COLLAPSE_RECOVERY_FAMILY:
         expected = {
             "schema_version": 1,
@@ -315,7 +352,7 @@ def _validate_inputs(args: argparse.Namespace, config: Any) -> dict[str, Any]:
         raise ValueError(f"normalized-target pilot provenance mismatch: {mismatch}")
     return {
         "status": "PASS",
-        "arm": config.arm,
+        "arm": _arm_label(config),
         "training_git_sha": run.get("git_sha"),
         "config_sha256": sha256_file(args.config),
         "config_fingerprint": config.fingerprint(),
@@ -323,6 +360,12 @@ def _validate_inputs(args: argparse.Namespace, config: Any) -> dict[str, Any]:
         "dataset_manifest_sha256": dataset["manifest_sha256"],
         "alignment_manifest_sha256": alignment["manifest_sha256"],
     }
+
+
+def _arm_label(config: Any) -> str:
+    if config.experiment_family == MAIN500M_FAMILY:
+        return "main500m_final"
+    return str(config.arm)
 
 
 def _space_summary(report: dict[str, Any], prefix: str) -> dict[str, Any]:
@@ -423,7 +466,9 @@ def main() -> None:
     local_rank = int(os.environ["LOCAL_RANK"])
     world = int(os.environ["WORLD_SIZE"])
     raw_config = yaml.safe_load(args.config.read_text(encoding="utf-8"))
-    if raw_config.get("experiment_family") == ENCODER_AUXK_FACTORIAL_FAMILY:
+    if raw_config.get("experiment_family") == MAIN500M_FAMILY:
+        config = load_main500m_config(args.config)
+    elif raw_config.get("experiment_family") == ENCODER_AUXK_FACTORIAL_FAMILY:
         config = load_encoder_auxk_factorial_config(args.config)
     elif raw_config.get("experiment_family") == GATE_COLLAPSE_RECOVERY_FAMILY:
         config = load_gate_collapse_recovery_config(args.config)
@@ -432,6 +477,13 @@ def main() -> None:
     else:
         config = load_granite_normalized_target_config(args.config)
     contract = _load_contract(args.contract)
+    if config.experiment_family == MAIN500M_FAMILY:
+        if contract.get("source_experiment_family") != config.experiment_family:
+            raise ValueError("final held-out contract and source training family differ")
+        if sha256_file(args.checkpoint / "manifest.json") != contract[
+            "checkpoint_manifest_sha256"
+        ]:
+            raise ValueError("final held-out contract pins a different checkpoint")
     if config.experiment_family == GATE_COLLAPSE_RECOVERY_FAMILY:
         if contract["experiment_family"] != config.experiment_family:
             raise ValueError("evaluation contract and training config families differ")
@@ -450,6 +502,12 @@ def main() -> None:
             raise RuntimeError("two-model evaluation must contain only Gemma and SmolLM2")
     elif model_order != MODEL_ORDER_GRANITE:
         raise RuntimeError("Granite evaluation requires gemma/smol/granite")
+    if config.experiment_family == MAIN500M_FAMILY and any(
+        forbidden in model.model_id.lower()
+        for forbidden in contract["forbidden_model_substrings"]
+        for model in config.models
+    ):
+        raise RuntimeError("forbidden source model present in final held-out evaluation")
     device = torch.device("cuda", local_rank)
     torch.cuda.set_device(device)
     dist.init_process_group("nccl", device_id=device)
@@ -569,8 +627,8 @@ def main() -> None:
                 {
                     "schema_version": 1,
                     "status": "E0_CHECKPOINT_RESTORE_PASS",
-                    "arm": config.arm,
-                    "experiment_arm_id": getattr(config, "arm_id", config.arm),
+                    "arm": _arm_label(config),
+                    "experiment_arm_id": getattr(config, "arm_id", _arm_label(config)),
                     "checkpoint_manifest_sha256": provenance["checkpoint_manifest_sha256"],
                     "checkpoint_step": checkpoint_manifest["step"],
                     "model_order": list(model_order),
@@ -614,8 +672,8 @@ def main() -> None:
             manifest = {
                 "schema_version": 1,
                 "status": "READ_ONLY_GRANITE_NORMALIZED_TARGET_DIAGNOSTIC_COMPLETE",
-                "arm": config.arm,
-                "experiment_arm_id": getattr(config, "arm_id", config.arm),
+                "arm": _arm_label(config),
+                "experiment_arm_id": getattr(config, "arm_id", _arm_label(config)),
                 "activation_objective_mode": getattr(
                     config.objective, "activation_objective_mode", "matryoshka"
                 ),
