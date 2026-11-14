@@ -3,6 +3,10 @@ from __future__ import annotations
 import numpy as np
 import torch
 
+from aspd.multimodel.cli.analyze_aspd_v3_interpretability_clusters import (
+    _fit_feature,
+    adjusted_rand,
+)
 from aspd.multimodel.cli.embed_aspd_v3_interpretability_contexts import _signature
 from aspd.multimodel.cli.prepare_aspd_v3_interpretability_stage2 import (
     choose_clustering_keys,
@@ -70,3 +74,29 @@ def test_embedding_signature_detects_parameter_changes() -> None:
     with torch.no_grad():
         model.weight.add_(1)
     assert _signature(model) != before
+
+
+def test_cluster_analysis_recovers_stable_separated_context_families() -> None:
+    rng = np.random.default_rng(11)
+    left = rng.normal(loc=[1, 0, 0], scale=0.03, size=(30, 3))
+    right = rng.normal(loc=[0, 1, 0], scale=0.03, size=(30, 3))
+    metrics, labels, _centers = _fit_feature(
+        np.concatenate([left, right]),
+        np.linspace(0.1, 1.0, 60),
+        candidate_k=[2, 3],
+        restarts=5,
+        seed=9,
+        minimum_silhouette=0.1,
+        minimum_cluster_fraction=0.1,
+        minimum_stability=0.6,
+    )
+    assert metrics["selected_k"] == 2
+    assert metrics["credible_multi_cluster"] is True
+    expected = np.repeat([0, 1], 30)
+    assert adjusted_rand(labels, expected) > 0.9
+
+
+def test_adjusted_rand_is_permutation_invariant() -> None:
+    left = np.asarray([0, 0, 1, 1, 2, 2])
+    right = np.asarray([2, 2, 0, 0, 1, 1])
+    assert adjusted_rand(left, right) == 1.0
