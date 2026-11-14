@@ -5,7 +5,7 @@
 #SBATCH --gres=gpu:b200:1
 #SBATCH --time=03:00:00
 #SBATCH --cpus-per-task=12
-#SBATCH --mem=192G
+#SBATCH --mem=64G
 #SBATCH --output=slurm/logs/aspd-v3-final-stage1-judge-%j.out
 #SBATCH --error=slurm/logs/aspd-v3-final-stage1-judge-%j.err
 
