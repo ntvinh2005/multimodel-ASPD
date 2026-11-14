@@ -16,7 +16,7 @@ ulimit -c 0
 WORKTREE=/blue/thai/share/multimodel-ASPD/repo/.codex_runtime/interpretability-failure-v1
 PYTHON=/blue/thai/share/multimodel-ASPD/repo/.venv/bin/python
 PROTOCOL=configs/multimodel/aspd_v3/main500m_interpretability_stage2_v1.yaml
-PREPARATION=/blue/thai/vinhnguyen1/aspd_v3/evaluation/interpretability_failure_v1/stage2/preparation_git_6d9cfdd
+PREPARATION=/blue/thai/vinhnguyen1/aspd_v3/evaluation/interpretability_failure_v1/stage2/preparation_git_fccfdc9
 INPUT="${PREPARATION}/clustering_embedding_input.jsonl"
 MODEL=/blue/thai/vinhnguyen1/multimodel-ASPD/cache/huggingface/hub/models--mistralai--Mistral-Nemo-Instruct-2407/snapshots/04d8a90549d23fc6bd7f642064003592df51e9b3
 OUTPUT_ROOT=/blue/thai/vinhnguyen1/aspd_v3/evaluation/interpretability_failure_v1/stage2/embeddings
