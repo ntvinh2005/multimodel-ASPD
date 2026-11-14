@@ -73,13 +73,17 @@ def main() -> None:
         raise ValueError("embedding input is empty or contains blank text")
     args.output_dir.mkdir(parents=True)
     started = time.perf_counter()
-    tokenizer = AutoTokenizer.from_pretrained(str(args.model), local_files_only=True)
+    if protocol.get("embedding_tokenizer_fix_mistral_regex") is not True:
+        raise ValueError("Mistral tokenizer regex fix is required")
+    tokenizer = AutoTokenizer.from_pretrained(
+        str(args.model), local_files_only=True, fix_mistral_regex=True
+    )
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
     model = AutoModel.from_pretrained(
         str(args.model),
         local_files_only=True,
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         low_cpu_mem_usage=True,
     ).to("cuda")
     model.eval().requires_grad_(False)
@@ -120,6 +124,7 @@ def main() -> None:
             "embedding_model_revision": protocol["embedding_model_revision"],
             "embedding_model_path": str(args.model),
             "embedding_pooling": protocol["embedding_pooling"],
+            "tokenizer_fix_mistral_regex": True,
             "rows": len(rows),
             "shape": list(embeddings.shape),
             "dtype": str(embeddings.dtype),

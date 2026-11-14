@@ -28,6 +28,7 @@ clustering_minimum_stability_ari: 0.60
 clustering_random_restarts: 10
 embedding_model_id: mistralai/Mistral-Nemo-Instruct-2407
 embedding_model_revision: 04d8a90549d23fc6bd7f642064003592df51e9b3
+embedding_tokenizer_fix_mistral_regex: true
 embedding_pooling: attention_mask_mean_last_hidden_state
 embedding_dtype: bfloat16
 human_components: 60
