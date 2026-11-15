@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
 
+from aspd.multimodel.cli.analyze_aspd_v3_functional_correspondence import (
+    PRIMARY,
+    _context_alignment,
+)
 from aspd.multimodel.v3.functional_correspondence import (
     FunctionalCorrespondenceContract,
     continuation_logprob_metrics,
@@ -73,3 +78,46 @@ def test_signed_continuation_metric_rejects_empty_suffix() -> None:
             [2],
             [1],
         )
+
+
+def test_context_alignment_preserves_reused_context_ids_and_component_bootstrap() -> None:
+    rows = []
+    model_offsets = {"gemma": 0.0, "smol": 0.3, "granite": -0.2}
+    for site_index, site in enumerate(("pre", "mid")):
+        for feature in range(12):
+            for activity_index, activity in enumerate(("active", "inactive")):
+                for context_index in range(4):
+                    for model, model_offset in model_offsets.items():
+                        rows.append(
+                            {
+                                "model": model,
+                                "site": site,
+                                "feature": feature,
+                                "context_activity": activity,
+                                # Intentionally reused across every component and activity.
+                                "context_id": f"context-{context_index}",
+                                "intervention_kind": "learned",
+                                "strength": 1.0,
+                                PRIMARY: (
+                                    site_index * 10.0
+                                    + feature
+                                    + activity_index * 0.1
+                                    + context_index * 0.01
+                                    + model_offset
+                                ),
+                            }
+                        )
+    contract = SimpleNamespace(
+        components_per_site=12,
+        active_contexts_per_component=4,
+        inactive_contexts_per_component=4,
+        bootstrap_seed=17,
+        bootstrap_replicates=20,
+    )
+    result = _context_alignment(rows, contract)
+    for activity in ("active", "inactive"):
+        for comparison in result[activity].values():
+            assert comparison["n_components"] == 24
+            assert comparison["n_contexts"] == 96
+            assert comparison["contexts_per_component"] == 4
+            assert comparison["bootstrap_unit"] == "component"

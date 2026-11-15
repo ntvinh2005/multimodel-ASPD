@@ -164,6 +164,39 @@ def _rho_interval(
     }
 
 
+def _component_clustered_rho_interval(
+    left: np.ndarray,
+    right: np.ndarray,
+    *,
+    seed: int,
+    replicates: int,
+) -> dict[str, Any]:
+    if left.shape != right.shape or left.ndim != 2:
+        raise ValueError("clustered rank-correlation inputs must be equal 2D arrays")
+    point = float(spearmanr(left.reshape(-1), right.reshape(-1)).statistic)
+    rng = np.random.default_rng(seed)
+    sampled = []
+    for _ in range(replicates):
+        indices = rng.integers(0, left.shape[0], size=left.shape[0])
+        value = float(
+            spearmanr(left[indices].reshape(-1), right[indices].reshape(-1)).statistic
+        )
+        if np.isfinite(value):
+            sampled.append(value)
+    if not sampled:
+        raise ValueError("all clustered bootstrap rank correlations were undefined")
+    lower, upper = np.quantile(sampled, (0.025, 0.975))
+    return {
+        "n_components": int(left.shape[0]),
+        "n_contexts": int(left.size),
+        "contexts_per_component": int(left.shape[1]),
+        "rho": point,
+        "ci95": [float(lower), float(upper)],
+        "bootstrap_unit": "component",
+        "valid_bootstrap_replicates": len(sampled),
+    }
+
+
 def _signed_alignment(
     effects: list[dict[str, Any]],
     contract: FunctionalCorrespondenceContract,
@@ -222,20 +255,70 @@ def _context_alignment(
         for row in rows
         if row["intervention_kind"] == "learned" and float(row["strength"]) == 1.0
     ]
-    index = {(row["model"], row["context_id"]): float(row[PRIMARY]) for row in selected}
+    index = {
+        (
+            row["model"],
+            row["site"],
+            int(row["feature"]),
+            row["context_activity"],
+            row["context_id"],
+        ): float(row[PRIMARY])
+        for row in selected
+    }
     output = {}
     for activity in ("active", "inactive"):
-        context_ids = sorted(
-            {row["context_id"] for row in selected if row["context_activity"] == activity}
+        components = sorted(
+            {
+                (row["site"], int(row["feature"]))
+                for row in selected
+                if row["context_activity"] == activity
+            }
         )
+        if len(components) != 2 * contract.components_per_site:
+            raise ValueError(f"{activity} same-context component count changed")
         output[activity] = {}
         for left, right in (("gemma", "smol"), ("gemma", "granite"), ("smol", "granite")):
-            left_values = np.asarray([index[(left, context_id)] for context_id in context_ids])
-            right_values = np.asarray([index[(right, context_id)] for context_id in context_ids])
-            output[activity][f"{left}_vs_{right}"] = _rho_interval(
-                left_values,
-                right_values,
-                seed=contract.bootstrap_seed + len(output[activity]) + (0 if activity == "active" else 50),
+            left_values = []
+            right_values = []
+            for site, feature in components:
+                context_ids = sorted(
+                    {
+                        row["context_id"]
+                        for row in selected
+                        if row["context_activity"] == activity
+                        and row["site"] == site
+                        and int(row["feature"]) == feature
+                    }
+                )
+                expected = (
+                    contract.active_contexts_per_component
+                    if activity == "active"
+                    else contract.inactive_contexts_per_component
+                )
+                if len(context_ids) != expected:
+                    raise ValueError(
+                        f"{activity} context count changed for {site}/{feature}"
+                    )
+                left_values.append(
+                    [
+                        index[(left, site, feature, activity, context_id)]
+                        for context_id in context_ids
+                    ]
+                )
+                right_values.append(
+                    [
+                        index[(right, site, feature, activity, context_id)]
+                        for context_id in context_ids
+                    ]
+                )
+            output[activity][f"{left}_vs_{right}"] = _component_clustered_rho_interval(
+                np.asarray(left_values),
+                np.asarray(right_values),
+                seed=(
+                    contract.bootstrap_seed
+                    + len(output[activity])
+                    + (0 if activity == "active" else 50)
+                ),
                 replicates=contract.bootstrap_replicates,
             )
     return output
