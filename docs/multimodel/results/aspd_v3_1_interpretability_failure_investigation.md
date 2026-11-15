@@ -1,6 +1,6 @@
 # ASPD v3.1 interpretability-failure investigation
 
-Status: `COMPLETE_WITH_HUMAN_REVIEW_PENDING`
+Status: `COMPLETE_WITH_EXPLORATORY_NONHUMAN_H4_AUDIT`
 
 Date: 2026-11-14
 
@@ -10,7 +10,7 @@ Checkpoint: step `61,036`, `500,006,912` accepted aligned-anchor exposures, chec
 
 The current evidence does **not** support reading the reported 37% Intruder accuracy as a calibrated estimate of semantic interpretability. The most strongly established failure is in the measurement instrument: the Llama judge has severe position dependence, and an independent Mistral-family judge also failed its preregistered reliability gates. A paper-faithful task construction produced 33.65% macro accuracy, but that number remains exploratory because the judge is invalid. The direction and magnitude of any bias relative to human judgement are unknown; the data establish distortion, not specifically downward bias.
 
-There is also exploratory evidence of representation heterogeneity. In 120 frequency-stratified features with 50--100 natural-firing contexts each, 78/120 (65%) passed the predeclared embedding-cluster stability rule. This is consistent with multi-pattern or polysemantic firing, but it is not yet a human-validated estimate of polysemanticity. A new bounded three-model causal test found positive signed-effect correspondence only for SmolLM2--Granite, not for either pair involving Gemma; the predeclared H7 verdict is `INCONCLUSIVE`. Capacity shortage and a causal effect of detached internal supervision remain unproven.
+There is also exploratory evidence of representation heterogeneity. In 120 frequency-stratified features with 50--100 natural-firing contexts each, 78/120 (65%) passed the predeclared embedding-cluster stability rule. This is consistent with multi-pattern or polysemantic firing, but it is not yet a human-validated estimate of polysemanticity. A blinded nonhuman H4 audit classified 23/59 uncontaminated items (39.0%) as coherent and 18/59 (30.5%) as coherently syntactic, formatting, or token-boundary features. This supports the existence of non-topical features, but most were already in the old judge's high-score band. A bounded three-model causal test found positive signed-effect correspondence only for SmolLM2--Granite, not for either pair involving Gemma; the predeclared H7 verdict is `INCONCLUSIVE`. Capacity shortage and a causal effect of detached internal supervision remain unproven.
 
 The best present classification is therefore:
 
@@ -18,7 +18,7 @@ The best present classification is therefore:
 2. **Secondary plausible representation problem:** stable within-feature context heterogeneity.
 3. **Unresolved mechanism/training problems:** cross-model correspondence is mixed, while capacity and detached-gradient causal effects require controlled experiments.
 
-The single most informative next experiment is the already-frozen 60-component, two-rater blinded human taxonomy and unique-intruder audit. It directly adjudicates H1--H4 without retraining or paid API calls.
+If human ratings remain out of scope, the single most informative next measurement experiment is an independently executed, structure-aware local-judge rerating of the same frozen H4 tasks, compared with the original prompt on identical positions. This would test whether prompt scope rather than component quality explains missed structural patterns, without retraining ASPD.
 
 ## Provenance and immutable inputs
 
@@ -37,6 +37,8 @@ The single most informative next experiment is the already-frozen 60-component, 
 - H7 model runs: `h7_functional_correspondence/job_51380041_{0,1,2}`.
 - H7 corrected analysis: `h7_functional_correspondence/analysis_git_3f028ee`.
 - H7 causal figure: `h7_functional_correspondence/figures_git_fb81273`.
+- H4 frozen nonhuman responses: `docs/multimodel/analysis/aspd_v3_1_interpretability_failure_v1/h4_agent_blinded_responses.json`.
+- H4 nonhuman analysis: `/blue/thai/vinhnguyen1/aspd_v3/evaluation/interpretability_failure_v1/stage2/h4_agent_audit_git_5d6114a`.
 - No Qwen model was loaded or trained. Source-model weights and the ASPD checkpoint were read-only.
 
 The exact step-13k checkpoint weights no longer exist. Only immutable extraction/judge artifacts and deleted-checkpoint manifests survive. The step-13k and final feature samples overlap in only three component IDs, so a fixed-component checkpoint comparison cannot be reconstructed.
@@ -107,9 +109,29 @@ Across the 400 sampled components, mean and median target activation correlated 
 
 ### A5/H4 -- Non-topical syntax or structure
 
-A blinded package of 60 components was generated across PRE/MID, frequency, and failed-judge score strata. It asks two independent raters to classify semantic, syntactic, formatting/document-structure, boundary/positional, mixed/polysemantic, no-pattern, or insufficient-evidence behavior and to assess donor uniqueness.
+A blinded package of 60 components was generated across PRE/MID and failed-judge score strata. At the researcher's direction, Codex completed a single nonhuman qualitative pass. The response file explicitly records `human_evaluator=false`; it is not presented as human evidence and has no independent inter-rater agreement.
 
-**Verdict: NOT_TESTED.** Package preparation is complete; human evidence is pending and no LLM labels are being substituted for human ratings.
+During schema inspection, the answer for Feature Set 001 was accidentally exposed. That item was declared contaminated, assigned no scientific response, and excluded before the remaining answer key was opened. The other 59 responses and the exploratory adjudication rule were committed at `4600fd7` before grading.
+
+Results on 59 uncontaminated items were:
+
+| Agent classification | Count | Fraction |
+|---|---:|---:|
+| Coherent, any category | 23 | 39.0% |
+| Syntactic coherence | 10 | 16.9% |
+| Formatting/document-structure coherence | 6 | 10.2% |
+| Token-boundary coherence | 2 | 3.4% |
+| Semantic coherence | 5 | 8.5% |
+| Mixed/no discernible pattern | 36 | 61.0% |
+| Unique intruder identified | 23 | 39.0% |
+
+The 18 non-topical coherent items comprised 10 PRE and 8 MID components. All 18 agent-declared unique non-topical intruders matched the construction answer key. This 100% conditional accuracy does not prove semantic validity: the key identifies the donor by construction, and the same language-model agent both inferred the pattern and selected the donor.
+
+Crucially, non-topical coherence was concentrated in components the old Llama judge already scored highly: 17/25 high-band items, 1/24 intermediate-band items, and 0/10 zero-band items. Thus the audit supports the existence of syntactic/formatting/boundary features, but does not support the stronger claim that many low-scoring components are clear structural mechanisms missed by the judge.
+
+All three pre-key exploratory gates passed: non-topical coherent fraction at least 25% (observed 30.5%), at least ten unique non-topical tasks (18), and at least 50% construction-key accuracy in that subset (100%).
+
+**Verdict: PARTIALLY_SUPPORTED.** Non-topical coherent components exist in this sample, but this is a single nonhuman audit, not human validation, and it provides little evidence that the original judge missed clear structure in its low-score band.
 
 ## Phase B: learned-representation diagnosis
 
@@ -189,7 +211,7 @@ The machine-readable evidence matrix is stored beside this report. The final ver
 | H1 Judge/protocol | A1/A2 | Two judge families fail reliability; Llama has extreme position dependence | No calibrated human reference, so bias direction unknown | PARTIALLY_SUPPORTED |
 | H2 Donor ambiguity | A3 preparation | Source-match association in failed judge; human audit ready | No human unique-answer labels or three donor conditions | INCONCLUSIVE |
 | H3 Weak firings | A4 | Activation-strength association; quantified coverage curve | Association uses invalid judge | INCONCLUSIVE |
-| H4 Nonsemantic structure | A5 package | Taxonomy instrument frozen | Two human raters pending | NOT_TESTED |
+| H4 Nonsemantic structure | A5 nonhuman audit | 18/59 (30.5%) items are agent-coherent syntactic/formatting/boundary features; 18/18 selected donors match the construction key | Single language-model evaluator; 17/18 non-topical cases are in the old judge's high band; one contaminated item excluded | PARTIALLY_SUPPORTED |
 | H5 Polysemanticity | B1 | 78/120 stable multi-cluster features | Embedding clusters are not human meanings | PARTIALLY_SUPPORTED |
 | H6 Capacity | B2 | MID matrix FVU is higher than PRE; contribution is concentrated | Residual-frequency effect is tiny; no controlled `C` ablation | INCONCLUSIVE |
 | H7 Cross-model mismatch | B3 causal | SmolLM2--Granite signed effects align (`rho=0.532`, CI 0.090--0.823); Gemma pairs are near zero; same-context effects do not align | Neither predeclared support nor not-supported rule passes; 24-component sample and model-specific target selection | INCONCLUSIVE |
@@ -200,7 +222,7 @@ The machine-readable evidence matrix is stored beside this report. The final ver
 ## Answers to the ten research questions
 
 1. **Is 37% distorted?** Yes. It is not a validated semantic estimate. The sign and magnitude relative to human judgement are unknown.
-2. **What fraction is human-identifiable?** Unknown until the two-rater package is completed.
+2. **What fraction is identifiable?** Human-identifiable fraction remains unknown. In the explicitly nonhuman audit, 23/59 (39.0%) were agent-coherent and 18/59 (30.5%) had coherent non-topical patterns.
 3. **Do stronger activations improve coherence?** Exploratory association yes; confirmatory answer unknown.
 4. **Are weak features polysemantic?** Stable context heterogeneity is common (65% of the stratified 120-feature sample), but semantic polysemanticity is only partially supported.
 5. **Is `C=8192` binding?** Plausible but not established. Observational residuals do not discriminate capacity from objective/optimization effects.
@@ -208,7 +230,7 @@ The machine-readable evidence matrix is stored beside this report. The final ver
 7. **Does detached internal supervision cause mismatch?** Gradient routing is verified, but the causal contribution is untested; held-out activation/internal contribution alignment is moderately strong rather than absent.
 8. **Did interpretability plateau after 13k?** Not established and no longer exactly testable from surviving weights.
 9. **What are extreme winners?** They are disproportionately important to reconstruction, especially PRE, but there is no valid evidence yet that they are undesirable or less specific.
-10. **Strongest hypothesis and next experiment?** Measurement failure is strongest. Run the frozen two-rater human taxonomy/unique-intruder audit next.
+10. **Strongest hypothesis and next experiment?** Measurement failure remains strongest. If human review is excluded, run an independent structure-aware local-judge comparison on the same frozen items and positions next.
 
 ## Resource and execution record
 
@@ -234,6 +256,7 @@ Generated figures:
 - `stage3/figures_git_979c8ca/checkpoint_training_loss.png`: actual training-batch metric rows, not held-out checkpoint parity.
 - `stage3/figures_git_979c8ca/cross_model_observational_contribution_alignment.png`: unsigned contribution norms, not causal-effect alignment.
 - `h7_functional_correspondence/figures_git_fb81273/cross_model_signed_causal_effect_alignment.png`: actual signed three-model causal evaluation; correspondence is not proof of identical algorithms.
+- `stage2/h4_agent_audit_git_5d6114a/agent_h4_taxonomy.png`: actual blinded nonhuman taxonomy labels; explicitly not human evidence.
 - `stage2/heldout_analysis_git_979c8ca/feature_frequency_vs_failed_judge.png`: exploratory only because the judge failed.
 - `stage2/heldout_analysis_git_979c8ca/cluster_diagnostics.png`: exploratory Mistral-embedding clusters.
 - `stage2/heldout_analysis_git_979c8ca/contribution_concentration.png`: held-out observational contribution concentration.
@@ -251,9 +274,9 @@ The first H7 analysis namespace, `analysis_git_f50b1d7`, keyed the secondary sam
 
 ## Limitations and researcher decision
 
-- The current human-identifiable fraction, structure-aware coherence, and donor-validity rate are missing because human raters have not completed the frozen package.
+- Human-identifiable coherence and inter-rater agreement remain unknown. The completed H4 audit is a single language-model-agent measurement and can share biases with model judges.
 - H6 and H8 cannot become causal conclusions without separately approved training ablations.
 - H7 is bounded by 24 stratified components, a continuation-likelihood estimand, and independently selected strongest targets per model; it does not test identity of full algorithms.
 - H9 cannot be repaired exactly unless an independently archived step-13k checkpoint is found.
 
-The next researcher decision is whether to appoint two independent raters for `stage2/preparation_git_fccfdc9/human_review.html`. That is the cheapest experiment with the largest expected information gain and should precede any capacity or objective retraining.
+If no human ratings will be collected, the next researcher decision is whether to authorize a bounded, structure-aware rerating of the frozen H4 package with an independent local model family. Capacity or objective retraining should still not be justified from the invalid headline Intruder score alone.

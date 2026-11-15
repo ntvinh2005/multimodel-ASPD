@@ -27,12 +27,12 @@
       "verdict": "INCONCLUSIVE"
     },
     {
-      "contradicting_or_limiting_results": "Two independent raters have not completed the frozen 60-item package.",
-      "confounds": "None; no result is claimed.",
-      "experimental_evidence": "A5 package only",
+      "contradicting_or_limiting_results": "17/18 non-topical coherent items were already in the old judge high-score band; zero-band contained 0/10 non-topical coherent items.",
+      "confounds": "Single language-model agent, no independent agreement, construction-key correctness is not semantic validity, and one accidentally unblinded item was excluded.",
+      "experimental_evidence": "A5 blinded nonhuman qualitative audit",
       "hypothesis": "H4 Non-topical structure",
-      "supporting_results": "Blinded taxonomy and unique-intruder instrument prepared.",
-      "verdict": "NOT_TESTED"
+      "supporting_results": "23/59 agent-coherent items; 18/59 (30.5%) syntactic/formatting/token-boundary; 18/18 agent-unique non-topical selections matched the construction key.",
+      "verdict": "PARTIALLY_SUPPORTED"
     },
     {
       "contradicting_or_limiting_results": "Embedding clusters are not human meanings; held-out within-cluster versus cross-cluster Intruder was not run.",
@@ -83,6 +83,23 @@
       "verdict": "PARTIALLY_SUPPORTED"
     }
   ],
+  "h4_agent_audit": {
+    "analysis_git_sha": "5d6114aff7f6320b9cf42aaeefa3cacf5fb6503d",
+    "analysis_summary_sha256": "d24ca06df4f597d1924a8cb1d8c2de2a5301e965fa0c7b261e1779bf26cce6bb",
+    "blinded_response_git_sha": "4600fd7",
+    "contaminated_items_excluded": [
+      "Feature Set 001"
+    ],
+    "human_evidence_claimed": false,
+    "independent_evaluators": 1,
+    "items": 59,
+    "agent_coherent_fraction": 0.3898305084745763,
+    "agent_non_topical_coherent_fraction": 0.3050847457627119,
+    "agent_unique_intruder_fraction": 0.3898305084745763,
+    "intruder_accuracy_unique_non_topical": 1.0,
+    "unique_non_topical_attempts": 18,
+    "verdict": "PARTIALLY_SUPPORTED"
+  },
   "h7_functional_correspondence": {
     "analysis_git_sha": "3f028ee5debe5fc323530087dfed2eb4f5023bec",
     "analysis_summary_sha256": "af8e4793e904519cfe78ccae970c634a250d2a27798efc272a78cb2056de2094",
@@ -96,5 +113,5 @@
     "verdict": "INCONCLUSIVE"
   },
   "schema_version": 1,
-  "status": "COMPLETE_WITH_HUMAN_REVIEW_PENDING"
+  "status": "COMPLETE_WITH_EXPLORATORY_NONHUMAN_H4_AUDIT"
 }
