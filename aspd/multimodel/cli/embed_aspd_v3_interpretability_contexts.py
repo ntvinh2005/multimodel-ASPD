@@ -55,6 +55,7 @@ def _write_json(path: Path, value: Any) -> None:
 
 def main() -> None:
     args = _args()
+    evaluation_git_sha = _git_sha()
     if args.output_dir.exists():
         raise FileExistsError(args.output_dir)
     protocol = yaml.safe_load(args.protocol.read_text(encoding="utf-8"))
@@ -123,7 +124,7 @@ def main() -> None:
         {
             "schema_version": 1,
             "status": "ASPD_V3_1_CONTEXT_EMBEDDINGS_COMPLETE",
-            "git_sha": _git_sha(),
+            "git_sha": evaluation_git_sha,
             "protocol_sha256": sha256_file(args.protocol),
             "input_sha256": input_sha256,
             "embedding_model_id": protocol["embedding_model_id"],
