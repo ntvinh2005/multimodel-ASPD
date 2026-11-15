@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+from collections import Counter
+
 import numpy as np
 import pytest
 
 from aspd.multimodel.cli.extract_aspd_v3_feature_coherence import _anchor_priorities
+from aspd.multimodel.cli.prepare_aspd_v3_feature_coherence_heldout import (
+    stratified_sample,
+)
 from aspd.multimodel.v3.feature_coherence import (
     FeatureCoherenceAnalysisContract,
     FeatureCoherenceContract,
@@ -87,3 +92,15 @@ def test_deduplicate_context_rows_preserves_input_priority() -> None:
         1,
         3,
     ]
+
+
+def test_stratified_sample_round_robins_groups() -> None:
+    rows = [
+        {"row_id": f"a{index}", "group": "a", "bin": "weak"}
+        for index in range(5)
+    ] + [
+        {"row_id": f"b{index}", "group": "b", "bin": "strong"}
+        for index in range(5)
+    ]
+    sampled = stratified_sample(rows, count=4, seed=7, strata=("group", "bin"))
+    assert Counter(row["group"] for row in sampled) == {"a": 2, "b": 2}
