@@ -51,12 +51,12 @@
       "verdict": "INCONCLUSIVE"
     },
     {
-      "contradicting_or_limiting_results": "No model-specific rank-one ablation with a preregistered signed behavioral outcome.",
-      "confounds": "Unsigned norms cannot establish causal direction.",
-      "experimental_evidence": "B3 observational preparation",
+      "contradicting_or_limiting_results": "Neither predeclared directional rule passed; all-three sign agreement was 0.3333 (95% CI 0.1667-0.5417), versus random-rank-one point mean 0.2361.",
+      "confounds": "Only 24 stratified components; the strongest within-site learned target was selected independently per model; signed correspondence is not algorithm identity.",
+      "experimental_evidence": "B3 signed three-model causal ablation",
       "hypothesis": "H7 Cross-model functional mismatch",
-      "supporting_results": "Unsigned contribution-rank correlations are 0.7858 Gemma-Smol, 0.9509 Gemma-Granite, and 0.7430 Smol-Granite.",
-      "verdict": "NOT_TESTED"
+      "supporting_results": "Active-effect rho was -0.0817 Gemma-Smol (CI -0.4393 to 0.3667), 0.0452 Gemma-Granite (CI -0.3848 to 0.4781), and 0.5322 Smol-Granite (CI 0.0901 to 0.8234); exact same-context CIs all crossed zero.",
+      "verdict": "INCONCLUSIVE"
     },
     {
       "contradicting_or_limiting_results": "Activation-energy versus internal-contribution rho=0.6492; no objective ablation or causal-specificity outcome.",
@@ -83,6 +83,18 @@
       "verdict": "PARTIALLY_SUPPORTED"
     }
   ],
+  "h7_functional_correspondence": {
+    "analysis_git_sha": "3f028ee5debe5fc323530087dfed2eb4f5023bec",
+    "analysis_summary_sha256": "af8e4793e904519cfe78ccae970c634a250d2a27798efc272a78cb2056de2094",
+    "causal_execution_git_sha": "f50b1d78883ad45059052bea98faeea61f0e7140",
+    "causal_job_id": "51380041",
+    "components": 24,
+    "contract_sha256": "9fe4d5aff914d38ada37ee28d9ed9ba9c4a60c1fcec65e8e6eee235db4bad7e1",
+    "figure_git_sha": "fb81273",
+    "plan_sha256": "e4ed7e1a06d5c8d373fd524881ecaea02ddd0df0c65932c87cb3f605c208d3f3",
+    "result_rows": 3456,
+    "verdict": "INCONCLUSIVE"
+  },
   "schema_version": 1,
   "status": "COMPLETE_WITH_HUMAN_REVIEW_PENDING"
 }

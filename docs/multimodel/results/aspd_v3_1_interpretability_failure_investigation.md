@@ -10,13 +10,13 @@ Checkpoint: step `61,036`, `500,006,912` accepted aligned-anchor exposures, chec
 
 The current evidence does **not** support reading the reported 37% Intruder accuracy as a calibrated estimate of semantic interpretability. The most strongly established failure is in the measurement instrument: the Llama judge has severe position dependence, and an independent Mistral-family judge also failed its preregistered reliability gates. A paper-faithful task construction produced 33.65% macro accuracy, but that number remains exploratory because the judge is invalid. The direction and magnitude of any bias relative to human judgement are unknown; the data establish distortion, not specifically downward bias.
 
-There is also exploratory evidence of representation heterogeneity. In 120 frequency-stratified features with 50--100 natural-firing contexts each, 78/120 (65%) passed the predeclared embedding-cluster stability rule. This is consistent with multi-pattern or polysemantic firing, but it is not yet a human-validated estimate of polysemanticity. Capacity shortage, cross-model functional mismatch, and a causal effect of detached internal supervision remain unproven.
+There is also exploratory evidence of representation heterogeneity. In 120 frequency-stratified features with 50--100 natural-firing contexts each, 78/120 (65%) passed the predeclared embedding-cluster stability rule. This is consistent with multi-pattern or polysemantic firing, but it is not yet a human-validated estimate of polysemanticity. A new bounded three-model causal test found positive signed-effect correspondence only for SmolLM2--Granite, not for either pair involving Gemma; the predeclared H7 verdict is `INCONCLUSIVE`. Capacity shortage and a causal effect of detached internal supervision remain unproven.
 
 The best present classification is therefore:
 
 1. **Primary verified problem:** invalid semantic measurement.
 2. **Secondary plausible representation problem:** stable within-feature context heterogeneity.
-3. **Unresolved training/objective problems:** capacity and detached-gradient causal effects require controlled experiments.
+3. **Unresolved mechanism/training problems:** cross-model correspondence is mixed, while capacity and detached-gradient causal effects require controlled experiments.
 
 The single most informative next experiment is the already-frozen 60-component, two-rater blinded human taxonomy and unique-intruder audit. It directly adjudicates H1--H4 without retraining or paid API calls.
 
@@ -33,6 +33,10 @@ The single most informative next experiment is the already-frozen 60-component, 
 - Cluster analysis: `/blue/thai/vinhnguyen1/aspd_v3/evaluation/interpretability_failure_v1/stage2/clusters_git_f7688c7`.
 - Held-out reconstruction: `/blue/thai/vinhnguyen1/aspd_v3/evaluation/interpretability_failure_v1/heldout/job_51367637/heldout`.
 - Held-out synthesis: `/blue/thai/vinhnguyen1/aspd_v3/evaluation/interpretability_failure_v1/stage2/heldout_analysis_git_979c8ca`.
+- H7 frozen plan: `/blue/thai/vinhnguyen1/aspd_v3/evaluation/interpretability_failure_v1/h7_functional_correspondence/plan_git_f50b1d7.json`.
+- H7 model runs: `h7_functional_correspondence/job_51380041_{0,1,2}`.
+- H7 corrected analysis: `h7_functional_correspondence/analysis_git_3f028ee`.
+- H7 causal figure: `h7_functional_correspondence/figures_git_fb81273`.
 - No Qwen model was loaded or trained. Source-model weights and the ASPD checkpoint were read-only.
 
 The exact step-13k checkpoint weights no longer exist. Only immutable extraction/judge artifacts and deleted-checkpoint manifests survive. The step-13k and final feature samples overlap in only three component IDs, so a fixed-component checkpoint comparison cannot be reconstructed.
@@ -129,9 +133,23 @@ No `C=16,384` or `C=32,768` model was trained. Therefore observational residuals
 
 ### B3/H7 -- Cross-model functional correspondence
 
-The shared PRE/MID gate supplies one firing label, not three model-specific natural labels. Existing causal scripts target a historical two-model pilot and use generic unsigned/logit-scale outcomes; they do not implement the required final three-model, same-input, signed behavioral estimand with norm-matched rank-one controls. Reusing them would silently change the scientific question.
+The shared PRE/MID gate supplies one firing label, not three model-specific natural labels. The new causal test therefore held canonical prefix/continuation text fixed across all three tokenizers and measured model-specific rank-one ablation effects. Its primary signed outcome was edited-minus-clean continuation log-probability per canonical UTF-8 continuation byte; a negative value means the learned-operator ablation reduced continuation likelihood.
 
-**Verdict: NOT_TESTED.** Observational per-model contribution norms are reported, but cannot establish shared causal direction or universal mechanisms.
+The frozen sample contained 24 components (12 PRE, 12 MID; four from each low/middle/high contribution stratum), with four natural active and four matched inactive contexts per component. For each component/model, the test selected the learned operator with maximum Frobenius norm within the relevant site. It included three norm-matched random rank-one seeds and one random learned-component control. All three model runs passed source-weight restoration and zero-strength invariants and produced 3,456 rows in total.
+
+Component-clustered signed active-effect correspondence was:
+
+| Pair | Spearman rho | Component-bootstrap 95% CI | Sign concordance |
+|---|---:|---:|---:|
+| Gemma--SmolLM2 | -0.082 | -0.439--0.367 | 41.7% |
+| Gemma--Granite | 0.045 | -0.385--0.478 | 54.2% |
+| SmolLM2--Granite | 0.532 | 0.090--0.823 | 70.8% |
+
+All-three sign agreement was 33.3% (95% CI 16.7--54.2%), versus a 23.6% point mean across the three random rank-one controls. On the exact same active canonical contexts, pairwise effect correlations ranged from -0.115 to -0.041 and every component-clustered CI crossed zero. Only 4/24 components (16.7%) selected the same strongest matrix-name class in all three models.
+
+The predeclared support rule required either two pairwise rank-correlation upper bounds below zero or learned all-three sign agreement whose upper bound fell below the random-control point. The predeclared not-supported rule required all three pairwise lower bounds above zero plus greater learned sign agreement. Neither rule passed.
+
+**Verdict: INCONCLUSIVE.** SmolLM2 and Granite show bounded evidence of corresponding signed component effects, while Gemma does not align reliably with either. This rejects neither functional mismatch nor correspondence and is not evidence for a universal algorithm. The small stratified sample and model-specific strongest-target selection limit generalization.
 
 ### B4/H8 -- Activation-to-parameter alignment and detached gradients
 
@@ -174,7 +192,7 @@ The machine-readable evidence matrix is stored beside this report. The final ver
 | H4 Nonsemantic structure | A5 package | Taxonomy instrument frozen | Two human raters pending | NOT_TESTED |
 | H5 Polysemanticity | B1 | 78/120 stable multi-cluster features | Embedding clusters are not human meanings | PARTIALLY_SUPPORTED |
 | H6 Capacity | B2 | MID matrix FVU is higher than PRE; contribution is concentrated | Residual-frequency effect is tiny; no controlled `C` ablation | INCONCLUSIVE |
-| H7 Cross-model mismatch | B3 | Model-specific diagnostics prepared | No signed causal metric/run | NOT_TESTED |
+| H7 Cross-model mismatch | B3 causal | SmolLM2--Granite signed effects align (`rho=0.532`, CI 0.090--0.823); Gemma pairs are near zero; same-context effects do not align | Neither predeclared support nor not-supported rule passes; 24-component sample and model-specific target selection | INCONCLUSIVE |
 | H8 Objective mismatch | B4 | Detached-gradient route verified | Activation energy and internal contribution align (`rho=0.649`); no causal/objective ablation | INCONCLUSIVE |
 | H9 Training plateau | B5 | Reconstruction training losses improved | Protocol mismatch; step-13k weights absent | INCONCLUSIVE |
 | H10 Extreme winners | B6 | Top 20 carry 12.00% PRE and 5.60% MID contribution | No evidence winners are more multi-cluster; causal specificity unmeasured | PARTIALLY_SUPPORTED |
@@ -186,7 +204,7 @@ The machine-readable evidence matrix is stored beside this report. The final ver
 3. **Do stronger activations improve coherence?** Exploratory association yes; confirmatory answer unknown.
 4. **Are weak features polysemantic?** Stable context heterogeneity is common (65% of the stratified 120-feature sample), but semantic polysemanticity is only partially supported.
 5. **Is `C=8192` binding?** Plausible but not established. Observational residuals do not discriminate capacity from objective/optimization effects.
-6. **Are functions shared across models?** Not established; shared IDs and unsigned contribution norms are insufficient.
+6. **Are functions shared across models?** Not established. SmolLM2--Granite effects align in the 24-component test, but both Gemma pairs and all same-context correlations are unreliable; H7 is `INCONCLUSIVE`, not evidence of universal mechanisms.
 7. **Does detached internal supervision cause mismatch?** Gradient routing is verified, but the causal contribution is untested; held-out activation/internal contribution alignment is moderately strong rather than absent.
 8. **Did interpretability plateau after 13k?** Not established and no longer exactly testable from surviving weights.
 9. **What are extreme winners?** They are disproportionately important to reconstruction, especially PRE, but there is no valid evidence yet that they are undesirable or less specific.
@@ -203,8 +221,9 @@ The machine-readable evidence matrix is stored beside this report. The final ver
 | 51368322 | Corrected context embedding | Completed; valid pinned tokenizer/model revision |
 | 51366786 | First held-out attempt | Failed closed on dirty-worktree provenance guard; no scientific output |
 | 51367637 | Clean held-out reconstruction | Completed; 100,352 anchors, source weights unchanged, 168 targets |
+| 51380041 | Three-model H7 signed causal ablation (three array tasks) | Completed; 3,456 rows, all restoration/invariance gates passed |
 
-Executed jobs used approximately 3.28 B200 GPU-hours and 27.7 allocated CPU-hours including the preserved failed/invalid attempts; the valid scientific jobs account for approximately 3.25 GPU-hours. The complete evaluation namespace occupies 655 MB. API cost was $0. No paid hosted judge was called. No new training was run.
+Executed jobs used approximately 3.37 B200 GPU-hours and 28.4 allocated CPU-hours including the preserved failed/invalid attempts; the valid scientific jobs account for approximately 3.34 GPU-hours. The complete evaluation namespace occupies 661 MB. API cost was $0. No paid hosted judge was called. No new training was run.
 
 ## Figures and machine-readable evidence
 
@@ -214,12 +233,13 @@ Generated figures:
 - `stage3/figures_git_979c8ca/activation_threshold_coverage.png`: actual natural-firing coverage, not semantic coherence.
 - `stage3/figures_git_979c8ca/checkpoint_training_loss.png`: actual training-batch metric rows, not held-out checkpoint parity.
 - `stage3/figures_git_979c8ca/cross_model_observational_contribution_alignment.png`: unsigned contribution norms, not causal-effect alignment.
+- `h7_functional_correspondence/figures_git_fb81273/cross_model_signed_causal_effect_alignment.png`: actual signed three-model causal evaluation; correspondence is not proof of identical algorithms.
 - `stage2/heldout_analysis_git_979c8ca/feature_frequency_vs_failed_judge.png`: exploratory only because the judge failed.
 - `stage2/heldout_analysis_git_979c8ca/cluster_diagnostics.png`: exploratory Mistral-embedding clusters.
 - `stage2/heldout_analysis_git_979c8ca/contribution_concentration.png`: held-out observational contribution concentration.
 - `stage2/clusters_git_f7688c7/cluster_gallery.json`: actual natural-firing contexts and blinded exploratory cluster assignments.
 
-Accuracy-vs-threshold and coherence-vs-coverage figures were deliberately not produced: no threshold-rejudging with a valid semantic instrument exists. The figure manifest records these omissions instead of synthesizing missing values. Cross-model causal-effect alignment was likewise not produced.
+Accuracy-vs-threshold and coherence-vs-coverage figures were deliberately not produced: no threshold-rejudging with a valid semantic instrument exists. The figure manifest records these omissions instead of synthesizing missing values. Cross-model causal-effect alignment is now reported separately from the older unsigned observational figure.
 
 ## Provenance correction
 
@@ -227,11 +247,13 @@ Job 51367637 logged start commit `901edad36c885efdd595dee06159300877d0a9cf` befo
 
 The same pre-fix renderer wrote `original_space_uses_oracle_target_norm=false` in `heldout_reconstruction.json`. The configuration and authoritative experiment manifest both specify `per_anchor_l2` and `original_space_uses_oracle_target_norm=true`. FVU values are unchanged; this is a metadata-only correction. Both issues are preserved and documented in `provenance_corrections.json` rather than mutating the scientific output.
 
+The first H7 analysis namespace, `analysis_git_f50b1d7`, keyed the secondary same-context statistic only by `context_id`. Reused inactive donor IDs therefore collapsed 96 component-context observations to 30. This did not affect the predeclared component-level H7 verdict or any primary pairwise result. Commit `3f028ee` changed the key to `(site, feature, activity, context_id)` and bootstraps contexts by component; `analysis_git_3f028ee` is authoritative. The superseded output is preserved and was not overwritten; the machine-readable correction is `h7_provenance_correction.json`.
+
 ## Limitations and researcher decision
 
 - The current human-identifiable fraction, structure-aware coherence, and donor-validity rate are missing because human raters have not completed the frozen package.
 - H6 and H8 cannot become causal conclusions without separately approved training ablations.
-- H7 requires a researcher-approved signed behavioral outcome before GPU execution; arbitrary cross-model logit magnitudes are not comparable.
+- H7 is bounded by 24 stratified components, a continuation-likelihood estimand, and independently selected strongest targets per model; it does not test identity of full algorithms.
 - H9 cannot be repaired exactly unless an independently archived step-13k checkpoint is found.
 
 The next researcher decision is whether to appoint two independent raters for `stage2/preparation_git_fccfdc9/human_review.html`. That is the cheapest experiment with the largest expected information gain and should precede any capacity or objective retraining.

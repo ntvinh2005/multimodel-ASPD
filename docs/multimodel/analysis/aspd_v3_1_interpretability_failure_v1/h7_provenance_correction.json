@@ -1,0 +1,28 @@
+{
+  "authoritative_analysis": {
+    "git_sha": "3f028ee5debe5fc323530087dfed2eb4f5023bec",
+    "namespace": "h7_functional_correspondence/analysis_git_3f028ee",
+    "summary_sha256": "af8e4793e904519cfe78ccae970c634a250d2a27798efc272a78cb2056de2094"
+  },
+  "correction": {
+    "affected_statistic": "same_canonical_context_alignment only",
+    "corrected_bootstrap_unit": "component",
+    "corrected_key": [
+      "site",
+      "feature",
+      "context_activity",
+      "context_id"
+    ],
+    "corrected_observations_per_activity": 96,
+    "primary_h7_verdict_affected": false,
+    "reason": "The first analysis used context_id alone, so reused inactive donor identifiers collapsed observations across components."
+  },
+  "schema_version": 1,
+  "status": "CORRECTED_WITHOUT_OVERWRITING_SUPERSEDED_OUTPUT",
+  "superseded_analysis": {
+    "git_sha": "f50b1d78883ad45059052bea98faeea61f0e7140",
+    "inactive_observations_reported": 30,
+    "namespace": "h7_functional_correspondence/analysis_git_f50b1d7",
+    "summary_sha256": "6c25143384cc58da8eaa2bddb60d7b04a20fbbfff55f68576ba9fc8434c3ba33"
+  }
+}
