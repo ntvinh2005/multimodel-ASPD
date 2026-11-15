@@ -9,6 +9,7 @@ from aspd.multimodel.cli.extract_aspd_v3_feature_coherence import _anchor_priori
 from aspd.multimodel.cli.prepare_aspd_v3_feature_coherence_heldout import (
     stratified_sample,
 )
+from aspd.multimodel.cli.propose_aspd_v3_feature_rules import _parse_json
 from aspd.multimodel.v3.feature_coherence import (
     FeatureCoherenceAnalysisContract,
     FeatureCoherenceContract,
@@ -104,3 +105,8 @@ def test_stratified_sample_round_robins_groups() -> None:
     ]
     sampled = stratified_sample(rows, count=4, seed=7, strata=("group", "bin"))
     assert Counter(row["group"] for row in sampled) == {"a": 2, "b": 2}
+
+
+def test_proposer_parser_preserves_invalid_backslash_as_literal() -> None:
+    observed = _parse_json(r'{"rule": "delimiters like \| and +"}')
+    assert observed == {"rule": r"delimiters like \| and +"}

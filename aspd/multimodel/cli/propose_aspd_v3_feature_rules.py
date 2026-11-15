@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import platform
+import re
 import socket
 import subprocess
 import time
@@ -65,10 +66,18 @@ def _parse_json(text: str) -> dict[str, Any] | None:
     start = cleaned.find("{")
     if start < 0:
         return None
+    candidate = cleaned[start:]
     try:
-        value, _end = json.JSONDecoder().raw_decode(cleaned[start:])
+        value, _end = json.JSONDecoder().raw_decode(candidate)
     except json.JSONDecodeError:
-        return None
+        # Some instruction models emit a backslash before punctuation such as
+        # ``\|``. JSON does not define that escape. Doubling only these invalid
+        # backslashes preserves the proposed text while making the JSON lexical.
+        candidate = re.sub(r'\\(?!["\\/bfnrtu])', r"\\\\", candidate)
+        try:
+            value, _end = json.JSONDecoder().raw_decode(candidate)
+        except json.JSONDecodeError:
+            return None
     return value if isinstance(value, dict) else None
 
 
