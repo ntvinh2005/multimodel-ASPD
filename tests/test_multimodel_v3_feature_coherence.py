@@ -10,6 +10,7 @@ from aspd.multimodel.cli.prepare_aspd_v3_feature_coherence_heldout import (
     stratified_sample,
 )
 from aspd.multimodel.cli.propose_aspd_v3_feature_rules import _parse_json
+from aspd.multimodel.cli.validate_aspd_v3_feature_rules import parse_rule_presence
 from aspd.multimodel.v3.feature_coherence import (
     FeatureCoherenceAnalysisContract,
     FeatureCoherenceContract,
@@ -110,3 +111,11 @@ def test_stratified_sample_round_robins_groups() -> None:
 def test_proposer_parser_preserves_invalid_backslash_as_literal() -> None:
     observed = _parse_json(r'{"rule": "delimiters like \| and +"}')
     assert observed == {"rule": r"delimiters like \| and +"}
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("YES", "YES"), ("Answer: no.", "NO"), ("UNCERTAIN", "UNCERTAIN"), ("maybe", None)],
+)
+def test_rule_presence_parser(raw: str, expected: str | None) -> None:
+    assert parse_rule_presence(raw) == expected
