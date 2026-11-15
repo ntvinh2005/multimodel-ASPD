@@ -64,6 +64,12 @@ def main() -> None:
         raise ValueError("forbidden embedding model")
     if protocol["embedding_pooling"] != "attention_mask_mean_last_hidden_state":
         raise ValueError("embedding pooling changed")
+    input_sha256 = sha256_file(args.input)
+    allowed_inputs = protocol.get("allowed_input_sha256")
+    if allowed_inputs is not None and input_sha256 not in set(allowed_inputs):
+        raise ValueError("embedding input is not frozen in the protocol")
+    if args.model.name != protocol["embedding_model_revision"]:
+        raise ValueError("embedding model snapshot revision changed")
     rows = []
     with args.input.open(encoding="utf-8") as handle:
         for line in handle:
@@ -119,7 +125,7 @@ def main() -> None:
             "status": "ASPD_V3_1_CONTEXT_EMBEDDINGS_COMPLETE",
             "git_sha": _git_sha(),
             "protocol_sha256": sha256_file(args.protocol),
-            "input_sha256": sha256_file(args.input),
+            "input_sha256": input_sha256,
             "embedding_model_id": protocol["embedding_model_id"],
             "embedding_model_revision": protocol["embedding_model_revision"],
             "embedding_model_path": str(args.model),
