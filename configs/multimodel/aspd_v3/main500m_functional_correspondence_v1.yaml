@@ -1,0 +1,31 @@
+schema_version: 1
+status: RESEARCHER_AUTHORIZED_FUNCTIONAL_CORRESPONDENCE
+experiment_family: aspd_v3_1_functional_correspondence_v1
+training_authorized_by_this_contract: false
+checkpoint_step: 61036
+checkpoint_manifest_sha256: 735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969
+model_order: [gemma, smol, granite]
+selected_split: test
+component_selection_frame: stage1_components_stratified_by_heldout_internal_contribution
+components_per_site: 12
+contribution_stratum_quota: {low: 4, medium: 4, high: 4}
+active_contexts_per_component: 4
+inactive_contexts_per_component: 4
+context_activity_definition: natural_batchtopk_support
+canonical_alignment: exact_three_tokenizer_prefix_boundary
+continuation_definition: suffix_after_natural_peak_within_frozen_context
+minimum_continuation_utf8_bytes: 32
+minimum_continuation_tokens_per_model: 4
+target_selection_policy: maximum_learned_operator_frobenius_within_site_per_model
+learned_strengths: [0.0, 1.0]
+random_rank_one_seeds: [101, 103, 107]
+random_component_seed: 109
+parameter_restore: bitwise_exact_logical_slice_copy
+primary_metric: edited_minus_clean_continuation_logprob_per_utf8_byte
+secondary_metrics:
+  - edited_minus_clean_continuation_logprob_total
+  - edited_minus_clean_continuation_logprob_per_model_token
+selection_seed: 20261121
+bootstrap_seed: 20261122
+bootstrap_replicates: 5000
+adjudication_rule: support_if_two_pairwise_signed_effect_upper_cis_below_zero_or_learned_all_three_sign_agreement_upper_ci_below_random_control_point;weaken_if_all_pairwise_lower_cis_above_zero_and_learned_sign_agreement_exceeds_random;otherwise_inconclusive
