@@ -1,5 +1,7 @@
 # ASPD v3.1 interpretability-failure investigation
 
+Vietnamese hypothesis synthesis: `aspd_v3_1_interpretability_hypothesis_report_vi.md`.
+
 Status: `COMPLETE_WITH_EXPLORATORY_NONHUMAN_H4_AUDIT`
 
 Date: 2026-11-14
