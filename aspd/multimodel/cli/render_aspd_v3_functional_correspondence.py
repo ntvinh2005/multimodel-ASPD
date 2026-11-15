@@ -56,7 +56,6 @@ def main() -> None:
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    from matplotlib.lines import Line2D
 
     comparisons = (
         ("gemma", "smol", "Gemma", "SmolLM2"),
@@ -90,17 +89,8 @@ def main() -> None:
             ),
         )
     figure.suptitle(
-        "H7 learned rank-one ablation: signed continuation log-probability effect per UTF-8 byte"
-    )
-    figure.legend(
-        handles=(
-            Line2D([0], [0], marker="o", color="w", markerfacecolor="tab:blue", label="PRE"),
-            Line2D(
-                [0], [0], marker="o", color="w", markerfacecolor="tab:orange", label="MID"
-            ),
-        ),
-        loc="lower center",
-        ncol=2,
+        "H7 learned rank-one ablation: signed continuation log-probability effect per UTF-8 byte\n"
+        "PRE = blue; MID = orange"
     )
     figure.savefig(args.output_dir / "cross_model_signed_causal_effect_alignment.png", dpi=180)
     plt.close(figure)
