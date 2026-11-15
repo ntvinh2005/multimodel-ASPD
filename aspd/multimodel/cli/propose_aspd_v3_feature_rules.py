@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import torch
-from transformers import AutoProcessor, Gemma3ForConditionalGeneration
+from transformers import AutoTokenizer, Gemma3ForConditionalGeneration
 
 from aspd.multimodel.v3.diagnostic import sha256_file
 from aspd.multimodel.v3.feature_coherence import FeatureCoherenceAnalysisContract
@@ -116,8 +116,7 @@ def main() -> None:
         tasks = tasks[: args.limit]
     args.output_dir.mkdir(parents=True)
     started = time.perf_counter()
-    processor = AutoProcessor.from_pretrained(str(args.model), local_files_only=True)
-    tokenizer = processor.tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(str(args.model), local_files_only=True)
     tokenizer.padding_side = "left"
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
