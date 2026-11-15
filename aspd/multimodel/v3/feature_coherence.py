@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -178,3 +179,49 @@ def feature_event_values(
     if len(indices) != len(values) or int(indptr[-1]) != len(indices):
         raise ValueError("CSR values disagree")
     return values[indices == feature]
+
+
+def normalize_context_text(value: str) -> str:
+    """Normalize only for duplicate detection, never for evaluator display."""
+
+    value = value.replace("⟪ANCHOR⟫", "").replace("⟪/ANCHOR⟫", "")
+    return re.sub(r"\s+", " ", value).strip().casefold()
+
+
+def character_shingles(value: str, width: int = 5) -> frozenset[str]:
+    normalized = normalize_context_text(value)
+    if not normalized:
+        return frozenset()
+    if len(normalized) <= width:
+        return frozenset({normalized})
+    return frozenset(normalized[index : index + width] for index in range(len(normalized) - width + 1))
+
+
+def near_duplicate(left: str, right: str, *, threshold: float) -> bool:
+    left_set = character_shingles(left)
+    right_set = character_shingles(right)
+    if not left_set or not right_set:
+        return left_set == right_set
+    return len(left_set & right_set) / len(left_set | right_set) >= threshold
+
+
+def deduplicate_context_rows(
+    rows: list[dict[str, object]],
+    *,
+    threshold: float,
+    text_field: str = "text",
+) -> list[dict[str, object]]:
+    """Greedily preserve input order while removing exact and near duplicates."""
+
+    retained: list[dict[str, object]] = []
+    normalized: set[str] = set()
+    for row in rows:
+        text = str(row[text_field])
+        key = normalize_context_text(text)
+        if not key or key in normalized:
+            continue
+        if any(near_duplicate(text, str(other[text_field]), threshold=threshold) for other in retained):
+            continue
+        retained.append(row)
+        normalized.add(key)
+    return retained

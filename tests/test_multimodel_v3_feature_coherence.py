@@ -8,7 +8,10 @@ from aspd.multimodel.v3.feature_coherence import (
     FeatureCoherenceContract,
     component_key,
     csr_unique_document_counts,
+    deduplicate_context_rows,
     feature_event_values,
+    near_duplicate,
+    normalize_context_text,
 )
 
 
@@ -54,3 +57,22 @@ def test_negative_sampling_priorities_are_deterministic_and_type_specific() -> N
     assert first.tolist() == _anchor_priorities(anchors, 27, "ordinary").tolist()
     assert first.tolist() != _anchor_priorities(anchors, 27, "hard").tolist()
     assert first.tolist() != _anchor_priorities(anchors, 28, "ordinary").tolist()
+
+
+def test_near_duplicate_normalizes_anchor_markers_and_whitespace() -> None:
+    left = "Alpha  ⟪ANCHOR⟫beta⟪/ANCHOR⟫ gamma delta epsilon"
+    right = " alpha beta\n gamma delta epsilon "
+    assert normalize_context_text(left) == normalize_context_text(right)
+    assert near_duplicate(left, right, threshold=0.90)
+
+
+def test_deduplicate_context_rows_preserves_input_priority() -> None:
+    rows = [
+        {"text": "The quick brown fox jumps over the lazy dog", "id": 1},
+        {"text": "The quick brown fox jumps over  the lazy dog", "id": 2},
+        {"text": "A different context about matrix multiplication", "id": 3},
+    ]
+    assert [row["id"] for row in deduplicate_context_rows(rows, threshold=0.90)] == [
+        1,
+        3,
+    ]
