@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Literal
 
@@ -214,14 +215,28 @@ def deduplicate_context_rows(
     """Greedily preserve input order while removing exact and near duplicates."""
 
     retained: list[dict[str, object]] = []
+    retained_shingles: list[frozenset[str]] = []
+    inverted: dict[str, list[int]] = defaultdict(list)
     normalized: set[str] = set()
     for row in rows:
         text = str(row[text_field])
         key = normalize_context_text(text)
         if not key or key in normalized:
             continue
-        if any(near_duplicate(text, str(other[text_field]), threshold=threshold) for other in retained):
+        shingles = character_shingles(text)
+        overlap_counts: Counter[int] = Counter(
+            index for shingle in shingles for index in inverted[shingle]
+        )
+        if any(
+            overlap / (len(shingles) + len(retained_shingles[index]) - overlap)
+            >= threshold
+            for index, overlap in overlap_counts.items()
+        ):
             continue
         retained.append(row)
+        retained_shingles.append(shingles)
+        index = len(retained) - 1
+        for shingle in shingles:
+            inverted[shingle].append(index)
         normalized.add(key)
     return retained
