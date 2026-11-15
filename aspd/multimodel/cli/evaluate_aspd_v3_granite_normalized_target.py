@@ -424,7 +424,9 @@ def _render(reports: list[dict[str, Any]], output: Path, manifest: dict[str, Any
             "status": "HELDOUT_RECONSTRUCTION_COMPLETE",
             "arm": arm,
             "activation_target_normalization": manifest["activation_target_normalization"],
-            "original_space_uses_oracle_target_norm": arm == "normalized_target",
+            "original_space_uses_oracle_target_norm": bool(
+                manifest["original_space_uses_oracle_target_norm"]
+            ),
             "activation_summary": activation_summary,
             "activation_target_norms": target_norms,
             "activation_decoder_norms": decoder_norms,

@@ -15,6 +15,7 @@ from aspd.multimodel.cli.prepare_aspd_v3_interpretability_stage2 import (
     choose_clustering_keys,
     threshold_coverage,
 )
+from aspd.multimodel.cli.render_aspd_v3_interpretability_summary import _metric_row
 
 
 def test_threshold_coverage_separates_calibration_documents() -> None:
@@ -129,3 +130,13 @@ def test_heldout_feature_aggregation_preserves_shared_gate_and_sums_models() -> 
     assert result[0]["activation_code_energy_proxy"] == 2.5
     assert result[0]["internal_contribution_l2_total"] == 120.0
     assert result[0]["conditional_matrix_residual_l2_mean"] == 3.0
+
+
+def test_summary_uses_final_metric_occurrence_after_recovery(tmp_path) -> None:
+    metrics = tmp_path / "metrics.jsonl"
+    metrics.write_text(
+        '{"step": 13, "loss": {"activation": 2.0}}\n'
+        '{"step": 13, "loss": {"activation": 1.0}}\n',
+        encoding="utf-8",
+    )
+    assert _metric_row(metrics, 13)["loss"]["activation"] == 1.0
