@@ -15,7 +15,7 @@ ulimit -c 0
 WORKTREE=/blue/thai/share/multimodel-ASPD/repo/.codex_runtime/feature-coherence-v1
 PYTHON=/blue/thai/share/multimodel-ASPD/repo/.venv/bin/python
 CONTRACT=configs/multimodel/aspd_v3/main500m_feature_coherence_analysis_v1.yaml
-TASKS=/blue/thai/vinhnguyen1/aspd_v3/evaluation/feature_coherence_v1/rule_tasks_contract_82beef66cf42
+TASKS=/blue/thai/vinhnguyen1/aspd_v3/evaluation/feature_coherence_v1/rule_tasks_contract_82beef66cf42_v2
 MODEL=/blue/thai/vinhnguyen1/multimodel-ASPD/cache/huggingface/hub/models--google--gemma-3-4b-it/snapshots/093f9f388b31de276ce2de164bdc2081324b9767
 OUTPUT_ROOT=/blue/thai/vinhnguyen1/aspd_v3/evaluation/feature_coherence_v1/rule_proposals
 PROPOSER_LIMIT="${PROPOSER_LIMIT:-}"

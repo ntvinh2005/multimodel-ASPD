@@ -88,18 +88,18 @@ def main() -> None:
                 + _contexts(group, contract.maximum_representatives_per_group)
             )
         global_schema = {
-            "single_rule": "one concise, observable rule intended to explain all groups",
+            "single_rule": "one observable rule for all groups, at most 25 words",
             "single_rule_category": "semantic|syntactic|formatting|structural|positional|token_boundary|mixed|no_clear_rule",
-            "single_rule_specificity": "what observable evidence makes the rule present",
+            "single_rule_specificity": "observable evidence, at most 25 words",
             "multiple_rule_explanation": [
                 {
                     "group": 0,
-                    "rule": "a concise group-specific rule",
+                    "rule": "group-specific rule, at most 20 words",
                     "unrelated_to_other_groups": False,
                 }
             ],
             "groups_share_broader_rule": "yes|no|uncertain",
-            "uncertainty": "brief limitation",
+            "uncertainty": "limitation, at most 20 words",
         }
         tasks.append(
             {
@@ -119,6 +119,8 @@ def main() -> None:
                             + "\n\n".join(group_blocks)
                             + "\n\nReturn exactly this JSON schema:\n"
                             + json.dumps(global_schema, ensure_ascii=False)
+                            + "\nInclude exactly one multiple_rule_explanation item per "
+                            "displayed group. Keep the entire JSON response under 220 tokens."
                         ),
                     },
                 ],
@@ -126,10 +128,10 @@ def main() -> None:
         )
         for group in component["groups"]:
             group_schema = {
-                "rule": "one concise observable rule learned only from this group",
+                "rule": "observable rule learned only from this group, at most 25 words",
                 "category": "semantic|syntactic|formatting|structural|positional|token_boundary|mixed|no_clear_rule",
-                "specificity": "what observable evidence makes the rule present",
-                "uncertainty": "brief limitation",
+                "specificity": "observable evidence, at most 25 words",
+                "uncertainty": "limitation, at most 20 words",
             }
             tasks.append(
                 {
@@ -150,6 +152,7 @@ def main() -> None:
                                 )
                                 + "\n\nReturn exactly this JSON schema:\n"
                                 + json.dumps(group_schema, ensure_ascii=False)
+                                + "\nKeep the entire JSON response under 140 tokens."
                             ),
                         },
                     ],
