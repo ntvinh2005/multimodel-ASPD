@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from aspd.multimodel.cli.extract_aspd_v3_feature_coherence import _anchor_priorities
 from aspd.multimodel.v3.feature_coherence import (
     FeatureCoherenceContract,
     component_key,
@@ -45,3 +46,11 @@ def test_frozen_contract_loads() -> None:
     assert contract.training_authorized_by_this_contract is False
     assert contract.forbidden_model_substrings == ("qwen",)
     assert contract.activation_quantiles == pytest.approx((1 / 3, 2 / 3))
+
+
+def test_negative_sampling_priorities_are_deterministic_and_type_specific() -> None:
+    anchors = ["anchor-a", "anchor-b", "anchor-c"]
+    first = _anchor_priorities(anchors, 27, "ordinary")
+    assert first.tolist() == _anchor_priorities(anchors, 27, "ordinary").tolist()
+    assert first.tolist() != _anchor_priorities(anchors, 27, "hard").tolist()
+    assert first.tolist() != _anchor_priorities(anchors, 28, "ordinary").tolist()

@@ -23,6 +23,7 @@ class FeatureCoherenceContract(BaseModel):
     checkpoint_step: Literal[61_036]
     checkpoint_manifest_sha256: str
     source_config_sha256: str
+    accepted_training_exposures: Literal[500_006_912]
     model_order: tuple[Literal["gemma"], Literal["smol"], Literal["granite"]]
     forbidden_model_substrings: tuple[str, ...]
     dictionary_size: Literal[8_192]

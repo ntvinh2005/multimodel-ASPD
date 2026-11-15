@@ -5,6 +5,7 @@ training_authorized_by_this_contract: false
 checkpoint_step: 61036
 checkpoint_manifest_sha256: 735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969
 source_config_sha256: f7a6d87436304956ca0baca955ec2e0e929a7207142f57fc35362369822f63be
+accepted_training_exposures: 500006912
 model_order: [gemma, smol, granite]
 forbidden_model_substrings: [qwen]
 dictionary_size: 8192
