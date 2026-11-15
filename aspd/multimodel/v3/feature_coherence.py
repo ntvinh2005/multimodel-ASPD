@@ -137,6 +137,97 @@ class FeatureCoherenceContract(BaseModel):
         return hashlib.sha256(encoded.encode()).hexdigest()
 
 
+class FeatureCoherenceAnalysisContract(BaseModel):
+    """Frozen confirmatory analysis and independent-evaluator contract."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1]
+    experiment_family: Literal["aspd_v3_1_feature_coherence_analysis_v1"]
+    status: Literal["RESEARCHER_AUTHORIZED_EVALUATION"]
+    human_evidence_claimed: Literal[False]
+    forbidden_model_substrings: tuple[str, ...]
+    source_feature_protocol_fingerprint: str
+    source_context_manifest_sha256: str
+    source_discovery_extraction_manifest_sha256: str
+    source_confirmatory_extraction_manifest_sha256: str
+    historical_embeddings_sha256: str
+    historical_assignments_sha256: str
+    historical_metrics_sha256: str
+    embedding_model_id: Literal["mistralai/Mistral-Nemo-Instruct-2407"]
+    embedding_model_revision: str
+    proposer_model_id: Literal["google/gemma-3-4b-it"]
+    proposer_revision: str
+    validator_model_id: Literal["microsoft/Phi-4-mini-instruct"]
+    validator_revision: str
+    maximum_representatives_per_group: Literal[5]
+    heldout_positive_examples_per_component: Literal[48]
+    heldout_ordinary_negative_examples_per_component: Literal[48]
+    heldout_hard_negative_examples_per_component: Literal[48]
+    minimum_heldout_firing_contexts: Literal[24]
+    minimum_heldout_nonfiring_contexts: Literal[24]
+    minimum_heldout_contexts_per_group: Literal[8]
+    heldout_sampling_seed: int
+    negative_matching: Literal[
+        "source_group_then_embedding_cosine_and_character_length"
+    ]
+    activation_bins: tuple[Literal["weak"], Literal["medium"], Literal["strong"]]
+    proposer_max_new_tokens: Literal[320]
+    validator_max_new_tokens: Literal[16]
+    validator_calibration_balanced_accuracy: Literal[0.85]
+    validator_calibration_maximum_abstention: Literal[0.10]
+    coherent_balanced_accuracy: Literal[0.70]
+    coherent_lower_ci: Literal[0.60]
+    coherent_specificity: Literal[0.65]
+    coherent_minimum_group_recall: Literal[0.60]
+    coherent_group_coverage: Literal[0.80]
+    coherent_multi_rule_upper_advantage: Literal[0.10]
+    polysemantic_multi_balanced_accuracy: Literal[0.70]
+    polysemantic_multi_lower_ci: Literal[0.60]
+    polysemantic_point_advantage: Literal[0.10]
+    polysemantic_lower_advantage: Literal[0.05]
+    polysemantic_group_rule_balanced_accuracy: Literal[0.65]
+    polysemantic_within_across_advantage: Literal[0.15]
+    polysemantic_general_failure_balanced_accuracy: Literal[0.65]
+    polysemantic_general_failure_group_recall: Literal[0.50]
+    no_rule_balanced_accuracy: Literal[0.60]
+    no_rule_upper_ci: Literal[0.70]
+    bootstrap_replicates: Literal[5_000]
+    bootstrap_seed: int
+    exploratory_fdr: Literal[0.05]
+
+    @model_validator(mode="after")
+    def validate_analysis_contract(self) -> FeatureCoherenceAnalysisContract:
+        if self.forbidden_model_substrings != ("qwen",):
+            raise ValueError("Qwen exclusion changed")
+        hashes = (
+            self.source_feature_protocol_fingerprint,
+            self.source_context_manifest_sha256,
+            self.source_discovery_extraction_manifest_sha256,
+            self.source_confirmatory_extraction_manifest_sha256,
+            self.historical_embeddings_sha256,
+            self.historical_assignments_sha256,
+            self.historical_metrics_sha256,
+        )
+        if any(len(value) != 64 for value in hashes):
+            raise ValueError("analysis source SHA-256 is malformed")
+        if self.proposer_model_id == self.validator_model_id:
+            raise ValueError("proposer and validator must be independent model families")
+        return self
+
+    @classmethod
+    def load(cls, path: str | Path) -> FeatureCoherenceAnalysisContract:
+        import yaml
+
+        return cls.model_validate(yaml.safe_load(Path(path).read_text(encoding="utf-8")))
+
+    def fingerprint(self) -> str:
+        encoded = json.dumps(
+            self.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+        )
+        return hashlib.sha256(encoded.encode()).hexdigest()
+
+
 def csr_unique_document_counts(
     indptr: np.ndarray,
     indices: np.ndarray,

@@ -5,6 +5,7 @@ import pytest
 
 from aspd.multimodel.cli.extract_aspd_v3_feature_coherence import _anchor_priorities
 from aspd.multimodel.v3.feature_coherence import (
+    FeatureCoherenceAnalysisContract,
     FeatureCoherenceContract,
     component_key,
     csr_unique_document_counts,
@@ -49,6 +50,16 @@ def test_frozen_contract_loads() -> None:
     assert contract.training_authorized_by_this_contract is False
     assert contract.forbidden_model_substrings == ("qwen",)
     assert contract.activation_quantiles == pytest.approx((1 / 3, 2 / 3))
+
+
+def test_frozen_analysis_contract_uses_independent_models() -> None:
+    contract = FeatureCoherenceAnalysisContract.load(
+        "configs/multimodel/aspd_v3/main500m_feature_coherence_analysis_v1.yaml"
+    )
+    assert contract.human_evidence_claimed is False
+    assert contract.proposer_model_id.startswith("google/")
+    assert contract.validator_model_id.startswith("microsoft/")
+    assert contract.proposer_model_id != contract.validator_model_id
 
 
 def test_negative_sampling_priorities_are_deterministic_and_type_specific() -> None:
