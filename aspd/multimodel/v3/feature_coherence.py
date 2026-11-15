@@ -172,7 +172,7 @@ class FeatureCoherenceAnalysisContract(BaseModel):
         "source_group_then_embedding_cosine_and_character_length"
     ]
     activation_bins: tuple[Literal["weak"], Literal["medium"], Literal["strong"]]
-    proposer_max_new_tokens: Literal[320]
+    proposer_max_new_tokens: Literal[512]
     validator_max_new_tokens: Literal[16]
     validator_calibration_balanced_accuracy: Literal[0.85]
     validator_calibration_maximum_abstention: Literal[0.10]

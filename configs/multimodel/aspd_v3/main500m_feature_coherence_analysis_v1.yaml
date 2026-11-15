@@ -26,7 +26,7 @@ minimum_heldout_contexts_per_group: 8
 heldout_sampling_seed: 20261123
 negative_matching: source_group_then_embedding_cosine_and_character_length
 activation_bins: [weak, medium, strong]
-proposer_max_new_tokens: 320
+proposer_max_new_tokens: 512
 validator_max_new_tokens: 16
 validator_calibration_balanced_accuracy: 0.85
 validator_calibration_maximum_abstention: 0.10
