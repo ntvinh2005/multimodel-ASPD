@@ -166,10 +166,7 @@ def main() -> None:
     if _signature(model) != before:
         raise RuntimeError("proposer model parameters changed")
     invalid = sum(not row["valid"] for row in responses)
-    if invalid / len(responses) > 0.01:
-        raise RuntimeError(
-            f"invalid proposer response fraction exceeds 1%: {invalid}/{len(responses)}"
-        )
+    invalid_gate_failed = invalid / len(responses) > 0.01
     responses_path = args.output_dir / "candidate_rule_responses.jsonl"
     with responses_path.open("x", encoding="utf-8") as handle:
         for row in responses:
@@ -178,7 +175,11 @@ def main() -> None:
             )
     manifest = {
         "schema_version": 1,
-        "status": "ASPD_V3_1_FEATURE_RULE_PROPOSALS_COMPLETE",
+        "status": (
+            "FAILED_INVALID_RESPONSES"
+            if invalid_gate_failed
+            else "ASPD_V3_1_FEATURE_RULE_PROPOSALS_COMPLETE"
+        ),
         "git_sha": evaluation_git_sha,
         "human_evidence_claimed": False,
         "heldout_contexts_exposed_to_proposer": 0,
@@ -205,10 +206,14 @@ def main() -> None:
         },
     }
     _write_json(args.output_dir / "experiment_manifest.json", manifest)
+    print(json.dumps(manifest, indent=2, sort_keys=True))
+    if invalid_gate_failed:
+        raise RuntimeError(
+            f"invalid proposer response fraction exceeds 1%: {invalid}/{len(responses)}"
+        )
     (args.output_dir / "COMPLETE").write_text(
         "ASPD_V3_1_FEATURE_RULE_PROPOSALS_COMPLETE\n", encoding="utf-8"
     )
-    print(json.dumps(manifest, indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":
