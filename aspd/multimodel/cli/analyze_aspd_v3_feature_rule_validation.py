@@ -379,7 +379,9 @@ def main() -> None:
                     "cohort": selected[key]["cohort"],
                     "activation_bin": activation_bin,
                     "positive_n": len(bin_values),
-                    "general_rule_presence_rate": float(np.mean(bin_values)),
+                    "general_rule_presence_rate": (
+                        float(np.mean(bin_values)) if bin_values else None
+                    ),
                 }
             )
         component_rows.append(
@@ -471,11 +473,13 @@ def main() -> None:
         }
     strength_summary = {}
     for activation_bin in contract.activation_bins:
-        subset = [row for row in bin_rows if row["activation_bin"] == activation_bin]
+        all_bin_rows = [row for row in bin_rows if row["activation_bin"] == activation_bin]
+        subset = [row for row in all_bin_rows if row["positive_n"] > 0]
         strength_summary[activation_bin] = _aggregate_component_mean(
             subset, "general_rule_presence_rate", replicates=contract.bootstrap_replicates, seed=contract.bootstrap_seed + 200 + len(strength_summary)
         )
         strength_summary[activation_bin]["positive_contexts"] = sum(int(row["positive_n"]) for row in subset)
+        strength_summary[activation_bin]["components_without_examples"] = len(all_bin_rows) - len(subset)
 
     case_priority = {
         "single_coherent_rule": 0,
