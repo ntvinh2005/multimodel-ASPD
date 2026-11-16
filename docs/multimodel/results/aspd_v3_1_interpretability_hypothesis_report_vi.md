@@ -1,8 +1,8 @@
 # Báo cáo tổng hợp các giả thuyết về interpretability của ASPD v3.1
 
-Trạng thái: `COMPLETE_WITH_EXPLORATORY_NONHUMAN_H4_AUDIT`
+Trạng thái: `COMPLETE_WITH_NONHUMAN_HELDOUT_H5_UPDATE`
 
-Ngày tổng hợp: 2026-11-14
+Ngày tổng hợp: 2026-11-15
 
 Checkpoint được đánh giá: step `61,036`, `500,006,912` accepted aligned-anchor exposures, checkpoint-manifest SHA-256 `735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969`.
 
@@ -13,7 +13,7 @@ Checkpoint được đánh giá: step `61,036`, `500,006,912` accepted aligned-a
 Các kết quả hiện tại phân tách thành ba tầng:
 
 1. **Measurement problem — bằng chứng mạnh nhất.** Judge và protocol cũ làm méo phép đo. Chưa xác định được độ lệch so với đánh giá hợp lệ là hướng xuống hay hướng lên.
-2. **Representation problem — có bằng chứng một phần.** Nhiều feature có nhiều context cluster ổn định; audit H4 không-human tìm thấy cả semantic lẫn syntactic/formatting/token-boundary features. Tuy nhiên 61% mẫu H4 vẫn không có pattern rõ ràng trong audit này.
+2. **Representation problem — pattern chủ yếu yếu hoặc chưa nhận diện được.** Nhiều feature có nhiều context cluster ổn định; audit H4 không-human tìm thấy cả semantic lẫn syntactic/formatting/token-boundary features. Tuy nhiên held-out H5 follow-up không validate được common rule hoặc multiple unrelated rules nào trong 160 components. Stable clusters cũng xuất hiện gần ngang matched controls.
 3. **Training-objective/capacity problem — chưa được chứng minh.** `C=8192`, detached internal gradients và training plateau đều là giả thuyết hợp lý nhưng chưa có controlled ablation đủ để kết luận nhân quả.
 
 Kết luận tổng quát là interpretability hạn chế hiện nay nhiều khả năng là tổ hợp của **phép đo không hợp lệ** và **representation không đồng nhất/polysemantic**. Chưa có bằng chứng đủ mạnh để quy nguyên nhân chính cho capacity hoặc detached internal supervision.
@@ -40,9 +40,9 @@ Stage 1 đã sửa phần lớn task-construction mismatch và tạo 4,000 paper
 |---|---|---|
 | H1 — Judge/protocol mismatch | `PARTIALLY_SUPPORTED` | Evaluation design và judge behavior làm méo score, nhưng chưa biết hướng và độ lớn bias so với ground truth hợp lệ. |
 | H2 — Donor ambiguity | `INCONCLUSIVE` | Nhiều task có thể không có semantic intruder duy nhất, nhưng chưa có donor-factorial hợp lệ. |
-| H3 — Weak natural firings | `INCONCLUSIVE` | Activation mạnh liên hệ với score cao hơn, nhưng score đó đến từ judge không hợp lệ. |
+| H3 — Weak natural firings | `PARTIALLY_SUPPORTED` | Held-out frozen-rule presence cao hơn 9.00 pp ở strong so với weak events, nhưng absolute presence vẫn chỉ khoảng 31%. |
 | H4 — Non-topical structure | `PARTIALLY_SUPPORTED` | Audit không-human tìm thấy 18/59 feature coherent về syntax/formatting/token boundary. |
-| H5 — Polysemanticity | `PARTIALLY_SUPPORTED` | 78/120 feature có nhiều context cluster ổn định; chưa phải human-validated semantic polysemanticity. |
+| H5 — Polysemanticity | `NOT_SUPPORTED` | 0/160 qua validated multiple-rule gate; 153/160 không có reliable linguistic rule. Clustering controls cho stable-group rate gần như natural firings. |
 | H6 — Capacity bottleneck | `INCONCLUSIVE` | MID reconstruction khó hơn và contribution tập trung, nhưng chưa chứng minh `C=8192` là binding constraint. |
 | H7 — Cross-model mismatch | `INCONCLUSIVE` | SmolLM2–Granite align, hai cặp có Gemma không align đáng tin cậy; chưa support mismatch hoặc universality. |
 | H8 — Objective mismatch | `INCONCLUSIVE` | Detached gradient được xác minh, nhưng activation và internal contribution vẫn tương quan dương. |
@@ -114,13 +114,15 @@ Threshold được đóng băng trên calibration split, sau đó đo coverage t
 
 Median activation strength tương quan với failed-judge accuracy ở `rho=0.421`; mean activation có `rho=0.314`.
 
+Held-out H5 follow-up sau đó đóng băng common rules trên discovery contexts và test trên documents mới. Common-rule presence ở strong natural firings là 31.10%, so với 22.18% ở weak firings. Trên 131 components có cả hai bins, paired difference là `+9.00` điểm phần trăm, component-bootstrap 95% CI `+4.99` đến `+13.07`.
+
 #### Diễn giải
 
-Tín hiệu phù hợp với giả thuyết rằng strong firings coherent hơn, nhưng chưa thể gọi là semantic result vì outcome đến từ judge invalid. Trade-off coverage là rất lớn: q90 chỉ giữ khoảng 14% firing events.
+Strong firings chứa frozen proposed pattern thường xuyên hơn weak firings trên held-out documents. Tuy nhiên absolute presence vẫn chỉ khoảng 31%, và đây là nonhuman rule-presence validation chứ không phải human semantic ground truth. Trade-off coverage của thresholding cũng lớn: q90 chỉ giữ khoảng 14% firing events.
 
 #### Verdict
 
-`INCONCLUSIVE`.
+`PARTIALLY_SUPPORTED`.
 
 ### H4 — Feature biểu diễn syntax, formatting hoặc structure thay vì topic
 
@@ -174,13 +176,21 @@ Tuy nhiên 17/18 non-topical coherent items thuộc old-judge high-score band; i
 
 Các gallery thực tế cho thấy những feature tách code/HTML/API khỏi prose, hoặc biomedical text khỏi numerical/log-like records.
 
+Follow-up confirmatory dùng thêm 40 random components, discovery/held-out document split, 625 frozen common/group rules và independent Phi validation trên 67,225 tasks. Kết quả:
+
+- 0/160 components đạt single-common-rule gate.
+- 0/160 đạt multiple-unrelated-rule gate.
+- 153/160 không có reliable linguistic rule; 7/160 inconclusive.
+- Trong đúng 78 historical multi-cluster components: 76 no-rule, 2 inconclusive.
+- Stable multi-cluster rate là 96/160 trên natural firings, gần như controls: 93/160 random source/length-matched, 93/160 topic-matched và 94/160 frequency-matched other-component contexts.
+
 #### Diễn giải
 
-Stable context heterogeneity là phổ biến và phù hợp với multi-pattern firing. Tuy nhiên embedding cluster không đồng nghĩa với semantic mechanism riêng biệt; chưa có held-out within-cluster versus cross-cluster Intruder bằng một instrument hợp lệ.
+Stable context heterogeneity là phổ biến nhưng không đặc hiệu cho firing contexts. Nó không chuyển thành predictive evidence cho multiple unrelated linguistic rules. Kết quả phù hợp hơn với pattern yếu/chưa nhận diện được, đồng thời vẫn để ngỏ khả năng single proposer đã bỏ sót rule thật.
 
 #### Verdict
 
-`PARTIALLY_SUPPORTED`.
+`NOT_SUPPORTED` trong tested sample. Điều này không phải bằng chứng rằng polysemanticity không tồn tại ở toàn dictionary.
 
 ### H6 — `C=8192` là capacity bottleneck
 
@@ -303,23 +313,22 @@ Extreme winners quan trọng một cách không cân xứng đối với reconst
 
 1. **Điểm Intruder 37% có bị distortion không?** Có. Nó không phải semantic estimate đã hiệu chuẩn. Chưa biết distortion làm score thấp đi hay cao lên bao nhiêu.
 2. **Bao nhiêu feature có nghĩa dễ nhận biết?** Human-identifiable fraction vẫn chưa biết. Trong nonhuman audit, 23/59 (39.0%) coherent và 18/59 (30.5%) coherent theo non-topical pattern.
-3. **Strong activations có coherent hơn không?** Có association exploratory, nhưng chưa có confirmatory measurement bằng instrument hợp lệ.
-4. **Feature kém interpretable có thật sự polysemantic không?** Stable multi-cluster context behavior xuất hiện ở 65% stratified sample, nhưng semantic polysemanticity chỉ được support một phần.
+3. **Strong activations có coherent hơn không?** Có partial held-out evidence: frozen-rule presence tăng 9.00 pp từ weak sang strong events, nhưng absolute coverage vẫn thấp.
+4. **Feature kém interpretable có thật sự polysemantic không?** Chưa có support. 0/160 qua multiple-rule gate; stable clustering xuất hiện gần ngang matched controls.
 5. **`C=8192` có binding không?** Có thể, nhưng chưa được chứng minh.
 6. **Shared gate có tìm cùng function ở ba model không?** Chưa xác định. SmolLM2–Granite align; Gemma pairs không align đáng tin cậy.
 7. **Detached internal supervision có gây mismatch không?** Gradient route được xác minh; causal contribution vào interpretability chưa được test.
 8. **Interpretability có plateau từ 13k đến final không?** Không thể kết luận từ artifact còn lại.
 9. **Extreme winners là computation quan trọng hay concentration không mong muốn?** Chúng quan trọng cho reconstruction; chưa có bằng chứng chúng kém specific hơn.
-10. **Hypothesis mạnh nhất là gì?** Measurement failure. Representation heterogeneity/polysemanticity là vấn đề thứ hai có bằng chứng một phần. Capacity và objective mismatch vẫn chưa xác định.
+10. **Hypothesis mạnh nhất là gì?** Measurement failure vẫn mạnh nhất. Follow-up mới cho thấy pattern chủ yếu yếu hoặc chưa nhận diện được, không support polysemanticity là lời giải thích chính. Capacity và objective mismatch vẫn chưa xác định.
 
 ## 6. Ưu tiên thí nghiệm tiếp theo
 
 Nếu tiếp tục không dùng human rater, thứ tự có expected information gain cao nhất là:
 
-1. Chạy một independent local model family với cả semantic-only prompt và structure-aware prompt trên cùng frozen H4 tasks và cùng positions. Không chọn model dựa trên ASPD score cao nhất.
-2. Sau khi instrument qua reliability gate, chạy activation-strength threshold sweep để kiểm tra H3 bằng outcome hợp lệ.
-3. Chạy donor factorial trên cùng target contexts để tách paper-like donor, hard negative và verified semantic outlier cho H2.
-4. Chỉ cân nhắc `C=16384` hoặc objective ablation sau khi measurement validity được giải quyết. Các retraining ablation này chưa được ủy quyền bởi báo cáo hiện tại.
+1. Chạy contrastive dual-proposer rule induction: proposer xem discovery firings cùng matched discovery non-firings, freeze rule rồi test trên confirmatory package hiện có. Không chọn proposer dựa trên held-out score cao nhất.
+2. Chạy donor factorial trên cùng target contexts để tách paper-like donor, hard negative và verified semantic outlier cho H2.
+3. Chỉ cân nhắc `C=16384` hoặc objective ablation sau khi measurement validity và rule-discovery bottleneck được giải quyết. Các retraining ablation này chưa được ủy quyền bởi báo cáo hiện tại.
 
 ## 7. Provenance và artifact chính
 
@@ -328,6 +337,8 @@ Nếu tiếp tục không dùng human rater, thứ tự có expected information
 - H4 nonhuman summary: `/blue/thai/vinhnguyen1/aspd_v3/evaluation/interpretability_failure_v1/stage2/h4_agent_audit_git_5d6114a/summary.json`.
 - H7 causal summary: `/blue/thai/vinhnguyen1/aspd_v3/evaluation/interpretability_failure_v1/h7_functional_correspondence/analysis_git_3f028ee/functional_correspondence_summary.json`.
 - H7 Slurm job: `51380041`; cả ba tasks `COMPLETED`, exit `0:0`.
+- H5 held-out follow-up: `docs/multimodel/results/aspd_v3_1_feature_coherence_polysemanticity_report_vi.md`.
+- H5 machine-readable analysis: `/blue/thai/vinhnguyen1/aspd_v3/evaluation/feature_coherence_v1/rule_analysis_git_b9e1a4f`.
 - Không có Qwen model nào được load hoặc train trong các experiment mới.
 - Không có training mới, không sửa pretrained source weights và không sửa final ASPD checkpoint.
 
@@ -335,4 +346,4 @@ Nếu tiếp tục không dùng human rater, thứ tự có expected information
 
 Không nên phản ứng với score 37% bằng cách tăng dictionary capacity hoặc thay objective ngay lập tức. Dữ liệu hiện tại cho thấy phép đo semantic là điểm thất bại đã được xác minh rõ nhất. Đồng thời, representation không hoàn toàn vô nghĩa: có feature semantic, syntactic, formatting và token-boundary rõ; có nhiều stable context clusters; và reconstruction contribution được phân bố có cấu trúc. Vấn đề là những tín hiệu này chưa tạo thành một dictionary có semantic coherence cao và ổn định trên toàn bộ feature population.
 
-Kết luận khoa học thận trọng nhất là: **ASPD v3.1 đã học representation hữu ích cho reconstruction, nhưng semantic/mechanistic interpretability đo được hiện bị giới hạn đồng thời bởi evaluation invalidity và representation heterogeneity. Chưa có bằng chứng nhân quả đủ để quy lỗi chính cho `C=8192`, detached internal supervision hoặc overtraining sau step 13k.**
+Kết luận khoa học thận trọng nhất là: **ASPD v3.1 đã học representation hữu ích cho reconstruction, nhưng semantic/mechanistic interpretability đo được hiện bị giới hạn bởi evaluation invalidity và chủ yếu weak/unidentified linguistic patterns. Stable context clusters không đủ để kết luận polysemanticity. Chưa có bằng chứng nhân quả đủ để quy lỗi chính cho `C=8192`, detached internal supervision hoặc overtraining sau step 13k.**
