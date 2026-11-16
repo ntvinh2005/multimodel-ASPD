@@ -5,6 +5,10 @@ from collections import Counter
 import numpy as np
 import pytest
 
+from aspd.multimodel.cli.analyze_aspd_v3_feature_rule_validation import (
+    _binary_stats,
+    _paired_bootstrap,
+)
 from aspd.multimodel.cli.extract_aspd_v3_feature_coherence import _anchor_priorities
 from aspd.multimodel.cli.prepare_aspd_v3_feature_coherence_heldout import (
     stratified_sample,
@@ -119,3 +123,41 @@ def test_proposer_parser_preserves_invalid_backslash_as_literal() -> None:
 )
 def test_rule_presence_parser(raw: str, expected: str | None) -> None:
     assert parse_rule_presence(raw) == expected
+
+
+def test_binary_stats_uses_balanced_accuracy() -> None:
+    rows = [
+        {"actual_natural_firing": True, "prediction": True},
+        {"actual_natural_firing": True, "prediction": False},
+        {"actual_natural_firing": False, "prediction": False},
+        {"actual_natural_firing": False, "prediction": False},
+    ]
+    observed = _binary_stats(rows, "prediction")
+    assert observed["sensitivity"] == 0.5
+    assert observed["specificity"] == 1.0
+    assert observed["balanced_accuracy"] == 0.75
+
+
+def test_paired_bootstrap_preserves_general_multi_comparison() -> None:
+    rows = []
+    for index in range(8):
+        rows.extend(
+            [
+                {
+                    "pair_id": f"pair-{index}",
+                    "actual_natural_firing": True,
+                    "general_yes": False,
+                    "multi_yes": True,
+                },
+                {
+                    "pair_id": f"pair-{index}",
+                    "actual_natural_firing": False,
+                    "general_yes": False,
+                    "multi_yes": False,
+                },
+            ]
+        )
+    general, multi, advantage = _paired_bootstrap(rows, replicates=20, seed=9)
+    assert general.tolist() == pytest.approx([0.5] * 20)
+    assert multi.tolist() == pytest.approx([1.0] * 20)
+    assert advantage.tolist() == pytest.approx([0.5] * 20)
