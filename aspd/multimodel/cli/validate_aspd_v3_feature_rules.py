@@ -98,7 +98,7 @@ def main() -> None:
     args.output_dir.mkdir(parents=True)
     started = time.perf_counter()
     tokenizer = AutoTokenizer.from_pretrained(
-        str(args.model), local_files_only=True, trust_remote_code=True
+        str(args.model), local_files_only=True, trust_remote_code=False
     )
     tokenizer.padding_side = "left"
     if tokenizer.pad_token_id is None:
@@ -106,7 +106,7 @@ def main() -> None:
     model = AutoModelForCausalLM.from_pretrained(
         str(args.model),
         local_files_only=True,
-        trust_remote_code=True,
+        trust_remote_code=False,
         dtype=torch.bfloat16,
     ).to("cuda")
     model.eval().requires_grad_(False)
