@@ -481,26 +481,81 @@ def main() -> None:
         strength_summary[activation_bin]["positive_contexts"] = sum(int(row["positive_n"]) for row in subset)
         strength_summary[activation_bin]["components_without_examples"] = len(all_bin_rows) - len(subset)
 
-    case_priority = {
-        "single_coherent_rule": 0,
-        "multiple_unrelated_rules": 1,
-        "no_reliable_linguistic_rule": 2,
-        "inconclusive": 3,
-    }
+    case_candidates: list[tuple[str, dict[str, Any]]] = []
+    for classification in ("single_coherent_rule", "multiple_unrelated_rules"):
+        qualified = [row for row in component_rows if row["classification"] == classification]
+        qualified.sort(key=lambda row: (-float(row["general_balanced_accuracy"]), row["component_key"]))
+        case_candidates.extend((f"validated_{classification}", row) for row in qualified[:3])
+    case_candidates.extend(
+        ("best_observed_single_rule_candidate", row)
+        for row in sorted(component_rows, key=lambda row: (-float(row["general_balanced_accuracy"]), row["component_key"]))[:4]
+    )
+    case_candidates.extend(
+        ("best_observed_multi_rule_advantage", row)
+        for row in sorted(component_rows, key=lambda row: (-float(row["multi_minus_general"]), row["component_key"]))[:4]
+    )
+    case_candidates.extend(
+        ("weakest_observed_general_rule", row)
+        for row in sorted(component_rows, key=lambda row: (float(row["general_balanced_accuracy"]), row["component_key"]))[:3]
+    )
+    case_candidates.extend(
+        ("inconclusive_boundary_case", row)
+        for row in sorted(
+            [row for row in component_rows if row["classification"] == "inconclusive"],
+            key=lambda row: (-float(row["multi_balanced_accuracy"]), row["component_key"]),
+        )[:4]
+    )
     cases = []
-    per_class_limit = {"single_coherent_rule": 3, "multiple_unrelated_rules": 3, "no_reliable_linguistic_rule": 2, "inconclusive": 2}
-    for classification, limit in per_class_limit.items():
-        subset = [row for row in component_rows if row["classification"] == classification]
-        subset.sort(key=lambda row: (-abs(float(row["multi_minus_general"])), -float(row["general_balanced_accuracy"]), row["component_key"]))
-        for row in subset[:limit]:
-            key = str(row["component_key"])
-            positive_tasks = [task for task in joined if task["component_key"] == key and task["rule_type"] == "general" and task["condition"] == "ordinary" and task["actual_natural_firing"]]
-            representative = []
-            for task in positive_tasks[:2]:
-                context = str(task["messages"][1]["content"]).split("\n\nContext:\n", 1)[1].rsplit("\n\nLabel:", 1)[0]
-                representative.append({"example_id": task["example_id"], "prediction": task["prediction"], "activation_bin": task["activation_bin"], "target_discovery_cluster": task["target_discovery_cluster"], "context": context})
-            cases.append({"component_key": key, "classification": classification, "general_rule": row["general_rule"], "general_balanced_accuracy": row["general_balanced_accuracy"], "multi_balanced_accuracy": row["multi_balanced_accuracy"], "multi_minus_general": row["multi_minus_general"], "representative_heldout_firings": representative})
-    cases.sort(key=lambda row: (case_priority[row["classification"]], row["component_key"]))
+    used: set[str] = set()
+    for selection_reason, row in case_candidates:
+        key = str(row["component_key"])
+        if key in used:
+            continue
+        used.add(key)
+        positive_tasks = [
+            task
+            for task in joined
+            if task["component_key"] == key
+            and task["rule_type"] == "general"
+            and task["condition"] == "ordinary"
+            and task["actual_natural_firing"]
+        ]
+        representative = []
+        represented_clusters: set[int] = set()
+        for task in positive_tasks:
+            cluster = int(task["target_discovery_cluster"])
+            if cluster in represented_clusters:
+                continue
+            represented_clusters.add(cluster)
+            context = str(task["messages"][1]["content"]).split(
+                "\n\nContext:\n", 1
+            )[1].rsplit("\n\nLabel:", 1)[0]
+            representative.append(
+                {
+                    "example_id": task["example_id"],
+                    "prediction": task["prediction"],
+                    "activation_bin": task["activation_bin"],
+                    "target_discovery_cluster": cluster,
+                    "context": context,
+                }
+            )
+            if len(representative) == 3:
+                break
+        cases.append(
+            {
+                "component_key": key,
+                "selection_reason": selection_reason,
+                "classification": row["classification"],
+                "general_rule": row["general_rule"],
+                "group_rules": row["group_rules"],
+                "general_balanced_accuracy": row["general_balanced_accuracy"],
+                "multi_balanced_accuracy": row["multi_balanced_accuracy"],
+                "multi_minus_general": row["multi_minus_general"],
+                "representative_heldout_firings": representative,
+            }
+        )
+        if len(cases) == 10:
+            break
 
     summary = {
         "schema_version": 1,
