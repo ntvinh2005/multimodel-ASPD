@@ -210,6 +210,8 @@ def _analyze_controls(
                 minimum_cluster_fraction=0.10,
                 minimum_stability=0.60,
             )
+            if not math.isfinite(float(metrics["activation_kruskal_pvalue_exploratory"])):
+                metrics["activation_kruskal_pvalue_exploratory"] = None
             output.append({"component_key": key, "condition": condition, "contexts": len(row_ids), **metrics})
     return output
 
