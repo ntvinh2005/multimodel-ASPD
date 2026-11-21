@@ -1,0 +1,512 @@
+\documentclass[11pt,a4paper]{article}
+
+% Minimal, editable LaTeX setup
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=28mm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{microtype}
+
+% Short math shortcut (optional)
+\newcommand{\RR}{\mathbb{R}}
+
+\title{Multi-model ASPD: Formulation}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Setup}
+
+\paragraph{Models and data.}
+Consider $N$ pretrained language models $\mathcal M^{(1)},\ldots,
+\mathcal M^{(N)}$, possibly with different architectures.
+Let $\mathbf s\sim\mathcal D$ be an input text sequence drawn from a
+shared distribution. Model $n$ tokenizes it as
+$$
+\tau^{(n)}(\mathbf s)
+=(z_1^{(n)},\ldots,z_{T_n}^{(n)}),
+\qquad T_n=T_n(\mathbf s).
+$$
+The models share the input text, but need not share tokenization or
+aligned token positions.
+
+\paragraph{Layers and indices.}
+For each model $n$, select a set of layers $\mathcal L^{(n)}$ and define
+$$
+\sigma=(\ell,p)\in\Sigma^{(n)},
+\qquad
+j=(\ell,m)\in J^{(n)},
+\qquad \ell\in\mathcal L^{(n)}.
+$$
+Here $\Sigma^{(n)}$ indexes selected activation sites (site type $p$),
+while $J^{(n)}$ indexes selected weight matrices (matrix type $m$).
+In the current setup, $p\in\{\mathrm{PRE},\mathrm{MID}\}$ and
+$m\in\{Q,K,V,O,\mathrm{gate},\mathrm{up},\mathrm{down}\}$.
+
+\paragraph{Activations.}
+For each $\sigma\in\Sigma^{(n)}$, let
+$$
+H_\sigma^{(n)}(\mathbf s)
+=(h_{\sigma,1}^{(n)},\ldots,h_{\sigma,T_n}^{(n)}),
+\qquad h_{\sigma,t}^{(n)}\in\RR^{d_\sigma^{(n)}}.
+$$
+This represents the full activation sequence at site $\sigma$;
+$t$ refers to a token position within model $n$.
+
+\paragraph{Weight matrices.}
+For each $j\in J^{(n)}$, define
+$$
+W_j^{(n)}\in
+\RR^{d_{\mathrm{out},j}^{(n)}\times d_{\mathrm{in},j}^{(n)}},
+\qquad
+X_j^{(n)}(\mathbf s)=(x_{j,1}^{(n)},\ldots,x_{j,T_n}^{(n)}).
+$$
+Its linear projection at token position $t$ is
+$$
+x_{j,t}^{(n)}\in\RR^{d_{\mathrm{in},j}^{(n)}},
+\qquad
+y_{j,t}^{(n)}=W_j^{(n)}x_{j,t}^{(n)}
+\in\RR^{d_{\mathrm{out},j}^{(n)}}.
+$$
+We omit optional biases. The matrix input $x_{j,t}^{(n)}$ need not
+coincide with a selected activation $h_{\sigma,t}^{(n)}$.
+
+% --- Continue your formulation here ---
+% \section{Mechanism Definition}
+\section{Architecture (current)}
+This section serves as notation setup for different components and formula will be used later in formulation of post-hoc analysis. Therefore I won't mention again the overall architecture of multimodel ASPD.
+
+Note: Current architecture has been changed, mainly with the encoder. This document also need update if future architecture changes.
+\paragraph{Feature Gate}
+Remind: After model processes input sequence s, we have
+$$
+H_{\sigma}^{(n)}(s) = (h_{\sigma, 1}^{(n)}, ..., h_{\sigma, T_n}^{(n)})
+$$
+In the current training setup, we choose 8 layers per model. Group of chosen layer is $L^{(n)} = \{l_1, l_2, ..., l_8\}$
+
+At an anchor position t of model n, we concatenate activation vectors
+$$
+r_{p,t}^{(n)} = [h_{l_1, p, t}^{(n)}, h_{l_2, p, t}^{(n)}, ..., h_{l_8, p, t}^{(n)}] \in \RR^{8d_n}
+$$
+Note: index $t^{n}$ can be different between each model, depend on the way the sequence s is tokenized. This has been mentioned in setup section.
+
+Learned projection: This step is preprocessed step before feeding to the first transformer. There are three main purpose of this:
+\begin{itemize}
+\item Decrease dimensionality. If model n has 8 layers, each activation vector has $d_n = 2560$ dimensions. After concatenate, $r_{p,t}^{(n)} \in \RR^{8d_n} = \RR^{20480}$ $\Rightarrow$
+Large cost if we put it directly in transformer
+\item Projection also allow combine information from different layers. P and v learn from input from multiple layers at once.
+\item To create same input dimension between model. After projection, they will all have united, reduced dimension.
+\item Limitation: Projection might lose information when reduce dimension.
+\end{itemize}
+$$
+v_{p, t}^{(n)} = P^{(n)}_p*r^{(n)}_{p,t} + b^{(n)}_p
+$$
+After reshape, we got $E^{(n)}_{p,t}  =Reshape_{8512}(v_{p,t}^{(n)})$.
+
+This is 8 learned latent tokens, not 8 token positions of input text.
+
+First step: After go through model-specific Transformer:
+$$
+Z_{p,t}^{(n)} = F_p^{(n)}(E^{(n)}_{p,t})
+$$
+$F_p^{(n)}$ is Transformer with 2 blocks, output dimension is 8 x 512
+
+Second step: After go through shared encoder.
+
+Note: From this step I will write $\alpha$ as shared anchor. This is a transition from t. After projection they already have same dimension.
+$$
+Z_{p,\alpha}^{shared} = \operatorname{Transformer}(\operatorname{Concat}(Z_{p,\alpha}^1, SEP, Z_{p,\alpha}^2, SEP, ..., SEP, Z_{p,\alpha}^n))
+$$ where SEP is separator embedding.
+
+% Shared representation -> pooled representation
+$$
+\bar z_{p,\alpha}
+=
+\frac{1}{L}
+\sum_{k=1}^{L}
+Z_{p,\alpha,k}^{\mathrm{shared}}
+$$
+
+Why mean pooling?:
+\begin{itemize}
+\item After pooling we have $Z^{shared} \in \RR^{26\times512}$. We want to make a gate vector $\RR^C$ with C = 8192. Natural thought is get average over 26 latent tokens to form a 512 dimension vector.
+\item Why not simply flatten the whole shared representation? There will be more weight for each projection head $\Rightarrow$ More expensive
+\end{itemize}
+
+% Feature logits
+$$
+a_{p,\alpha}
+=
+W_p^{\mathrm{gate}}\bar z_{p,\alpha}
++b_p^{\mathrm{gate}}
+$$
+This step simply upscale the vector to the dimension of C - number of components.
+% Normalize and apply ReLU
+$$
+\tilde a_{p,\alpha,i}
+=
+\operatorname{ReLU}\left(
+\frac{a_{p,\alpha,i}-\mu_{p,\alpha}}
+{\sqrt{\sigma_{p,\alpha}^2+\epsilon}}
+\right)
+$$
+(Refer to my latest meeting report on the solution to resolve feature dictionary collapse problems.)
+
+% Continuous sparse gate over a batch of anchors
+$$
+g_p^s
+=
+\operatorname{BatchTopK}_K
+\left(
+\{\tilde a_{p,\alpha}\}_{\alpha\in\mathcal B}
+\right)
+$$
+
+% Binary gate
+$$
+g_{p,\alpha,i}
+=
+1[g_{p,\alpha,i}^s>0]
+$$
+
+\paragraph{Definition of a component:} With model n, weight matrix $j \in J^{(n)}$, and component i, we define
+$$
+P_{j,i}^{(n)} = u^{(n)}_{j,i} (v_{j,i}^{(n)})^T
+$$ where u is write vector and have dimension = layer output dimension and v is read vector and have dimension = layer input dimension.
+
+Coefficient of contribution of write vector u:
+$$
+e_{j,\alpha,i}^{(n)} = g_{p(j), \alpha, i}((v_{j,i}^{(n)})^T * x_{j,\alpha}^{(n)})
+$$
+$$
+\Delta y_{j,\alpha,i}^{(n)}
+=
+e_{j,\alpha,i}^{(n)}u_{j,i}^{(n)}
+$$ Delta là corresponding contribution output.
+
+This two metrics will have different use later in post-hoc analysis section, so keep in mind their difference: e is coefficient of contribution of write vector u, show how component react to input, and delta is real contribution output.
+
+\section{Post-hoc analysis}
+
+\paragraph {Edge score}
+To begin, we care about the change of coefficient in one component downstream when we get rid of a component upstream.
+Consider two components in model n, at anchor $\alpha$:
+\begin{itemize}
+\item $b = (j_2, i_2)$: Upstream component.
+\item $a = (j_1, i_1)$: Downstream component.
+\end{itemize}
+
+For neat writing, let define:
+$$
+e_a = e^{(n)}_{j_1, \alpha, i_1}
+\qquad
+e_b = e^{(n)}_{j_2, \alpha, i_2}
+$$
+
+Consider $e_a$ as a function of $e_b$ (since $e_b$ is upstream component):
+$$
+e_a = f(e_b)
+$$
+Taylor approximation when $e_b$  change small $\Delta e_b$
+$$
+f(e_b + \Delta e_b) \approx f(e_b) + f'(e_b)\Delta e_b
+$$
+
+We want to ablate component b, which is bring it coefficient e to 0. We set $\Delta e_b = -e_b$
+$$
+\Rightarrow f(0) \approx f(e_b) - f'(e_b)e_b
+$$
+$$
+\Leftrightarrow f'(e_b)e_b \approx f(e_b) - f(0)
+$$
+$$
+\Leftrightarrow E_{b \rightarrow a} = \frac{\partial e_a} {\partial e_b} e_b \approx e_a(s) - e_a(s | e_b = 0)
+$$
+
+\begin{itemize}
+\item If $E_{b \rightarrow a} > 0$: Ablate b will decrease $e_a$
+\item  If $E_{b \rightarrow a} < 0$: Ablate b will increase $e_a$
+\item  $E_{b \rightarrow a} \approx 0$: The change is insignificant.
+\end{itemize}
+
+\paragraph{Component Importance Score}
+From the previous definition of component contribution defined in definition of a component section, I define normalized component contribution score
+
+For each shared gate $(p,i)$ in model $n$,
+let $J_p^{(n)}$ denote the set of weight matrices
+controlled by gate stage $p$.
+
+We define the normalized contribution score of component $i$
+at weight matrix $j$ as
+
+$$
+\beta_{j,i}^{(n)}
+=
+\frac{
+\sqrt{
+\mathbb{E}_{\alpha}
+\left[
+\|\Delta y_{j,\alpha,i}^{(n)}\|_2^2
+\mid g_{p,\alpha,i}=1
+\right]
+}
+}{
+\sigma_j^{(n)}
+}
+$$
+
+where
+
+$$
+\sigma_j^{(n)}
+=
+\sqrt{
+\mathbb{E}_{\alpha}
+\left[
+\left\|
+y_{j,\alpha}^{(n)}
+-
+\mathbb{E}_{\alpha}[y_{j,\alpha}^{(n)}]
+\right\|_2^2
+\right]
+}
+$$
+
+As an auxiliary metric, we define the within-matrix
+relative contribution score:
+
+$$
+q_{j,i}^{(n)}
+=
+\sqrt{
+\mathbb{E}_{\alpha}
+\left[
+\|\Delta y_{j,\alpha,i}^{(n)}\|_2^2
+\right]
+}
+$$
+
+$$
+\rho_{j,i}^{(n)}
+=
+\frac{q_{j,i}^{(n)}}
+{\sum_{k=1}^{C}q_{j,k}^{(n)}}
+$$
+
+Here, $\beta_{j,i}^{(n)}$ measures contribution relative
+to the matrix output scale, while $\rho_{j,i}^{(n)}$
+measures the component's relative dominance within
+the same weight matrix. Both ratios require nonzero
+denominators.
+
+Note: Here currently there is an ambiguity on what is used on the screening step. Need decision on this in the future.
+
+\paragraph{Parent set definition}
+
+Consider two models $n$ and $m$.
+Components $P_{j^{(n)},i}^{(n)}$ and
+$P_{j^{(m)},i}^{(m)}$ are considered corresponding
+if they are controlled by the same shared gate
+$g_{p,\alpha,i}$, regardless of their layer
+or weight matrix locations.
+
+\textbf{Representative Component Selection.}
+
+For each shared gate $(p,i)$ in model $n$,
+we select representative components based on
+their normalized contribution scores
+$\beta_{j,i}^{(n)}$.
+
+$$
+\mathcal{R}_{p,i}^{(n)}
+=
+\left\{
+(j,i):
+j\in\operatorname{TopK}_{K_{\mathrm{rep}}}
+\left(\beta_{\cdot,i}^{(n)}\right),
+\quad
+\beta_{j,i}^{(n)}>\tau_{\mathrm{rep}}
+\right\}
+$$
+
+where TopK selects weight matrix indices
+$j\in J_p^{(n)}$ with the largest scores.
+$K_{\mathrm{rep}}$ is the maximum number of
+representative components, and
+$\tau_{\mathrm{rep}}\geq0$ is an optional threshold.
+The within-matrix score $\rho_{j,i}^{(n)}$
+can be used as an auxiliary screening metric.
+
+\textbf{Parent Set Construction.}
+
+Let
+
+$$
+a^{(n)}=(j_a^{(n)},i)\in\mathcal{R}_{p,i}^{(n)},
+\qquad
+a^{(m)}=(j_a^{(m)},i)\in\mathcal{R}_{p,i}^{(m)}
+$$
+
+be two selected corresponding downstream
+components.
+
+For each model $n$, let $\mathcal{U}^{(n)}(a)$
+denote the set of candidate upstream components of $a$.
+
+We define the parent set of component $a$ as:
+
+$$
+\operatorname{Pa}_{K_{\mathrm{par}},\tau}^{(n)}(a;\alpha)
+=
+\left\{
+b\in\operatorname{TopK}_{K_{\mathrm{par}}}
+\left(|E_{\cdot\rightarrow a}^{(n)}(\alpha)|\right)
+:
+|E_{b\rightarrow a}^{(n)}(\alpha)|>\tau
+\right\}
+$$
+
+where TopK selects the $K_{\mathrm{par}}$
+candidate upstream components in
+$\mathcal{U}^{(n)}(a)$ with the largest
+absolute edge scores, and $\tau\geq0$
+is an optional threshold.
+
+For two corresponding downstream components,
+we obtain:
+
+$$
+\begin{aligned}
+\mathcal{P}_{a,\alpha}^{(n)}
+&=
+\operatorname{Pa}_{K_{\mathrm{par}},\tau}^{(n)}
+(a^{(n)};\alpha)
+\\[8pt]
+\mathcal{P}_{a,\alpha}^{(m)}
+&=
+\operatorname{Pa}_{K_{\mathrm{par}},\tau}^{(m)}
+(a^{(m)};\alpha)
+\end{aligned}
+$$
+
+\paragraph{Parent Set Comparison}
+
+Goal: We want to compare distributions of edge scores of parent-gate sets between two models n and m.
+
+Note: For a model, a shared gate might have multiple representative components. Therefore, we need a method to aggregate there distribution/effect score.
+
+Since corresponding components may belong to different
+weight matrices, we compare their parents using
+shared-gate identities rather than matrix indices.
+
+For an upstream component $b=(j_b,i_b)$, define
+
+$$
+\gamma(b)=(p(j_b),i_b)
+$$
+$p(j_b)$ because gate have type PRE/MID. Hàm gamma above là mapping from component identity to shared-gate identity.
+
+For each downstream gate $(p,i)$, aggregate the parent
+sets of its representative components:
+
+$$
+\mathcal{G}_{p,i}^{(n)}(\alpha)
+=
+\bigcup_{a\in\mathcal{R}_{p,i}^{(n)}}
+\left\{
+\gamma(b):b\in\mathcal{P}_{a,\alpha}^{(n)}
+\right\}
+$$
+
+\textbf{Set Overlap.}
+
+We measure the overlap between parent-gate sets using
+the Jaccard index:
+
+$$
+J_{p,i}^{(n,m)}(\alpha)
+=
+\frac{
+|\mathcal{G}_{p,i}^{(n)}(\alpha)
+\cap\mathcal{G}_{p,i}^{(m)}(\alpha)|
+}{
+|\mathcal{G}_{p,i}^{(n)}(\alpha)
+\cup\mathcal{G}_{p,i}^{(m)}(\alpha)|
+}
+$$
+
+\textbf{Weighted Parent Distribution.}
+
+To account for edge strength, we normalize each
+edge score by the output scale of its downstream matrix:
+
+$$
+w_{b\rightarrow a}^{(n)}(\alpha)
+=
+\frac{
+|E_{b\rightarrow a}^{(n)}(\alpha)|
+\|u_{j_a,i_a}^{(n)}\|_2
+}{
+\sigma_{j_a}^{(n)}
+}
+$$
+
+? Why not just use raw E edge score:
+We are trying to measure relative impact of an upstream component on output of downstream component, instead of only the change of coefficient $e_a$
+
+For each upstream gate identity $\xi$, define its
+aggregated parent score:
+
+$$
+S_{p,i}^{(n)}(\xi;\alpha)
+=
+\frac{1}{|\mathcal{R}_{p,i}^{(n)}|}
+\sum_{a\in\mathcal{R}_{p,i}^{(n)}}
+\sum_{\substack{
+b\in\mathcal{P}_{a,\alpha}^{(n)}\\
+\gamma(b)=\xi
+}}
+w_{b\rightarrow a}^{(n)}(\alpha)
+$$
+
+The normalized parent distribution is:
+
+$$
+\pi_{p,i}^{(n)}(\xi;\alpha)
+=
+\frac{
+S_{p,i}^{(n)}(\xi;\alpha)
+}{
+\sum_{\xi'}S_{p,i}^{(n)}(\xi';\alpha)
+}
+$$
+
+We compare the parent distributions between models
+$n$ and $m$ using Total Variation distance:
+
+$$
+D_{\mathrm{TV},p,i}^{(n,m)}(\alpha)
+=
+\frac12\sum_{\xi}
+\left|
+\pi_{p,i}^{(n)}(\xi;\alpha)
+-
+\pi_{p,i}^{(m)}(\xi;\alpha)
+\right|
+$$
+
+The total normalized edge strength can also be retained:
+
+$$
+M_{p,i}^{(n)}(\alpha)
+=
+\sum_{\xi}S_{p,i}^{(n)}(\xi;\alpha)
+$$
+
+All distribution-based comparisons are defined for
+anchors with nonempty representative sets and positive
+total parent scores in both models.
+
+\end{document}
