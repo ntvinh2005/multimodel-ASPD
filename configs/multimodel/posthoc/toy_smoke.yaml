@@ -1,0 +1,41 @@
+# SMOKE ONLY: synthetic tiny models and synthetic gates. Not a scientific result.
+# Every decision below is a placeholder chosen to exercise the code paths quickly.
+# Run (CPU, ~seconds):
+#   python -m aspd.multimodel.cli.posthoc_analysis \
+#     --config configs/multimodel/posthoc/toy_smoke.yaml --output-dir out/posthoc/toy_smoke_<date>
+schema_version: 1
+experiment_id: posthoc_toy_smoke_v1
+
+backend:
+  kind: toy
+  options:
+    seed: 0
+    device: cpu
+    n_features: 16
+    k_per_anchor: 4
+    selected_layers: [1, 2]
+    num_hidden_layers: 4
+
+anchors:
+  importance_pools: 3
+  edge_pools: 3
+
+representatives:
+  screening_metric: beta   # formulation default; ambiguity noted in the .tex
+  k_rep: 2
+  tau_rep: 0.0
+
+edges:
+  downstream_gates:
+    mode: most_frequent
+    count: 3                # per site
+  max_anchors_per_gate: 4
+  anchors_per_backward: 6
+  ablation_check_records: 8
+
+parents:
+  k_par: 8
+  tau: 0.0
+
+comparison:
+  model_pairs: null         # null -> all unordered pairs in model order

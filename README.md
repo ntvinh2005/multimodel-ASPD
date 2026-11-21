@@ -20,6 +20,9 @@ The bounded blind LLM scan is documented in
 interpretation and never changes measured Crosscoder classes or ranks.
 Completed R0/R1 results and the ASPD comparison are summarized in the
 [`general model-diffing report`](docs/multimodel/results/general_model_diffing_final_report.md).
+The post-hoc edge-score and cross-model parent-set analysis of the
+[`formulation`](docs/multimodel/multimodel_aspd_formulation.tex) is documented in
+[`docs/multimodel/posthoc_analysis.md`](docs/multimodel/posthoc_analysis.md).
 The upstream single-model ASPD paths remain unchanged.
 
 To inspect a downloaded multi-model analysis in the browser, follow the copy-paste Windows and
