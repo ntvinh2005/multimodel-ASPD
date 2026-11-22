@@ -101,6 +101,32 @@ been measured. Run the smoke configuration first (1 importance pool, 2 explicit 
 2 anchors per gate), then decide whether to set `edges.downstream_gates.count` to cap
 the number of screened gates per site.
 
+### Measured on the smoke run (job 52378170, 2026-11-22, engineering only)
+
+Configuration `v31_500m_validation_smoke_v1.yaml`, commit `5625def`, 1 B200. Output:
+`/blue/thai/share/multimodel-ASPD/evaluations/minhdatle/posthoc/v31_500m_validation_smoke_v1_job52378170`.
+- Job: `COMPLETED 0:0`, 4 min 57 s wall time. Peak CUDA allocation 59.9 GB; host RSS 1.2 GB.
+- Backend load (3 models + 3 checkpoint owners): 246 s, once per job.
+- Pool preparation (stream + 3-way alignment + natural gates): 13.9 s for the importance
+  pool, 6.9 s for the edge pool. Importance capture and accumulation: 0.9 s per pool for
+  all three models.
+- Edge stage: 18 backward passes in 0.72 s, about 40 ms each, including the 3 forward
+  passes. Each pass covered 2 anchors.
+- Taylor vs exact ablation (4 checks): within 1–12%, e.g. +0.678 vs +0.686, −1.47 vs −1.65.
+- Screening from one pool: 6,517 PRE and 6,519 MID gates fired. 5,308 PRE and 5,013 MID
+  gates had non-empty R in at least two models at τ_rep = 0.07. Finite-β quantiles
+  (10/50/90/99%): 0.017 / 0.063 / 0.156 / 0.480, consistent with the β_ref scale of §1.
+
+Projection for `v31_500m_validation_v1.yaml` on 1 B200 (to be re-measured):
+- About 8,000–10,000 analysed gates after `min_importance_fires = 50`.
+- × 20 anchors × 3 representatives × 3 models gives about 1.5–1.8 M backward passes.
+  In the full run, anchors in one backward pass rarely share a gate, so expect about one
+  pass per (anchor, representative, model).
+- At about 40 ms each, that's about 17–20 GPU-hours for edges. Importance (50 pools) is
+  about 15 min, edge pools about 5 min, load 4 min.
+- Total: roughly 18–22 GPU-hours on one GPU, or about 5–7 hours wall time split by gate
+  over 4 GPUs.
+
 ## Tuning log
 
 | Date | Field | Old → new | Evidence | Approved by |

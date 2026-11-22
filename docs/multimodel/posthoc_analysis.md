@@ -6,7 +6,7 @@ Status (2026-11-21)
 |---|---|
 | Implementation (`aspd/multimodel/posthoc/`) | `LOCAL_CODE_READY` |
 | Toy end-to-end pipeline (CPU) | `SYNTHETIC_TESTED` |
-| v3.1 checkpoint backend | `IMPLEMENTED_NOT_VALIDATED` (no GPU run yet; see [Real-run blockers](#real-run-blockers)) |
+| v3.1 checkpoint backend | `REAL_CHECKPOINT_SMOKE_PASS` (job 52378170, 2026-11-22) |
 | Scientific decisions | `UNRESOLVED` (see [Open decisions](#open-decisions)) |
 | Results | none — nothing has been run on a real checkpoint |
 
@@ -206,4 +206,4 @@ Gemma-2-2B / SmolLM2-1.7B / Granite-3.3-2B, 168 targets.
 | Finite-difference identity `Δe_a/ε ≈ E_{b→a}` on tiny random Llama models and a fused-slice model (float64) | passed (tests) |
 | Exact equality of Taylor and full ablation on the linear `v → o` path | passed (tests) |
 | v3.1 backend contract on this base (`aspd-v3.1-feature-coherence-v1`) | API symbols pass; frozen config loads through `load_frozen_config` from a non-owner account, matches the checkpoint manifest (file SHA-256, fingerprint `7e44ead3…`), 168 targets; an altered config is rejected |
-| Real checkpoint / GPU | not run |
+| Real checkpoint / GPU smoke (job 52378170, commit `5625def`, 1 B200) | `COMPLETED 0:0` in 4 min 57 s; all four stages; 36 edge records; 12 of 12 pair comparisons valid; Taylor vs exact within 1–12% (engineering only, not a result) |
