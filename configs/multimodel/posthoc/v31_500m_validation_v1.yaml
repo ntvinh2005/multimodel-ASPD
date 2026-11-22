@@ -45,7 +45,7 @@ edges:
   max_anchors_per_gate: 20
   anchor_sampling: seeded_random
   anchor_seed: 0
-  anchors_per_backward: 16           # memory knob only; does not change results
+  anchors_per_backward: 4            # cost knob only (2026-11-22: 16 -> 4, see decisions C.9)
   ablation_check_records: 50
 
 parents:

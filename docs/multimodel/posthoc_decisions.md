@@ -86,8 +86,12 @@ Derivations are in `posthoc_thresholds.md`.
    (not the first rows, which favour early documents).
 8. `anchors.edge_pools = 25` (51,200 anchors; an average gate fires ~200 times, so the cap
    of 20 fills for almost every gate).
-9. `edges.anchors_per_backward = 16` and `edges.ablation_check_records = 50`. Cost and
-   diagnostic only; they do not change any score.
+9. `edges.anchors_per_backward = 4` and `edges.ablation_check_records = 50`. Cost and
+   diagnostic only; they do not change any score. Approved as 16, then changed to 4 on
+   2026-11-22 before the v1 config produced any result. Each backward pass runs over
+   every document in its batch, but in the full run the anchors in one batch rarely share
+   a gate. A batch of 16 would therefore make every pass about 4× more expensive for no
+   saving. The smoke run measured about 40 ms per pass with batches of 4.
 
 ## D. Implementation choices (made by Claude; none changes a defined quantity)
 
