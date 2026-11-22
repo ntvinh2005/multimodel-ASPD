@@ -16,6 +16,7 @@ import hashlib
 import json
 import math
 import statistics
+import time
 from collections import defaultdict
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -47,6 +48,48 @@ from aspd.multimodel.posthoc.representatives import representative_sets
 from aspd.multimodel.posthoc.source_hooks import capture_matrix_io
 
 FORMULATION = "docs/multimodel/multimodel_aspd_formulation.tex"
+
+
+def _log(message: str) -> None:
+    print(f"[posthoc {time.strftime('%H:%M:%S')}] {message}", flush=True)
+
+
+class _Timing:
+    """Wall-clock and pass counters recorded in stage manifests (used to size full runs)."""
+
+    def __init__(self) -> None:
+        self.started = time.perf_counter()
+        self.seconds: dict[str, float] = defaultdict(float)
+        self.counts: dict[str, int] = defaultdict(int)
+
+    def add(self, name: str, since: float) -> float:
+        now = time.perf_counter()
+        self.seconds[name] += now - since
+        return now
+
+    def timed_pools(self, pools: Any) -> Any:
+        """Yield from ``pools`` while charging the wait (stream + alignment + gates)."""
+
+        iterator = iter(pools)
+        while True:
+            start = time.perf_counter()
+            try:
+                pool = next(iterator)
+            except StopIteration:
+                return
+            self.add("pool_preparation", start)
+            self.counts["pools"] += 1
+            yield pool
+
+    def report(self) -> dict[str, Any]:
+        report: dict[str, Any] = {
+            "total_seconds": time.perf_counter() - self.started,
+            "seconds": dict(self.seconds),
+            "counts": dict(self.counts),
+        }
+        if torch.cuda.is_available():
+            report["cuda_max_memory_allocated_bytes"] = int(torch.cuda.max_memory_allocated())
+        return report
 
 
 def build_backend(config: PosthocConfig, work_dir: Path) -> PosthocBackend:
@@ -85,15 +128,21 @@ def run_importance(config: PosthocConfig, root: Path, backend: PosthocBackend) -
     stage = StageDirectory(root, "importance")
     accumulators: dict[Any, MatrixImportanceAccumulator] = {}
     anchors = 0
-    for pool in backend.pools(int(config.importance_pools), skip=0):  # type: ignore[arg-type]
+    timing = _Timing()
+    pools = backend.pools(int(config.importance_pools), skip=0)  # type: ignore[arg-type]
+    for pool in timing.timed_pools(pools):
         anchors += pool.anchor_count
+        _log(f"importance pool {timing.counts['pools']}/{config.importance_pools}: "
+             f"{pool.anchor_count} anchors")
         gates = {site: pool.gates[site].to(backend.device) for site in SITES}
         for model in backend.model_keys:
+            start = time.perf_counter()
             specs = backend.hook_specs(model)
             factors = backend.factors(model)
             captured = capture_matrix_io(
                 backend.source_model(model), pool.models[model].to(backend.device), specs
             )
+            timing.counts["capture_forwards"] += 1
             for spec in specs:
                 x, y = captured[spec.matrix]
                 U, V = factors[spec.matrix]
@@ -103,6 +152,7 @@ def run_importance(config: PosthocConfig, root: Path, backend: PosthocBackend) -
                 )
                 accumulator.update(x.float(), y.float(), gates[spec.matrix.site], U, V)
             del captured
+            timing.add("capture_and_accumulate", start)
     table = ImportanceTable(acc.finalize() for acc in accumulators.values())
     table.save(stage.path)
     stage.complete(
@@ -110,7 +160,7 @@ def run_importance(config: PosthocConfig, root: Path, backend: PosthocBackend) -
             "importance", config,
             {"backend": backend.provenance(), "model_order": list(backend.model_keys),
              "anchors": anchors, "pools": config.importance_pools,
-             "matrices": len(table.entries)},
+             "matrices": len(table.entries), "timing": timing.report()},
         )
     )
     return stage.path
@@ -186,7 +236,10 @@ def run_edges(config: PosthocConfig, root: Path, backend: PosthocBackend) -> Pat
 
     pools_used = 0
     skip = config.edge_skip()
-    for offset, pool in enumerate(backend.pools(int(config.edge_pools), skip=skip)):  # type: ignore[arg-type]
+    timing = _Timing()
+    _log(f"edges: {len(selected_gates)} selected gates")
+    pools = backend.pools(int(config.edge_pools), skip=skip)  # type: ignore[arg-type]
+    for offset, pool in enumerate(timing.timed_pools(pools)):
         if not any(quota.values()):
             break
         pools_used += 1
@@ -220,8 +273,13 @@ def run_edges(config: PosthocConfig, root: Path, backend: PosthocBackend) -> Pat
                         for a in reps.get((model, gate), ()):
                             requests[a] = mask
                 group_ids = [pool.anchor_ids[r] for r in group]
+                start = time.perf_counter()
                 new = edge_scores_for_group(source, sub, group_ids, sub_gates, specs, factors,
                                             requests)
+                timing.add("edge_forward_backward", start)
+                timing.counts["edge_forwards"] += 1
+                timing.counts["edge_backwards"] += sum(bool(m.any()) for m in requests.values())
+                timing.counts["edge_records"] += len(new)
                 records.extend(new)
                 for record in new:
                     if len(checks) >= check_budget or not record.upstream:
@@ -229,14 +287,19 @@ def run_edges(config: PosthocConfig, root: Path, backend: PosthocBackend) -> Pat
                     top = int(record.scores.abs().argmax())
                     b = record.upstream[top]
                     row = group_ids.index(record.anchor_id)
+                    start = time.perf_counter()
                     exact = exact_ablation_effect(source, sub, sub_gates, specs, factors,
                                                   record.downstream, b)[row]
+                    timing.add("ablation_checks", start)
+                    timing.counts["ablation_checks"] += 1
                     checks.append({
                         "anchor_id": record.anchor_id, "downstream": record.downstream.key,
                         "upstream": b.key, "taylor": float(record.scores[top]),
                         "exact": float(exact), "coefficient": record.coefficient,
                     })
 
+    _log(f"edges: {len(records)} records, {timing.counts['edge_backwards']} backward passes, "
+         f"{timing.seconds['edge_forward_backward']:.1f} s in forward/backward")
     stage = StageDirectory(root, "edges")
     save_edges(stage.path, records)
     write_json(stage.path / "selection.json", {
@@ -255,6 +318,7 @@ def run_edges(config: PosthocConfig, root: Path, backend: PosthocBackend) -> Pat
     stage.complete(_manifest("edges", config, {
         "backend": backend.provenance(), "records": len(records),
         "first_pool_index": skip,
+        "timing": timing.report(),
         "conventions": config.recorded_conventions(),
     }))
     return stage.path
@@ -374,7 +438,10 @@ def run_stages(
     try:
         for stage in stages:
             if stage in ("importance", "edges") and backend is None:
+                start = time.perf_counter()
                 backend = backend_factory(config, root)
+                _log(f"backend {config.backend_kind} ready in {time.perf_counter() - start:.1f} s")
+            _log(f"stage {stage} started")
             if stage == "importance":
                 outputs.append(run_importance(config, root, backend))  # type: ignore[arg-type]
             elif stage == "representatives":
