@@ -14,6 +14,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+import torch
+
 from aspd.multimodel.posthoc.edges import EdgeRecord
 from aspd.multimodel.posthoc.ids import ComponentId, GateId
 
@@ -37,16 +39,25 @@ class Parent:
 
 
 def parent_set(record: EdgeRecord, rule: ParentRule) -> tuple[Parent, ...]:
-    """``Pa(a; alpha)`` ordered by decreasing ``|E|``."""
+    """``Pa(a; alpha)`` ordered by decreasing ``|E|``.
 
-    ranked = sorted(
-        zip(record.upstream, record.scores.tolist(), strict=True),
-        key=lambda item: (-abs(item[1]), item[0]),
-    )
+    TopK by ``|E|`` (ties broken by ``ComponentId`` order), then the strict threshold
+    ``|E| > tau``.  Works on the compact record: only the entries tied with or above the
+    ``K_par``-th largest ``|E|`` are turned into ComponentIds.
+    """
+
+    n = len(record)
+    if n == 0:
+        return ()
+    magnitude = record.scores.abs()
+    k = min(rule.k_par, n)
+    kth = torch.topk(magnitude, k).values[-1]
+    candidates = (magnitude >= kth).nonzero(as_tuple=True)[0].tolist()
+    ranked = sorted(candidates, key=lambda i: (-float(magnitude[i]), record.component(i)))[:k]
     return tuple(
-        Parent(component, score)
-        for component, score in ranked[: rule.k_par]
-        if abs(score) > rule.tau
+        Parent(record.component(i), float(record.scores[i]))
+        for i in ranked
+        if float(magnitude[i]) > rule.tau
     )
 
 

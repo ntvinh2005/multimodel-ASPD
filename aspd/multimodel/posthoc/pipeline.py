@@ -26,10 +26,12 @@ import torch
 
 from aspd.multimodel.posthoc.artifacts import (
     StageDirectory,
-    load_edges,
+    load_edge_table,
     require_complete,
     runtime_provenance,
     save_edges,
+    sha256_file,
+    shard_stage_name,
     write_json,
 )
 from aspd.multimodel.posthoc.backend import PosthocBackend
@@ -205,28 +207,51 @@ def load_representatives(root: Path) -> tuple[tuple[str, ...], dict[tuple[str, G
 
 
 # ========================================================================= edges
-def run_edges(config: PosthocConfig, root: Path, backend: PosthocBackend) -> Path:
-    """Edge scores into every representative of every selected gate at natural anchors."""
+def selected_downstream_gates(config: PosthocConfig, root: Path) -> list[GateId]:
+    """The analysed gates, in canonical order (identical for every shard)."""
 
-    config.require_ready("edges")
     table = ImportanceTable.load(require_complete(root, "importance"))
     models, reps = load_representatives(root)
-    if models != backend.model_keys:
-        raise ValueError("representative model order differs from the backend")
     fire_counts = {site: table.gate_fire_counts(site).tolist() for site in SITES}
     support = {
         gate: sum(1 for model in models if reps.get((model, gate)))
         for gate in {gate for (_model, gate) in reps}
     }
-    selected_gates = [
+    return [
         gate for gate in config.downstream_gates.resolve(fire_counts, support)
         if support.get(gate, 0) >= 1
     ]
+
+
+def run_edges(
+    config: PosthocConfig, root: Path, backend: PosthocBackend,
+    shard: tuple[int, int] | None = None,
+) -> Path:
+    """Edge scores into every representative of every selected gate at natural anchors.
+
+    With ``shard = (i, n)`` only gates ``i, i+n, i+2n, ...`` of the canonical gate list are
+    processed and the output goes to ``edges-shard-i-of-n``; ``finalize_edge_shards``
+    then publishes the ``edges`` stage.  Anchor sampling is per gate and per pool, so a
+    sharded run selects exactly the anchors of an unsharded one.
+    """
+
+    config.require_ready("edges")
+    if shard is not None:
+        index, count = shard
+        if not 0 <= index < count:
+            raise ValueError(f"invalid shard {index}/{count}")
+    models, reps = load_representatives(root)
+    if models != backend.model_keys:
+        raise ValueError("representative model order differs from the backend")
+    all_gates = selected_downstream_gates(config, root)
+    selected_gates = all_gates if shard is None else all_gates[shard[0]::shard[1]]
     quota = {gate: int(config.max_anchors_per_gate) for gate in selected_gates}  # type: ignore[arg-type]
     anchors_by_gate: dict[GateId, list[str]] = defaultdict(list)
     records: list[EdgeRecord] = []
     checks: list[dict[str, Any]] = []
     check_budget = int(config.ablation_check_records)  # type: ignore[arg-type]
+    if shard is not None:
+        check_budget = math.ceil(check_budget / shard[1])
     write_norms: dict[str, float] = {}
     for model in models:
         factors = backend.factors(model)
@@ -237,7 +262,8 @@ def run_edges(config: PosthocConfig, root: Path, backend: PosthocBackend) -> Pat
     pools_used = 0
     skip = config.edge_skip()
     timing = _Timing()
-    _log(f"edges: {len(selected_gates)} selected gates")
+    _log(f"edges: {len(selected_gates)} selected gates"
+         + ("" if shard is None else f" (shard {shard[0]}/{shard[1]} of {len(all_gates)})"))
     pools = backend.pools(int(config.edge_pools), skip=skip)  # type: ignore[arg-type]
     for offset, pool in enumerate(timing.timed_pools(pools)):
         if not any(quota.values()):
@@ -285,7 +311,7 @@ def run_edges(config: PosthocConfig, root: Path, backend: PosthocBackend) -> Pat
                     if len(checks) >= check_budget or not record.upstream:
                         continue
                     top = int(record.scores.abs().argmax())
-                    b = record.upstream[top]
+                    b = record.component(top)
                     row = group_ids.index(record.anchor_id)
                     start = time.perf_counter()
                     exact = exact_ablation_effect(source, sub, sub_gates, specs, factors,
@@ -300,10 +326,12 @@ def run_edges(config: PosthocConfig, root: Path, backend: PosthocBackend) -> Pat
 
     _log(f"edges: {len(records)} records, {timing.counts['edge_backwards']} backward passes, "
          f"{timing.seconds['edge_forward_backward']:.1f} s in forward/backward")
-    stage = StageDirectory(root, "edges")
+    stage = StageDirectory(root, "edges" if shard is None else shard_stage_name(*shard))
     save_edges(stage.path, records)
     write_json(stage.path / "selection.json", {
         "mode": config.downstream_gates.mode,
+        "shard": None if shard is None else list(shard),
+        "all_selected_gates": [g.key for g in all_gates],
         "gates": [g.key for g in selected_gates],
         "anchors": {g.key: anchors_by_gate[g] for g in selected_gates},
         "quota_shortfall": {g.key: quota[g] for g in selected_gates if quota[g]},
@@ -318,6 +346,7 @@ def run_edges(config: PosthocConfig, root: Path, backend: PosthocBackend) -> Pat
     stage.complete(_manifest("edges", config, {
         "backend": backend.provenance(), "records": len(records),
         "first_pool_index": skip,
+        "shard": None if shard is None else list(shard),
         "timing": timing.report(),
         "conventions": config.recorded_conventions(),
     }))
@@ -347,6 +376,72 @@ def sample_anchor_rows(
 
 
 # ======================================================================= compare
+def finalize_edge_shards(config: PosthocConfig, root: Path, count: int) -> Path:
+    """Publish the ``edges`` stage from ``count`` completed shards (no data is copied).
+
+    Checks that every shard completed with this config, that all shards saw the same
+    canonical gate list, and that their gate subsets are disjoint and cover it.  The
+    ``edges`` stage then lists each shard with the SHA-256 of its ``COMPLETE`` file.
+    """
+
+    shards = []
+    for index in range(count):
+        name = shard_stage_name(index, count)
+        path = require_complete(root, name)
+        manifest = json.loads((path / "manifest.json").read_text())
+        selection = json.loads((path / "selection.json").read_text())
+        if manifest["config_fingerprint"] != config.fingerprint():
+            raise ValueError(f"{name} was produced by a different config")
+        if selection["shard"] != [index, count]:
+            raise ValueError(f"{name} records shard {selection['shard']}")
+        shards.append((name, path, manifest, selection))
+    reference = shards[0][3]["all_selected_gates"]
+    covered: list[str] = []
+    for name, _path, _shard_manifest, selection in shards:
+        if selection["all_selected_gates"] != reference:
+            raise ValueError(f"{name} saw a different canonical gate list")
+        covered.extend(selection["gates"])
+    if sorted(covered) != sorted(reference) or len(set(covered)) != len(covered):
+        raise ValueError("edge shards do not partition the selected gates")
+
+    merged: dict[str, Any] = {
+        "mode": shards[0][3]["mode"], "shard": None, "all_selected_gates": reference,
+        "gates": reference, "anchors": {}, "quota_shortfall": {},
+        "pools_used": max(s[3]["pools_used"] for s in shards), "downstream_write_norms": {},
+    }
+    checks: list[dict[str, Any]] = []
+    timing: dict[str, Any] = {"seconds": defaultdict(float), "counts": defaultdict(int),
+                              "total_seconds": 0.0}
+    for _name, path, manifest, selection in shards:
+        merged["anchors"].update(selection["anchors"])
+        merged["quota_shortfall"].update(selection["quota_shortfall"])
+        merged["downstream_write_norms"].update(selection["downstream_write_norms"])
+        checks.extend(json.loads((path / "ablation_check.json").read_text())["checks"])
+        for key, value in manifest["timing"]["seconds"].items():
+            timing["seconds"][key] += value
+        for key, value in manifest["timing"]["counts"].items():
+            timing["counts"][key] += value
+        timing["total_seconds"] += manifest["timing"]["total_seconds"]
+    stage = StageDirectory(root, "edges")
+    write_json(stage.path / "shards.json", {"shards": [
+        {"stage": name, "complete_sha256": sha256_file(path / "COMPLETE")}
+        for name, path, _shard_manifest, _selection in shards
+    ]})
+    write_json(stage.path / "selection.json", merged)
+    write_json(stage.path / "ablation_check.json", {
+        "description": "Taylor E_{b->a} versus exact ablation, concatenated over shards.",
+        "checks": checks,
+    })
+    stage.complete(_manifest("edges", config, {
+        "shards": count,
+        "records": sum(int(s[2]["records"]) for s in shards),
+        "conventions": shards[0][2]["conventions"],
+        "timing_summed_over_shards": {k: dict(v) if isinstance(v, defaultdict) else v
+                                      for k, v in timing.items()},
+    }))
+    return stage.path
+
+
 def _mean(values: list[float]) -> float | None:
     return statistics.fmean(values) if values else None
 
@@ -360,9 +455,7 @@ def run_compare(config: PosthocConfig, root: Path) -> Path:
     edges_dir = require_complete(root, "edges")
     selection = json.loads((edges_dir / "selection.json").read_text())
     write_norms = selection["downstream_write_norms"]
-    by_key: dict[tuple[str, ComponentId], EdgeRecord] = {
-        (r.anchor_id, r.downstream): r for r in load_edges(edges_dir)
-    }
+    edges = load_edge_table(root)
     pairs = config.pairs()
     stage = StageDirectory(root, "compare")
     per_gate: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
@@ -374,10 +467,11 @@ def run_compare(config: PosthocConfig, root: Path) -> Path:
                 views = []
                 for model in models:
                     representatives = reps.get((model, gate), ())
-                    parents = {
-                        a: parent_set(by_key[(anchor_id, a)], rule)
-                        for a in representatives if (anchor_id, a) in by_key
-                    }
+                    parents = {}
+                    for a in representatives:
+                        record = edges.get(anchor_id, a)
+                        if record is not None:
+                            parents[a] = parent_set(record, rule)
                     views.append(ModelParentView(
                         model=model,
                         representatives=representatives,
@@ -427,10 +521,19 @@ def run_stages(
     stages: Iterable[str],
     *,
     backend_factory: Callable[[PosthocConfig, Path], PosthocBackend] = build_backend,
+    shard: tuple[int, int] | None = None,
+    finalize_shards: int | None = None,
 ) -> list[Path]:
-    """Run ``stages`` in canonical order, building the backend only if needed."""
+    """Run ``stages`` in canonical order, building the backend only if needed.
+
+    ``shard = (i, n)`` runs only shard ``i`` of the edge stage (``stages`` must be
+    ``("edges",)``).  ``finalize_shards = n`` publishes ``edges`` from ``n`` completed shards
+    before any later stage (use with ``stages = ("compare",)`` or alone).
+    """
 
     stages = [s for s in STAGES if s in set(stages)]
+    if shard is not None and stages != ["edges"]:
+        raise ValueError("--shard runs the edge stage only")
     for stage in stages:  # fail before any compute if a requested stage is blocked
         config.require_ready(stage)
     backend: PosthocBackend | None = None
@@ -447,9 +550,14 @@ def run_stages(
             elif stage == "representatives":
                 outputs.append(run_representatives(config, root, model_order(root)))
             elif stage == "edges":
-                outputs.append(run_edges(config, root, backend))  # type: ignore[arg-type]
+                outputs.append(run_edges(config, root, backend, shard))  # type: ignore[arg-type]
             else:
+                if finalize_shards is not None:
+                    outputs.append(finalize_edge_shards(config, root, finalize_shards))
+                    finalize_shards = None
                 outputs.append(run_compare(config, root))
+        if finalize_shards is not None:
+            outputs.append(finalize_edge_shards(config, root, finalize_shards))
     finally:
         if backend is not None:
             backend.close()

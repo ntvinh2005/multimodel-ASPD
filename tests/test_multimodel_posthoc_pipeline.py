@@ -206,3 +206,73 @@ def test_edge_anchor_source_selects_the_pools(tmp_path: Path, source: str,
     manifest = json.loads((root / "edges/manifest.json").read_text())
     assert manifest["conventions"]["edge_anchor_source"] == source
     assert manifest["first_pool_index"] == first_pool
+
+
+# ------------------------------------------------------------- sharded edge stage
+def _edges_by_key(root: Path) -> dict:
+    from aspd.multimodel.posthoc.artifacts import load_edge_table
+
+    return {(r.anchor_id, r.downstream.key): r for r in load_edge_table(root)}
+
+
+def test_sharded_edges_equal_unsharded(toy_run: Path, tmp_path: Path) -> None:
+    import shutil
+
+    root = tmp_path / "sharded"
+    for stage in ("importance", "representatives"):
+        shutil.copytree(toy_run / stage, root / stage)
+    config = load_config(TOY)
+    for index in range(3):
+        run_stages(config, root, ("edges",), shard=(index, 3))
+    with pytest.raises(FileNotFoundError):  # compare refuses before finalization
+        run_stages(config, root, ("compare",))
+    shutil.rmtree(root / "compare", ignore_errors=True)
+    run_stages(config, root, ("compare",), finalize_shards=3)
+    # Discrete structure is identical; scores differ only by float32 rounding because a
+    # shard batches different anchors together (different padded lengths).
+    sharded, single = _edges_by_key(root), _edges_by_key(toy_run)
+    assert sharded.keys() == single.keys()
+    for key, record in sharded.items():
+        assert record.upstream == single[key].upstream
+        torch.testing.assert_close(record.scores, single[key].scores, rtol=1e-4, atol=1e-6)
+
+    def rows(path: Path) -> dict:
+        return {(r["gate"], r["anchor_id"], tuple(r["models"])): r
+                for r in map(json.loads, path.read_text().splitlines())}
+
+    a, b = rows(root / "compare/comparisons.jsonl"), rows(toy_run / "compare/comparisons.jsonl")
+    assert a.keys() == b.keys()
+    for key in a:
+        assert a[key]["parent_gate_sets"] == b[key]["parent_gate_sets"]
+        assert a[key]["jaccard"] == b[key]["jaccard"]
+        if a[key]["total_variation"] is not None:
+            assert a[key]["total_variation"] == pytest.approx(b[key]["total_variation"], abs=1e-5)
+    selection = json.loads((root / "edges/selection.json").read_text())
+    reference = json.loads((toy_run / "edges/selection.json").read_text())
+    assert selection["anchors"] == reference["anchors"]
+    assert json.loads((root / "edges/shards.json").read_text())["shards"][0]["stage"] == (
+        "edges-shard-000-of-003")
+
+
+def test_finalize_rejects_missing_or_tampered_shards(toy_run: Path, tmp_path: Path) -> None:
+    import shutil
+
+    root = tmp_path / "partial"
+    for stage in ("importance", "representatives"):
+        shutil.copytree(toy_run / stage, root / stage)
+    config = load_config(TOY)
+    run_stages(config, root, ("edges",), shard=(0, 2))
+    with pytest.raises(FileNotFoundError, match="edges-shard-001-of-002"):
+        run_stages(config, root, (), finalize_shards=2)
+    run_stages(config, root, ("edges",), shard=(1, 2))
+    with (root / "edges-shard-001-of-002/selection.json").open("a") as handle:
+        handle.write(" ")
+    with pytest.raises(ValueError, match="changed after its stage completed"):
+        run_stages(config, root, (), finalize_shards=2)
+
+
+def test_result_files_are_group_readable(toy_run: Path) -> None:
+    import stat
+
+    for path in (toy_run / "edges/edges.safetensors", toy_run / "importance/importance.safetensors"):
+        assert path.stat().st_mode & stat.S_IRGRP, path

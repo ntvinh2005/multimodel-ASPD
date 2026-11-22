@@ -148,7 +148,8 @@ def test_representatives_topk_threshold_site_and_nan() -> None:
 
 # ------------------------------------------------------------------ parents
 def _record(a: ComponentId, scores: dict[ComponentId, float]) -> EdgeRecord:
-    return EdgeRecord("anchor", a, 1.0, tuple(scores), torch.tensor(list(scores.values())))
+    return EdgeRecord.from_components("anchor", a, 1.0, tuple(scores),
+                                      torch.tensor(list(scores.values())))
 
 
 def test_parent_set_uses_abs_topk_then_threshold() -> None:

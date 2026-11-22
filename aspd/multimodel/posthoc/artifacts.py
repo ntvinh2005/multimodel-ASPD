@@ -114,58 +114,142 @@ def require_complete(root: Path, stage: str) -> Path:
 
 
 # ---------------------------------------------------------------- edge storage
-def save_edges(directory: Path, records: Sequence[EdgeRecord]) -> None:
-    """Store edge records as COO tensors plus a JSON index."""
+def _group_readable(path: Path) -> None:
+    """``safetensors`` writes owner-only files; give them the normal umask permissions."""
 
-    matrices = sorted({c.matrix for r in records for c in r.upstream})
-    matrix_index = {m: i for i, m in enumerate(matrices)}
-    rows, starts = [], 0
-    upstream_matrix, upstream_feature, scores = [], [], []
+    umask = os.umask(0)
+    os.umask(umask)
+    path.chmod(0o666 & ~umask)
+
+
+def save_edges(directory: Path, records: Sequence[EdgeRecord]) -> None:
+    """Store edge records as flat tensors (COO) plus a small JSON vocabulary."""
+
+    matrices = sorted({m for r in records for m in r.matrices})
+    matrix_lookup = {m: i for i, m in enumerate(matrices)}
+    downstream = sorted({r.downstream for r in records})
+    downstream_lookup = {c: i for i, c in enumerate(downstream)}
+    anchors = sorted({r.anchor_id for r in records})
+    anchor_lookup = {a: i for i, a in enumerate(anchors)}
+    up_matrix, up_feature, scores, starts, stops = [], [], [], [], []
+    offset = 0
     for record in records:
-        n = len(record.upstream)
-        rows.append(
-            {
-                "anchor_id": record.anchor_id,
-                "downstream": record.downstream.key,
-                "coefficient": record.coefficient,
-                "start": starts,
-                "stop": starts + n,
-            }
-        )
-        upstream_matrix.extend(matrix_index[c.matrix] for c in record.upstream)
-        upstream_feature.extend(c.feature for c in record.upstream)
+        local = torch.tensor([matrix_lookup[m] for m in record.matrices], dtype=torch.int32)
+        up_matrix.append(local[record.matrix_index.long()] if len(record) else
+                         torch.zeros(0, dtype=torch.int32))
+        up_feature.append(record.features.to(torch.int32))
         scores.append(record.scores.float())
-        starts += n
+        starts.append(offset)
+        offset += len(record)
+        stops.append(offset)
     tensors = {
-        "upstream_matrix": torch.tensor(upstream_matrix, dtype=torch.int32),
-        "upstream_feature": torch.tensor(upstream_feature, dtype=torch.int32),
+        "upstream_matrix": torch.cat(up_matrix) if up_matrix else torch.zeros(0, dtype=torch.int32),
+        "upstream_feature": torch.cat(up_feature) if up_feature else torch.zeros(0, dtype=torch.int32),
         "score": torch.cat(scores) if scores else torch.zeros(0),
+        "record_start": torch.tensor(starts, dtype=torch.int64),
+        "record_stop": torch.tensor(stops, dtype=torch.int64),
+        "record_coefficient": torch.tensor([r.coefficient for r in records], dtype=torch.float64),
+        "record_downstream": torch.tensor([downstream_lookup[r.downstream] for r in records],
+                                          dtype=torch.int32),
+        "record_anchor": torch.tensor([anchor_lookup[r.anchor_id] for r in records],
+                                      dtype=torch.int32),
     }
     save_file(tensors, str(directory / "edges.safetensors"))
-    write_json(
-        directory / "edge_records.json",
-        {"matrix_keys": [m.key for m in matrices], "records": rows},
-    )
+    _group_readable(directory / "edges.safetensors")
+    write_json(directory / "edge_records.json", {
+        "schema_version": 2,
+        "matrix_keys": [m.key for m in matrices],
+        "downstream_keys": [c.key for c in downstream],
+        "anchor_ids": anchors,
+        "records": len(records),
+    })
+
+
+class _EdgePart:
+    """One stored edge file; records are materialized on demand as tensor views."""
+
+    def __init__(self, directory: Path):
+        self.tensors = load_file(str(directory / "edges.safetensors"))
+        meta = json.loads((directory / "edge_records.json").read_text(encoding="utf-8"))
+        if meta.get("schema_version") != 2:
+            raise ValueError(f"{directory}: unsupported edge storage schema")
+        self.matrices = tuple(MatrixId.from_key(k) for k in meta["matrix_keys"])
+        self.downstream = [ComponentId.from_key(k) for k in meta["downstream_keys"]]
+        self.anchor_ids = list(meta["anchor_ids"])
+        anchor = self.tensors["record_anchor"].tolist()
+        down = self.tensors["record_downstream"].tolist()
+        self.index = {(anchor[r], down[r]): r for r in range(len(anchor))}
+        self.anchor_lookup = {a: i for i, a in enumerate(self.anchor_ids)}
+        self.downstream_lookup = {c: i for i, c in enumerate(self.downstream)}
+
+    def __len__(self) -> int:
+        return int(self.tensors["record_start"].numel())
+
+    def record(self, row: int) -> EdgeRecord:
+        t = self.tensors
+        start, stop = int(t["record_start"][row]), int(t["record_stop"][row])
+        return EdgeRecord(
+            anchor_id=self.anchor_ids[int(t["record_anchor"][row])],
+            downstream=self.downstream[int(t["record_downstream"][row])],
+            coefficient=float(t["record_coefficient"][row]),
+            matrices=self.matrices,
+            matrix_index=t["upstream_matrix"][start:stop],
+            features=t["upstream_feature"][start:stop],
+            scores=t["score"][start:stop],
+        )
+
+    def find(self, anchor_id: str, downstream: ComponentId) -> int | None:
+        a = self.anchor_lookup.get(anchor_id)
+        d = self.downstream_lookup.get(downstream)
+        if a is None or d is None:
+            return None
+        return self.index.get((a, d))
+
+
+class EdgeTable:
+    """All edge records of a run (one file, or every shard of a sharded edge stage)."""
+
+    def __init__(self, parts: Sequence[_EdgePart]):
+        self.parts = list(parts)
+
+    def __len__(self) -> int:
+        return sum(len(p) for p in self.parts)
+
+    def __iter__(self):
+        for part in self.parts:
+            for row in range(len(part)):
+                yield part.record(row)
+
+    def get(self, anchor_id: str, downstream: ComponentId) -> EdgeRecord | None:
+        for part in self.parts:
+            row = part.find(anchor_id, downstream)
+            if row is not None:
+                return part.record(row)
+        return None
 
 
 def load_edges(directory: Path) -> list[EdgeRecord]:
-    tensors = load_file(str(directory / "edges.safetensors"))
-    index = json.loads((directory / "edge_records.json").read_text(encoding="utf-8"))
-    matrices = [MatrixId.from_key(key) for key in index["matrix_keys"]]
-    up_m = tensors["upstream_matrix"].tolist()
-    up_f = tensors["upstream_feature"].tolist()
-    records = []
-    for row in index["records"]:
-        start, stop = row["start"], row["stop"]
-        records.append(
-            EdgeRecord(
-                anchor_id=row["anchor_id"],
-                downstream=ComponentId.from_key(row["downstream"]),
-                coefficient=float(row["coefficient"]),
-                upstream=tuple(
-                    ComponentId(matrices[up_m[k]], up_f[k]) for k in range(start, stop)
-                ),
-                scores=tensors["score"][start:stop].clone(),
-            )
-        )
-    return records
+    """All records of one stored edge file (small runs and tests)."""
+
+    return list(EdgeTable([_EdgePart(directory)]))
+
+
+def shard_stage_name(index: int, count: int) -> str:
+    return f"edges-shard-{index:03d}-of-{count:03d}"
+
+
+def load_edge_table(root: Path) -> EdgeTable:
+    """Verified edge records of ``root``: the ``edges`` stage or the shards it lists."""
+
+    edges_dir = require_complete(root, "edges")
+    shards_file = edges_dir / "shards.json"
+    if not shards_file.is_file():
+        return EdgeTable([_EdgePart(edges_dir)])
+    listing = json.loads(shards_file.read_text(encoding="utf-8"))
+    parts = []
+    for entry in listing["shards"]:
+        shard_dir = require_complete(root, entry["stage"])
+        if sha256_file(shard_dir / "COMPLETE") != entry["complete_sha256"]:
+            raise ValueError(f"{shard_dir} changed after the edge shards were finalized")
+        parts.append(_EdgePart(shard_dir))
+    return EdgeTable(parts)

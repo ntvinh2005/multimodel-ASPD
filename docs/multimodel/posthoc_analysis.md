@@ -32,6 +32,22 @@ $PY -m aspd.multimodel.cli.posthoc_analysis \
 $PY -m pytest -q tests/test_multimodel_posthoc_*.py
 ```
 
+Full v3.1 run on 2 GPUs. This submits three dependent jobs: importance and
+representatives on 1 GPU; the edge stage as 8 gate shards, at most 2 at a time; then a
+CPU-only job that publishes the shards and runs compare.
+
+```bash
+CONFIG=configs/multimodel/posthoc/v31_500m_validation_v1.yaml SHARDS=8 PARALLEL=2 \
+  EDGE_TIME=05:00:00 bash slurm/multimodel/posthoc_submit_sharded.sh
+```
+
+A shard processes gates `i, i+N, …` of the canonical gate list and writes
+`edges-shard-i-of-N/`. `--finalize-shards N` checks that the shards partition the gates
+and come from the same config, then writes `edges/` as an index of the shards; no edge
+data is copied. Anchors are sampled per gate and pool, so a sharded run analyses exactly
+the anchors of an unsharded one. Scores differ only by float32 rounding from different
+batching. This is tested.
+
 Stages can be run one at a time (`--stage importance`, repeatable). Each stage writes an
 immutable `<root>/<stage>/` directory with `manifest.json` (git SHA, config SHA-256,
 backend provenance, Slurm job ID) and a `COMPLETE` file of SHA-256 hashes; later stages

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -169,6 +170,9 @@ class ImportanceTable:
                 tensors[f"{matrix.key}::{name}"] = getattr(entry, name).contiguous()
             meta[matrix.key] = {"sigma": entry.sigma, "anchor_count": entry.anchor_count}
         save_file(tensors, str(directory / "importance.safetensors"))
+        umask = os.umask(0)  # safetensors writes owner-only files; restore normal permissions
+        os.umask(umask)
+        (directory / "importance.safetensors").chmod(0o666 & ~umask)
         with (directory / "importance_meta.json").open("x", encoding="utf-8") as handle:
             json.dump(meta, handle, indent=2, sort_keys=True)
 

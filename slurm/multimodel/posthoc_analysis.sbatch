@@ -6,9 +6,12 @@
 #   squeue -u vinhnguyen1; squeue -u "$USER"; squeue -A thai; sacctmgr show qos thai
 # and submit only from a clean worktree at a commit merged into main.
 #
-# Usage:
+# Usage (all stages in one job):
 #   CONFIG=configs/multimodel/posthoc/v31_500m_validation_smoke_v1.yaml STAGES=all \
 #     sbatch slurm/multimodel/posthoc_analysis.sbatch
+# Edge-stage shards as a job array (OUT_ROOT must already hold importance/ and
+# representatives/); prefer slurm/multimodel/posthoc_submit_sharded.sh, which chains it all:
+#   CONFIG=... OUT_ROOT=... SHARDS=8 sbatch --array=0-7%2 slurm/multimodel/posthoc_analysis.sbatch
 #
 # Resources match the single-B200 colocated three-owner extractors
 # (slurm/multimodel/aspd_v3_step13000_paper_intruder_extract.sbatch): three bf16 source
@@ -33,7 +36,12 @@ source "${SHARE}/env.sh"
 
 : "${CONFIG:?Set CONFIG to a versioned post-hoc YAML}"
 STAGES="${STAGES:-all}"
+SHARDS="${SHARDS:-}"
 PYTHON="${SHARE}/repo/.venv/bin/python"
+if [[ -n "${SHARDS}" ]]; then
+  : "${SLURM_ARRAY_TASK_ID:?SHARDS requires a job array (--array=0-$((SHARDS - 1)))}"
+  : "${OUT_ROOT:?SHARDS requires OUT_ROOT (the shared output root of the run)}"
+fi
 OUT_ROOT="${OUT_ROOT:-${SHARE}/evaluations/${USER}/posthoc/$(basename "${CONFIG}" .yaml)_job${SLURM_JOB_ID}}"
 
 export PYTHONPATH="${PWD}"
@@ -42,7 +50,9 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # Fail closed: clean tracked tree, fresh output root, no unresolved decision.
 test -z "$(git status --porcelain --untracked-files=no)"
-test ! -e "${OUT_ROOT}/importance" || { echo "output root already has results: ${OUT_ROOT}" >&2; exit 2; }
+if [[ -z "${SHARDS}" && ( "${STAGES}" == *all* || "${STAGES}" == *importance* ) ]]; then
+  test ! -e "${OUT_ROOT}/importance" || { echo "output root already has results: ${OUT_ROOT}" >&2; exit 2; }
+fi
 "${PYTHON}" -m aspd.multimodel.cli.posthoc_analysis --config "${CONFIG}" --check
 
 echo "git_sha=$(git rev-parse HEAD)"
@@ -51,6 +61,11 @@ echo "output_root=${OUT_ROOT}"
 mkdir -p "$(dirname "${OUT_ROOT}")" slurm/logs
 
 stage_args=()
-for stage in ${STAGES//,/ }; do stage_args+=(--stage "${stage}"); done
+if [[ -n "${SHARDS}" ]]; then
+  stage_args=(--stage edges --shard "${SLURM_ARRAY_TASK_ID}/${SHARDS}")
+  echo "edge shard ${SLURM_ARRAY_TASK_ID}/${SHARDS}"
+else
+  for stage in ${STAGES//,/ }; do stage_args+=(--stage "${stage}"); done
+fi
 "${PYTHON}" -m aspd.multimodel.cli.posthoc_analysis \
   --config "${CONFIG}" --output-dir "${OUT_ROOT}" "${stage_args[@]}"

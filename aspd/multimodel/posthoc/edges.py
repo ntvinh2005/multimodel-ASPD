@@ -51,13 +51,45 @@ from aspd.multimodel.posthoc.source_hooks import Ablation, probed_forward
 
 @dataclass(frozen=True)
 class EdgeRecord:
-    """All edge scores into one downstream component at one anchor."""
+    """All edge scores into one downstream component at one anchor.
+
+    Stored compactly (a full run has ~10^6 records of ~700 entries): entry ``k`` is the
+    upstream component ``ComponentId(matrices[matrix_index[k]], features[k])`` with edge
+    score ``scores[k]``.  ``upstream`` materializes the ComponentIds for small uses.
+    """
 
     anchor_id: str
     downstream: ComponentId
     coefficient: float  # e_a at this anchor
-    upstream: tuple[ComponentId, ...]
-    scores: Tensor  # [len(upstream)] float32, E_{b->a}(alpha)
+    matrices: tuple[MatrixId, ...]
+    matrix_index: Tensor  # [n] int32 into ``matrices``
+    features: Tensor  # [n] int32
+    scores: Tensor  # [n] float32, E_{b->a}(alpha)
+
+    def __len__(self) -> int:
+        return int(self.scores.numel())
+
+    def component(self, k: int) -> ComponentId:
+        return ComponentId(self.matrices[int(self.matrix_index[k])], int(self.features[k]))
+
+    @property
+    def upstream(self) -> tuple[ComponentId, ...]:
+        index, features = self.matrix_index.tolist(), self.features.tolist()
+        return tuple(ComponentId(self.matrices[m], f) for m, f in zip(index, features, strict=True))
+
+    @classmethod
+    def from_components(
+        cls, anchor_id: str, downstream: ComponentId, coefficient: float,
+        upstream: Sequence[ComponentId], scores: Tensor,
+    ) -> EdgeRecord:
+        matrices = tuple(sorted({c.matrix for c in upstream}))
+        lookup = {m: i for i, m in enumerate(matrices)}
+        return cls(
+            anchor_id, downstream, coefficient, matrices,
+            torch.tensor([lookup[c.matrix] for c in upstream], dtype=torch.int32),
+            torch.tensor([c.feature for c in upstream], dtype=torch.int32),
+            scores.float().reshape(-1),
+        )
 
 
 def group_rows(documents: Tensor, rows: Sequence[int], max_group: int) -> list[list[int]]:
@@ -138,10 +170,12 @@ def edge_scores_for_group(
                 )
             else:
                 grads = [None] * len(parents)
+            parent_tuple = tuple(parents)
             for row in mask.nonzero(as_tuple=True)[0].tolist():
-                ids: list[ComponentId] = []
+                blocks: list[Tensor] = []
+                features: list[Tensor] = []
                 values: list[Tensor] = []
-                for matrix, grad in zip(parents, grads, strict=True):
+                for block, (matrix, grad) in enumerate(zip(parents, grads, strict=True)):
                     e_b = coefficients[matrix][row]
                     active = (e_b != 0).nonzero(as_tuple=True)[0]
                     if active.numel() == 0:
@@ -152,14 +186,18 @@ def edge_scores_for_group(
                     else:
                         direction = U_b[active] @ grad[row].to(U_b.dtype)
                         scores = (e_b[active] * direction).float().cpu()
-                    ids.extend(ComponentId(matrix, int(i)) for i in active.tolist())
+                    blocks.append(torch.full((active.numel(),), block, dtype=torch.int32))
+                    features.append(active.to(torch.int32).cpu())
                     values.append(scores)
+                empty_int = torch.zeros(0, dtype=torch.int32)
                 records.append(
                     EdgeRecord(
                         anchor_id=anchor_ids[row],
                         downstream=component,
                         coefficient=float(e_a[row].detach()),
-                        upstream=tuple(ids),
+                        matrices=parent_tuple,
+                        matrix_index=torch.cat(blocks) if blocks else empty_int,
+                        features=torch.cat(features) if features else empty_int,
                         scores=torch.cat(values) if values else torch.zeros(0),
                     )
                 )

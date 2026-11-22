@@ -111,15 +111,21 @@ Derivations are in `posthoc_thresholds.md`.
 8. The smoke config caps the screened gates at 1 per site and has no minimum-firings
    floor. It is for engineering checks only and is never reported as a result.
 
+9. **The edge stage runs as 8 gate shards, at most 2 at a time** (2 GPUs, following the
+   researcher's request on 2026-11-22). A failure loses only one shard, about 2.5 h, and
+   is resubmitted on its own. Results equal the unsharded run except for float32
+   rounding.
+10. Edge records are stored as compact tensors, and the `.safetensors` result files are
+    written group-readable so the team can read them.
+
 ## E. Open (needs a decision later)
 
 1. **Units of $\tau$.** $E_{b\to a}$ is in the output units of matrix $j_a$, which differ
    between matrices and models. One absolute $\tau$ is not equally strict everywhere.
    Option: threshold $|E|/\sigma_{j_a}$. That would be a formulation change; decide after
    seeing real edge scores.
-2. **Edge-stage cost.** Up to ~2.9 M backward passes if every gate passes screening. Decide
-   whether to cap screened gates per site (`edges.downstream_gates.count`) after the smoke
-   run measures speed.
+2. ~~Edge-stage cost.~~ Measured on the smoke run: about 40 ms per backward pass, so about
+   1.5–1.8 M passes, roughly 18–22 GPU-hours. Running on 2 GPUs (D.9) without capping gates.
 3. ~~Read access for the config loader.~~ **Resolved for the v1 runs (2026-11-22).** See A.8.
 4. **Merge into `main`.** Runs from this branch are validation runs under CONTRIBUTING
    until the evaluation branches are merged.
