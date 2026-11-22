@@ -101,18 +101,20 @@ attends to an earlier one.
 The forward pass stops as soon as the deepest needed matrix input is captured. Hooks
 touch only the anchor rows and are removed on exit; source weights are never modified.
 
-### Edge-score conventions
+### Edge-score conventions (fixed by the formulation, not settings)
 
-The formulation does not fix these. Each is a required field under `edges.conventions`
-with exactly one implemented value; it is recorded in every `edges/manifest.json`.
+These follow from the formulation's own definitions and are recorded in every
+`edges/manifest.json` (`config.FORMULATION_FIXED_CONVENTIONS`):
 
-| Field | Implemented value | Alternative not implemented |
-|---|---|---|
-| `jacobian_path` | `native_source_model` (true `W` downstream of `b`) | replacement model (`W` replaced by `Σ g u vᵀ` + frozen error, the single-model `aspd.analysis.prompt` convention). v3.1 gates exist only at accepted anchors, not at every token, so a full replacement model is undefined. |
-| `gates_under_ablation` | `frozen_natural` | re-running the encoder on ablated residuals |
-| `upstream_positions` | `same_anchor_token` | summing `b`'s influence over earlier positions through attention |
-| `upstream_set` | `all_selected_upstream_in_compute_order` (q,k,v → o → gate,up → down; then the next layer) | restricting by layer distance or site |
-| `effect` | `total` (paths through intermediate components included) | direct effect only |
+- **Real model.** $E \approx e_a(s) - e_a(s \mid e_b = 0)$ is evaluated on $s$ through the
+  real model, so removing $b$ subtracts $e_b u_b$ from the native $y_{j_b}$.
+- **Gates held fixed.** $g$ is a 0/1 step function, so $\partial g / \partial e_b = 0$
+  almost everywhere and $E$ is the same whether or not the gate would be recomputed.
+- **Same anchor.** $e_a$ and $e_b$ carry the same $\alpha$.
+- **Candidate set.** $\mathcal U^{(n)}(a)$ is all selected components; non-upstream ones
+  have $E = 0$ and never pass $|E| > \tau$. Components of $a$'s own gate are allowed
+  (researcher decision, 2026-11-21).
+- **Total effect.** Everything downstream of $b$ responds to its removal.
 
 `edges/ablation_check.json` compares the Taylor score with the exact ablation for the
 strongest parent of the first `ablation_check_records` records. On linear paths (for
@@ -122,6 +124,9 @@ error, not a bug.
 
 ## 5. Open decisions
 
+Decided values and proposed thresholds with their derivation are pinned in
+[`posthoc_thresholds.md`](posthoc_thresholds.md).
+
 Every row is a required config field with no default. A `null` blocks only the stages
 that need it; `--check` lists them.
 
@@ -129,12 +134,10 @@ that need it; `--check` lists them.
 |---|---|---|
 | `representatives.screening_metric` (`beta`/`rho`) | representatives | "ambiguity on what is used on the screening step" |
 | `representatives.k_rep`, `tau_rep` | representatives | free parameters |
-| `edges.downstream_gates` (`explicit` list or `most_frequent` + `count`) | edges | not specified |
+| `edges.downstream_gates` (`screened` [decided], `most_frequent`, `explicit`; optional `count` cap) | edges | formulation says "each shared gate"; `screened` keeps the gates that pass its screening step |
 | `edges.max_anchors_per_gate`, `anchors.edge_pools` | edges | not specified (sample size) |
 | `edges.anchor_sampling` (`first_in_pool`/`seeded_random`) + `anchor_seed` | edges | not specified; which firing anchors are kept when a gate exceeds its quota |
 | `anchors.edge_anchor_source` (`disjoint_after_importance`/`same_as_importance`) | edges | not specified; whether `E` uses the anchors that define `β`, `σ` |
-| `edges.conventions.*` (five fields above) | edges | not specified |
-| `comparison.model_pairs` (`all` or explicit pairs) | compare | formulation compares "two models n and m" |
 | `anchors.importance_pools` | importance | expectation set for `β`, `σ` |
 | `parents.k_par`, `tau` | compare | free parameters |
 | `backend.options.split` (validation/test) | importance, edges | evaluation protocol |

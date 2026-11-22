@@ -1,7 +1,8 @@
 """Post-hoc analysis configuration (YAML) with fail-closed researcher decisions.
 
-Every value the formulation leaves open (including the edge-score conventions and the
-anchor-sampling rules, see ``EDGE_CONVENTIONS``) is a required field without a default.  A
+Every value the formulation leaves open is a required field without a default.  (The
+edge-score conventions are fixed by the formulation itself; see
+``FORMULATION_FIXED_CONVENTIONS``.)  A
 ``null`` value blocks only the stages that need it, so ``importance`` can run before
 ``K_rep``, ``tau``, ... are decided:
 
@@ -35,21 +36,25 @@ from aspd.multimodel.posthoc.representatives import RepresentativeRule
 STAGES: tuple[str, ...] = ("importance", "representatives", "edges", "compare")
 BACKENDS: tuple[str, ...] = ("toy", "v31_checkpoint")
 
-#: Edge-score conventions the formulation leaves open.  Each must be set explicitly;
-#: the tuple lists the values that are implemented (the first entry of each was the
-#: implementation's original, undeclared choice).
-EDGE_CONVENTIONS: dict[str, tuple[str, ...]] = {
-    # d e_a / d e_b through the true source weights (not a replacement model)
-    "jacobian_path": ("native_source_model",),
-    # g_a stays at its natural value when b is removed (encoder is not re-run)
-    "gates_under_ablation": ("frozen_natural",),
-    # e_b at the anchor's own token only (no attention paths from earlier tokens)
-    "upstream_positions": ("same_anchor_token",),
-    # U^{(n)}(a): every selected matrix of the same model earlier in compute order
-    "upstream_set": ("all_selected_upstream_in_compute_order",),
-    # total effect (indirect paths through intermediate components included)
-    "effect": ("total",),
+#: Edge-score conventions that follow from the formulation's own definitions (not settings):
+FORMULATION_FIXED_CONVENTIONS: dict[str, str] = {
+    # E ~ e_a(s) - e_a(s | e_b = 0) is evaluated on s through the real model, so removing
+    # b means subtracting e_b u_b from the native output y_{j_b}.
+    "jacobian_path": "native_source_model",
+    # g is a 0/1 step function: d g / d e_b = 0 almost everywhere, so E is the same
+    # whether or not the gate would be recomputed.
+    "gates_under_ablation": "frozen_natural",
+    # e_a and e_b are both indexed by the same anchor alpha.
+    "upstream_positions": "same_anchor_token",
+    # Components exist only for j in J^{(n)}; non-upstream ones have E = 0 and can never
+    # pass |E| > tau, so "all components" = "all upstream components".  Components of
+    # the downstream gate itself are allowed (researcher decision, 2026-11-21).
+    "upstream_set": "all_selected_upstream_in_compute_order_including_same_gate",
+    # Ablation lets everything downstream of b respond.
+    "effect": "total",
 }
+#: How downstream gates (p, i) are chosen for the edge stage.
+GATE_SELECTION_MODES: tuple[str, ...] = ("screened", "most_frequent", "explicit")
 #: Which firing anchors are analysed when a gate fires more often than its quota.
 ANCHOR_SAMPLING: tuple[str, ...] = ("first_in_pool", "seeded_random")
 #: Whether edge anchors are disjoint from the anchors that define beta/sigma.
@@ -62,20 +67,45 @@ class PosthocBlocked(RuntimeError):
 
 @dataclass(frozen=True)
 class DownstreamGateSelection:
-    mode: str | None  # "explicit" or "most_frequent"
+    mode: str | None  # "screened", "explicit" or "most_frequent"
     gates: tuple[str, ...] = ()  # explicit: e.g. ("pre/12", "mid/7")
-    count: int | None = None  # most_frequent: number of gates per site
+    count: int | None = None  # most_frequent: per site (required); screened: optional cap
 
-    def resolve(self, fire_counts: dict[str, Any]) -> tuple[GateId, ...]:
+    def resolve(
+        self,
+        fire_counts: dict[str, Any],
+        has_representatives: dict[GateId, int] | None = None,
+    ) -> tuple[GateId, ...]:
         """Return the analysed downstream gates.
 
-        ``fire_counts[site]`` is the ``[C]`` firing count from the importance stage.
-        ``most_frequent`` takes the ``count`` most frequently firing gates of each site
-        (ties by feature index); never-firing gates are never selected.
+        ``fire_counts[site]`` is the ``[C]`` firing count from the importance stage;
+        ``has_representatives[gate]`` is the number of models with non-empty R_{p,i}.
+
+        * ``screened`` -- every gate that passes the formulation's own screening step,
+          i.e. has a non-empty representative set in at least two models (fewer cannot
+          give a valid pair).  Optional ``count`` keeps only the ``count`` most frequently
+          firing screened gates per site.
+        * ``most_frequent`` -- the ``count`` most frequently firing gates of each site.
+        * ``explicit`` -- the listed gates.
+
+        Frequency ties go to the lower feature index; never-firing gates are never selected.
         """
 
         if self.mode == "explicit":
             return tuple(sorted(GateId.from_key(key) for key in self.gates))
+        if self.mode == "screened":
+            if has_representatives is None:
+                raise ValueError("screened selection needs the representative sets")
+            selected = []
+            for site in sorted(fire_counts):
+                counts = fire_counts[site]
+                kept = [c for c in range(len(counts)) if int(counts[c]) > 0
+                        and has_representatives.get(GateId(site, c), 0) >= 2]
+                kept.sort(key=lambda c: (-int(counts[c]), c))
+                if self.count is not None:
+                    kept = kept[: self.count]
+                selected.extend(GateId(site, c) for c in kept)
+            return tuple(sorted(selected))
         if self.mode == "most_frequent":
             selected: list[GateId] = []
             for site in sorted(fire_counts):
@@ -105,9 +135,8 @@ class PosthocConfig:
     ablation_check_records: int | None
     k_par: int | None
     tau: float | None
-    #: ``"all"`` (every unordered pair in model order) or explicit pairs; null blocks compare.
-    model_pairs: str | tuple[tuple[str, str], ...] | None
-    edge_conventions: dict[str, str | None]
+    #: ``"all"`` (default: every unordered pair in model order) or explicit pairs.
+    model_pairs: str | tuple[tuple[str, str], ...]
     anchor_sampling: str | None
     anchor_seed: int | None
     edge_anchor_source: str | None
@@ -147,19 +176,12 @@ class PosthocConfig:
                 required["edges.downstream_gates.count"] = self.downstream_gates.count
             if self.downstream_gates.mode == "explicit" and not self.downstream_gates.gates:
                 required["edges.downstream_gates.gates"] = None
-            required.update(
-                {f"edges.conventions.{k}": v for k, v in self.edge_conventions.items()}
-            )
             required["edges.anchor_sampling"] = self.anchor_sampling
             if self.anchor_sampling == "seeded_random":
                 required["edges.anchor_seed"] = self.anchor_seed
             required["anchors.edge_anchor_source"] = self.edge_anchor_source
         if stage == "compare":
-            required.update({
-                "parents.k_par": self.k_par,
-                "parents.tau": self.tau,
-                "comparison.model_pairs": self.model_pairs,
-            })
+            required.update({"parents.k_par": self.k_par, "parents.tau": self.tau})
         missing = [name for name, value in required.items() if value is None]
         if stage in ("importance", "edges"):
             missing.extend(
@@ -201,7 +223,7 @@ class PosthocConfig:
 
     def recorded_conventions(self) -> dict[str, Any]:
         return {
-            **self.edge_conventions,
+            **FORMULATION_FIXED_CONVENTIONS,
             "anchor_sampling": self.anchor_sampling,
             "anchor_seed": self.anchor_seed,
             "edge_anchor_source": self.edge_anchor_source,
@@ -258,27 +280,17 @@ def load_config(path: str | Path) -> PosthocConfig:
     parents = _section(raw, "parents")
     comparison = raw.get("comparison") or {}
     selection = edges.get("downstream_gates") or {}
-    if "model_pairs" not in comparison:
-        raise ValueError("config key 'model_pairs' must be present (use null if unresolved)")
-    pairs = comparison["model_pairs"]
-    if pairs is not None and pairs != "all":
+    pairs = comparison.get("model_pairs") or "all"
+    if pairs != "all":
         pairs = tuple(tuple(pair) for pair in pairs)
-    conventions_raw = edges.get("conventions")
-    if not isinstance(conventions_raw, dict):
-        raise ValueError("config section 'edges.conventions' must be a mapping")
-    conventions: dict[str, str | None] = {}
-    for name, implemented in EDGE_CONVENTIONS.items():
-        if name not in conventions_raw:
-            raise ValueError(f"config key 'edges.conventions.{name}' must be present "
-                             "(use null if unresolved)")
-        value = conventions_raw[name]
-        if value is not None and value not in implemented:
-            raise ValueError(f"edges.conventions.{name}={value!r} is not implemented; "
-                             f"implemented: {implemented}")
-        conventions[name] = value
-    unknown = set(conventions_raw) - set(EDGE_CONVENTIONS)
-    if unknown:
-        raise ValueError(f"unknown edge conventions: {sorted(unknown)}")
+    if "conventions" in edges:
+        raise ValueError(
+            "edges.conventions was removed: these follow from the formulation and are fixed "
+            "(see FORMULATION_FIXED_CONVENTIONS); delete the section"
+        )
+    mode = selection.get("mode")
+    if mode is not None and mode not in GATE_SELECTION_MODES:
+        raise ValueError(f"edges.downstream_gates.mode must be one of {GATE_SELECTION_MODES}")
     sampling = _optional(edges, "anchor_sampling", str)
     if sampling is not None and sampling not in ANCHOR_SAMPLING:
         raise ValueError(f"edges.anchor_sampling must be one of {ANCHOR_SAMPLING}")
@@ -306,7 +318,6 @@ def load_config(path: str | Path) -> PosthocConfig:
         k_par=_optional(parents, "k_par", int),
         tau=_optional(parents, "tau", float),
         model_pairs=pairs,
-        edge_conventions=conventions,
         anchor_sampling=sampling,
         anchor_seed=None if edges.get("anchor_seed") is None else int(edges["anchor_seed"]),
         edge_anchor_source=source,

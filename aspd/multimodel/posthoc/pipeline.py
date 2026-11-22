@@ -164,9 +164,13 @@ def run_edges(config: PosthocConfig, root: Path, backend: PosthocBackend) -> Pat
     if models != backend.model_keys:
         raise ValueError("representative model order differs from the backend")
     fire_counts = {site: table.gate_fire_counts(site).tolist() for site in SITES}
+    support = {
+        gate: sum(1 for model in models if reps.get((model, gate)))
+        for gate in {gate for (_model, gate) in reps}
+    }
     selected_gates = [
-        gate for gate in config.downstream_gates.resolve(fire_counts)
-        if any(reps.get((model, gate)) for model in models)
+        gate for gate in config.downstream_gates.resolve(fire_counts, support)
+        if support.get(gate, 0) >= 1
     ]
     quota = {gate: int(config.max_anchors_per_gate) for gate in selected_gates}  # type: ignore[arg-type]
     anchors_by_gate: dict[GateId, list[str]] = defaultdict(list)

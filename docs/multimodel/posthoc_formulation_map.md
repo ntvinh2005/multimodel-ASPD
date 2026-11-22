@@ -66,10 +66,10 @@ modules exactly as the evaluation extractors do (`v31_backend._gates`, `:180–2
 
 | Formulation | Code | Status |
 |---|---|---|
-| $E_{b\to a} = \frac{\partial e_a}{\partial e_b} e_b$ | `edges.edge_scores_for_group` (`:82`). Because $e_b$ enters only through $e_b u_b$ in $y_{j_b}$, $\partial e_a / \partial e_b = u_b^\top \partial e_a / \partial y_{j_b,\alpha}$. One backward pass per downstream $a$ (`:134`) gives $\partial e_a / \partial y_j$ for every upstream matrix via zero probes (`source_hooks.probed_forward`, `:137`). Then $E = e_b \cdot (U_b \cdot \mathrm{grad})$ (`:152–153`). | EXACT given the conventions in §5.1 |
+| $E_{b\to a} = \frac{\partial e_a}{\partial e_b} e_b$ | `edges.edge_scores_for_group` (`:82`). Because $e_b$ enters only through $e_b u_b$ in $y_{j_b}$, $\partial e_a / \partial e_b = u_b^\top \partial e_a / \partial y_{j_b,\alpha}$. One backward pass per downstream $a$ (`:134`) gives $\partial e_a / \partial y_j$ for every upstream matrix via zero probes (`source_hooks.probed_forward`, `:137`). Then $E = e_b \cdot (U_b \cdot \mathrm{grad})$ (`:152–153`). | EXACT (§5.1) |
 | $\approx e_a(s) - e_a(s \mid e_b = 0)$ | `edges.exact_ablation_effect` (`:169`) subtracts $e_b u_b$ from the native output and re-runs. Same sign as $E$. | EXACT. Used as a diagnostic (`edges/ablation_check.json`) and in tests. |
 | sign reading ($E > 0$: ablating $b$ decreases $e_a$) | scores stored **signed** (`EdgeRecord.scores`) | EXACT |
-| "at anchor $\alpha$" | the model's token $t^{(n)}(\alpha)$; $e_b$ at the same token | INTERPRETED (§5.1, `upstream_positions`) |
+| "at anchor $\alpha$" | the model's token $t^{(n)}(\alpha)$; $e_b$ at the same token | EXACT (§5.1) |
 
 ### 4.2 Component importance
 
@@ -81,7 +81,7 @@ modules exactly as the evaluation extractors do (`v31_backend._gates`, `:180–2
 | $q_{j,i} = \sqrt{\mathbb E_\alpha \lVert\Delta y\rVert^2}$ | `importance.py:99` | EXACT |
 | $\rho_{j,i} = q_{j,i} / \sum_k q_{j,k}$ | `importance.py:105–106` | EXACT; `NaN` if $\sum = 0$ |
 | $\mathbb E_\alpha$ over which anchors | the `importance_pools` natural pools of the selected split | INTERPRETED (`anchors.importance_pools`, `backend.options.split`) |
-| "ambiguity on what is used on the screening step" | `representatives.screening_metric` ∈ {`beta`, `rho`}, no default | left open |
+| "ambiguity on what is used on the screening step" | `representatives.screening_metric`; researcher chose `beta` (2026-11-21), $\rho$ not used | DECIDED |
 
 ### 4.3 Parent sets
 
@@ -90,7 +90,7 @@ modules exactly as the evaluation extractors do (`v31_backend._gates`, `:180–2
 | correspondence = same shared gate | every model's representatives are keyed by the same `GateId` (`pipeline.run_representatives`, `:120`) | EXACT |
 | $\mathcal R^{(n)}_{p,i} = \{j \in \mathrm{TopK}_{K_{rep}}(\beta), \beta > \tau_{rep}\}$ | `representatives.select_representatives` (`:40`). Filter-then-TopK equals TopK-then-filter for one score. Ties go by layer, then matrix. `NaN` is never selected (`:48`). | EXACT |
 | $a^{(n)}, a^{(m)}$ corresponding downstream | at each selected anchor, edges are computed for every $a \in \mathcal R^{(n)}_{p,i}$ in every model (`pipeline.run_edges`, `:158`) | EXACT |
-| $\mathcal U^{(n)}(a)$ | `MatrixId.is_upstream_of` (`ids.py:93`): same model, $(\ell, \mathrm{stage})$ earlier; stages q,k,v < o < gate,up < down | INTERPRETED (§5.1, `upstream_set`) |
+| $\mathcal U^{(n)}(a)$ | `MatrixId.is_upstream_of` (`ids.py:93`): same model, $(\ell, \mathrm{stage})$ earlier; stages q,k,v < o < gate,up < down; same-gate components included | EXACT (§5.1) |
 | $\mathrm{Pa}_{K_{par},\tau}(a;\alpha) = \{b \in \mathrm{TopK}(\lvert E\rvert) : \lvert E\rvert > \tau\}$ | `parents.parent_set` (`:39`); TopK then strict threshold (`:48`). Only $b$ with $g_b = 1$ are stored; the rest have $E = 0$ and can never pass $\lvert E\rvert > \tau \ge 0$. | EXACT |
 | $\mathcal P^{(n)}_{a,\alpha}$, $\mathcal P^{(m)}_{a,\alpha}$ | `parents` dict built per model in `pipeline.run_compare` (`:286`) | EXACT |
 
@@ -107,7 +107,7 @@ modules exactly as the evaluation extractors do (`v31_backend._gates`, `:180–2
 | $D_{TV} = \frac12 \sum \lvert\pi^n - \pi^m\rvert$ | `comparison.total_variation` (`:75`) | EXACT |
 | $M = \sum_\xi S(\xi)$ | `PairComparison.strength_left/right` (`comparison.py:109`, set in `compare_pair` `:128`) | EXACT |
 | defined only for nonempty $\mathcal R$ and positive totals in both models | `compare_pair` → `distribution_valid`; `D_TV = null` otherwise | EXACT |
-| which pairs $(n, m)$ | `comparison.model_pairs` ∈ {`all`, explicit list} | INTERPRETED (no default) |
+| which pairs $(n, m)$ | `comparison.model_pairs`, default `all` | EXACT (all pairs of the $N$ models) |
 
 ### 4.5 Computed but not in the formulation (ADDED)
 
@@ -124,18 +124,17 @@ A `null` blocks only the stage that needs it (`--check` lists them), and a value
 not implemented is rejected by name. The toy config sets every field, labelled SMOKE
 ONLY; `v31_500m_template.yaml` leaves all of them `null`.
 
-### 5.1 Edge-score conventions (`edges.conventions`)
+### 5.1 Edge-score conventions — fixed by the formulation
 
-These were implicit in the first implementation. They are now explicit; each has one
-implemented value.
-
-| Field | Implemented value | Meaning | Alternative (not implemented) |
-|---|---|---|---|
-| `jacobian_path` | `native_source_model` | $\partial e_a / \partial e_b$ through the real weights | replacement model ($W \to \sum g u v^\top$ + frozen error). Needs gates at every token; v3.1 has them only at anchors. |
-| `gates_under_ablation` | `frozen_natural` | $g_a$ keeps its natural value when $b$ is removed | re-run the encoder on ablated residuals |
-| `upstream_positions` | `same_anchor_token` | only $e_b$ at $\alpha$'s own token | also count $b$ at earlier tokens via attention |
-| `upstream_set` | `all_selected_upstream_in_compute_order` | §4.3 definition of $\mathcal U^{(n)}(a)$ | limit by layer distance or site |
-| `effect` | `total` | all paths from $b$ to $a$, including via intermediate components | direct effect only |
+These were first recorded as open decisions. On review they follow from the
+formulation's definitions and are not settings. Each reason is given in
+`config.FORMULATION_FIXED_CONVENTIONS` and in `posthoc_analysis.md` §4:
+- real model ($E$ is defined through $e_a(s \mid e_b = 0)$ on the real input);
+- gates held fixed (a step-function gate has zero derivative almost everywhere);
+- same anchor (shared $\alpha$ in the notation);
+- candidate set = all selected components (non-upstream ones have $E = 0$), including
+  the downstream gate's own components (researcher decision, 2026-11-21);
+- total effect.
 
 ### 5.2 Sampling and data
 
@@ -143,7 +142,7 @@ implemented value.
 |---|---|---|
 | `anchors.edge_anchor_source` | `disjoint_after_importance` \| `same_as_importance` | whether $E$ uses different anchors from those defining $\beta$ and $\sigma$ |
 | `edges.anchor_sampling` (+ `anchor_seed`) | `first_in_pool` \| `seeded_random` | which firing anchors are kept when a gate fires more often than `max_anchors_per_gate`. The first implementation silently used `first_in_pool`. |
-| `edges.downstream_gates` | `explicit` list \| `most_frequent` + `count` | which gates $(p, i)$ to analyse. `most_frequent` = the `count` most-firing gates per site; ties go to the lower index; never-firing gates are excluded. |
+| `edges.downstream_gates` | `screened` (decided) \| `most_frequent` \| `explicit`; optional `count` | which gates $(p, i)$ to analyse. `most_frequent` = the `count` most-firing gates per site; ties go to the lower index; never-firing gates are excluded. |
 | `edges.max_anchors_per_gate`, `anchors.importance_pools`, `anchors.edge_pools` | integers | sample sizes |
 | `backend.options.split` | `validation` \| `test` | document-disjoint evaluation split |
 | `backend.options.source_dtype` | `bfloat16` \| `float32` | bf16 reproduces the evaluation-time gates; fp32 gives more precise gradients |
@@ -151,7 +150,7 @@ implemented value.
 ### 5.3 Formulation parameters
 
 `representatives.screening_metric`, `k_rep`, `tau_rep`, `parents.k_par`, `parents.tau`,
-`comparison.model_pairs`.
+`comparison.model_pairs` (default `all`). Proposed values: [`posthoc_thresholds.md`](posthoc_thresholds.md).
 
 ### 5.4 Technical choices that do not change any defined quantity
 

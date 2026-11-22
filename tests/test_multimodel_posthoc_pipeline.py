@@ -33,8 +33,9 @@ def test_v31_template_is_blocked_for_every_stage() -> None:
     config = load_config(TEMPLATE)
     for stage in ("importance", "representatives", "edges", "compare"):
         assert config.blockers(stage), stage
-    assert "representatives.screening_metric" in config.blockers("representatives")
-    assert "backend.options.source_dtype" in config.blockers("importance")
+    assert config.blockers("representatives") == [
+        "representatives.k_rep", "representatives.tau_rep"]
+    assert config.blockers("importance") == ["anchors.importance_pools"]
     with pytest.raises(PosthocBlocked):
         config.require_ready("compare")
 
@@ -121,8 +122,7 @@ def test_cli_check_and_blocked_exit_codes(tmp_path: Path, capsys) -> None:
     capsys.readouterr()
     assert cli_main(["--config", str(TEMPLATE), "--check"]) == 2
     report = json.loads(capsys.readouterr().out)
-    assert report["blockers"]["compare"] == [
-        "parents.k_par", "parents.tau", "comparison.model_pairs"]
+    assert report["blockers"]["compare"] == ["parents.k_par", "parents.tau"]
     code = cli_main(["--config", str(TEMPLATE), "--output-dir", str(tmp_path / "x"),
                      "--stage", "representatives"])
     assert code == 3 and not (tmp_path / "x").exists()
@@ -139,22 +139,28 @@ def _dump(tmp_path: Path, raw: dict, name: str = "c.yaml") -> Path:
     return path
 
 
-def test_every_edge_convention_must_be_explicit(tmp_path: Path) -> None:
-    raw = _raw()
-    raw["edges"]["conventions"]["gates_under_ablation"] = None
-    config = load_config(_dump(tmp_path, raw))
-    assert config.blockers("edges") == ["edges.conventions.gates_under_ablation"]
-    assert not config.blockers("importance") and not config.blockers("compare")
-    del raw["edges"]["conventions"]["effect"]
-    with pytest.raises(ValueError, match="edges.conventions.effect"):
-        load_config(_dump(tmp_path, raw, "missing.yaml"))
+def test_edge_conventions_are_fixed_not_configurable(tmp_path: Path) -> None:
+    from aspd.multimodel.posthoc.config import FORMULATION_FIXED_CONVENTIONS
 
-
-def test_unimplemented_convention_is_rejected_by_name(tmp_path: Path) -> None:
     raw = _raw()
-    raw["edges"]["conventions"]["jacobian_path"] = "replacement_model"
-    with pytest.raises(ValueError, match="not implemented"):
+    raw["edges"]["conventions"] = {"jacobian_path": "native_source_model"}
+    with pytest.raises(ValueError, match="edges.conventions was removed"):
         load_config(_dump(tmp_path, raw))
+    assert FORMULATION_FIXED_CONVENTIONS["upstream_set"].endswith("including_same_gate")
+
+
+def test_screened_selection_uses_the_screening_step() -> None:
+    from aspd.multimodel.posthoc.config import DownstreamGateSelection
+    from aspd.multimodel.posthoc.ids import GateId
+
+    fire = {"pre": [5, 0, 9, 3], "mid": [1, 1, 0, 7]}
+    support = {GateId("pre", 0): 3, GateId("pre", 1): 3, GateId("pre", 2): 1,
+               GateId("pre", 3): 2, GateId("mid", 0): 2, GateId("mid", 3): 3}
+    every = DownstreamGateSelection("screened").resolve(fire, support)
+    # pre/1 never fires; pre/2 has R in only one model; mid/2 never fires.
+    assert every == (GateId("mid", 0), GateId("mid", 3), GateId("pre", 0), GateId("pre", 3))
+    capped = DownstreamGateSelection("screened", count=1).resolve(fire, support)
+    assert capped == (GateId("mid", 3), GateId("pre", 0))
 
 
 def test_seeded_random_sampling_is_reproducible_and_needs_a_seed(tmp_path: Path) -> None:

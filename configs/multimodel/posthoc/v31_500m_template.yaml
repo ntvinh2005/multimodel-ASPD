@@ -18,42 +18,36 @@ backend:
     # The loader re-verifies them; they are not researcher decisions.
     config_file_sha256: f7a6d87436304956ca0baca955ec2e0e929a7207142f57fc35362369822f63be
     dataset_manifest_sha256: a258974d21ceac3457529644be07459518fde7bc28501abde5c67e5e3719286f
-    split: null                      # validation | test (document-disjoint)
-    source_dtype: null               # bfloat16 (training/eval parity) | float32 (gradient precision)
+    split: validation                # researcher decision 2026-11-21
+    source_dtype: bfloat16           # researcher decision 2026-11-21
     device: cuda:0
     local_files_only: true
     pool_anchors: 2048               # training BatchTopK pool size; gates depend on it
 
 anchors:
-  importance_pools: null             # pools of 2,048 anchors for sigma/beta/q/rho
-  edge_pools: null                   # upper bound on pools scanned for edge anchors
-  edge_anchor_source: null           # disjoint_after_importance | same_as_importance
+  importance_pools: null             # PROPOSED 50 -- see docs/multimodel/posthoc_thresholds.md
+  edge_pools: null                   # PROPOSED 25 -- see posthoc_thresholds.md
+  edge_anchor_source: disjoint_after_importance   # researcher decision 2026-11-21
 
 representatives:
-  screening_metric: null             # beta | rho  (formulation: "ambiguity ... need decision")
-  k_rep: null
-  tau_rep: null
+  screening_metric: beta             # researcher decision 2026-11-21 (rho not used)
+  k_rep: null                        # PROPOSED 3 -- see posthoc_thresholds.md
+  tau_rep: null                      # PROPOSED 0.07 -- see posthoc_thresholds.md
 
 edges:
   downstream_gates:
-    mode: null                       # explicit | most_frequent
-    gates: []                        # explicit: ["pre/123", "mid/45"]
-    count: null                      # most_frequent: gates per site
-  max_anchors_per_gate: null
-  anchor_sampling: null              # first_in_pool | seeded_random
-  anchor_seed: null                  # required for seeded_random
+    mode: screened                   # researcher decision 2026-11-21: the screening step decides
+    gates: []                        # explicit mode only
+    count: null                      # optional cap per site (null = every screened gate)
+  max_anchors_per_gate: null         # PROPOSED 20 -- see posthoc_thresholds.md
+  anchor_sampling: null              # PROPOSED seeded_random
+  anchor_seed: null                  # PROPOSED 0
   anchors_per_backward: null         # memory knob only; does not change results
   ablation_check_records: null       # exact-ablation checks of the Taylor score
-  conventions:                       # formulation leaves these open; one option implemented each
-    jacobian_path: null              # native_source_model
-    gates_under_ablation: null       # frozen_natural
-    upstream_positions: null         # same_anchor_token
-    upstream_set: null               # all_selected_upstream_in_compute_order
-    effect: null                     # total
 
 parents:
-  k_par: null
-  tau: null
+  k_par: null                        # PROPOSED 10 -- see posthoc_thresholds.md
+  tau: null                          # PROPOSED 0.0 -- see posthoc_thresholds.md (units caveat)
 
 comparison:
-  model_pairs: null                  # all | [[gemma, smol], ...]
+  model_pairs: all                   # (gemma,smol), (gemma,granite), (smol,granite)
