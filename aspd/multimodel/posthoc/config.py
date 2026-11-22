@@ -1,6 +1,7 @@
 """Post-hoc analysis configuration (YAML) with fail-closed researcher decisions.
 
-Every value the formulation leaves open is a required field without a default.  A
+Every value the formulation leaves open (including the edge-score conventions and the
+anchor-sampling rules, see ``EDGE_CONVENTIONS``) is a required field without a default.  A
 ``null`` value blocks only the stages that need it, so ``importance`` can run before
 ``K_rep``, ``tau``, ... are decided:
 
@@ -33,6 +34,26 @@ from aspd.multimodel.posthoc.representatives import RepresentativeRule
 
 STAGES: tuple[str, ...] = ("importance", "representatives", "edges", "compare")
 BACKENDS: tuple[str, ...] = ("toy", "v31_checkpoint")
+
+#: Edge-score conventions the formulation leaves open.  Each must be set explicitly;
+#: the tuple lists the values that are implemented (the first entry of each was the
+#: implementation's original, undeclared choice).
+EDGE_CONVENTIONS: dict[str, tuple[str, ...]] = {
+    # d e_a / d e_b through the true source weights (not a replacement model)
+    "jacobian_path": ("native_source_model",),
+    # g_a stays at its natural value when b is removed (encoder is not re-run)
+    "gates_under_ablation": ("frozen_natural",),
+    # e_b at the anchor's own token only (no attention paths from earlier tokens)
+    "upstream_positions": ("same_anchor_token",),
+    # U^{(n)}(a): every selected matrix of the same model earlier in compute order
+    "upstream_set": ("all_selected_upstream_in_compute_order",),
+    # total effect (indirect paths through intermediate components included)
+    "effect": ("total",),
+}
+#: Which firing anchors are analysed when a gate fires more often than its quota.
+ANCHOR_SAMPLING: tuple[str, ...] = ("first_in_pool", "seeded_random")
+#: Whether edge anchors are disjoint from the anchors that define beta/sigma.
+EDGE_ANCHOR_SOURCES: tuple[str, ...] = ("disjoint_after_importance", "same_as_importance")
 
 
 class PosthocBlocked(RuntimeError):
@@ -84,7 +105,12 @@ class PosthocConfig:
     ablation_check_records: int | None
     k_par: int | None
     tau: float | None
-    model_pairs: tuple[tuple[str, str], ...] | None = None
+    #: ``"all"`` (every unordered pair in model order) or explicit pairs; null blocks compare.
+    model_pairs: str | tuple[tuple[str, str], ...] | None
+    edge_conventions: dict[str, str | None]
+    anchor_sampling: str | None
+    anchor_seed: int | None
+    edge_anchor_source: str | None
     source_path: str | None = field(default=None, compare=False)
     source_sha256: str | None = field(default=None, compare=False)
 
@@ -121,8 +147,19 @@ class PosthocConfig:
                 required["edges.downstream_gates.count"] = self.downstream_gates.count
             if self.downstream_gates.mode == "explicit" and not self.downstream_gates.gates:
                 required["edges.downstream_gates.gates"] = None
+            required.update(
+                {f"edges.conventions.{k}": v for k, v in self.edge_conventions.items()}
+            )
+            required["edges.anchor_sampling"] = self.anchor_sampling
+            if self.anchor_sampling == "seeded_random":
+                required["edges.anchor_seed"] = self.anchor_seed
+            required["anchors.edge_anchor_source"] = self.edge_anchor_source
         if stage == "compare":
-            required.update({"parents.k_par": self.k_par, "parents.tau": self.tau})
+            required.update({
+                "parents.k_par": self.k_par,
+                "parents.tau": self.tau,
+                "comparison.model_pairs": self.model_pairs,
+            })
         missing = [name for name, value in required.items() if value is None]
         if stage in ("importance", "edges"):
             missing.extend(
@@ -147,6 +184,28 @@ class PosthocConfig:
     def parent_rule(self) -> ParentRule:
         self.require_ready("compare")
         return ParentRule(int(self.k_par), float(self.tau))  # type: ignore[arg-type]
+
+    def pairs(self) -> tuple[tuple[str, str], ...] | None:
+        """Model pairs for ``compare_all_pairs`` (``None`` means all pairs)."""
+
+        self.require_ready("compare")
+        return None if self.model_pairs == "all" else self.model_pairs  # type: ignore[return-value]
+
+    def edge_skip(self) -> int:
+        """Index of the first pool used by the edge stage."""
+
+        self.require_ready("edges")
+        if self.edge_anchor_source == "same_as_importance":
+            return 0
+        return int(self.importance_pools)  # type: ignore[arg-type]
+
+    def recorded_conventions(self) -> dict[str, Any]:
+        return {
+            **self.edge_conventions,
+            "anchor_sampling": self.anchor_sampling,
+            "anchor_seed": self.anchor_seed,
+            "edge_anchor_source": self.edge_anchor_source,
+        }
 
     def fingerprint(self) -> str:
         payload = asdict(self)
@@ -199,7 +258,33 @@ def load_config(path: str | Path) -> PosthocConfig:
     parents = _section(raw, "parents")
     comparison = raw.get("comparison") or {}
     selection = edges.get("downstream_gates") or {}
-    pairs = comparison.get("model_pairs")
+    if "model_pairs" not in comparison:
+        raise ValueError("config key 'model_pairs' must be present (use null if unresolved)")
+    pairs = comparison["model_pairs"]
+    if pairs is not None and pairs != "all":
+        pairs = tuple(tuple(pair) for pair in pairs)
+    conventions_raw = edges.get("conventions")
+    if not isinstance(conventions_raw, dict):
+        raise ValueError("config section 'edges.conventions' must be a mapping")
+    conventions: dict[str, str | None] = {}
+    for name, implemented in EDGE_CONVENTIONS.items():
+        if name not in conventions_raw:
+            raise ValueError(f"config key 'edges.conventions.{name}' must be present "
+                             "(use null if unresolved)")
+        value = conventions_raw[name]
+        if value is not None and value not in implemented:
+            raise ValueError(f"edges.conventions.{name}={value!r} is not implemented; "
+                             f"implemented: {implemented}")
+        conventions[name] = value
+    unknown = set(conventions_raw) - set(EDGE_CONVENTIONS)
+    if unknown:
+        raise ValueError(f"unknown edge conventions: {sorted(unknown)}")
+    sampling = _optional(edges, "anchor_sampling", str)
+    if sampling is not None and sampling not in ANCHOR_SAMPLING:
+        raise ValueError(f"edges.anchor_sampling must be one of {ANCHOR_SAMPLING}")
+    source = _optional(anchors, "edge_anchor_source", str)
+    if source is not None and source not in EDGE_ANCHOR_SOURCES:
+        raise ValueError(f"anchors.edge_anchor_source must be one of {EDGE_ANCHOR_SOURCES}")
     config = PosthocConfig(
         schema_version=1,
         experiment_id=str(raw["experiment_id"]),
@@ -220,7 +305,11 @@ def load_config(path: str | Path) -> PosthocConfig:
         ablation_check_records=_optional(edges, "ablation_check_records", int),
         k_par=_optional(parents, "k_par", int),
         tau=_optional(parents, "tau", float),
-        model_pairs=None if pairs is None else tuple(tuple(pair) for pair in pairs),
+        model_pairs=pairs,
+        edge_conventions=conventions,
+        anchor_sampling=sampling,
+        anchor_seed=None if edges.get("anchor_seed") is None else int(edges["anchor_seed"]),
+        edge_anchor_source=source,
         source_path=str(path.resolve()),
         source_sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
     )

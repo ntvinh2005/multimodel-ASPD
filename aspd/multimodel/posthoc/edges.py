@@ -20,7 +20,8 @@ upstream matrices at once, and
 for every component of every upstream matrix.  Only components with ``g_b = 1`` have
 ``e_b != 0``; only those are stored.
 
-Conventions fixed by this implementation (see ``docs/multimodel/posthoc_analysis.md``):
+Conventions (the only implemented values of the required ``edges.conventions``
+config fields; see ``config.EDGE_CONVENTIONS`` and ``docs/multimodel/posthoc_formulation_map.md``):
 
 * Gates are frozen at their natural values: ``e_a = g_a (v_a^T x_a)`` with ``g_a``
   constant.  The encoder is not re-run under ablation.

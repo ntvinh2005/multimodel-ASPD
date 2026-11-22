@@ -27,6 +27,7 @@ backend:
 anchors:
   importance_pools: null             # pools of 2,048 anchors for sigma/beta/q/rho
   edge_pools: null                   # upper bound on pools scanned for edge anchors
+  edge_anchor_source: null           # disjoint_after_importance | same_as_importance
 
 representatives:
   screening_metric: null             # beta | rho  (formulation: "ambiguity ... need decision")
@@ -39,12 +40,20 @@ edges:
     gates: []                        # explicit: ["pre/123", "mid/45"]
     count: null                      # most_frequent: gates per site
   max_anchors_per_gate: null
+  anchor_sampling: null              # first_in_pool | seeded_random
+  anchor_seed: null                  # required for seeded_random
   anchors_per_backward: null         # memory knob only; does not change results
   ablation_check_records: null       # exact-ablation checks of the Taylor score
+  conventions:                       # formulation leaves these open; one option implemented each
+    jacobian_path: null              # native_source_model
+    gates_under_ablation: null       # frozen_natural
+    upstream_positions: null         # same_anchor_token
+    upstream_set: null               # all_selected_upstream_in_compute_order
+    effect: null                     # total
 
 parents:
   k_par: null
   tau: null
 
 comparison:
-  model_pairs: null                  # null -> (gemma,smol), (gemma,granite), (smol,granite)
+  model_pairs: null                  # all | [[gemma, smol], ...]

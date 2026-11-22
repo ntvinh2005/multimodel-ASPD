@@ -53,10 +53,13 @@ compare           CPU: importance + representatives + edges          -> Pa, G, J
 ```
 
 `importance` uses pools `[0, importance_pools)` of the backend's deterministic pool
-sequence; `edges` uses the following `edge_pools` pools, so the two stages never share
-anchors even when run as separate jobs.
+sequence. With `edge_anchor_source: disjoint_after_importance`, `edges` uses the following
+`edge_pools` pools, so the two stages never share anchors even when run as separate jobs.
+With `same_as_importance`, it starts again at pool 0.
 
 ## 3. Equation-to-code map
+
+Short form below. The full walk through the `.tex` — every definition, its exact code location, EXACT/INTERPRETED/ADDED status and the notation differences — is in [`posthoc_formulation_map.md`](posthoc_formulation_map.md).
 
 | Formulation | Code |
 |---|---|
@@ -98,17 +101,18 @@ attends to an earlier one.
 The forward pass stops as soon as the deepest needed matrix input is captured. Hooks
 touch only the anchor rows and are removed on exit; source weights are never modified.
 
-### Conventions fixed by this implementation
+### Edge-score conventions
 
-These follow the formulation's text. They are recorded in every `edges/manifest.json`
-under `conventions`.
+The formulation does not fix these. Each is a required field under `edges.conventions`
+with exactly one implemented value; it is recorded in every `edges/manifest.json`.
 
-| Convention | Choice | Alternative not implemented |
+| Field | Implemented value | Alternative not implemented |
 |---|---|---|
-| Jacobian path | native source model (true `W` downstream of `b`) | replacement model (`W` replaced by `Σ g u vᵀ` + frozen error, the single-model `aspd.analysis.prompt` convention). v3.1 gates exist only at accepted anchors, not at every token, so a full replacement model is undefined. |
-| Gates under ablation | frozen at their natural values | re-running the encoder on ablated residuals |
-| Positions | `e_b` at the anchor's own token (`same_anchor`) | summing `b`'s influence over earlier positions through attention |
-| Candidate set `U^{(n)}(a)` | every selected matrix of the same model upstream of `j_a` in compute order (q,k,v → o → gate,up → down; then the next layer) | restricting by layer distance |
+| `jacobian_path` | `native_source_model` (true `W` downstream of `b`) | replacement model (`W` replaced by `Σ g u vᵀ` + frozen error, the single-model `aspd.analysis.prompt` convention). v3.1 gates exist only at accepted anchors, not at every token, so a full replacement model is undefined. |
+| `gates_under_ablation` | `frozen_natural` | re-running the encoder on ablated residuals |
+| `upstream_positions` | `same_anchor_token` | summing `b`'s influence over earlier positions through attention |
+| `upstream_set` | `all_selected_upstream_in_compute_order` (q,k,v → o → gate,up → down; then the next layer) | restricting by layer distance or site |
+| `effect` | `total` (paths through intermediate components included) | direct effect only |
 
 `edges/ablation_check.json` compares the Taylor score with the exact ablation for the
 strongest parent of the first `ablation_check_records` records. On linear paths (for
@@ -127,6 +131,10 @@ that need it; `--check` lists them.
 | `representatives.k_rep`, `tau_rep` | representatives | free parameters |
 | `edges.downstream_gates` (`explicit` list or `most_frequent` + `count`) | edges | not specified |
 | `edges.max_anchors_per_gate`, `anchors.edge_pools` | edges | not specified (sample size) |
+| `edges.anchor_sampling` (`first_in_pool`/`seeded_random`) + `anchor_seed` | edges | not specified; which firing anchors are kept when a gate exceeds its quota |
+| `anchors.edge_anchor_source` (`disjoint_after_importance`/`same_as_importance`) | edges | not specified; whether `E` uses the anchors that define `β`, `σ` |
+| `edges.conventions.*` (five fields above) | edges | not specified |
+| `comparison.model_pairs` (`all` or explicit pairs) | compare | formulation compares "two models n and m" |
 | `anchors.importance_pools` | importance | expectation set for `β`, `σ` |
 | `parents.k_par`, `tau` | compare | free parameters |
 | `backend.options.split` (validation/test) | importance, edges | evaluation protocol |
@@ -197,7 +205,7 @@ Gemma-2-2B / SmolLM2-1.7B / Granite-3.3-2B, 168 targets.
 
 | Check | Result |
 |---|---|
-| `pytest -q tests/test_multimodel_posthoc_math.py tests/test_multimodel_posthoc_edges.py tests/test_multimodel_posthoc_pipeline.py tests/test_multimodel_posthoc_v31_contract.py` | 29 passed, 1 skipped (blocker 1, unreadable preflight report) in 6.9 s, CPU, `OMP_NUM_THREADS=1`, on base `6d998c8` |
+| `pytest -q tests/test_multimodel_posthoc_math.py tests/test_multimodel_posthoc_edges.py tests/test_multimodel_posthoc_pipeline.py tests/test_multimodel_posthoc_v31_contract.py` | 34 passed, 1 skipped (blocker 1, unreadable preflight report) in 8.0 s, CPU, `OMP_NUM_THREADS=1`, on base `6d998c8` |
 | `ruff check` (repository config) on all new Python files | passed |
 | Finite-difference identity `Δe_a/ε ≈ E_{b→a}` on tiny random Llama models and a fused-slice model (float64) | passed (tests) |
 | Exact equality of Taylor and full ablation on the linear `v → o` path | passed (tests) |

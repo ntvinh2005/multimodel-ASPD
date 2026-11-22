@@ -12,6 +12,7 @@ that symlinks or copies the earlier stages (see the runbook).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import statistics
@@ -180,7 +181,8 @@ def run_edges(config: PosthocConfig, root: Path, backend: PosthocBackend) -> Pat
                 write_norms[a.key] = float(factors[a.matrix][0][a.feature].float().norm())
 
     pools_used = 0
-    for pool in backend.pools(int(config.edge_pools), skip=int(config.importance_pools)):  # type: ignore[arg-type]
+    skip = config.edge_skip()
+    for offset, pool in enumerate(backend.pools(int(config.edge_pools), skip=skip)):  # type: ignore[arg-type]
         if not any(quota.values()):
             break
         pools_used += 1
@@ -189,7 +191,8 @@ def run_edges(config: PosthocConfig, root: Path, backend: PosthocBackend) -> Pat
             if quota[gate] == 0:
                 continue
             rows = pool.gates[gate.site][:, gate.feature].nonzero(as_tuple=True)[0].tolist()
-            rows = rows[: quota[gate]]
+            rows = sample_anchor_rows(rows, quota[gate], config, pool_index=skip + offset,
+                                      gate=gate)
             if rows:
                 rows_by_gate[gate] = rows
                 quota[gate] -= len(rows)
@@ -247,14 +250,32 @@ def run_edges(config: PosthocConfig, root: Path, backend: PosthocBackend) -> Pat
     })
     stage.complete(_manifest("edges", config, {
         "backend": backend.provenance(), "records": len(records),
-        "conventions": {
-            "jacobian_path": "native_source_model",
-            "gates": "frozen_natural_binary_gates",
-            "upstream_positions": "same_anchor_token_only",
-            "candidate_upstream_set": "all_selected_matrices_upstream_in_compute_order",
-        },
+        "first_pool_index": skip,
+        "conventions": config.recorded_conventions(),
     }))
     return stage.path
+
+
+def sample_anchor_rows(
+    rows: list[int], quota: int, config: PosthocConfig, *, pool_index: int, gate: GateId
+) -> list[int]:
+    """Pick at most ``quota`` of the firing ``rows`` of one pool for one gate.
+
+    ``first_in_pool`` keeps pool order; ``seeded_random`` draws without replacement
+    with a generator seeded by ``(anchor_seed, pool_index, gate)``, so the choice is
+    reproducible and independent of which other gates are analysed.
+    """
+
+    if len(rows) <= quota:
+        return rows
+    if config.anchor_sampling == "first_in_pool":
+        return rows[:quota]
+    if config.anchor_sampling == "seeded_random":
+        key = f"{config.anchor_seed}:{pool_index}:{gate.key}".encode()
+        seed = int.from_bytes(hashlib.sha256(key).digest()[:8], "little")
+        order = torch.randperm(len(rows), generator=torch.Generator().manual_seed(seed))
+        return sorted(rows[i] for i in order[:quota].tolist())
+    raise ValueError(f"unknown anchor sampling {config.anchor_sampling!r}")
 
 
 # ======================================================================= compare
@@ -274,7 +295,7 @@ def run_compare(config: PosthocConfig, root: Path) -> Path:
     by_key: dict[tuple[str, ComponentId], EdgeRecord] = {
         (r.anchor_id, r.downstream): r for r in load_edges(edges_dir)
     }
-    pairs = config.model_pairs
+    pairs = config.pairs()
     stage = StageDirectory(root, "compare")
     per_gate: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     rows = 0

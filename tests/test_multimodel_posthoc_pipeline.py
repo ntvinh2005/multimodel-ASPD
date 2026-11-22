@@ -121,7 +121,80 @@ def test_cli_check_and_blocked_exit_codes(tmp_path: Path, capsys) -> None:
     capsys.readouterr()
     assert cli_main(["--config", str(TEMPLATE), "--check"]) == 2
     report = json.loads(capsys.readouterr().out)
-    assert report["blockers"]["compare"] == ["parents.k_par", "parents.tau"]
+    assert report["blockers"]["compare"] == [
+        "parents.k_par", "parents.tau", "comparison.model_pairs"]
     code = cli_main(["--config", str(TEMPLATE), "--output-dir", str(tmp_path / "x"),
                      "--stage", "representatives"])
     assert code == 3 and not (tmp_path / "x").exists()
+
+
+# ------------------------------------------------- formerly implicit decisions
+def _raw() -> dict:
+    return yaml.safe_load(TOY.read_text())
+
+
+def _dump(tmp_path: Path, raw: dict, name: str = "c.yaml") -> Path:
+    path = tmp_path / name
+    path.write_text(yaml.safe_dump(raw))
+    return path
+
+
+def test_every_edge_convention_must_be_explicit(tmp_path: Path) -> None:
+    raw = _raw()
+    raw["edges"]["conventions"]["gates_under_ablation"] = None
+    config = load_config(_dump(tmp_path, raw))
+    assert config.blockers("edges") == ["edges.conventions.gates_under_ablation"]
+    assert not config.blockers("importance") and not config.blockers("compare")
+    del raw["edges"]["conventions"]["effect"]
+    with pytest.raises(ValueError, match="edges.conventions.effect"):
+        load_config(_dump(tmp_path, raw, "missing.yaml"))
+
+
+def test_unimplemented_convention_is_rejected_by_name(tmp_path: Path) -> None:
+    raw = _raw()
+    raw["edges"]["conventions"]["jacobian_path"] = "replacement_model"
+    with pytest.raises(ValueError, match="not implemented"):
+        load_config(_dump(tmp_path, raw))
+
+
+def test_seeded_random_sampling_is_reproducible_and_needs_a_seed(tmp_path: Path) -> None:
+    from aspd.multimodel.posthoc.ids import GateId
+    from aspd.multimodel.posthoc.pipeline import sample_anchor_rows
+
+    raw = _raw()
+    random_config = load_config(_dump(tmp_path, raw, "random.yaml"))
+    rows = list(range(0, 40, 2))
+    gate = GateId("pre", 3)
+    first = sample_anchor_rows(rows, 5, random_config, pool_index=7, gate=gate)
+    assert first == sample_anchor_rows(rows, 5, random_config, pool_index=7, gate=gate)
+    assert first != sample_anchor_rows(rows, 5, random_config, pool_index=8, gate=gate)
+    assert len(first) == 5 and set(first) <= set(rows) and first == sorted(first)
+    raw["edges"]["anchor_sampling"] = "first_in_pool"
+    ordered = load_config(_dump(tmp_path, raw, "first.yaml"))
+    assert sample_anchor_rows(rows, 5, ordered, pool_index=7, gate=gate) == rows[:5]
+    raw["edges"]["anchor_sampling"] = "seeded_random"
+    raw["edges"]["anchor_seed"] = None
+    assert load_config(_dump(tmp_path, raw, "noseed.yaml")).blockers("edges") == [
+        "edges.anchor_seed"]
+
+
+@pytest.mark.parametrize(("source", "first_pool"), [
+    ("disjoint_after_importance", 3), ("same_as_importance", 0)])
+def test_edge_anchor_source_selects_the_pools(tmp_path: Path, source: str,
+                                              first_pool: int) -> None:
+    raw = _raw()
+    raw["anchors"]["edge_anchor_source"] = source
+    config = load_config(_dump(tmp_path, raw))
+    root = tmp_path / "run"
+    run_stages(config, root, ("importance", "representatives", "edges"))
+    selection = json.loads((root / "edges/selection.json").read_text())
+    pools = {anchor.split("-")[1] for ids in selection["anchors"].values() for anchor in ids}
+    assert f"p{first_pool}" in pools
+    importance_pools = {f"p{i}" for i in range(3)}
+    if source == "disjoint_after_importance":
+        assert not pools & importance_pools
+    else:
+        assert pools <= importance_pools | {"p3", "p4", "p5"} and pools & importance_pools
+    manifest = json.loads((root / "edges/manifest.json").read_text())
+    assert manifest["conventions"]["edge_anchor_source"] == source
+    assert manifest["first_pool_index"] == first_pool

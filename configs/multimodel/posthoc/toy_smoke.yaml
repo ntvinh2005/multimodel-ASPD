@@ -19,6 +19,7 @@ backend:
 anchors:
   importance_pools: 3
   edge_pools: 3
+  edge_anchor_source: disjoint_after_importance
 
 representatives:
   screening_metric: beta   # formulation default; ambiguity noted in the .tex
@@ -30,12 +31,20 @@ edges:
     mode: most_frequent
     count: 3                # per site
   max_anchors_per_gate: 4
+  anchor_sampling: seeded_random
+  anchor_seed: 0
   anchors_per_backward: 6
   ablation_check_records: 8
+  conventions:              # the only implemented values; see posthoc_analysis.md §5
+    jacobian_path: native_source_model
+    gates_under_ablation: frozen_natural
+    upstream_positions: same_anchor_token
+    upstream_set: all_selected_upstream_in_compute_order
+    effect: total
 
 parents:
   k_par: 8
   tau: 0.0
 
 comparison:
-  model_pairs: null         # null -> all unordered pairs in model order
+  model_pairs: all          # every unordered pair in model order
