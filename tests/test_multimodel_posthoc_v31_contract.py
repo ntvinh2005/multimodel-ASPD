@@ -51,13 +51,16 @@ def test_frozen_500m_config_matches_posthoc_ids() -> None:
     from aspd.multimodel.v3.main500m_config import load_main500m_config
     from aspd.multimodel.v3.registry import build_model_registry_2b
 
-    config = load_main500m_config(CONFIG)
+    try:
+        config = load_main500m_config(CONFIG)
+    except PermissionError as error:
+        # The config is marked full_training_authorized, so model validation re-checks
+        # the training-launch evidence (GPU preflight + exact-resume reports).  Those
+        # files are readable only by the training owner; see
+        # docs/multimodel/posthoc_analysis.md, "Real-run blockers".
+        pytest.skip(f"training-authorization evidence is not readable: {error.filename}")
     pending = [m.key for m in config.models if not getattr(m, "layer_prefixes", None)]
-    if pending:
-        # As of 2026-11-21, main still carries the pre-approval draft (model3_pending);
-        # the trained Gemma/SmolLM2/Granite contract lives on the unmerged
-        # aspd-v3.1-main500m-* branches.  The real backend cannot run until it is merged.
-        pytest.skip(f"frozen 500M config on this branch has unresolved models: {pending}")
+    assert not pending, f"frozen 500M config has unresolved models: {pending}"
     registry = build_model_registry_2b(config)
     assert tuple(config.architecture.model_order) == ("gemma", "smol", "granite")
     assert set(V3_LOGICAL_MATRICES) == set(MATRIX_NAMES)

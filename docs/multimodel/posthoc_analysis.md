@@ -141,23 +141,39 @@ defines per-anchor quantities only.
 
 ## 6. Real-run blockers
 
-Observed on 2026-11-21 from the `minhdatle` account:
+Observed on 2026-11-21 from the `minhdatle` account. This branch is based on
+`aspd-v3.1-feature-coherence-v1` (`6d998c8`), the latest evaluation branch. It contains
+the checkpoint's training commit `5ca3b43`, and its
+`configs/multimodel/aspd_v3/main500m_preparation_v1.yaml` matches the checkpoint
+byte-for-byte: file SHA-256 `f7a6d874…63be`, config fingerprint `7e44ead3…3902`,
+Gemma-2-2B / SmolLM2-1.7B / Granite-3.3-2B, 168 targets.
 
-1. **The 500M contract is not on `main`.** On `main`,
-   `configs/multimodel/aspd_v3/main500m_preparation_v1.yaml` still has a `model3_pending`
-   slot. The Gemma/SmolLM2/Granite configuration that the checkpoint was trained with
-   (commit `5ca3b43`) lives only on the unmerged `aspd-v3.1-main500m-*` and evaluation
-   branches. CONTRIBUTING requires official evaluations to run from a commit merged into
-   `main`. `tests/test_multimodel_posthoc_v31_contract.py` skips with this reason.
-2. **The trained config can't be loaded from this account.** On those branches,
-   `load_main500m_config` reads the owner's preflight report under
-   `/blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/preflight/`, whose files are
-   `-rw-------`. The checkpoint itself (`.../step-000061036`, manifest SHA-256
-   `735cd573…4969`) is readable. CONTRIBUTING's model-only evaluation release would
-   remove this dependency.
-3. **The v3.1 backend has never run on a GPU.** Its first run should be a bounded
-   smoke run, e.g. `importance_pools: 1`, two explicit gates, `max_anchors_per_gate: 2`,
-   written to a validation namespace.
+1. **The config can't be loaded from a non-owner account.** The YAML sets
+   `full_training_authorized: true`, so `V31Main500MConfig`'s model validator calls
+   `require_main_authorized()` at load time. That re-verifies the evidence that
+   authorized *launching training*:
+   - `validate_preflight_evidence()` reads
+     `/blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/preflight/preflight_report.json`.
+     It is the three-GPU preflight: 168 hooked targets, frozen sources, DCP
+     save/reload/resume, and bitwise resume on the real models.
+   - `validate_exact_resume_evidence()` reads
+     `/blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/resume_validation_job_50550194/benchmark_report.json`.
+     It is the bitwise-exact interrupted-vs-uninterrupted resume test.
+
+   Both files are `-rw-------`. Neither feeds any value into the encoder, the gates or
+   the rank-one factors; they only gate training launch. The checkpoint itself
+   (`.../step-000061036`, manifest SHA-256 `735cd573…4969`) is readable. To fix it, the
+   owner runs `chmod g+r` on those two files, or publishes the model-only evaluation
+   release that CONTRIBUTING describes. An evaluation-only loader that skips these two
+   checks keeps the fingerprint identical (verified read-only), but it bypasses an
+   owner fail-closed guard and is not implemented without the owner's approval.
+   `tests/test_multimodel_posthoc_v31_contract.py` skips with the unreadable file name.
+2. **This base is not merged into `main`.** CONTRIBUTING requires official evaluations
+   to run from a merged commit. A run from this branch is a validation run until the
+   evaluation branches are merged.
+3. **The v3.1 backend has never run on a GPU.** Its first run should be a small smoke run,
+   e.g. `importance_pools: 1`, two explicit gates, `max_anchors_per_gate: 2`, written to a
+   validation namespace.
 
 ## 7. Guide for agents extending this code
 
@@ -181,10 +197,10 @@ Observed on 2026-11-21 from the `minhdatle` account:
 
 | Check | Result |
 |---|---|
-| `pytest -q tests/test_multimodel_posthoc_math.py tests/test_multimodel_posthoc_edges.py tests/test_multimodel_posthoc_pipeline.py tests/test_multimodel_posthoc_v31_contract.py` | 29 passed, 1 skipped (blocker 1) in 11.6 s, CPU, `OMP_NUM_THREADS=1` |
+| `pytest -q tests/test_multimodel_posthoc_math.py tests/test_multimodel_posthoc_edges.py tests/test_multimodel_posthoc_pipeline.py tests/test_multimodel_posthoc_v31_contract.py` | 29 passed, 1 skipped (blocker 1, unreadable preflight report) in 6.9 s, CPU, `OMP_NUM_THREADS=1`, on base `6d998c8` |
 | `ruff check` (repository config) on all new Python files | passed |
 | Finite-difference identity `Δe_a/ε ≈ E_{b→a}` on tiny random Llama models and a fused-slice model (float64) | passed (tests) |
 | Exact equality of Taylor and full ablation on the linear `v → o` path | passed (tests) |
-| v3.1 backend API contract against `main` | API symbols pass; config check skipped (blocker 1) |
-| v3.1 backend API contract against `aspd-v3.1-feature-coherence-v1` (exported copy) | API symbols pass; config load fails on the permission blocker (blocker 2) |
+| v3.1 backend API contract on this base (`aspd-v3.1-feature-coherence-v1`) | API symbols pass; config check skipped (blocker 1) |
+| Frozen config with the two evidence checks stubbed out (scratch copy, not committed) | fingerprint `7e44ead3…` equals the checkpoint manifest; 168 targets |
 | Real checkpoint / GPU | not run |

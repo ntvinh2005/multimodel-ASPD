@@ -1,11 +1,11 @@
 """ASPD v3.1 three-model checkpoint backend.
 
-Status: ``IMPLEMENTED_NOT_VALIDATED`` -- written against the v3.1 APIs on ``main``
-(``main500m_config``, ``ModelOwnedMain2B``, ``ModelOwnedCheckpoint``,
-``DiagnosticAlignedAnchorStream``, ``capture_family_pool``) but not yet executed on a
-GPU with the real checkpoint.  The 500M checkpoint was trained from commit ``5ca3b43``
-(not on ``main`` as of 2026-11-21); confirm checkpoint/code compatibility before an
-official run (CONTRIBUTING.md: full evaluations run from a commit merged into ``main``).
+Status: ``IMPLEMENTED_NOT_VALIDATED`` -- uses the v3.1 APIs of the evaluation branch
+``aspd-v3.1-feature-coherence-v1`` (``main500m_config``, ``ModelOwnedMain2B``,
+``ModelOwnedCheckpoint``, ``DiagnosticAlignedAnchorStream``, ``capture_family_pool``),
+which contains the checkpoint's training commit ``5ca3b43``; not yet executed on a GPU.
+Loading the frozen config needs read access to the owner's training-authorization
+evidence; see ``docs/multimodel/posthoc_analysis.md`` ("Real-run blockers").
 
 Natural gates are computed exactly as the colocated evaluation extractor does
 (``extract_aspd_v3_paper_intruder_colocated._encode_colocated`` on the evaluation
