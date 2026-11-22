@@ -34,6 +34,15 @@ Run configs that implement this log:
    (`backend.options.source_dtype: bfloat16`)
 7. **Proposed thresholds and sample sizes approved** ("ok", 2026-11-21) as starting
    values, to be tuned. See C.
+8. **Skip the two training-launch evidence checks for this run** (2026-11-22, "fix our
+   loader just for this time"). The frozen 500M config re-checks the GPU-preflight and
+   exact-resume reports at load time, and only the training owner can read them. The v1
+   run configs set `backend.options.skip_training_launch_evidence: true`, which turns off
+   exactly `validate_preflight_evidence` and `validate_exact_resume_evidence` in an
+   evaluation-only subclass (`v31_backend.load_frozen_config`). Everything else still
+   runs. The loader also requires the config to reproduce the checkpoint manifest's file
+   SHA-256 (`f7a6d874…`) and config fingerprint (`7e44ead3…`). The template keeps `false`;
+   later runs need a new authorization.
 
 ## B. Fixed by the formulation itself (not settings)
 
@@ -111,9 +120,6 @@ Derivations are in `posthoc_thresholds.md`.
 2. **Edge-stage cost.** Up to ~2.9 M backward passes if every gate passes screening. Decide
    whether to cap screened gates per site (`edges.downstream_gates.count`) after the smoke
    run measures speed.
-3. **Read access for the config loader.** The frozen 500M config re-checks two
-   training-launch reports that only the training owner can read. The owner must
-   `chmod g+r` them, or approve an evaluation-only loader that skips those two checks
-   (see `posthoc_analysis.md`, "Real-run blockers").
+3. ~~Read access for the config loader.~~ **Resolved for the v1 runs (2026-11-22).** See A.8.
 4. **Merge into `main`.** Runs from this branch are validation runs under CONTRIBUTING
    until the evaluation branches are merged.

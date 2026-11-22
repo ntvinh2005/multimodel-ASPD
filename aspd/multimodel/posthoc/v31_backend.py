@@ -4,8 +4,9 @@ Status: ``IMPLEMENTED_NOT_VALIDATED`` -- uses the v3.1 APIs of the evaluation br
 ``aspd-v3.1-feature-coherence-v1`` (``main500m_config``, ``ModelOwnedMain2B``,
 ``ModelOwnedCheckpoint``, ``DiagnosticAlignedAnchorStream``, ``capture_family_pool``),
 which contains the checkpoint's training commit ``5ca3b43``; not yet executed on a GPU.
-Loading the frozen config needs read access to the owner's training-authorization
-evidence; see ``docs/multimodel/posthoc_analysis.md`` ("Real-run blockers").
+Loading the frozen config re-runs training-launch evidence checks on files only the
+training owner can read; ``skip_training_launch_evidence: true`` (researcher authorization
+2026-11-22, v1 runs) skips exactly those two checks -- see ``load_frozen_config``.
 
 Natural gates are computed exactly as the colocated evaluation extractor does
 (``extract_aspd_v3_paper_intruder_colocated._encode_colocated`` on the evaluation
@@ -21,17 +22,67 @@ Required ``backend.options``: ``training_config``, ``checkpoint``,
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
 import torch
+import yaml
 from torch import Tensor, nn
 
 from aspd.multimodel.posthoc.backend import AnchorPool, MatrixHookSpec, ModelInputs
 from aspd.multimodel.posthoc.ids import MatrixId
 
 SOURCE_DTYPES = {"bfloat16": torch.bfloat16, "float32": torch.float32}
+
+#: Training-launch evidence checks that ``V31Main500MConfig`` re-runs at load time because
+#: the frozen config is marked ``full_training_authorized``.  They read reports that only
+#: the training owner can open, and no value from them reaches the encoder, gates or
+#: factors.  ``skip_training_launch_evidence: true`` disables exactly these two.
+TRAINING_LAUNCH_EVIDENCE_CHECKS = ("validate_preflight_evidence", "validate_exact_resume_evidence")
+
+
+def load_frozen_config(
+    path: str | Path, checkpoint: str | Path, *, skip_training_launch_evidence: bool
+) -> Any:
+    """Load the frozen v3.1 training config and prove it is the checkpoint's config.
+
+    With ``skip_training_launch_evidence`` the two checks in
+    ``TRAINING_LAUNCH_EVIDENCE_CHECKS`` are replaced by no-ops in an evaluation-only
+    subclass; every other validator (structure, alignment and human-interpretability
+    evidence, readiness) still runs.  In both modes the loaded config must reproduce the
+    checkpoint manifest's ``config_file_sha256`` and ``config_fingerprint`` exactly.
+    """
+
+    from aspd.multimodel.v3.main500m_config import V31Main500MConfig, load_main500m_config
+
+    path = Path(path)
+    if skip_training_launch_evidence:
+
+        class _EvaluationOnlyConfig(V31Main500MConfig):
+            """Frozen training config for read-only evaluation; see module docstring."""
+
+            def validate_preflight_evidence(self) -> dict[str, Any]:
+                return {"status": "SKIPPED_FOR_READ_ONLY_EVALUATION"}
+
+            def validate_exact_resume_evidence(self) -> dict[str, Any]:
+                return {"status": "SKIPPED_FOR_READ_ONLY_EVALUATION"}
+
+        payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("ASPD v3.1 main 500M config must be a mapping")
+        config = _EvaluationOnlyConfig.model_validate(payload)
+    else:
+        config = load_main500m_config(path)
+    manifest = json.loads((Path(checkpoint) / "manifest.json").read_text(encoding="utf-8"))
+    file_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
+    if file_sha256 != manifest["config_file_sha256"]:
+        raise ValueError(f"{path} is not the checkpoint's training config (file SHA-256 differs)")
+    if config.fingerprint() != manifest["config_fingerprint"]:
+        raise ValueError("loaded config fingerprint differs from the checkpoint manifest")
+    return config
 
 
 def _pad_id(tokenizer: Any) -> int:
@@ -45,7 +96,6 @@ def _pad_id(tokenizer: Any) -> int:
 class V31CheckpointBackend:
     def __init__(self, options: Mapping[str, Any], *, work_dir: Path):
         from aspd.multimodel.v3.hooks import assert_frozen_backbone
-        from aspd.multimodel.v3.main500m_config import load_main500m_config
         from aspd.multimodel.v3.model_owned import ModelOwnedMain2B
         from aspd.multimodel.v3.model_owned_checkpoint import ModelOwnedCheckpoint
         from aspd.multimodel.v3.models import load_frozen_v3_model, load_v3_tokenizer
@@ -59,7 +109,13 @@ class V31CheckpointBackend:
         self.work_dir = Path(work_dir)
         self.device = torch.device(self.options["device"])
         self.local_files_only = bool(self.options.get("local_files_only", True))
-        self.config = load_main500m_config(self.options["training_config"])
+        self.skip_training_launch_evidence = bool(
+            self.options.get("skip_training_launch_evidence", False)
+        )
+        self.config = load_frozen_config(
+            self.options["training_config"], self.options["checkpoint"],
+            skip_training_launch_evidence=self.skip_training_launch_evidence,
+        )
         self.registry = build_model_registry_2b(self.config)
         self.model_keys = tuple(self.config.architecture.model_order)
         self.n_features = int(self.config.architecture.dictionary_size)
@@ -239,6 +295,10 @@ class V31CheckpointBackend:
             "dataset_manifest_sha256": self.options["dataset_manifest_sha256"],
             "split": self.options["split"],
             "source_dtype": self.options["source_dtype"],
+            "skipped_config_checks": (
+                list(TRAINING_LAUNCH_EVIDENCE_CHECKS) if self.skip_training_launch_evidence else []
+            ),
+            "config_matches_checkpoint_manifest": True,
             "pool_anchors": self.pool_anchors,
             "gate": "per-anchor z-score -> ReLU -> pool-wide BatchTopK; g = 1[g^s > 0]",
             "models": {

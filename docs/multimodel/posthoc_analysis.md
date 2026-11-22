@@ -161,26 +161,17 @@ the checkpoint's training commit `5ca3b43`, and its
 byte-for-byte: file SHA-256 `f7a6d874…63be`, config fingerprint `7e44ead3…3902`,
 Gemma-2-2B / SmolLM2-1.7B / Granite-3.3-2B, 168 targets.
 
-1. **The config can't be loaded from a non-owner account.** The YAML sets
-   `full_training_authorized: true`, so `V31Main500MConfig`'s model validator calls
-   `require_main_authorized()` at load time. That re-verifies the evidence that
-   authorized *launching training*:
-   - `validate_preflight_evidence()` reads
-     `/blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/preflight/preflight_report.json`.
-     It is the three-GPU preflight: 168 hooked targets, frozen sources, DCP
-     save/reload/resume, and bitwise resume on the real models.
-   - `validate_exact_resume_evidence()` reads
-     `/blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/resume_validation_job_50550194/benchmark_report.json`.
-     It is the bitwise-exact interrupted-vs-uninterrupted resume test.
-
-   Both files are `-rw-------`. Neither feeds any value into the encoder, the gates or
-   the rank-one factors; they only gate training launch. The checkpoint itself
-   (`.../step-000061036`, manifest SHA-256 `735cd573…4969`) is readable. To fix it, the
-   owner runs `chmod g+r` on those two files, or publishes the model-only evaluation
-   release that CONTRIBUTING describes. An evaluation-only loader that skips these two
-   checks keeps the fingerprint identical (verified read-only), but it bypasses an
-   owner fail-closed guard and is not implemented without the owner's approval.
-   `tests/test_multimodel_posthoc_v31_contract.py` skips with the unreadable file name.
+1. **Config loading from a non-owner account (resolved for the v1 runs).** The YAML sets
+   `full_training_authorized: true`, so `V31Main500MConfig`'s model validator re-verifies
+   the evidence that authorized *launching training*. `validate_preflight_evidence()`
+   reads `…/preflight/preflight_report.json` and `validate_exact_resume_evidence()` reads
+   `…/resume_validation_job_50550194/benchmark_report.json`. Both files are `-rw-------`
+   and owned by the training owner, and neither feeds any value into the analysis. With
+   researcher authorization (2026-11-22), the v1 run configs set
+   `skip_training_launch_evidence: true`: `v31_backend.load_frozen_config` skips exactly
+   those two checks and proves the config is the checkpoint's (file SHA-256 and
+   fingerprint equal to the checkpoint manifest). The alternative remains the owner
+   running `chmod g+r` on the two files.
 2. **This base is not merged into `main`.** CONTRIBUTING requires official evaluations
    to run from a merged commit. A run from this branch is a validation run until the
    evaluation branches are merged.
@@ -210,10 +201,9 @@ Gemma-2-2B / SmolLM2-1.7B / Granite-3.3-2B, 168 targets.
 
 | Check | Result |
 |---|---|
-| `pytest -q tests/test_multimodel_posthoc_math.py tests/test_multimodel_posthoc_edges.py tests/test_multimodel_posthoc_pipeline.py tests/test_multimodel_posthoc_v31_contract.py` | 34 passed, 1 skipped (blocker 1, unreadable preflight report) in 8.0 s, CPU, `OMP_NUM_THREADS=1`, on base `6d998c8` |
+| `pytest -q tests/test_multimodel_posthoc_math.py tests/test_multimodel_posthoc_edges.py tests/test_multimodel_posthoc_pipeline.py tests/test_multimodel_posthoc_v31_contract.py` | 36 passed in 15.5 s, CPU, `OMP_NUM_THREADS=1`, on base `6d998c8` (2026-11-22) |
 | `ruff check` (repository config) on all new Python files | passed |
 | Finite-difference identity `Δe_a/ε ≈ E_{b→a}` on tiny random Llama models and a fused-slice model (float64) | passed (tests) |
 | Exact equality of Taylor and full ablation on the linear `v → o` path | passed (tests) |
-| v3.1 backend API contract on this base (`aspd-v3.1-feature-coherence-v1`) | API symbols pass; config check skipped (blocker 1) |
-| Frozen config with the two evidence checks stubbed out (scratch copy, not committed) | fingerprint `7e44ead3…` equals the checkpoint manifest; 168 targets |
+| v3.1 backend contract on this base (`aspd-v3.1-feature-coherence-v1`) | API symbols pass; frozen config loads through `load_frozen_config` from a non-owner account, matches the checkpoint manifest (file SHA-256, fingerprint `7e44ead3…`), 168 targets; an altered config is rejected |
 | Real checkpoint / GPU | not run |

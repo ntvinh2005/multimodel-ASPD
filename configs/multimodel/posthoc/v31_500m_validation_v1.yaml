@@ -22,6 +22,9 @@ backend:
     device: cuda:0
     local_files_only: true
     pool_anchors: 2048               # training BatchTopK pool size; gates depend on it
+    # Researcher authorization 2026-11-22, this run only: skip the two training-launch
+    # evidence checks (owner-only files). Config still verified against the checkpoint.
+    skip_training_launch_evidence: true
 
 anchors:
   importance_pools: 50

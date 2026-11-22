@@ -17,6 +17,11 @@ from aspd.multimodel.posthoc.ids import MATRIX_NAMES, MATRIX_SITE
 
 REPO = Path(__file__).resolve().parents[1]
 CONFIG = REPO / "configs/multimodel/aspd_v3/main500m_preparation_v1.yaml"
+CHECKPOINT = Path(
+    "/blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/runs/"
+    "aspd_v3_1_three_model_168targets_c8192_k32_500m_v1_resume_step16000_authfix_5ca3b43/"
+    "checkpoints/step-000061036"
+)
 
 
 def _params(function) -> set[str]:
@@ -47,18 +52,13 @@ def test_v3_api_used_by_backend_exists() -> None:
 
 
 def test_frozen_500m_config_matches_posthoc_ids() -> None:
+    from aspd.multimodel.posthoc.v31_backend import load_frozen_config
     from aspd.multimodel.v3.config import V3_LOGICAL_MATRICES
-    from aspd.multimodel.v3.main500m_config import load_main500m_config
     from aspd.multimodel.v3.registry import build_model_registry_2b
 
-    try:
-        config = load_main500m_config(CONFIG)
-    except PermissionError as error:
-        # The config is marked full_training_authorized, so model validation re-checks
-        # the training-launch evidence (GPU preflight + exact-resume reports).  Those
-        # files are readable only by the training owner; see
-        # docs/multimodel/posthoc_analysis.md, "Real-run blockers".
-        pytest.skip(f"training-authorization evidence is not readable: {error.filename}")
+    if not (CHECKPOINT / "manifest.json").is_file():
+        pytest.skip(f"checkpoint manifest not available: {CHECKPOINT}")
+    config = load_frozen_config(CONFIG, CHECKPOINT, skip_training_launch_evidence=True)
     pending = [m.key for m in config.models if not getattr(m, "layer_prefixes", None)]
     assert not pending, f"frozen 500M config has unresolved models: {pending}"
     registry = build_model_registry_2b(config)
@@ -70,3 +70,14 @@ def test_frozen_500m_config_matches_posthoc_ids() -> None:
             assert target.grounding_kind == expected, target.key
     assert {"dataset_id", "dataset_revision", "split_modulus", "validation_buckets",
             "test_buckets", "split_seed", "sequence_length"} <= set(type(config.data).model_fields)
+
+
+def test_evaluation_loader_rejects_a_config_that_is_not_the_checkpoints(tmp_path: Path) -> None:
+    from aspd.multimodel.posthoc.v31_backend import load_frozen_config
+
+    if not (CHECKPOINT / "manifest.json").is_file():
+        pytest.skip(f"checkpoint manifest not available: {CHECKPOINT}")
+    altered = tmp_path / "altered.yaml"
+    altered.write_text(CONFIG.read_text(encoding="utf-8") + "\n# changed\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="not the checkpoint's training config"):
+        load_frozen_config(altered, CHECKPOINT, skip_training_launch_evidence=True)

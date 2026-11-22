@@ -23,6 +23,7 @@ backend:
     device: cuda:0
     local_files_only: true
     pool_anchors: 2048               # training BatchTopK pool size; gates depend on it
+    skip_training_launch_evidence: false   # true only with researcher authorization
 
 anchors:
   importance_pools: null             # PROPOSED 50 -- see docs/multimodel/posthoc_thresholds.md
