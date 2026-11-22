@@ -124,8 +124,10 @@ error, not a bug.
 
 ## 5. Open decisions
 
-Decided values and proposed thresholds with their derivation are pinned in
-[`posthoc_thresholds.md`](posthoc_thresholds.md).
+Every decision, who made it and why: [`posthoc_decisions.md`](posthoc_decisions.md).
+Approved values and their derivation: [`posthoc_thresholds.md`](posthoc_thresholds.md).
+Run configs: `configs/multimodel/posthoc/v31_500m_validation_v1.yaml` (analysis) and
+`v31_500m_validation_smoke_v1.yaml` (engineering smoke run).
 
 Every row is a required config field with no default. A `null` blocks only the stages
 that need it; `--check` lists them.

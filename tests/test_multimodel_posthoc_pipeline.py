@@ -161,6 +161,8 @@ def test_screened_selection_uses_the_screening_step() -> None:
     assert every == (GateId("mid", 0), GateId("mid", 3), GateId("pre", 0), GateId("pre", 3))
     capped = DownstreamGateSelection("screened", count=1).resolve(fire, support)
     assert capped == (GateId("mid", 3), GateId("pre", 0))
+    floored = DownstreamGateSelection("screened", min_importance_fires=5).resolve(fire, support)
+    assert floored == (GateId("mid", 3), GateId("pre", 0))  # pre/3 (3) and mid/0 (1) dropped
 
 
 def test_seeded_random_sampling_is_reproducible_and_needs_a_seed(tmp_path: Path) -> None:

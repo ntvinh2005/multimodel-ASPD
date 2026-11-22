@@ -7,15 +7,20 @@
 # and submit only from a clean worktree at a commit merged into main.
 #
 # Usage:
-#   CONFIG=configs/multimodel/posthoc/<versioned copy>.yaml STAGES=all \
-#     sbatch --account=thai slurm/multimodel/posthoc_analysis.sbatch
+#   CONFIG=configs/multimodel/posthoc/v31_500m_validation_smoke_v1.yaml STAGES=all \
+#     sbatch slurm/multimodel/posthoc_analysis.sbatch
 #
+# Resources match the single-B200 colocated three-owner extractors
+# (slurm/multimodel/aspd_v3_step13000_paper_intruder_extract.sbatch): three bf16 source
+# models plus three fp32 checkpoint owners on one GPU. Override --time at submission
+# (smoke: ~1 h; full run: set from the smoke run's measured backward-pass time).
 #SBATCH --job-name=aspd-posthoc
+#SBATCH --account=thai
 #SBATCH --partition=hpg-b200
 #SBATCH --gres=gpu:b200:1
-#SBATCH --time=04:00:00
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=96G
+#SBATCH --time=01:00:00
+#SBATCH --cpus-per-task=12
+#SBATCH --mem=256G
 #SBATCH --output=slurm/logs/aspd-posthoc-%j.out
 #SBATCH --error=slurm/logs/aspd-posthoc-%j.err
 

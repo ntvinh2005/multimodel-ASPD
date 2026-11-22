@@ -70,6 +70,9 @@ class DownstreamGateSelection:
     mode: str | None  # "screened", "explicit" or "most_frequent"
     gates: tuple[str, ...] = ()  # explicit: e.g. ("pre/12", "mid/7")
     count: int | None = None  # most_frequent: per site (required); screened: optional cap
+    #: screened/most_frequent: drop gates that fired fewer times in the importance stage
+    #: (their beta rests on too few samples).  None = no minimum.
+    min_importance_fires: int | None = None
 
     def resolve(
         self,
@@ -89,7 +92,10 @@ class DownstreamGateSelection:
         * ``explicit`` -- the listed gates.
 
         Frequency ties go to the lower feature index; never-firing gates are never selected.
+        ``min_importance_fires`` additionally drops gates with fewer importance firings.
         """
+
+        floor = max(1, self.min_importance_fires or 1)
 
         if self.mode == "explicit":
             return tuple(sorted(GateId.from_key(key) for key in self.gates))
@@ -99,7 +105,7 @@ class DownstreamGateSelection:
             selected = []
             for site in sorted(fire_counts):
                 counts = fire_counts[site]
-                kept = [c for c in range(len(counts)) if int(counts[c]) > 0
+                kept = [c for c in range(len(counts)) if int(counts[c]) >= floor
                         and has_representatives.get(GateId(site, c), 0) >= 2]
                 kept.sort(key=lambda c: (-int(counts[c]), c))
                 if self.count is not None:
@@ -112,7 +118,7 @@ class DownstreamGateSelection:
                 counts = fire_counts[site]
                 order = sorted(range(len(counts)), key=lambda c: (-int(counts[c]), c))
                 selected.extend(
-                    GateId(site, c) for c in order[: self.count] if int(counts[c]) > 0
+                    GateId(site, c) for c in order[: self.count] if int(counts[c]) >= floor
                 )
             return tuple(sorted(selected))
         raise PosthocBlocked(f"unknown downstream gate selection mode {self.mode!r}")
@@ -311,6 +317,8 @@ def load_config(path: str | Path) -> PosthocConfig:
             mode=selection.get("mode"),
             gates=tuple(selection.get("gates") or ()),
             count=None if selection.get("count") is None else int(selection["count"]),
+            min_importance_fires=(None if selection.get("min_importance_fires") is None
+                                  else int(selection["min_importance_fires"])),
         ),
         max_anchors_per_gate=_optional(edges, "max_anchors_per_gate", int),
         anchors_per_backward=_optional(edges, "anchors_per_backward", int),

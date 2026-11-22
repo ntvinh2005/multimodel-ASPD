@@ -1,10 +1,10 @@
 # Post-hoc analysis: pinned thresholds and sample sizes
 
-**Status: PROPOSED (2026-11-21), awaiting researcher approval.** These values are not in
-any executable config yet. `configs/multimodel/posthoc/v31_500m_template.yaml` keeps them
-`null` and points here. When a value is approved or retuned, add a row to the
-[tuning log](#tuning-log) and copy the value into a new, versioned run config. Never edit
-a config that already produced results.
+**Status: APPROVED as starting values (researcher, 2026-11-21).** They are in
+`configs/multimodel/posthoc/v31_500m_validation_v1.yaml`. When a value is retuned, add a
+row to the [tuning log](#tuning-log), record the reason in
+[`posthoc_decisions.md`](posthoc_decisions.md), and create a new versioned config
+(`…_v2.yaml`). Never edit a config that already produced results.
 
 Decided by the researcher on 2026-11-21 (not proposals):
 - representatives are ranked by **β only** (ρ not used);
@@ -45,7 +45,7 @@ Caveats: the orthogonality assumption ignores cross terms, and FVU is a mean ove
 matrices. This gives a **scale**, not a cut-off derived from data. Recompute it from the
 importance stage once it has run (`importance.safetensors` has β for every component).
 
-## 2. Proposed values
+## 2. Approved starting values
 
 **`representatives.tau_rep = 0.07`**. This is about half of $\beta_{\mathrm{ref}}$ at
 both sites. A component counts as a representative only if, when it fires, its
@@ -85,6 +85,13 @@ frequency is skewed: the top 1% of gates take about 10–12% of firings.
 `anchor_seed = 0`, **`anchors.edge_pools = 25`**. That's 51,200 anchors, where an average
 gate fires about 200 times, so the cap of 20 fills for all but the rarest gates.
 
+**`edges.downstream_gates.min_importance_fires = 50`**. A gate must fire at least 50 times
+in the importance stage to be analysed, so no representative is chosen from a β that
+rests on a handful of samples.
+
+**`edges.anchors_per_backward = 16`**, **`edges.ablation_check_records = 50`**. Cost and
+diagnostic settings only; they do not change any score.
+
 ## 3. Cost check before a full run
 
 The edge stage needs about one backward pass per (anchor, representative, model).
@@ -98,4 +105,5 @@ the number of screened gates per site.
 
 | Date | Field | Old → new | Evidence | Approved by |
 |---|---|---|---|---|
-| 2026-11-21 | all of §2 | — → proposed | §1 calculation; 500M held-out FVU and firing statistics | pending |
+| 2026-11-21 | all of §2 | — → proposed | §1 calculation; 500M held-out FVU and firing statistics | — |
+| 2026-11-21 | all of §2 | proposed → approved | researcher "ok" | researcher |
