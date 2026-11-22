@@ -20,7 +20,10 @@ OUT_ROOT="${OUT_ROOT:-${SHARE}/evaluations/${USER}/posthoc/${NAME}_${STAMP}}"
 test ! -e "${OUT_ROOT}" || { echo "output root exists: ${OUT_ROOT}" >&2; exit 2; }
 test -z "$(git status --porcelain --untracked-files=no)" || { echo "commit first" >&2; exit 2; }
 
-first=$(CONFIG="${CONFIG}" OUT_ROOT="${OUT_ROOT}" STAGES="importance,representatives" \
+# `env -u SHARDS`: this job is not an array task; SHARDS from the caller's environment
+# must not leak into it through --export=ALL (job 52380304 failed that way).
+first=$(env -u SHARDS CONFIG="${CONFIG}" OUT_ROOT="${OUT_ROOT}" \
+  STAGES="importance,representatives" \
   sbatch --parsable --export=ALL slurm/multimodel/posthoc_analysis.sbatch)
 edges=$(CONFIG="${CONFIG}" OUT_ROOT="${OUT_ROOT}" SHARDS="${SHARDS}" \
   sbatch --parsable --export=ALL --dependency="afterok:${first}" \
