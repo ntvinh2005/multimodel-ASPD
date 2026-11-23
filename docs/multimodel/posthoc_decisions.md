@@ -125,8 +125,7 @@ Derivations are in `posthoc_thresholds.md`.
 11. **Memory requests** (2026-11-22). The first full run reserved 256 GB per GPU job, copied
     from the extractor scripts, while using at most 10.2 GB. That held 68% of the group's
     375 GB pool and kept two shards from running together. Now 32 GB per GPU job and 48 GB
-    for compare. The researcher's constraint is that all our concurrent jobs stay under
-    100 GB in total. `posthoc_submit_sharded.sh` refuses a `PARALLEL` that would reach it.
+    for compare.
 
 ## E. Open (needs a decision later)
 

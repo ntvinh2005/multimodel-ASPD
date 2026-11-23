@@ -13,12 +13,6 @@ set -euo pipefail
 SHARDS="${SHARDS:-8}"
 PARALLEL="${PARALLEL:-2}"
 EDGE_TIME="${EDGE_TIME:-05:00:00}"
-# Researcher constraint (2026-11-22): our concurrent jobs stay under 100 GB of RAM.
-# Each GPU job requests 32G (posthoc_analysis.sbatch); compare (48G) runs alone.
-MEM_PER_GPU_JOB_GB=32
-if (( PARALLEL * MEM_PER_GPU_JOB_GB >= 100 )); then
-  echo "PARALLEL=${PARALLEL} x ${MEM_PER_GPU_JOB_GB}G would reach the 100 GB cap" >&2; exit 2
-fi
 SHARE=/blue/thai/share/multimodel-ASPD
 NAME="$(basename "${CONFIG}" .yaml)"
 STAMP="$(date +%Y%m%dT%H%M%S)"

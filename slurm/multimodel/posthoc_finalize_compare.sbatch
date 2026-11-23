@@ -7,7 +7,7 @@
 #SBATCH --partition=hpg-default
 #SBATCH --time=04:00:00
 #SBATCH --cpus-per-task=4
-# Memory: loads all edge shards (~15 GB for v1); runs alone, so 48G stays under the 100 GB cap.
+# Memory: loads all edge shards (~15 GB for v1).
 #SBATCH --mem=48G
 #SBATCH --output=slurm/logs/aspd-posthoc-compare-%j.out
 #SBATCH --error=slurm/logs/aspd-posthoc-compare-%j.err

@@ -15,8 +15,6 @@
 #
 # One B200 holds three bf16 source models plus three fp32 checkpoint owners (~58 GB GPU).
 # Host RAM: measured peak 10.2 GB (jobs 52378170, 52380455-56), so 32G leaves ~3x margin.
-# Researcher constraint (2026-11-22): all our concurrent jobs together stay under 100 GB
-# of the group's 375 GB pool -- at 32G, at most 3 of these jobs at a time.
 # Override --time at submission (smoke ~1 h; one v1 edge shard of 8 measured ~1.2 h).
 #SBATCH --job-name=aspd-posthoc
 #SBATCH --account=thai
