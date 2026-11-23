@@ -60,6 +60,8 @@ MODEL_SPECS = {
     },
 }
 DATASET_REVISION = "3be90335b66f24456a5d6659d9c8d208c0357119"
+QUICK_CONTEXT_PROTOCOL_SHA256 = "5ea04ee18e76f9fbf71c6816f7a31b052550e7f1a940a369d5dced5429338285"
+QUICK_CONTEXT_DISPLAY_MODEL_KEY = "gemma"
 COMPONENT_RE = re.compile(
     r"^(?P<model>[^.]+)\.L(?P<layer>\d+)\.(?P<matrix>[^/]+)/(?P<feature>\d+)$"
 )
@@ -408,6 +410,19 @@ def load_activation_examples(
         raise ValueError("activation-context extraction is not the final natural-gate run")
     if manifest["selected_split"] != "test":
         raise ValueError("activation-context extraction must use the frozen test split")
+    if manifest.get("protocol_sha256") != QUICK_CONTEXT_PROTOCOL_SHA256:
+        raise ValueError("activation-context extraction does not use the frozen Gemma display protocol")
+
+    source = manifest["source_model_provenance"][QUICK_CONTEXT_DISPLAY_MODEL_KEY]
+    from huggingface_hub import snapshot_download
+    from transformers import AutoTokenizer
+
+    tokenizer_snapshot = snapshot_download(
+        repo_id=source["model_id"],
+        revision=source["tokenizer_revision"],
+        local_files_only=True,
+    )
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_snapshot, local_files_only=True)
 
     requested = {
         site.lower(): {int(gate.split(":")[1]) for gate in frontend_gates if gate.startswith(site)}
@@ -432,10 +447,27 @@ def load_activation_examples(
                 gate_id = gate_key(site, feature)
                 examples = []
                 for context in row["contexts"][:4]:
+                    token_ids = [int(value) for value in context["token_ids"]]
                     activations = [float(value) for value in context["activations"]]
                     firings = [bool(value) for value in context["firings"]]
-                    if not activations or len(activations) > 65 or len(activations) != len(firings):
+                    if (
+                        not activations
+                        or len(activations) > 65
+                        or len(activations) != len(firings)
+                        or len(token_ids) != len(activations)
+                    ):
                         raise ValueError(f"unexpected natural-context window for {gate_id}")
+                    token_pieces = tokenizer.convert_ids_to_tokens(token_ids)
+                    if isinstance(token_pieces, str) or len(token_pieces) != len(token_ids):
+                        raise ValueError(f"tokenizer pieces lost position alignment for {gate_id}")
+                    token_texts = [
+                        tokenizer.decode(
+                            [token_id],
+                            skip_special_tokens=False,
+                            clean_up_tokenization_spaces=False,
+                        )
+                        for token_id in token_ids
+                    ]
                     center_candidates = [
                         position
                         for position, (activation, firing) in enumerate(
@@ -462,6 +494,9 @@ def load_activation_examples(
                             "documentId": str(context["document_id"]),
                             "firings": firings,
                             "sourceGroup": str(context["source_group"]),
+                            "tokenIds": token_ids,
+                            "tokenPieces": [str(value) for value in token_pieces],
+                            "tokenTexts": token_texts,
                         }
                     )
                 rows.append(
@@ -491,6 +526,13 @@ def load_activation_examples(
         "splitUnit": manifest["split_unit"],
         "windowTokens": 65,
         "relationToGraph": "independent-natural-firing-extraction; examples are not graph anchors",
+        "displayTokenizer": {
+            "modelKey": QUICK_CONTEXT_DISPLAY_MODEL_KEY,
+            "modelId": source["model_id"],
+            "revision": source["tokenizer_revision"],
+            "protocolSha256": manifest["protocol_sha256"],
+            "axis": "saved token_ids, activations, and firings are position-aligned on the Gemma display-tokenizer axis",
+        },
     }
     return sorted(rows, key=lambda row: (row["site"], row["featureIndex"])), provenance
 

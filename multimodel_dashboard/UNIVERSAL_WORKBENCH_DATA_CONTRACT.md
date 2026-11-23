@@ -28,7 +28,8 @@ references or non-finite measured values.
 The export is regenerated with:
 
 ```bash
-python3 multimodel_dashboard/scripts/export_measured_workbench.py \
+HF_HOME=/blue/thai/vinhnguyen1/multimodel-ASPD/cache/huggingface \
+  .venv/bin/python multimodel_dashboard/scripts/export_measured_workbench.py \
   --artifact-root /blue/thai/share/multimodel-ASPD/evaluations/minhdatle/posthoc/v31_500m_validation_v1_20261122T223718 \
   --activation-context-root /blue/thai/vinhnguyen1/aspd_v3/evaluation/quick_intruder_jaccard_500m_v1/extraction/full/job_51194062 \
   --output multimodel_dashboard/src/workbench/data/measuredWorkbenchDataset.json
@@ -52,9 +53,15 @@ rounding in stored `w` changed (maximum absolute difference approximately `1.27e
 Canonical context text and continuous `g^s` were not retained in the immutable edge artifact. The
 Examples panel therefore uses a separate, hash-verified natural-firing extraction from checkpoint
 step 61,036 on the document-disjoint test split. It exports up to four existing contexts for every
-gate present in the bounded graph, including the saved activation/firing window and measured center
-`g^s`. These examples are not the contribution-graph anchors and do not by themselves validate a
-semantic interpretation. The manifest preserves both source hashes and this relationship explicitly.
+gate present in the bounded graph, including the saved token IDs, activation/firing window and
+measured center `g^s`. The exporter verifies the frozen protocol hash and decodes every position with
+`google/gemma-2-2b-it` tokenizer revision
+`299a8560bedf22ed1c72a8a11e7dce4a7f9f51f8` from the local Hugging Face cache. Raw tokenizer pieces,
+formatted one-token decodes, token IDs, continuous values, and binary support remain one-to-one.
+The UI uses one activation color scale per feature across its displayed examples and marks the saved
+peak separately. These examples are not the contribution-graph anchors and do not by themselves
+validate a semantic interpretation. The manifest preserves both source hashes and this relationship
+explicitly.
 `signedEffect` is measured first-order Taylor `E`; `upstreamCoefficient` and `gradient` remain null
 because the artifact does not store them separately.
 

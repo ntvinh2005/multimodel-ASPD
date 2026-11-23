@@ -56,6 +56,13 @@ export interface DatasetManifest {
       splitUnit: string;
       windowTokens: number;
       relationToGraph: string;
+      displayTokenizer: {
+        modelKey: string;
+        modelId: string;
+        revision: string;
+        protocolSha256: string;
+        axis: string;
+      };
     };
     verification: string;
     limitations: string[];
@@ -127,6 +134,9 @@ export interface ActivationExample {
   documentId: string;
   firings: boolean[];
   sourceGroup: string;
+  tokenIds: number[];
+  tokenPieces: string[];
+  tokenTexts: string[];
 }
 
 export interface GateActivationExamples {

@@ -27,6 +27,8 @@ describe("measured Workbench bundle", () => {
   it("covers every displayed gate with hash-provenanced natural firing contexts", () => {
     expect(measuredWorkbenchDataset.manifest.export?.activationExamples?.naturalGateOnly).toBe(true);
     expect(measuredWorkbenchDataset.manifest.export?.activationExamples?.selectedSplit).toBe("test");
+    expect(measuredWorkbenchDataset.manifest.export?.activationExamples?.displayTokenizer.modelKey).toBe("gemma");
+    expect(measuredWorkbenchDataset.manifest.export?.activationExamples?.displayTokenizer.revision).toBe("299a8560bedf22ed1c72a8a11e7dce4a7f9f51f8");
     expect(measuredWorkbenchDataset.activationExamples).toHaveLength(measuredWorkbenchDataset.gates.length);
     for (const record of measuredWorkbenchDataset.activationExamples ?? []) {
       expect(record.examples.length).toBeGreaterThan(0);
@@ -34,6 +36,9 @@ describe("measured Workbench bundle", () => {
       for (const example of record.examples) {
         expect(example.firings[example.centerPosition]).toBe(true);
         expect(example.activations[example.centerPosition]).toBe(example.activation);
+        expect(example.tokenIds).toHaveLength(example.activations.length);
+        expect(example.tokenPieces).toHaveLength(example.activations.length);
+        expect(example.tokenTexts).toHaveLength(example.activations.length);
       }
     }
   });
@@ -54,5 +59,9 @@ describe("measured Workbench bundle", () => {
     const wrongParentRule = structuredClone(rawDataset) as unknown as Record<string, any>;
     wrongParentRule.manifest.export.parentBackend.rule.k_par = 9;
     expect(() => validateMeasuredWorkbenchDataset(wrongParentRule)).toThrow(/parent backend rule/);
+
+    const misalignedTokens = structuredClone(rawDataset) as unknown as Record<string, any>;
+    misalignedTokens.activationExamples[0].examples[0].tokenPieces.pop();
+    expect(() => validateMeasuredWorkbenchDataset(misalignedTokens)).toThrow(/one-to-one token/);
   });
 });

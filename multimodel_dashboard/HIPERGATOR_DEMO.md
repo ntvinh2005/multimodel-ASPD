@@ -14,7 +14,9 @@ does not load model weights, run inference, request a GPU, or expose a public po
   visualization subset, not a dictionary-wide estimate or general causal validation.
 - The Examples tab uses up to four saved natural-firing contexts per displayed gate from a separate
   hash-verified test-split extraction. They are not the selected contribution-graph anchors and are
-  evidence for forming semantic hypotheses, not validated feature labels.
+  evidence for forming semantic hypotheses, not validated feature labels. Each saved Gemma token ID
+  is rendered against its position-aligned continuous activation and binary selected support; the
+  display does not claim token equivalence across the three source-model tokenizers.
 - Parent edges and per-anchor parent distributions are exported from the completed, hash-verified
   profiles backend (job `52480152`), rather than reconstructed by the browser adapter.
 

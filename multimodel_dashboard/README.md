@@ -16,9 +16,10 @@ npm run dev
 ```
 
 Implemented: multi-gate/model selection, synchronized gate spotlight, model-separated layer-aware
-graphs, parent/child/both traversal to three hops, aligned-anchor switching, signed directed edges,
-edge-width scaling, exact edge details, component locator heatmaps, parent-distribution comparison,
-hash-provenanced natural gate activation contexts, zoom/pan, and local hypothesis persistence.
+graphs, explicit parent/child hop badges, parent/child/both traversal to three hops, aligned-anchor
+switching, signed directed edges, data-scaled edge filtering, exact edge details, component locator
+heatmaps, parent-distribution comparison, Gemma-token-aligned natural gate activation heatmaps,
+bounded zoom/pan, and local hypothesis persistence.
 
 The measured JSON adapter validates references, finite numeric fields, the non-synthetic provenance
 flag, and the absence of cross-model dependency edges before rendering. Not yet implemented:
