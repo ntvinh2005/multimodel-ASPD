@@ -1,0 +1,31 @@
+.uw-gates label em { margin-left: 10px; color: #d6bf81; font-style: normal; letter-spacing: 0; }
+.uw-gates button.available { border-style: dashed; opacity: .65; }
+.uw-edge-state { padding: 8px 12px; border-bottom: 1px solid #6b5127; background: #211b12; color: #e5bd73; font-size: 9px; }
+.uw-trace-summary { display: grid; gap: 3px; margin: -7px 0 12px; padding: 9px; border-left: 2px solid #68c9be; background: #0b181a; font-size: 9px; }
+.uw-trace-summary span, .uw-locator-legend { color: #8798ad; font-size: 9px; line-height: 1.5; }
+.uw-provenance-drawer { margin-top: 10px; border: 1px solid var(--l); background: #0b111a; padding: 8px 11px; font-size: 9px; }
+.uw-provenance-drawer summary { cursor: pointer; color: #8da0b8; }
+.uw-provenance-drawer dl { display: grid; grid-template-columns: 110px 1fr; gap: 6px 10px; }
+.uw-provenance-drawer dt { color: #718197; }
+.uw-provenance-drawer dd { margin: 0; font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
+.uw-node:focus, .uw-edge:focus { outline: none; filter: drop-shadow(0 0 4px #fff); }
+.uw-model-coverage { margin: -8px 0 12px; padding: 7px 9px; border: 1px solid #2d3b50; background: #0b121c; color: #9babc0; font-size: 9px; line-height: 1.45; }
+.uw-pairwise { display: grid; gap: 5px; }
+.uw-pairwise > div { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; padding: 8px; border: 1px solid #2b394d; background: #0a111a; font-size: 8px; }
+.uw-pairwise span { color: #94a4b8; }
+.uw-tabs { grid-template-columns: repeat(5, 1fr); }
+.uw-pin-action { width: 100%; margin: -6px 0 12px; border-color: #53a89f !important; color: #087f75 !important; background: #eaf7f5 !important; }
+.uw-connections { margin-top: 16px; }
+.uw-connections > header, .uw-pinned section > header { display: flex; justify-content: space-between; color: #64748b; font-size: 9px; margin-bottom: 5px; }
+.uw-connections > p { color: #64748b; font-size: 9px; }
+.uw-connections > button { width: 100%; display: grid; grid-template-columns: 18px 1fr auto auto; gap: 6px; align-items: center; margin-top: 4px; text-align: left; font-size: 8px; }
+.uw-connections > button > b { color: #94a3b8; }
+.uw-connections > button > small.neg { color: #b4233a; }
+.uw-connections > button > small.pos { color: #087f5b; }
+.uw-pinned { padding: 18px; }
+.uw-pinned h2 { margin: 7px 0; font: 600 19px Georgia, serif; }
+.uw-pinned > p { color: #64748b; font-size: 9px; line-height: 1.5; }
+.uw-pinned section { margin-top: 16px; }
+.uw-pinned article { display: grid; grid-template-columns: 1fr 28px; gap: 5px; margin-top: 5px; }
+.uw-pinned article > button:first-child { display: grid; gap: 3px; text-align: left; }
+.uw-pinned article small { color: #64748b; font-size: 8px; }
