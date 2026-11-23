@@ -17,6 +17,11 @@ the objects behind them. It is CPU-only and reads the verified ``importance``,
     are listed, ranked by frequency and then mean ``w``. The full lists are in
     ``parents_per_anchor``.
 
+``parent_distributions.safetensors`` (+ ``distributions_vocab.json``)
+    ``S^{(n)}_{p,i}(xi; alpha)`` and ``pi^{(n)}_{p,i}(xi; alpha)`` for every analysed (gate,
+    model, anchor) and parent gate ``xi``, with ``|R|``, ``M`` and the validity flag per
+    (gate, model, anchor).  Formulation objects, stored in full.
+
 ``gate_parent_profile.jsonl``
     One line per analysed gate ``(p, i)``. For each model: the mean of
     ``pi^{(n)}_{p,i}(xi; alpha)`` over valid anchors, the mean total strength ``M``, and the
@@ -32,6 +37,7 @@ the objects behind them. It is CPU-only and reads the verified ``importance``,
 from __future__ import annotations
 
 import json
+import math
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -140,10 +146,18 @@ class GateModelProfile:
         parents: Mapping[ComponentId, Sequence[Parent]],
         write_norms: Mapping[ComponentId, float],
         sigmas: Mapping[ComponentId, float],
-    ) -> None:
-        self.anchors += 1
+    ) -> tuple[dict[GateId, float], dict[GateId, float] | None]:
+        """Add one anchor; return its ``S`` and ``pi`` (``None`` when invalid)."""
+
         scores = aggregated_parent_scores(parents, self.representatives, write_norms, sigmas)
         pi = parent_distribution(scores)
+        self.add_distribution(scores, pi)
+        return scores, pi
+
+    def add_distribution(
+        self, scores: Mapping[GateId, float], pi: Mapping[GateId, float] | None
+    ) -> None:
+        self.anchors += 1
         if not self.representatives or pi is None:
             return
         self.valid += 1
@@ -176,6 +190,66 @@ def shared_top_parent_gates(profiles: Mapping[str, GateModelProfile], top: int) 
     if len(tops) < 2:
         return []
     return sorted(g.key for g in set.intersection(*tops))
+
+
+# ------------------------------------------------- per-anchor S and pi rows
+class DistributionRows:
+    """Columnar store of ``S`` and ``pi`` per (gate, model, anchor, xi) (flushed per gate)."""
+
+    HEADER = (("gate", torch.int32), ("model", torch.int16), ("anchor", torch.int32),
+              ("representatives", torch.int16), ("M", torch.float64), ("valid", torch.bool))
+    ENTRY = (("row", torch.int64), ("xi", torch.int32), ("S", torch.float64),
+             ("pi", torch.float64))
+
+    def __init__(self, models: Sequence[str]) -> None:
+        self.models = {m: i for i, m in enumerate(models)}
+        self.gates: dict[GateId, int] = {}
+        self.anchor_ids: dict[str, int] = {}
+        self._rows = 0
+        self._pending: dict[str, list[Any]] = defaultdict(list)
+        self._chunks: dict[str, list[Tensor]] = defaultdict(list)
+
+    def _id(self, table: dict, key: Any) -> int:
+        return table.setdefault(key, len(table))
+
+    def add(self, gate: GateId, model: str, anchor_id: str, representatives: int,
+            scores: Mapping[GateId, float], pi: Mapping[GateId, float] | None) -> None:
+        row = self._rows
+        self._rows += 1
+        valid = bool(representatives) and pi is not None
+        for name, value in (("gate", self._id(self.gates, gate)), ("model", self.models[model]),
+                            ("anchor", self._id(self.anchor_ids, anchor_id)),
+                            ("representatives", representatives),
+                            ("M", float(sum(scores.values()))), ("valid", valid)):
+            self._pending[name].append(value)
+        for xi, s in scores.items():
+            self._pending["row"].append(row)
+            self._pending["xi"].append(self._id(self.gates, xi))
+            self._pending["S"].append(s)
+            self._pending["pi"].append(pi[xi] if pi is not None else math.nan)
+
+    def flush(self) -> None:
+        if not self._pending:
+            return
+        for name, dtype in (*self.HEADER, *self.ENTRY):
+            self._chunks[name].append(torch.tensor(self._pending[name], dtype=dtype))
+        self._pending = defaultdict(list)
+
+    def tensors(self) -> dict[str, Tensor]:
+        self.flush()
+        out = {}
+        for prefix, columns in (("header_", self.HEADER), ("entry_", self.ENTRY)):
+            for name, dtype in columns:
+                chunks = self._chunks[name]
+                out[prefix + name] = torch.cat(chunks) if chunks else torch.zeros(0, dtype=dtype)
+        return out
+
+    def vocab(self) -> dict[str, Any]:
+        return {
+            "models": [m for m, _ in sorted(self.models.items(), key=lambda kv: kv[1])],
+            "gates": [g.key for g, _ in sorted(self.gates.items(), key=lambda kv: kv[1])],
+            "anchor_ids": [a for a, _ in sorted(self.anchor_ids.items(), key=lambda kv: kv[1])],
+        }
 
 
 # ------------------------------------------------------- per-anchor parent rows
