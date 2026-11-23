@@ -1,5 +1,28 @@
 # Multi-model ASPD and Crosscoder research dashboard
 
+To review the frontend through a time-limited CPU session on HiPerGator, follow
+[`HIPERGATOR_DEMO.md`](HIPERGATOR_DEMO.md). The procedure uses an SSH tunnel and does not load models
+or request a GPU.
+
+## Universal Mechanism Discovery Workbench
+
+The default route is a graph-first local workbench for the ASPD v3.1 three-model 500M lineage. It
+runs from clearly labeled deterministic synthetic post-hoc data even without the Python API.
+
+```powershell
+npm install
+npm run dev
+```
+
+Implemented: multi-gate/model selection, synchronized gate spotlight, model-separated layer-aware
+graphs, parent/child/both traversal to three hops, aligned-anchor switching, signed directed edges,
+edge-width scaling, exact edge details, component locator heatmaps, parent-distribution comparison,
+zoom/pan, and local hypothesis persistence.
+
+Not yet implemented: imported post-hoc file validation, animated playback, path ranking, complete
+circuit-difference heuristics, intervention charts, image export, session JSON import/export, and
+automated browser tests. See [the data contract](UNIVERSAL_WORKBENCH_DATA_CONTRACT.md).
+
 Local FastAPI + React/TypeScript interface for inspecting real `posthoc.safetensors`, taxonomy,
 Crosscoder model-diffing artifacts, exact activation contexts, and the tracked post-ranking
 cross-method comparison. It has no demo-data or random fallback path. Missing data is rendered as

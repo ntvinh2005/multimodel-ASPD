@@ -9,6 +9,7 @@ import FeatureExplorer from "./components/FeatureExplorer";
 import MethodComparison from "./components/MethodComparison";
 import DeltaResearch from "./components/DeltaResearch";
 import Overview from "./components/Overview";
+import UniversalWorkbench from "./workbench/UniversalWorkbench";
 import type {
   CrosscoderOverviewPayload,
   HealthPayload,
@@ -17,6 +18,7 @@ import type {
 } from "./types";
 
 type View =
+  | "universal-workbench"
   | "aspd-overview"
   | "aspd-feature"
   | "aspd-candidates"
@@ -40,7 +42,7 @@ const unavailableComparison = (message: string): MethodComparisonPayload => ({
 });
 
 export default function App() {
-  const [view, setView] = useState<View>("aspd-overview");
+  const [view, setView] = useState<View>("universal-workbench");
   const [overview, setOverview] = useState<OverviewPayload | null>(null);
   const [health, setHealth] = useState<HealthPayload | null>(null);
   const [crosscoder, setCrosscoder] = useState<CrosscoderOverviewPayload | null>(null);
@@ -53,6 +55,7 @@ export default function App() {
   const [compareIds, setCompareIds] = useState<number[]>(() => JSON.parse(localStorage.getItem("aspd-compare") || "[]") as number[]);
 
   useEffect(() => {
+    if (view === "universal-workbench") return;
     Promise.all([api.overview(), api.health()])
       .then(([aspdOverview, aspdHealth]) => { setOverview(aspdOverview); setHealth(aspdHealth); })
       .catch((reason: Error) => setError(reason.message));
@@ -66,7 +69,7 @@ export default function App() {
     api.researchComparison()
       .then(setResearchComparison)
       .catch((reason: Error) => setResearchComparison(unavailableComparison(reason.message)));
-  }, []);
+  }, [view]);
   useEffect(() => localStorage.setItem("aspd-bookmarks", JSON.stringify(bookmarks)), [bookmarks]);
   useEffect(() => localStorage.setItem("aspd-compare", JSON.stringify(compareIds)), [compareIds]);
 
@@ -79,8 +82,10 @@ export default function App() {
     setCompareIds((old) => old.includes(id) ? old.filter((x) => x !== id) : old.length < 5 ? [...old, id] : old);
   }
 
-  if (error) return <main className="boot-state"><div className="error-box"><h1>Dashboard could not load real ASPD artifacts</h1>{error}</div></main>;
-  if (!overview || !health) return <main className="boot-state"><div className="loading">Loading and validating P1–P5 artifacts…</div></main>;
+  if (view !== "universal-workbench" && error) return <main className="boot-state"><div className="error-box"><h1>Dashboard could not load real ASPD artifacts</h1>{error}</div></main>;
+  if (view !== "universal-workbench" && (!overview || !health)) return <main className="boot-state"><div className="loading">Loading and validating P1–P5 artifacts…</div></main>;
+  if (view === "universal-workbench") return <UniversalWorkbench />;
+  if (!overview || !health) return null;
   const method = view.startsWith("crosscoder") ? "Crosscoder" : view === "research-comparison" ? "Cross-method Comparison" : "ASPD";
   const title = method === "Crosscoder"
     ? crosscoder?.metadata?.model_ids.filter(Boolean).join(" ↔ ") || "Crosscoder artifacts"
@@ -91,6 +96,9 @@ export default function App() {
     <aside className="sidebar">
       <div className="brand"><span>MODEL DIFFING</span><strong>Research Inspector</strong><small>Measurement · interpretation · hypothesis</small></div>
       <nav>
+        <NavGroup label="ASPD v3.1">
+          <NavButton view="universal-workbench" current={view} label="Universal Workbench" icon="⌁" onClick={navigate} />
+        </NavGroup>
         <NavGroup label="ASPD">
           <NavButton view="aspd-overview" current={view} label="Overview" icon="◫" onClick={navigate} />
           <NavButton view="aspd-feature" current={view} label="Feature Explorer" icon="⌕" onClick={navigate} />
