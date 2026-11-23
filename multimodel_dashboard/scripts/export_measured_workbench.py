@@ -255,7 +255,110 @@ def component_record(
     }
 
 
-def build_bundle(root: Path, gates_per_site: int, display_parent_gates: int) -> dict[str, Any]:
+def load_activation_examples(
+    context_root: Path,
+    frontend_gates: list[str],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Load only the natural-firing examples needed by the browser bundle."""
+    manifest_path = context_root / "experiment_manifest.json"
+    manifest = read_json(manifest_path)
+    if manifest["checkpoint_step"] != 61036 or not manifest["natural_gate_only"]:
+        raise ValueError("activation-context extraction is not the final natural-gate run")
+    if manifest["selected_split"] != "test":
+        raise ValueError("activation-context extraction must use the frozen test split")
+
+    requested = {
+        site.lower(): {int(gate.split(":")[1]) for gate in frontend_gates if gate.startswith(site)}
+        for site in ("PRE", "MID")
+    }
+    rows: list[dict[str, Any]] = []
+    context_hashes: dict[str, str] = {}
+    for site in ("pre", "mid"):
+        path = context_root / f"{site}_feature_contexts.jsonl"
+        actual_hash = sha256_file(path)
+        expected_hash = manifest["site_reports"][site]["feature_contexts_sha256"]
+        if actual_hash != expected_hash:
+            raise ValueError(f"{site} feature contexts failed SHA-256 verification")
+        context_hashes[site] = actual_hash
+        remaining = set(requested[site])
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                row = json.loads(line)
+                feature = int(row["feature"])
+                if feature not in remaining:
+                    continue
+                gate_id = gate_key(site, feature)
+                examples = []
+                for context in row["contexts"][:4]:
+                    activations = [float(value) for value in context["activations"]]
+                    firings = [bool(value) for value in context["firings"]]
+                    if not activations or len(activations) > 65 or len(activations) != len(firings):
+                        raise ValueError(f"unexpected natural-context window for {gate_id}")
+                    center_candidates = [
+                        position
+                        for position, (activation, firing) in enumerate(
+                            zip(activations, firings, strict=True)
+                        )
+                        if firing
+                        and math.isclose(
+                            activation,
+                            float(context["activation"]),
+                            rel_tol=1e-6,
+                            abs_tol=1e-8,
+                        )
+                    ]
+                    if len(center_candidates) != 1:
+                        raise ValueError(f"saved center firing is inconsistent for {gate_id}")
+                    examples.append(
+                        {
+                            "activation": float(context["activation"]),
+                            "activations": activations,
+                            "anchorId": str(context["anchor_id"]),
+                            "anchorIndex": int(context["anchor_index"]),
+                            "centerPosition": center_candidates[0],
+                            "context": str(context["context"]),
+                            "documentId": str(context["document_id"]),
+                            "firings": firings,
+                            "sourceGroup": str(context["source_group"]),
+                        }
+                    )
+                rows.append(
+                    {
+                        "gateId": gate_id,
+                        "site": site.upper(),
+                        "featureIndex": feature,
+                        "examples": examples,
+                    }
+                )
+                remaining.remove(feature)
+                if not remaining:
+                    break
+        if remaining:
+            raise ValueError(f"activation contexts missing features for {site}: {sorted(remaining)}")
+
+    provenance = {
+        "artifactRoot": str(context_root),
+        "checkpointStep": manifest["checkpoint_step"],
+        "checkpointManifestSha256": manifest["checkpoint_manifest_sha256"],
+        "evaluationGitSha": manifest["evaluation_git_sha"],
+        "experimentFamily": manifest["experiment_family"],
+        "extractionManifestSha256": sha256_file(manifest_path),
+        "featureContextSha256": context_hashes,
+        "naturalGateOnly": True,
+        "selectedSplit": manifest["selected_split"],
+        "splitUnit": manifest["split_unit"],
+        "windowTokens": 65,
+        "relationToGraph": "independent-natural-firing-extraction; examples are not graph anchors",
+    }
+    return sorted(rows, key=lambda row: (row["site"], row["featureIndex"])), provenance
+
+
+def build_bundle(
+    root: Path,
+    activation_context_root: Path,
+    gates_per_site: int,
+    display_parent_gates: int,
+) -> dict[str, Any]:
     importance_manifest = read_json(root / "importance/manifest.json")
     representatives_payload = read_json(root / "representatives/representatives.json")
     representatives = representatives_payload["representatives"]
@@ -413,6 +516,9 @@ def build_bundle(root: Path, gates_per_site: int, display_parent_gates: int) -> 
         {row["gateId"] for row in component_rows},
         key=lambda key: (0 if key.startswith("PRE:") else 1, int(key.split(":")[1])),
     )
+    activation_examples, activation_provenance = load_activation_examples(
+        activation_context_root, frontend_gates
+    )
     first = scenarios[0]
     default_gate_ids = [first["gateId"], *first["displayParentGateIds"]]
     default_gate_ids = list(dict.fromkeys(default_gate_ids))
@@ -492,10 +598,13 @@ def build_bundle(root: Path, gates_per_site: int, display_parent_gates: int) -> 
                 ),
                 "selectedScenarios": scenarios,
                 "sourceHashes": source_hashes,
+                "activationExamples": activation_provenance,
                 "verification": "uses immutable COMPLETE hash chain; selected tensors read-only",
                 "floatPrecision": "12 decimal places for cross-runtime deterministic JSON",
                 "limitations": [
                     "canonical context text and continuous g^s were not stored in the edge artifact",
+                    "displayed natural-firing contexts come from a separate test-split extraction and are not the graph anchors",
+                    "four saved contexts per gate support semantic inspection, not a validated feature interpretation",
                     "graph edges are first-order Taylor measurements, not general causal validation",
                     "the bounded bundle is a deterministic visualization subset, not a population estimate",
                 ],
@@ -518,6 +627,7 @@ def build_bundle(root: Path, gates_per_site: int, display_parent_gates: int) -> 
             parent_distributions,
             key=lambda row: (row["anchorId"], row["gateId"], row["modelId"]),
         ),
+        "activationExamples": activation_examples,
     }
     canonical = canonicalize_numbers(payload)
     validate_bundle(canonical)
@@ -550,16 +660,26 @@ def validate_bundle(payload: dict[str, Any]) -> None:
             raise ValueError(f"unexpected evidence label on {edge['id']}")
     if not payload["edges"]:
         raise ValueError("bundle contains no measured edges")
+    gate_ids = {row["id"] for row in payload["gates"]}
+    example_gate_ids = {row["gateId"] for row in payload["activationExamples"]}
+    if example_gate_ids != gate_ids:
+        raise ValueError("activation examples must cover every exported gate")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--artifact-root", type=Path, required=True)
+    parser.add_argument("--activation-context-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--gates-per-site", type=int, default=2)
     parser.add_argument("--display-parent-gates", type=int, default=6)
     args = parser.parse_args()
-    bundle = build_bundle(args.artifact_root.resolve(), args.gates_per_site, args.display_parent_gates)
+    bundle = build_bundle(
+        args.artifact_root.resolve(),
+        args.activation_context_root.resolve(),
+        args.gates_per_site,
+        args.display_parent_gates,
+    )
     encoded = (json.dumps(bundle, indent=2, sort_keys=True, allow_nan=False) + "\n").encode()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_bytes(encoded)
@@ -574,6 +694,8 @@ def main() -> None:
                 "components": len(bundle["components"]),
                 "edges": len(bundle["edges"]),
                 "parent_distributions": len(bundle["parentDistributions"]),
+                "activation_example_gates": len(bundle["activationExamples"]),
+                "activation_examples": sum(len(row["examples"]) for row in bundle["activationExamples"]),
             },
             sort_keys=True,
         )

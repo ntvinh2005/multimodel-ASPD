@@ -12,7 +12,8 @@ hashes, selection rule, browser graph bound, source artifact root, and explicit 
 
 TypeScript interfaces live in `src/workbench/types.ts`. They cover the dataset manifest, models,
 shared gates, model-specific rank-one components, aligned anchors with model-specific tokenization,
-anchor-specific directed edges, parent distributions, and research hypotheses.
+anchor-specific directed edges, parent distributions, natural gate activation examples, and research
+hypotheses.
 
 Nullable numeric fields mean unavailable measurements, never numeric zero. A parent distribution
 with zero total strength has status `undefined` and `values: null`; TV and Jaccard remain undefined.
@@ -28,6 +29,7 @@ The export is regenerated with:
 ```bash
 python3 multimodel_dashboard/scripts/export_measured_workbench.py \
   --artifact-root /blue/thai/share/multimodel-ASPD/evaluations/minhdatle/posthoc/v31_500m_validation_v1_20261122T223718 \
+  --activation-context-root /blue/thai/vinhnguyen1/aspd_v3/evaluation/quick_intruder_jaccard_500m_v1/extraction/full/job_51194062 \
   --output multimodel_dashboard/src/workbench/data/measuredWorkbenchDataset.json
 ```
 
@@ -37,8 +39,12 @@ stored seeded-random natural anchor for each. Parent sets retain the frozen run 
 across models. Full parent distributions for the selected scenarios remain in the bundle. This is a
 deterministic visualization subset, not an estimate for the full dictionary.
 
-Canonical context text and continuous `g^s` were not retained in the immutable edge artifact, so the
-bundle displays anchor hashes and binary natural-firing provenance without inventing text or scores.
+Canonical context text and continuous `g^s` were not retained in the immutable edge artifact. The
+Examples panel therefore uses a separate, hash-verified natural-firing extraction from checkpoint
+step 61,036 on the document-disjoint test split. It exports up to four existing contexts for every
+gate present in the bounded graph, including the saved activation/firing window and measured center
+`g^s`. These examples are not the contribution-graph anchors and do not by themselves validate a
+semantic interpretation. The manifest preserves both source hashes and this relationship explicitly.
 `signedEffect` is measured first-order Taylor `E`; `upstreamCoefficient` and `gradient` remain null
 because the artifact does not store them separately.
 

@@ -12,6 +12,9 @@ does not load model weights, run inference, request a GPU, or expose a public po
 - The measured validation page uses the aggregate record committed with the frontend. The interactive
   graph uses a deterministic, bounded measured export from the raw post-hoc tensor shards. It is a
   visualization subset, not a dictionary-wide estimate or general causal validation.
+- The Examples tab uses up to four saved natural-firing contexts per displayed gate from a separate
+  hash-verified test-split extraction. They are not the selected contribution-graph anchors and are
+  evidence for forming semantic hypotheses, not validated feature labels.
 
 ## 1. Prepare the checkout
 

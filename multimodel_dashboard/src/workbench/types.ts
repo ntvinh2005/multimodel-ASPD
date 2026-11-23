@@ -33,6 +33,20 @@ export interface DatasetManifest {
       edgeShard: string;
     }>;
     sourceHashes: Record<string, unknown>;
+    activationExamples?: {
+      artifactRoot: string;
+      checkpointStep: number;
+      checkpointManifestSha256: string;
+      evaluationGitSha: string;
+      experimentFamily: string;
+      extractionManifestSha256: string;
+      featureContextSha256: Record<string, string>;
+      naturalGateOnly: boolean;
+      selectedSplit: string;
+      splitUnit: string;
+      windowTokens: number;
+      relationToGraph: string;
+    };
     verification: string;
     limitations: string[];
   };
@@ -93,6 +107,25 @@ export interface ParentDistribution {
   values: Record<string, number> | null;
 }
 
+export interface ActivationExample {
+  activation: number;
+  activations: number[];
+  anchorId: string;
+  anchorIndex: number;
+  centerPosition: number;
+  context: string;
+  documentId: string;
+  firings: boolean[];
+  sourceGroup: string;
+}
+
+export interface GateActivationExamples {
+  gateId: string;
+  site: GateStage;
+  featureIndex: number;
+  examples: ActivationExample[];
+}
+
 export interface WorkbenchDataset {
   manifest: DatasetManifest;
   models: ModelMetadata[];
@@ -101,6 +134,7 @@ export interface WorkbenchDataset {
   components: Component[];
   edges: DependencyEdge[];
   parentDistributions: ParentDistribution[];
+  activationExamples?: GateActivationExamples[];
 }
 
 export type TraceDirection = "parents" | "children" | "both";

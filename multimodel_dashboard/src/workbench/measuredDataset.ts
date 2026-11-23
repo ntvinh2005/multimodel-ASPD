@@ -108,6 +108,35 @@ export function validateMeasuredWorkbenchDataset(value: unknown): WorkbenchDatas
       throw new Error(`unsupported parent distribution status for ${id}`);
     }
   });
+
+  const activationExamples = requireArray(root.activationExamples, "dataset.activationExamples").map((value, index) => requireRecord(value, `dataset.activationExamples[${index}]`));
+  const exampleGateIds = new Set<string>();
+  activationExamples.forEach((row, index) => {
+    const base = `dataset.activationExamples[${index}]`;
+    const gateId = requireString(row.gateId, `${base}.gateId`);
+    if (!gateIds.has(gateId)) throw new Error(`${base} references unknown gate ${gateId}`);
+    if (exampleGateIds.has(gateId)) throw new Error(`duplicate activation examples for ${gateId}`);
+    exampleGateIds.add(gateId);
+    const examples = requireArray(row.examples, `${base}.examples`);
+    if (examples.length > 4) throw new Error(`${base} contains more than four saved contexts`);
+    examples.forEach((value, exampleIndex) => {
+      const example = requireRecord(value, `${base}.examples[${exampleIndex}]`);
+      const exampleBase = `${base}.examples[${exampleIndex}]`;
+      requireString(example.anchorId, `${exampleBase}.anchorId`);
+      requireString(example.documentId, `${exampleBase}.documentId`);
+      requireString(example.sourceGroup, `${exampleBase}.sourceGroup`);
+      requireString(example.context, `${exampleBase}.context`);
+      requireFiniteOrNull(example.activation, `${exampleBase}.activation`);
+      const activations = requireArray(example.activations, `${exampleBase}.activations`);
+      const firings = requireArray(example.firings, `${exampleBase}.firings`);
+      if (activations.length === 0 || activations.length > 65 || firings.length !== activations.length) throw new Error(`${exampleBase} must preserve its clipped window of at most 65 positions`);
+      if (typeof example.centerPosition !== "number" || !Number.isInteger(example.centerPosition) || example.centerPosition < 0 || example.centerPosition >= activations.length) throw new Error(`${exampleBase} has invalid center position`);
+      activations.forEach((activation, position) => requireFiniteOrNull(activation, `${exampleBase}.activations[${position}]`));
+      if (firings.some((firing) => typeof firing !== "boolean")) throw new Error(`${exampleBase}.firings must be boolean`);
+      if (firings[example.centerPosition as number] !== true || activations[example.centerPosition as number] !== example.activation) throw new Error(`${exampleBase} does not preserve its natural center firing`);
+    });
+  });
+  if (exampleGateIds.size !== gateIds.size) throw new Error("activation examples do not cover every exported gate");
   return value as WorkbenchDataset;
 }
 
