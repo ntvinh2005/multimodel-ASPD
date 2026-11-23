@@ -85,5 +85,5 @@ export function activationWindow(example: ActivationExample, view: ActivationCon
 
 export function activationOpacity(activation: number, featureMaximum: number) {
   if (activation <= 0 || featureMaximum <= 0) return 0;
-  return .14 + Math.sqrt(Math.min(1, activation / featureMaximum)) * .72;
+  return .06 + Math.min(1, activation / featureMaximum) * .88;
 }

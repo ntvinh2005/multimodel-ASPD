@@ -205,7 +205,7 @@ function ActivationExamples({ gateId }: { gateId: string | null }) {
       <div className="uw-segment"><button className={tokenFormat === "formatted" ? "active" : ""} onClick={() => setTokenFormat("formatted")}>FORMATTED</button><button className={tokenFormat === "raw" ? "active" : ""} onClick={() => setTokenFormat("raw")}>RAW PIECES</button></div>
       <label className="uw-check"><input type="checkbox" checked={preserveBreaks} onChange={(event) => setPreserveBreaks(event.target.checked)} />Line breaks</label>
     </div>
-    <div className="uw-token-legend"><span><i className="gradient" />continuous g<sup>s</sup> intensity</span><span><i className="support" />natural selected support g=1</span><span><i className="center" />recorded peak firing</span><span><i className="zero" />measured zero</span></div>
+    <div className="uw-token-legend"><span className="uw-intensity-scale"><small>0</small><i className="gradient" /><small>{featureMaximum.toFixed(3)}</small>linear continuous g<sup>s</sup></span><span><i className="support" />natural selected support g=1</span><span><i className="center" />recorded peak firing</span><span><i className="zero" />measured zero</span></div>
     <div className="uw-example-boundary"><strong>Gemma display-token projection</strong><span>{provenance?.displayTokenizer.modelId}@{provenance?.displayTokenizer.revision.slice(0, 12)} · position-aligned token IDs, g<sup>s</sup>, and support. These contexts are separate from the selected contribution-graph anchor.</span></div>
     {record.examples.map((example, index) => {
       const { start, end } = activationWindow(example, view);

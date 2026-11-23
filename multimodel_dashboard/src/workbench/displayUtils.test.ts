@@ -43,6 +43,7 @@ describe("measured display scales", () => {
     expect(activationWindow(example, "stacked")).toEqual({ start: 14, end: 27 });
     expect(activationWindow(example, "snippet")).toEqual({ start: 0, end: 29 });
     expect(activationWindow(example, "full")).toEqual({ start: 0, end: 30 });
-    expect(activationOpacity(.8, .8)).toBeCloseTo(.86);
+    expect(activationOpacity(.8, .8)).toBeCloseTo(.94);
+    expect(activationOpacity(.2, .8)).toBeCloseTo(.28);
   });
 });
