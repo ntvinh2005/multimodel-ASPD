@@ -14,6 +14,28 @@ export interface DatasetManifest {
   dataset: { id: string; revision: string; splitPolicy: string };
   screening: { metric: "beta"; kRep: number; tauRep: number; method: string };
   edgeScoring: { method: string; normalization: string };
+  display?: {
+    defaultGateIds: string[];
+    defaultSpotlight: string;
+    defaultAnchorId: string;
+    defaultEdgeThreshold: number;
+  };
+  export?: {
+    artifactRoot: string;
+    checkpointStep: number;
+    selectionRule: string;
+    graphBound: string;
+    selectedScenarios: Array<{
+      gateId: string;
+      rawGateId: string;
+      anchorId: string;
+      displayParentGateIds: string[];
+      edgeShard: string;
+    }>;
+    sourceHashes: Record<string, unknown>;
+    verification: string;
+    limitations: string[];
+  };
 }
 
 export interface ModelMetadata {
@@ -33,6 +55,7 @@ export interface AnchorRecord {
   start: number;
   end: number;
   gateActivations: Record<string, number | null>;
+  firingGateIds?: string[];
   modelTokens: Record<string, Array<{ text: string; position: number; isAnchor: boolean }>>;
 }
 
@@ -58,7 +81,7 @@ export interface DependencyEdge {
   upstreamCoefficient: number | null;
   gradient: number | null;
   normalization: string;
-  evidence: "taylor-only" | "intervention-available";
+  evidence: "taylor-only" | "measured-taylor" | "intervention-available";
 }
 
 export interface ParentDistribution {

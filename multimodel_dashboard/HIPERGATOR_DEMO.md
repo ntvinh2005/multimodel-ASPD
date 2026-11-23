@@ -10,7 +10,8 @@ does not load model weights, run inference, request a GPU, or expose a public po
 - Use an SSH tunnel from the researcher's computer. Do not open the server to the public internet.
 - Stop the allocation when the review is finished. The example below also applies a two-hour limit.
 - The measured validation page uses the aggregate record committed with the frontend. The interactive
-  component graph remains explicitly synthetic until a bounded raw-result export is available.
+  graph uses a deterministic, bounded measured export from the raw post-hoc tensor shards. It is a
+  visualization subset, not a dictionary-wide estimate or general causal validation.
 
 ## 1. Prepare the checkout
 
@@ -106,7 +107,7 @@ installation, tests, build, and time-limited server startup above. It must repor
 3. the local tunnel command with placeholders, never credentials;
 4. test and build results;
 5. the automatic stop time;
-6. whether the displayed graph is measured or synthetic.
+6. the measured bundle ID and whether its runtime validation passed.
 
 The agent must not submit a GPU job, load a checkpoint, run model inference, expose a public listener,
 or leave a server running on a login node.

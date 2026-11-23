@@ -1,13 +1,14 @@
 # Universal Mechanism Discovery Workbench data contract
 
-The workbench consumes post-hoc results without loading training models. The initial fixture is
-deterministic synthetic data and is never presented as a pretrained-model measurement.
+The workbench consumes post-hoc results without loading training models. The default dataset is
+`aspd-v3.1-500m-measured-workbench-v1`, a bounded measured export from the completed ASPD v3.1 500M
+post-hoc validation artifact. Its manifest sets `synthetic: false`; the older deterministic fixture
+remains source-only and is not imported by the application.
 
 Every dataset includes a stable dataset ID, schema version, synthetic flag, exact source commit,
 training branch/config, screening settings, edge scoring method, and normalization method. The
-fixture is synchronized to revision `5ca3b43326d77d4d46fa8605394c5e726f5b48b9`, branch
-`aspd-v3.1-main500m-checkpoint-timeout-fix`, and
-`configs/multimodel/aspd_v3/main500m_preparation_v1.yaml`.
+measured export records the post-hoc source revision, checkpoint step, immutable COMPLETE-chain
+hashes, selection rule, browser graph bound, source artifact root, and explicit limitations.
 
 TypeScript interfaces live in `src/workbench/types.ts`. They cover the dataset manifest, models,
 shared gates, model-specific rank-one components, aligned anchors with model-specific tokenization,
@@ -18,11 +19,30 @@ with zero total strength has status `undefined` and `values: null`; TV and Jacca
 The graph renderer receives only a bounded subset produced by `componentsForSelection` and
 `edgesForAnchor`.
 
-Future JSON/CSV adapters must validate external records into `WorkbenchDataset`, preserve checkpoint
-and anchor provenance, avoid inferring component matches from location, and never create dependency
-edges across models.
+`src/workbench/measuredDataset.ts` validates the generated JSON into `WorkbenchDataset`, preserves
+checkpoint and anchor provenance, rejects synthetic or cross-model edges, and fails closed on broken
+references or non-finite measured values.
+
+The export is regenerated with:
+
+```bash
+python3 multimodel_dashboard/scripts/export_measured_workbench.py \
+  --artifact-root /blue/thai/share/multimodel-ASPD/evaluations/minhdatle/posthoc/v31_500m_validation_v1_20261122T223718 \
+  --output multimodel_dashboard/src/workbench/data/measuredWorkbenchDataset.json
+```
+
+The default bound selects the two lowest feature-index eligible gates per PRE/MID site and the first
+stored seeded-random natural anchor for each. Parent sets retain the frozen run rule `K_par=10`,
+`tau=0`; graph rendering retains edges from the top six parent gates by mean parent-distribution mass
+across models. Full parent distributions for the selected scenarios remain in the bundle. This is a
+deterministic visualization subset, not an estimate for the full dictionary.
+
+Canonical context text and continuous `g^s` were not retained in the immutable edge artifact, so the
+bundle displays anchor hashes and binary natural-firing provenance without inventing text or scores.
+`signedEffect` is measured first-order Taylor `E`; `upstreamCoefficient` and `gradient` remain null
+because the artifact does not store them separately.
 
 The scientific specification is `docs/Universal_Mechanism.pdf`, SHA-256
 `a963c3616a498ca1b299fad6f033a94a2ca27a7ac8029de6dc5c7e67ebf31f27`. The PDF defines aggregated
-parent scores as the mean over representative downstream components; fixtures and imported adapters
+parent scores as the mean over representative downstream components; generated and imported adapters
 must preserve that factor so total normalized edge strength remains on the specified scale.
