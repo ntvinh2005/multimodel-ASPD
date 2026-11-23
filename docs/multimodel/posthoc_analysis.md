@@ -65,7 +65,9 @@ and run `--stage compare` with the new config. Changing `K_rep`/`tau_rep`/metric
 importance        backend: source models + factors + natural pools   -> sigma_j, beta, q, rho
 representatives   CPU: importance                                    -> R_{p,i}^{(n)} for every gate
 edges             backend: models + factors + new natural pools      -> E_{b->a}(alpha), ablation check
-compare           CPU: importance + representatives + edges          -> Pa, G, J, w, S, pi, D_TV, M
+compare           CPU: importance + representatives + edges          -> J, D_TV, M, G per anchor/pair
+profiles          CPU: importance + representatives + edges          -> Pa(a;alpha) with E,w; component,
+                                                                        gate (mean pi, M) and edge profiles
 ```
 
 `importance` uses pools `[0, importance_pools)` of the backend's deterministic pool

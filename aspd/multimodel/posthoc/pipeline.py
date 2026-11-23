@@ -46,6 +46,14 @@ from aspd.multimodel.posthoc.edges import (
 from aspd.multimodel.posthoc.ids import SITES, ComponentId, GateId
 from aspd.multimodel.posthoc.importance import ImportanceTable, MatrixImportanceAccumulator
 from aspd.multimodel.posthoc.parents import parent_set
+from aspd.multimodel.posthoc.profiles import (
+    ComponentProfile,
+    GateModelProfile,
+    ParentRows,
+    dumps,
+    edge_profile_from_table,
+    shared_top_parent_gates,
+)
 from aspd.multimodel.posthoc.representatives import representative_sets
 from aspd.multimodel.posthoc.source_hooks import capture_matrix_io
 
@@ -504,6 +512,92 @@ def run_compare(config: PosthocConfig, root: Path) -> Path:
     return stage.path
 
 
+def run_profiles(config: PosthocConfig, root: Path, *, top: int = 20) -> Path:
+    """Write Pa(a; alpha), component/gate parent profiles and the edge profile; CPU only.
+
+    Recomputes ``Pa`` with the same rule and records as ``compare`` (it reads the same
+    verified artifacts), so the profiles are consistent with ``comparisons.jsonl``.
+    """
+
+    from safetensors.torch import save_file
+
+    rule = config.parent_rule()
+    table = ImportanceTable.load(require_complete(root, "importance"))
+    models, reps = load_representatives(root)
+    selection = json.loads((require_complete(root, "edges") / "selection.json").read_text())
+    write_norms = selection["downstream_write_norms"]
+    edges = load_edge_table(root)
+    stage = StageDirectory(root, "profiles")
+    rows = ParentRows()
+    timing = _Timing()
+    components_written = gates_written = 0
+    with (stage.path / "component_parent_profile.jsonl").open("x", encoding="utf-8") as comp_out, \
+            (stage.path / "gate_parent_profile.jsonl").open("x", encoding="utf-8") as gate_out:
+        for index, gate_key in enumerate(selection["gates"]):
+            gate = GateId.from_key(gate_key)
+            anchors = selection["anchors"][gate_key]
+            gate_profiles: dict[str, GateModelProfile] = {}
+            for model in models:
+                representatives = reps.get((model, gate), ())
+                norms = {a: write_norms[a.key] for a in representatives}
+                sigmas = {a: table[a.matrix].sigma for a in representatives}
+                components = {a: ComponentProfile(a, norms[a], sigmas[a]) for a in representatives}
+                gate_profile = GateModelProfile(representatives)
+                for anchor_id in anchors:
+                    parents = {}
+                    for a in representatives:
+                        record = edges.get(anchor_id, a)
+                        if record is None:
+                            continue
+                        parents[a] = parent_set(record, rule)
+                        components[a].add(record.coefficient, parents[a])
+                        rows.add(anchor_id, a, parents[a], norms[a], sigmas[a])
+                    gate_profile.add(parents, norms, sigmas)
+                gate_profiles[model] = gate_profile
+                for profile in components.values():
+                    if profile.anchors:
+                        comp_out.write(dumps(profile.to_json(top)) + "\n")
+                        components_written += 1
+            gate_out.write(dumps({
+                "gate": gate_key,
+                "anchors": len(anchors),
+                "models": {m: p.to_json(top) for m, p in gate_profiles.items()},
+                "shared_top_parent_gates": shared_top_parent_gates(gate_profiles, top),
+            }) + "\n")
+            gates_written += 1
+            rows.flush()
+            if (index + 1) % 1000 == 0:
+                _log(f"profiles: {index + 1}/{len(selection['gates'])} gates")
+    timing.add("parent_profiles", timing.started)
+    parent_tensors = rows.tensors()
+    save_file(parent_tensors, str(stage.path / "parents_per_anchor.safetensors"))
+    (stage.path / "parents_per_anchor.safetensors").chmod(0o664)
+    write_json(stage.path / "parents_vocab.json", {
+        "description": "rows of parents_per_anchor.safetensors: Pa(a; alpha) entries; "
+                       "anchor/downstream/parent index anchor_ids/components",
+        **rows.vocab(),
+    })
+    start = time.perf_counter()
+    write_json(stage.path / "edge_profile.json", _finite({
+        "description": "edge-score distribution by model, upstream/downstream matrix type "
+                       "and layer gap (downstream layer - upstream layer)",
+        "all_stored_edges": edge_profile_from_table(edges, models).to_json(),
+        "parents_only": rows.edge_profile(models).to_json(),
+    }))
+    timing.add("edge_profile", start)
+    stage.complete(_manifest("profiles", config, {
+        "rule": {"k_par": rule.k_par, "tau": rule.tau},
+        "top_listed": top,
+        "components": components_written,
+        "gates": gates_written,
+        "parent_rows": int(parent_tensors["E"].numel()),
+        "timing": timing.report(),
+        "status": "Pa(a;alpha) entries are formulation objects; profiles are descriptive "
+                  "aggregates over anchors (ADDED)",
+    }))
+    return stage.path
+
+
 def _finite(value: Any) -> Any:
     if isinstance(value, float) and not math.isfinite(value):
         return None
@@ -555,7 +649,10 @@ def run_stages(
                 if finalize_shards is not None:
                     outputs.append(finalize_edge_shards(config, root, finalize_shards))
                     finalize_shards = None
-                outputs.append(run_compare(config, root))
+                if stage == "compare":
+                    outputs.append(run_compare(config, root))
+                else:
+                    outputs.append(run_profiles(config, root))
         if finalize_shards is not None:
             outputs.append(finalize_edge_shards(config, root, finalize_shards))
     finally:
