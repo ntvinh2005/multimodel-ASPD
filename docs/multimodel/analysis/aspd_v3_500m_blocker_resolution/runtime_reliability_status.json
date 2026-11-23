@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "measured_at": "2026-11-09T19:39:08-05:00",
+  "updated_at": "2026-11-10T07:51:47-05:00",
+  "status": "RUNTIME_RELIABILITY_VALIDATED_MAIN_AUTHORIZED",
+  "slurm": {
+    "account": "thai",
+    "account_association_observed": true,
+    "preferred_partition": "hpg-b200",
+    "preferred_partition_state": "UP",
+    "preferred_partition_nodes": 60,
+    "preferred_partition_gpu_layout": "8x B200 per node",
+    "preferred_partition_max_walltime": "14-00:00:00",
+    "other_gpu_partitions_observed": [
+      "hpg-rtx6000",
+      "hpg-turin",
+      "hwgui"
+    ],
+    "safe_fallback": "WAIT_FOR_B200_UNLESS_A_SEPARATE_BOUNDED_MEMORY_PREFLIGHT_APPROVES_ANOTHER_GPU_CLASS",
+    "submitted_by_this_audit": true,
+    "cancelled_by_this_audit": false,
+    "other_user_jobs_observed": [
+      {
+        "job_id": "50519752",
+        "name": "cssalt-sonogym-smoke",
+        "state": "RUNNING",
+        "reason_or_node": "c1105a-s4"
+      }
+    ]
+  },
+  "environment": {
+    "env_file": "/blue/thai/vinhnguyen1/multimodel-ASPD/env.sh",
+    "env_file_readable": true,
+    "python": "/blue/thai/vinhnguyen1/multimodel-ASPD/repo/.venv/bin/python",
+    "torchrun": "/blue/thai/vinhnguyen1/multimodel-ASPD/repo/.venv/bin/torchrun",
+    "torch": "2.8.0+cu128",
+    "cuda_build": "12.8"
+  },
+  "contracts": {
+    "configuration_fingerprint": "7e44ead3e8a05913936c1125ce4e4fa30f65a1b90dc466411bf9ae882cac3902",
+    "execution_contract_fingerprint": "45f8b159d737e1096ef0dda78300484667926e2307800969d3fc800802e24944",
+    "configuration_sha256": "f7a6d87436304956ca0baca955ec2e0e929a7207142f57fc35362369822f63be",
+    "main_slurm_sha256": "80a4c348b3350396e56755c67122afb754b1da8cfeeff1d5ff6b67958acb4d34",
+    "preflight_slurm_sha256": "7d01ba92137d56374d327df520526936192130864945f51606ba84f9e2bdbae1",
+    "resume_validation_slurm_sha256": "708bdcfe99d5b398be723d00cdfb28ea4d1dabf803480019ea13fcd6abe6d900"
+  },
+  "verified_guards": [
+    "main_and_preflight_have_separate_mode_specific_authorization",
+    "three_ranks_and_three_B200_requests_are_explicit",
+    "reviewed_git_commit_and_clean_worktree_are_required",
+    "pinned_environment_and_executables_are_required",
+    "one_tibibyte_startup_storage_reservation_is_enforced",
+    "new_preflight_namespace_must_not_exist",
+    "main_existing_run_requires_manifest_and_complete_checkpoint",
+    "external_resume_requires_complete_checkpoint_and_manifest",
+    "milestone_continuation_authorization_is_forwarded",
+    "slurm_usr1_creates_a_file_backed_stop_request_without_signalling_torchrun",
+    "requeue_requires_zero_exit_and_a_verified_complete_checkpoint_artifact",
+    "resume_storage_requires_one_atomic_checkpoint_plus_the_200_gibibyte_reserve"
+  ],
+  "tests": {
+    "bash_syntax": "PASS_MAIN_PREFLIGHT_RESUME_VALIDATION_PROPOSALS",
+    "focused_cpu": "67_PASSED_1_DESELECTED",
+    "main_draft_validation": "EXPECTED_FAIL_CLOSED_EXIT_2",
+    "preflight_authorization_validation": "PASS_EXACT_FOUR_STEP_FRESH_NAMESPACE",
+    "cpu_slurm_signal_requeue": "PASS_JOB_50550768_ONE_RESTART_ZERO_DUPLICATES",
+    "real_three_model_external_resume": "PASS_JOB_50611663_BITWISE_EXACT_ZERO_DUPLICATES",
+    "real_three_model_preflight": "PASS_JOB_50550194_168_TARGETS_NATIVE_PARITY",
+    "real_final_three_model_throughput": "PASS_JOB_50550194_PROFILED_4150.668_ACCEPTED_ANCHORS_PER_SECOND"
+  },
+  "evidence_boundary": "The scheduler/shell signal and one-requeue contract passed in CPU-only job 50550768. Isolated three-B200 job 50611663 restored step 3 and reproduced step 4 bitwise with identical ordered anchors, zero repeats and immutable source weights. Monitoring v1, milestone v1, semantic-uncertainty acceptance and main submission are explicitly authorized."
+}

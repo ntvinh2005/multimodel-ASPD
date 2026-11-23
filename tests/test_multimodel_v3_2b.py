@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import shutil
 import sqlite3
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -13,13 +15,37 @@ import pytest
 import torch
 from torch import nn
 
-from aspd.multimodel.cli.train_aspd_v3_2b import _PoolPrefetcher
+from aspd.multimodel.cli.train_aspd_v3_2b import (
+    _authorize_main500m_mode,
+    _canonical_metric_rows,
+    _checkpoint_storage_free_bytes,
+    _checkpoint_storage_ready,
+    _effective_external_resume_lineage,
+    _exact_training_state_digest,
+    _init_distributed,
+    _PoolPrefetcher,
+    _record_continuation_authorization,
+    _validate_main500m_alignment_manifest,
+)
 from aspd.multimodel.components import RankOneComponents
 from aspd.multimodel.v3.data import SQLiteExposureLedger
 from aspd.multimodel.v3.encoder import FeatureReadout, pack_cross_model_tokens
 from aspd.multimodel.v3.gating import V3BatchTopK
 from aspd.multimodel.v3.main500m_config import V31Main500MConfig, load_main500m_config
-from aspd.multimodel.v3.main500m_monitoring import evaluate_main500m_health
+from aspd.multimodel.v3.main500m_continuation import (
+    continuation_authorized_through,
+    load_continuation_authorization,
+    milestone_diagnostic_due,
+    milestone_pause_due,
+    milestone_scientific_summary,
+    next_review_exposure,
+)
+from aspd.multimodel.v3.main500m_monitoring import (
+    DICTIONARY_CONCENTRATION_PAUSE_MINIMUM_EXPOSURES,
+    SUSTAINED_POLICY_IMPLEMENTATION_REVISION,
+    SustainedMain500MHealthMonitor,
+    evaluate_main500m_health,
+)
 from aspd.multimodel.v3.main_2b_config import MODEL_ORDER_2B, load_main_2b_v1_config
 from aspd.multimodel.v3.model_owned import (
     LocalCaptureBatch,
@@ -69,12 +95,142 @@ def _main500m_config():
     )
 
 
+def _deauthorize_main500m_payload(payload: dict) -> dict:
+    payload["scientific_status"] = "MAIN_500M_NOT_AUTHORIZED"
+    payload["full_training_authorized"] = False
+    payload["approvals"]["full_training"] = "MAIN_500M_NOT_AUTHORIZED"
+    return payload
+
+
+def test_in_place_resume_preserves_original_external_resume_lineage() -> None:
+    original = {
+        "checkpoint": "/immutable/step-000010000",
+        "manifest_sha256": "a" * 64,
+        "step": 10_000,
+    }
+    assert (
+        _effective_external_resume_lineage(
+            proposed=None,
+            existing=original,
+            in_place_resume=True,
+        )
+        == original
+    )
+
+    replacement = {
+        "checkpoint": "/other/step-000014000",
+        "manifest_sha256": "b" * 64,
+        "step": 14_000,
+    }
+    assert (
+        _effective_external_resume_lineage(
+            proposed=replacement,
+            existing=original,
+            in_place_resume=False,
+        )
+        == replacement
+    )
+
+
+def test_checkpoint_storage_gate_accounts_for_new_checkpoint_and_reserve() -> None:
+    gib = 1024**3
+    assert not _checkpoint_storage_ready(
+        free_bytes=292 * gib,
+        checkpoint_bytes=132 * gib,
+        reserve_bytes=200 * gib,
+        growth_margin_bytes=16 * gib,
+    )
+    assert _checkpoint_storage_ready(
+        free_bytes=424 * gib,
+        checkpoint_bytes=132 * gib,
+        reserve_bytes=200 * gib,
+        growth_margin_bytes=16 * gib,
+    )
+    with pytest.raises(ValueError, match="negative"):
+        _checkpoint_storage_ready(
+            free_bytes=-1,
+            checkpoint_bytes=132 * gib,
+            reserve_bytes=200 * gib,
+        )
+
+
+def test_checkpoint_storage_probe_accepts_absent_first_checkpoint_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    checkpoint_root = tmp_path / "fresh-resume" / "checkpoints"
+    run_root = checkpoint_root.parent
+    run_root.mkdir()
+    observed: list[Path] = []
+
+    def fake_disk_usage(path: str | os.PathLike[str]) -> SimpleNamespace:
+        observed.append(Path(path))
+        return SimpleNamespace(free=987_654_321)
+
+    monkeypatch.setattr(shutil, "disk_usage", fake_disk_usage)
+
+    assert _checkpoint_storage_free_bytes(checkpoint_root) == 987_654_321
+    assert observed == [run_root]
+    assert not checkpoint_root.exists()
+
+
+def test_model_owned_checkpoint_prunes_oldest_before_atomic_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manager = ModelOwnedCheckpoint(tmp_path, keep_complete=2)
+    for step in (1, 2, 3):
+        checkpoint = tmp_path / f"step-{step:09d}"
+        checkpoint.mkdir()
+        (checkpoint / "COMPLETE").write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(manager, "_rank_world", lambda: (0, 3))
+    monkeypatch.setattr(torch.distributed, "barrier", lambda: None)
+
+    removed = manager.prune_before_atomic_replacement()
+
+    assert [path.name for path in removed] == ["step-000000001", "step-000000002"]
+    assert [path.name for path in manager.complete_checkpoints()] == ["step-000000003"]
+
+
+def _pin_test_alignment_evidence(payload: dict, path: Path) -> None:
+    payload["approvals"]["three_way_alignment"] = "APPROVED"
+    payload["approvals"]["three_way_alignment_artifact"] = str(path)
+    payload["approvals"]["three_way_alignment_artifact_sha256"] = "0" * 64
+    provisional = V31Main500MConfig.model_validate(payload)
+    report = {
+        "status": "PASS",
+        "alignment_contract_fingerprint": (
+            provisional.alignment_contract_fingerprint()
+        ),
+        "alignment_policy": provisional.data.canonical_text_policy,
+        "alignment_acceptance": provisional.data.alignment_acceptance,
+        "model_order": list(provisional.architecture.model_order),
+        "tokenizers": [
+            {
+                "model_key": model.key,
+                "id": model.tokenizer_id,
+                "revision": model.tokenizer_revision,
+            }
+            for model in provisional.models
+        ],
+        "audit": {
+            "boundary_invariants": "PASS",
+            "within_process_repeatability": "PASS",
+            "dataset_stream_prefix_replay": "PASS",
+        },
+        "selection_bias": {"status": "PASS"},
+        "capacity": {"status": "PASS"},
+    }
+    path.write_text(json.dumps(report, sort_keys=True), encoding="utf-8")
+    payload["approvals"]["three_way_alignment_artifact_sha256"] = (
+        hashlib.sha256(path.read_bytes()).hexdigest()
+    )
+
+
 def test_main500m_draft_preserves_zscore_math_and_fails_closed() -> None:
     config = _main500m_config()
     report = config.structural_report()
     assert report["logical_target_slots"] == 168
-    assert report["approved_physical_targets"] == 112
-    assert report["pending_physical_targets"] == 56
+    assert report["approved_physical_targets"] == 168
+    assert report["pending_physical_targets"] == 0
     assert config.objective.gate_logit_normalization == "per_anchor_feature_zscore"
     assert config.objective.gate_logit_normalization_epsilon == 1e-5
     assert config.objective.activation_objective_mode == "full_only"
@@ -83,19 +239,536 @@ def test_main500m_draft_preserves_zscore_math_and_fails_closed() -> None:
     assert config.objective.activation_code == "continuous"
     assert config.data.optimizer_steps == 61_036
     assert config.data.planned_accepted_anchor_exposures == 500_006_912
+    assert config.runtime.startup_storage_required_bytes == 1_099_511_627_776
+    assert config.runtime.checkpoint_root == config.runtime.output_root
     assert config.approvals.human_interpretability.status == (
-        "PENDING_RESEARCHER_DECISION"
+        "APPROVED_SEMANTIC_UNCERTAINTY_ACCEPTED"
     )
-    assert "MODEL_THREE_BLOCKED" in report["blockers"]
-    with pytest.raises(RuntimeError, match="MODEL_THREE_BLOCKED"):
-        config.require_execution_authorized()
+    assert config.evaluation_status == "SEMANTIC_UNCERTAINTY_EXPLICITLY_ACCEPTED"
+    assert config.approvals.human_interpretability.permits_main_authorization()
+    assert config.validate_human_interpretability_artifact()["decision"] == (
+        "ACCEPT_SEMANTIC_UNCERTAINTY"
+    )
+    assert "MODEL_THREE_BLOCKED" not in report["blockers"]
+    assert "RESUME_BLOCKED" not in report["blockers"]
+    assert report["status"] == "AUTHORIZED_READY"
+    assert report["blockers"] == []
+    config.require_execution_authorized()
 
     invalid = config.payload()
-    invalid["approvals"]["human_interpretability"]["artifact_path"] = (
-        "/immutable/human-evaluation/decision.json"
+    invalid["approvals"]["human_interpretability"]["status"] = (
+        "PENDING_RESEARCHER_RESPONSES"
     )
-    with pytest.raises(ValueError, match="pending human-interpretability gate"):
+    invalid["approvals"]["human_interpretability"]["researcher_decision"] = "APPROVE"
+    invalid["evaluation_status"] = (
+        "HUMAN_INTERPRETABILITY_PACKAGE_COMPLETE_RESPONSES_PENDING"
+    )
+    with pytest.raises(ValueError, match="cannot claim a decision"):
         V31Main500MConfig.model_validate(invalid)
+
+
+def test_main500m_exact_resume_evidence_is_hash_pinned_and_semantic(
+    tmp_path: Path,
+) -> None:
+    payload = _deauthorize_main500m_payload(_main500m_config().payload())
+    approvals = payload["approvals"]
+    approvals["exact_resume_source_commit"] = "a" * 40
+    approvals["exact_resume_contract_sha256"] = "b" * 64
+    report = {
+        "status": "PASS",
+        "mode": "resume_validation",
+        "strategy": "model_owned",
+        "git_sha": approvals["exact_resume_source_commit"],
+        "world_size": 3,
+        "logical_target_count": 168,
+        "optimizer_steps": 4,
+        "accepted_exposures": 32_768,
+        "uninterrupted_vs_resumed_next_update": "BITWISE_EXACT",
+        "dcp_save_reload_resume_update": "PASS",
+        "resume_validation_contract_sha256": approvals[
+            "exact_resume_contract_sha256"
+        ],
+        "uninterrupted_state_sha256_by_rank": ["rank0", "rank1", "rank2"],
+        "resumed_state_sha256_by_rank": ["rank0", "rank1", "rank2"],
+        "exact_data_replay": {
+            "step": 4,
+            "accepted_exposures": 32_768,
+            "unique_anchors": 32_768,
+            "repeated_exposures": 0,
+        },
+        "source_state_immutability_by_rank": [
+            {"status": "PASS", "initial_sha256": key, "final_sha256": key}
+            for key in ("gemma", "smollm2", "granite")
+        ],
+    }
+    artifact = tmp_path / "resume_report.json"
+    artifact.write_text(json.dumps(report, sort_keys=True), encoding="utf-8")
+    approvals["exact_resume_artifact"] = str(artifact)
+    approvals["exact_resume_artifact_sha256"] = hashlib.sha256(
+        artifact.read_bytes()
+    ).hexdigest()
+    config = V31Main500MConfig.model_validate(payload)
+    assert config.validate_exact_resume_evidence() == report
+
+    report["exact_data_replay"]["repeated_exposures"] = 1
+    artifact.write_text(json.dumps(report, sort_keys=True), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="EXACT_RESUME_ARTIFACT_HASH_MISMATCH"):
+        config.validate_exact_resume_evidence()
+    approvals["exact_resume_artifact_sha256"] = hashlib.sha256(
+        artifact.read_bytes()
+    ).hexdigest()
+    invalid = V31Main500MConfig.model_validate(payload)
+    with pytest.raises(RuntimeError, match="EXACT_RESUME_EVIDENCE_INVALID"):
+        invalid.validate_exact_resume_evidence()
+
+
+def test_main500m_slurm_proposals_separate_preflight_and_main() -> None:
+    main = (
+        ROOT / "slurm/multimodel/aspd_v3_500m_main_PROPOSAL.sbatch"
+    ).read_text(encoding="utf-8")
+    preflight = (
+        ROOT / "slurm/multimodel/aspd_v3_500m_preflight_PROPOSAL.sbatch"
+    ).read_text(encoding="utf-8")
+
+    for script in (main, preflight):
+        assert "#SBATCH --account=thai" in script
+        assert "#SBATCH --partition=hpg-b200" in script
+        assert "#SBATCH --gres=gpu:b200:3" in script
+        assert "ASPD_EXPECTED_GIT_SHA" in script
+        assert "startup_storage_required_bytes" in script
+        assert "git status --porcelain" in script
+
+    assert "--mode main" in main
+    assert "--require-ready" in main
+    assert "--continuation-authorization" in main
+    assert "LATEST_COMPLETE_CHECKPOINT" in main
+    assert "  --mode preflight \\\n" not in main
+    assert "#SBATCH --signal=B:USR1@2700" in main
+    assert "scontrol requeue" in main
+    assert "ASPD_STOP_REQUEST_FILE" in main
+    assert "ASPD_SIGNAL_COMPLETION_ARTIFACT" in main
+    assert "SIGNAL_CHECKPOINT_COMPLETE" in main
+    assert "kill -USR1" not in main
+    assert '"${TRAINER_RC}" -eq 99' not in main
+    assert "CHECKPOINT_BYTES + STORAGE_RESERVE_BYTES" in main
+    assert "ASPD_RUN_ID" in main
+    assert "one safe path component" in main
+
+    assert "--mode preflight" in preflight
+    assert "--require-preflight-ready" in preflight
+    assert "PREFLIGHT_STEPS > 20" in preflight
+    assert "  --mode main \\\n" not in preflight
+    assert "scontrol requeue" not in preflight
+
+
+def test_main500m_runtime_rejects_checkpoint_root_different_from_run_root() -> None:
+    payload = _deauthorize_main500m_payload(_main500m_config().payload())
+    payload["runtime"]["checkpoint_root"] = str(
+        Path(payload["runtime"]["output_root"]) / "separate-checkpoints"
+    )
+    with pytest.raises(ValueError, match="checkpoint_root must equal output_root"):
+        V31Main500MConfig.model_validate(payload)
+
+
+def test_main500m_human_gate_distinguishes_evidence_from_accepted_uncertainty(
+    tmp_path: Path,
+) -> None:
+    payload = _deauthorize_main500m_payload(_main500m_config().payload())
+    gate = payload["approvals"]["human_interpretability"]
+    evaluation_path = tmp_path / "package_manifest.json"
+    evaluation_path.write_text(
+        json.dumps({"status": "HUMAN_INTERPRETABILITY_PACKAGE_COMPLETE"}),
+        encoding="utf-8",
+    )
+    researcher_decision = (
+        "Proceed while explicitly accepting single-rater semantic uncertainty."
+    )
+    decision_path = tmp_path / "researcher_decision.json"
+    decision_payload = {
+        "schema_version": 1,
+        "status": "HUMAN_INTERPRETABILITY_RESEARCHER_DECISION",
+        "decision": "ACCEPT_SEMANTIC_UNCERTAINTY",
+        "researcher_decision": researcher_decision,
+        "scientific_limitations": gate["scientific_limitations"],
+        "evaluation_artifact_path": str(evaluation_path),
+        "evaluation_artifact_sha256": hashlib.sha256(
+            evaluation_path.read_bytes()
+        ).hexdigest(),
+    }
+    decision_path.write_text(json.dumps(decision_payload), encoding="utf-8")
+    gate.update(
+        {
+            "status": "APPROVED_SEMANTIC_UNCERTAINTY_ACCEPTED",
+            "artifact_path": str(decision_path),
+            "artifact_sha256": hashlib.sha256(decision_path.read_bytes()).hexdigest(),
+            "researcher_decision": researcher_decision,
+        }
+    )
+    payload["evaluation_status"] = "SEMANTIC_UNCERTAINTY_EXPLICITLY_ACCEPTED"
+    accepted = V31Main500MConfig.model_validate(payload)
+    assert accepted.approvals.human_interpretability.permits_main_authorization()
+    assert accepted.validate_human_interpretability_artifact() == decision_payload
+
+    decision_payload["decision"] = "APPROVE_HUMAN_EVIDENCE"
+    decision_payload["researcher_decision"] = "Approve based on completed human evidence."
+    decision_path.write_text(json.dumps(decision_payload), encoding="utf-8")
+    gate.update(
+        {
+            "status": "APPROVED_HUMAN_EVIDENCE",
+            "artifact_sha256": hashlib.sha256(decision_path.read_bytes()).hexdigest(),
+            "researcher_decision": decision_payload["researcher_decision"],
+        }
+    )
+    payload["evaluation_status"] = "HUMAN_INTERPRETABILITY_APPROVED"
+    unsupported_claim = V31Main500MConfig.model_validate(payload)
+    with pytest.raises(RuntimeError, match="evaluation_artifact.status"):
+        unsupported_claim.validate_human_interpretability_artifact()
+
+    gate["status"] = "REJECTED"
+    gate["researcher_decision"] = "Do not proceed on current semantic evidence."
+    payload["evaluation_status"] = "HUMAN_INTERPRETABILITY_REJECTED"
+    rejected = V31Main500MConfig.model_validate(payload)
+    assert not rejected.approvals.human_interpretability.permits_main_authorization()
+    assert "HUMAN_INTERPRETABILITY_APPROVAL_PENDING" in rejected.readiness_blockers()
+
+
+def test_main500m_bounded_preflight_has_independent_fail_closed_authorization(
+    tmp_path: Path,
+) -> None:
+    payload = _deauthorize_main500m_payload(_main500m_config().payload())
+    payload["approvals"]["bounded_preflight"] = {
+        "status": "PENDING_RESEARCHER_APPROVAL",
+        "optimizer_steps": None,
+        "output_namespace": None,
+        "authorization_reference": None,
+    }
+    draft = V31Main500MConfig.model_validate(payload)
+    with pytest.raises(RuntimeError, match="BOUNDED_PREFLIGHT_NOT_AUTHORIZED"):
+        draft.require_preflight_authorized(
+            optimizer_steps=4,
+            run_dir=tmp_path / "unapproved",
+        )
+
+    payload = draft.payload()
+    preflight_root = (
+        tmp_path / "aspd_v3" / "main500m_preparation_v1" / "preflight"
+    )
+    payload["runtime"]["preflight_output_root"] = str(preflight_root)
+    payload["runtime"]["preflight_evidence"] = str(
+        preflight_root / "preflight_report.json"
+    )
+    _pin_test_alignment_evidence(payload, tmp_path / "alignment.json")
+    payload["approvals"]["bounded_preflight"] = {
+        "status": "AUTHORIZED",
+        "optimizer_steps": 4,
+        "output_namespace": str(preflight_root),
+        "authorization_reference": "unit-test-only",
+    }
+    authorized = V31Main500MConfig.model_validate(payload)
+    authorized.require_preflight_authorized(
+        optimizer_steps=4,
+        run_dir=preflight_root,
+    )
+    with pytest.raises(RuntimeError, match="step budget differs"):
+        authorized.require_preflight_authorized(
+            optimizer_steps=5,
+            run_dir=preflight_root,
+        )
+    with pytest.raises(RuntimeError, match="dedicated output namespace"):
+        authorized.require_preflight_authorized(
+            optimizer_steps=4,
+            run_dir=preflight_root.parent / "wrong",
+        )
+    preflight_root.mkdir(parents=True)
+    with pytest.raises(RuntimeError, match="refuses to overwrite"):
+        authorized.require_preflight_authorized(
+            optimizer_steps=4,
+            run_dir=preflight_root,
+        )
+
+
+def test_main500m_mode_gate_cannot_cross_preflight_and_main_boundaries(
+    tmp_path: Path,
+) -> None:
+    draft = _main500m_config()
+    main_args = SimpleNamespace(
+        mode="main",
+        strategy="model_owned",
+        skip_checkpoint=False,
+        resume_checkpoint=None,
+        max_steps=61_036,
+        run_dir=tmp_path / "main",
+    )
+    _authorize_main500m_mode(draft, main_args)
+
+    skip_args = copy.copy(main_args)
+    skip_args.skip_checkpoint = True
+    with pytest.raises(RuntimeError, match="cannot disable checkpoint recovery"):
+        _authorize_main500m_mode(draft, skip_args)
+
+    invalid_mode = copy.copy(main_args)
+    invalid_mode.mode = "benchmark"
+    with pytest.raises(RuntimeError, match="only preflight"):
+        _authorize_main500m_mode(draft, invalid_mode)
+
+
+def test_main500m_resume_validation_requires_pinned_bounded_contract(
+    tmp_path: Path,
+) -> None:
+    config = _main500m_config()
+    checkpoint = tmp_path / "preflight" / "checkpoints" / "step-000000003"
+    checkpoint.mkdir(parents=True)
+    manifest = checkpoint / "manifest.json"
+    manifest.write_text('{"status":"COMPLETE"}\n', encoding="utf-8")
+    preflight_report = tmp_path / "preflight" / "preflight_report.json"
+    preflight_report.write_text('{"status":"PASS"}\n', encoding="utf-8")
+    output = tmp_path / "resume-validation"
+    contract_path = tmp_path / "resume-validation-contract.json"
+    contract = {
+        "schema_version": 1,
+        "status": "AUTHORIZED_BOUNDED_RESUME_VALIDATION",
+        "authorization_reference": "researcher-approved-unverified-checks",
+        "execution_contract_fingerprint": config.execution_contract_fingerprint(),
+        "source_checkpoint": str(checkpoint),
+        "source_checkpoint_manifest_sha256": hashlib.sha256(
+            manifest.read_bytes()
+        ).hexdigest(),
+        "preflight_report": str(preflight_report),
+        "preflight_report_sha256": hashlib.sha256(
+            preflight_report.read_bytes()
+        ).hexdigest(),
+        "output_namespace": str(output),
+        "target_optimizer_step": 4,
+    }
+    contract_path.write_text(json.dumps(contract), encoding="utf-8")
+    args = SimpleNamespace(
+        mode="resume_validation",
+        strategy="model_owned",
+        skip_checkpoint=False,
+        resume_checkpoint=checkpoint,
+        resume_validation_contract=contract_path,
+        max_steps=4,
+        run_dir=output,
+    )
+    _authorize_main500m_mode(config, args)
+    contract["source_checkpoint_manifest_sha256"] = "0" * 64
+    contract_path.write_text(json.dumps(contract), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="CONTRACT_INVALID"):
+        _authorize_main500m_mode(config, args)
+
+
+def test_main500m_preflight_evidence_is_pinned_and_semantically_validated(
+    tmp_path: Path,
+) -> None:
+    payload = _deauthorize_main500m_payload(_main500m_config().payload())
+    payload["approvals"]["exact_resume"] = (
+        "SYNTHETIC_VALIDATED_REAL_THREE_MODEL_PENDING"
+    )
+    preflight_root = (
+        tmp_path / "aspd_v3" / "main500m_preparation_v1" / "preflight"
+    )
+    evidence_path = preflight_root / "preflight_report.json"
+    payload["runtime"]["preflight_output_root"] = str(preflight_root)
+    payload["runtime"]["preflight_evidence"] = str(evidence_path)
+    payload["approvals"]["three_way_alignment"] = "APPROVED"
+    payload["approvals"]["bounded_preflight"] = {
+        "status": "AUTHORIZED",
+        "optimizer_steps": 4,
+        "output_namespace": str(preflight_root),
+        "authorization_reference": "unit-test-only",
+    }
+    contract = V31Main500MConfig.model_validate(payload)
+    contract_fingerprint = contract.execution_contract_fingerprint()
+    payload["approvals"]["three_model_gpu_preflight"] = {
+        "status": "PASSED",
+        "artifact_path": str(evidence_path),
+        "artifact_sha256": "0" * 64,
+        "execution_contract_fingerprint": contract_fingerprint,
+        "source_commit": "1" * 40,
+        "optimizer_steps": 4,
+    }
+    missing = V31Main500MConfig.model_validate(payload)
+    with pytest.raises(RuntimeError, match="ARTIFACT_MISSING"):
+        missing.validate_preflight_evidence()
+
+    preflight_root.mkdir(parents=True)
+    report = {
+        "status": "PASS",
+        "mode": "preflight",
+        "strategy": "model_owned",
+        "world_size": 3,
+        "logical_target_count": 168,
+        "optimizer_steps": 4,
+        "execution_contract_fingerprint": contract_fingerprint,
+        "git_sha": "1" * 40,
+        "dcp_save_reload_resume_update": "PASS",
+        "checkpoint_parameter_and_adam_restore_probe": "PASS",
+        "uninterrupted_vs_resumed_next_update": "BITWISE_EXACT",
+        "source_correctness": [
+            {
+                "status": "PASS",
+                "targets": 56,
+                "frozen_parameters": "PASS",
+            }
+            for _ in range(3)
+        ],
+        "checkpoint_manifest": {"status": "COMPLETE", "world_size": 3},
+    }
+    evidence_path.write_text(json.dumps(report, sort_keys=True), encoding="utf-8")
+    payload["approvals"]["three_model_gpu_preflight"]["artifact_sha256"] = (
+        hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+    )
+    valid = V31Main500MConfig.model_validate(payload)
+    assert valid.validate_preflight_evidence() == report
+
+    report.pop("uninterrupted_vs_resumed_next_update")
+    evidence_path.write_text(json.dumps(report, sort_keys=True), encoding="utf-8")
+    payload["approvals"]["three_model_gpu_preflight"]["artifact_sha256"] = (
+        hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+    )
+    legacy_preflight = V31Main500MConfig.model_validate(payload)
+    assert legacy_preflight.validate_preflight_evidence() == report
+    payload["approvals"]["exact_resume"] = "VALIDATED_THREE_MODEL_GPU"
+    exact_resume_claim = V31Main500MConfig.model_validate(payload)
+    with pytest.raises(RuntimeError, match="EVIDENCE_INVALID"):
+        exact_resume_claim.validate_preflight_evidence()
+    report["uninterrupted_vs_resumed_next_update"] = "BITWISE_EXACT"
+    report["exact_data_replay"] = {
+        "step": 4,
+        "accepted_exposures": 32768,
+        "unique_anchors": 32768,
+        "repeated_exposures": 0,
+        "ordered_anchor_ids_sha256": "3" * 64,
+    }
+    report["source_state_immutability_by_rank"] = [
+        {
+            "rank": rank,
+            "model": model,
+            "initial_sha256": "4" * 64,
+            "final_sha256": "4" * 64,
+            "status": "PASS",
+        }
+        for rank, model in enumerate(("gemma", "smol", "granite"))
+    ]
+    evidence_path.write_text(json.dumps(report, sort_keys=True), encoding="utf-8")
+    payload["approvals"]["three_model_gpu_preflight"]["artifact_sha256"] = (
+        hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+    )
+    exact_valid = V31Main500MConfig.model_validate(payload)
+    assert exact_valid.validate_preflight_evidence() == report
+    payload["approvals"]["exact_resume"] = (
+        "SYNTHETIC_VALIDATED_REAL_THREE_MODEL_PENDING"
+    )
+
+    report["git_sha"] = "2" * 40
+    evidence_path.write_text(json.dumps(report, sort_keys=True), encoding="utf-8")
+    payload["approvals"]["three_model_gpu_preflight"]["artifact_sha256"] = (
+        hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+    )
+    wrong_source = V31Main500MConfig.model_validate(payload)
+    with pytest.raises(RuntimeError, match="EVIDENCE_INVALID"):
+        wrong_source.validate_preflight_evidence()
+
+    report["git_sha"] = "1" * 40
+    report["logical_target_count"] = 167
+    evidence_path.write_text(json.dumps(report, sort_keys=True), encoding="utf-8")
+    payload["approvals"]["three_model_gpu_preflight"]["artifact_sha256"] = (
+        hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+    )
+    invalid = V31Main500MConfig.model_validate(payload)
+    with pytest.raises(RuntimeError, match="EVIDENCE_INVALID"):
+        invalid.validate_preflight_evidence()
+
+
+def test_main500m_source_contract_rejects_qwen() -> None:
+    payload = _main500m_config().payload()
+    payload["models"][2]["model_id"] = "Qwen/forbidden-new-experiment"
+    with pytest.raises(ValueError, match="Qwen is forbidden"):
+        V31Main500MConfig.model_validate(payload)
+
+
+def test_exact_training_state_digest_is_stable_and_mutation_sensitive() -> None:
+    torch.manual_seed(7)
+    model = nn.Linear(4, 3)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda _step: 1.0)
+    loss = model(torch.randn(2, 4)).square().mean()
+    loss.backward()
+    optimizer.step()
+    scheduler.step()
+    baseline = _exact_training_state_digest(model, optimizer, scheduler)
+    assert _exact_training_state_digest(model, optimizer, scheduler) == baseline
+    parameter = next(model.parameters())
+    adam_tensor = optimizer.state[parameter]["exp_avg"]
+    with torch.no_grad():
+        adam_tensor.reshape(-1)[0].add_(1)
+    assert _exact_training_state_digest(model, optimizer, scheduler) != baseline
+    with torch.no_grad():
+        adam_tensor.reshape(-1)[0].sub_(1)
+    scheduler.last_epoch += 1
+    assert _exact_training_state_digest(model, optimizer, scheduler) != baseline
+    scheduler.last_epoch -= 1
+    torch.rand(1)
+    after_rng_mutation = _exact_training_state_digest(model, optimizer, scheduler)
+    assert after_rng_mutation != baseline
+    with torch.no_grad():
+        next(model.parameters()).reshape(-1)[0].add_(1)
+    assert _exact_training_state_digest(model, optimizer, scheduler) != after_rng_mutation
+
+
+def test_canonical_metric_rows_requires_exact_single_step_replay() -> None:
+    def row(step: int, digest: str) -> dict[str, object]:
+        return {
+            "step": step,
+            "ordered_anchor_ids_sha256": digest,
+            "accepted_exposures": step * 8192,
+            "unique_anchors": step * 8192,
+            "repeated_exposures": 0,
+        }
+
+    raw = [row(1, "a"), row(2, "b"), row(2, "b")]
+    rows, evidence = _canonical_metric_rows(raw, exact_replay_step=2)
+    assert [item["step"] for item in rows] == [1, 2]
+    assert evidence == {
+        "step": 2,
+        "ordered_anchor_ids_sha256": "b",
+        "accepted_exposures": 16384,
+        "unique_anchors": 16384,
+        "repeated_exposures": 0,
+    }
+    with pytest.raises(RuntimeError, match="data replay mismatch"):
+        _canonical_metric_rows([row(1, "a"), row(2, "b"), row(2, "c")], exact_replay_step=2)
+    with pytest.raises(RuntimeError, match="multiplicity mismatch"):
+        _canonical_metric_rows([row(1, "a"), row(1, "a"), row(2, "b")], exact_replay_step=2)
+
+
+def test_main500m_approved_granite_contract_is_immutable() -> None:
+    payload = _main500m_config().payload()
+    payload["models"][2]["selected_layers"] = list(range(15, 23))
+    with pytest.raises(ValueError, match="approved Granite model-3 contract changed"):
+        V31Main500MConfig.model_validate(payload)
+
+
+def test_main500m_three_way_alignment_evidence_is_pinned_and_validated(
+    tmp_path: Path,
+) -> None:
+    config = _main500m_config()
+    report = config.validate_three_way_alignment_evidence()
+    assert report["status"] == "PASS"
+    assert report["audit"]["boundary_invariants"] == "PASS"
+
+    payload = _deauthorize_main500m_payload(config.payload())
+    invalid_path = tmp_path / "invalid_alignment.json"
+    invalid_report = copy.deepcopy(report)
+    invalid_report["audit"]["dataset_stream_prefix_replay"] = "FAIL"
+    invalid_path.write_text(json.dumps(invalid_report), encoding="utf-8")
+    payload["approvals"]["three_way_alignment_artifact"] = str(invalid_path)
+    payload["approvals"]["three_way_alignment_artifact_sha256"] = hashlib.sha256(
+        invalid_path.read_bytes()
+    ).hexdigest()
+    invalid = V31Main500MConfig.model_validate(payload)
+    with pytest.raises(RuntimeError, match="THREE_WAY_ALIGNMENT_EVIDENCE_INVALID"):
+        invalid.validate_three_way_alignment_evidence()
 
 
 def test_three_model_zscore_and_separator_contract_matches_notation() -> None:
@@ -166,39 +839,429 @@ def test_main500m_health_monitor_separates_alerts_from_hard_aborts() -> None:
     }
 
 
+def _complete_main500m_diagnostic(
+    *,
+    diagnostic_step: int,
+    accepted_exposures: int,
+    gate_collapse: bool = False,
+    reconstruction_regression: bool = False,
+) -> dict:
+    loss: dict[str, float] = {"total": 1.0}
+    for site in ("pre", "mid"):
+        for model in ("gemma", "smol", "third"):
+            prefix = f"diagnostic/gate/{site}/{model}"
+            loss.update(
+                {
+                    f"{prefix}/projection_negative_logit_fraction": 0.5,
+                    f"{prefix}/normalized_negative_logit_fraction": 0.5,
+                    f"{prefix}/positive_scores_per_anchor": (
+                        128.0 if gate_collapse else 4096.0
+                    ),
+                    f"{prefix}/positive_firings_per_anchor": 32.0,
+                    f"{prefix}/active_features_in_pool": (
+                        500 if gate_collapse else 4096
+                    ),
+                    f"{prefix}/effective_dictionary_size_in_pool": (
+                        900.0 if gate_collapse else 4096.0
+                    ),
+                    f"{prefix}/top_1_percent_firing_share_in_pool": (
+                        0.60 if gate_collapse else 0.10
+                    ),
+                    f"{prefix}/top_10_percent_firing_share_in_pool": (
+                        0.90 if gate_collapse else 0.40
+                    ),
+                    f"{prefix}/dead_features": 0.0,
+                    f"{prefix}/recently_dead_features": (
+                        7000.0 if gate_collapse else 0.0
+                    ),
+                }
+            )
+            for window in range(8):
+                loss[
+                    f"diagnostic/activation/{site}/{model}/window_{window}/full_fvu"
+                ] = 0.90 if reconstruction_regression else 0.50
+    for model in ("gemma", "smol", "third"):
+        for target in range(56):
+            loss[f"loss/internal/{model}.target_{target}"] = (
+                0.90 if reconstruction_regression else 0.50
+            )
+    return {
+        "accepted_exposures": accepted_exposures,
+        "repeated_exposures": 0,
+        "diagnostic_parameter_step": diagnostic_step,
+        "ordered_anchor_ids_sha256": "c" * 64,
+        "loss": loss,
+        "gradient_norms_by_rank": [
+            {"rank": rank, "l2": {"shared_encoder": 1.0, "rank_one": 1.0}}
+            for rank in range(3)
+        ],
+    }
+
+
+def test_main500m_health_monitor_fails_closed_on_incomplete_scheduled_diagnostics() -> None:
+    result = evaluate_main500m_health(
+        {
+            "accepted_exposures": 8192,
+            "repeated_exposures": 0,
+            "diagnostic_parameter_step": 0,
+            "loss": {"total": 1.0},
+            "gradient_norms_by_rank": [],
+        },
+        _main500m_config().monitoring,
+    )
+    assert result["status"] == "ABORT"
+    assert {event["code"] for event in result["events"]} == {"MISSING_DIAGNOSTICS"}
+
+
+def test_main500m_sustained_gate_failure_checkpoints_then_pauses_and_resumes_state() -> None:
+    thresholds = _main500m_config().monitoring
+    monitor = SustainedMain500MHealthMonitor(thresholds)
+    healthy = monitor.observe(
+        _complete_main500m_diagnostic(diagnostic_step=0, accepted_exposures=8192)
+    )
+    assert healthy["status"] == "PASS"
+    assert healthy["action"] == "CONTINUE"
+
+    first = monitor.observe(
+        _complete_main500m_diagnostic(
+            diagnostic_step=64,
+            accepted_exposures=65 * 8192,
+            gate_collapse=True,
+        )
+    )
+    assert first["status"] == "ALERT"
+    second = monitor.observe(
+        _complete_main500m_diagnostic(
+            diagnostic_step=128,
+            accepted_exposures=129 * 8192,
+            gate_collapse=True,
+        )
+    )
+    assert second["status"] == "ALERT"
+
+    resumed = SustainedMain500MHealthMonitor(thresholds)
+    resumed.load_state_dict(monitor.state_dict())
+    third = resumed.observe(
+        _complete_main500m_diagnostic(
+            diagnostic_step=192,
+            accepted_exposures=193 * 8192,
+            gate_collapse=True,
+        )
+    )
+    assert third["status"] == "PAUSE"
+    assert third["action"] == "CHECKPOINT_AND_PAUSE"
+    assert "SUSTAINED_GATE_HEALTH_FAILURE" in {
+        event["code"] for event in third["events"]
+    }
+
+
+def _set_dictionary_concentration_only(metrics: dict, value: float = 900.0) -> dict:
+    for key in tuple(metrics["loss"]):
+        if key.endswith("/effective_dictionary_size_in_pool"):
+            metrics["loss"][key] = value
+    return metrics
+
+
+def test_main500m_dictionary_concentration_only_is_alert_during_zscore_warmup() -> None:
+    thresholds = _main500m_config().monitoring
+    monitor = SustainedMain500MHealthMonitor(thresholds)
+    for diagnostic_step in (192, 256, 320):
+        result = monitor.observe(
+            _set_dictionary_concentration_only(
+                _complete_main500m_diagnostic(
+                    diagnostic_step=diagnostic_step,
+                    accepted_exposures=(diagnostic_step + 1) * 8192,
+                )
+            )
+        )
+        assert result["status"] == "ALERT"
+        assert result["action"] == "CONTINUE"
+        assert result["monitor_state"]["gate_failure_streak"] == 0
+        assert result["monitor_state"]["implementation_revision"] == (
+            SUSTAINED_POLICY_IMPLEMENTATION_REVISION
+        )
+        assert "DICTIONARY_CONCENTRATION_WARMUP_ALERT_ONLY" in {
+            event["code"] for event in result["events"]
+        }
+
+
+def test_main500m_dictionary_concentration_pauses_after_zscore_warmup() -> None:
+    thresholds = _main500m_config().monitoring
+    monitor = SustainedMain500MHealthMonitor(thresholds)
+    first_step = DICTIONARY_CONCENTRATION_PAUSE_MINIMUM_EXPOSURES // 8192 - 1
+    result = None
+    for offset in (0, 64, 128):
+        diagnostic_step = first_step + offset
+        result = monitor.observe(
+            _set_dictionary_concentration_only(
+                _complete_main500m_diagnostic(
+                    diagnostic_step=diagnostic_step,
+                    accepted_exposures=(diagnostic_step + 1) * 8192,
+                )
+            )
+        )
+    assert result is not None
+    assert result["status"] == "PAUSE"
+    assert result["action"] == "CHECKPOINT_AND_PAUSE"
+    assert result["monitor_state"]["gate_failure_streak"] == 3
+
+
+def test_main500m_legacy_pause_streak_resets_on_warmup_only_concentration() -> None:
+    thresholds = _main500m_config().monitoring
+    monitor = SustainedMain500MHealthMonitor(thresholds)
+    monitor.load_state_dict(
+        {
+            "schema_version": 1,
+            "policy_version": "v1",
+            "gate_failure_streak": 3,
+            "reconstruction_failure_streak": 0,
+            "diagnostic_observations": 6,
+            "last_diagnostic_parameter_step": 320,
+        }
+    )
+    result = monitor.observe(
+        _set_dictionary_concentration_only(
+            _complete_main500m_diagnostic(
+                diagnostic_step=384,
+                accepted_exposures=385 * 8192,
+            )
+        )
+    )
+    assert result["status"] == "ALERT"
+    assert result["action"] == "CONTINUE"
+    assert result["monitor_state"]["gate_failure_streak"] == 0
+
+
+def test_main500m_reconstruction_pause_starts_only_after_first_review_milestone() -> None:
+    thresholds = _main500m_config().monitoring
+    monitor = SustainedMain500MHealthMonitor(thresholds)
+    for diagnostic_step in (0, 64):
+        early = monitor.observe(
+            _complete_main500m_diagnostic(
+                diagnostic_step=diagnostic_step,
+                accepted_exposures=(diagnostic_step + 1) * 8192,
+                reconstruction_regression=True,
+            )
+        )
+        assert early["status"] == "ALERT"
+        assert early["action"] == "CONTINUE"
+        assert early["monitor_state"]["reconstruction_failure_streak"] == 0
+
+    first = monitor.observe(
+        _complete_main500m_diagnostic(
+            diagnostic_step=1221,
+            accepted_exposures=10_002_432,
+            reconstruction_regression=True,
+        )
+    )
+    assert first["status"] == "ALERT"
+    second = monitor.observe(
+        _complete_main500m_diagnostic(
+            diagnostic_step=1280,
+            accepted_exposures=10_493_952,
+            reconstruction_regression=True,
+        )
+    )
+    assert second["status"] == "PAUSE"
+    assert "SUSTAINED_RECONSTRUCTION_FAILURE" in {
+        event["code"] for event in second["events"]
+    }
+
+
+def test_main500m_milestones_are_exact_step_boundaries_and_final_is_not_a_pause() -> None:
+    milestones = _main500m_config().monitoring.staged_milestone_exposures
+    assert all(exposures % 8192 == 0 for exposures in milestones)
+    assert milestone_diagnostic_due(milestones[0], milestones)
+    assert milestone_pause_due(milestones[0], milestones)
+    assert milestone_diagnostic_due(milestones[-1], milestones)
+    assert not milestone_pause_due(milestones[-1], milestones)
+    assert next_review_exposure(milestones[0], milestones) == milestones[1]
+    with pytest.raises(ValueError, match="beyond the final"):
+        next_review_exposure(milestones[-1], milestones)
+
+
+def test_model_owned_distributed_timeout_covers_slow_exact_resume_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[tuple[object, ...]] = []
+    monkeypatch.setenv("LOCAL_RANK", "2")
+    monkeypatch.setattr(
+        torch.cuda,
+        "set_device",
+        lambda device: events.append(("device", device)),
+    )
+    monkeypatch.setattr(
+        torch.distributed,
+        "init_process_group",
+        lambda backend, **kwargs: events.append(("init", backend, kwargs)),
+    )
+    monkeypatch.setattr(torch.distributed, "get_rank", lambda: 2)
+    monkeypatch.setattr(torch.distributed, "get_world_size", lambda: 3)
+
+    rank, world, device = _init_distributed()
+
+    assert (rank, world, device) == (2, 3, torch.device("cuda", 2))
+    assert events == [
+        ("device", torch.device("cuda", 2)),
+        (
+            "init",
+            "nccl",
+            {
+                "device_id": torch.device("cuda", 2),
+                "timeout": timedelta(hours=1),
+            },
+        ),
+    ]
+
+
+def test_main500m_continuation_authorization_is_checkpoint_and_contract_pinned(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "authorizations"
+    root.mkdir()
+    path = root / "continue_after_10m.json"
+    payload = {
+        "schema_version": 1,
+        "status": "APPROVED",
+        "decision": "CONTINUE",
+        "policy_version": "v1",
+        "reasons": ["MILESTONE"],
+        "accepted_exposures": 10_002_432,
+        "approved_through_exposures": 25_001_984,
+        "execution_contract_fingerprint": "a" * 64,
+        "checkpoint_manifest_sha256": "b" * 64,
+        "researcher": "unit-test researcher",
+        "decided_at": "2026-11-09T20:00:00-05:00",
+        "scientific_limitations_acknowledged": "synthetic unit-test decision only",
+    }
+    path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+    validated = load_continuation_authorization(
+        path,
+        authorization_root=root,
+        pending_review={
+            "policy_version": "v1",
+            "reasons": ["MILESTONE"],
+            "accepted_exposures": 10_002_432,
+        },
+        execution_contract_fingerprint="a" * 64,
+        checkpoint_manifest_sha256="b" * 64,
+        approved_through_exposures=25_001_984,
+        final_approved_through_exposures=500_006_912,
+    )
+    assert validated["artifact_path"] == str(path.resolve())
+    assert len(validated["artifact_sha256"]) == 64
+
+    payload["checkpoint_manifest_sha256"] = "d" * 64
+    path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+    with pytest.raises(ValueError, match="provenance mismatch"):
+        load_continuation_authorization(
+            path,
+            authorization_root=root,
+            pending_review={
+                "policy_version": "v1",
+                "reasons": ["MILESTONE"],
+                "accepted_exposures": 10_002_432,
+            },
+            execution_contract_fingerprint="a" * 64,
+            checkpoint_manifest_sha256="b" * 64,
+            approved_through_exposures=25_001_984,
+            final_approved_through_exposures=500_006_912,
+        )
+
+
+def test_main500m_continue_to_final_authorization_is_explicit_and_pinned(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "authorizations"
+    root.mkdir()
+    path = root / "continue_to_final.json"
+    payload = {
+        "schema_version": 1,
+        "status": "APPROVED",
+        "decision": "CONTINUE_TO_FINAL",
+        "policy_version": "v1",
+        "reasons": ["MILESTONE"],
+        "accepted_exposures": 10_002_432,
+        "approved_through_exposures": 500_006_912,
+        "execution_contract_fingerprint": "a" * 64,
+        "checkpoint_manifest_sha256": "b" * 64,
+        "researcher": "unit-test researcher",
+        "decided_at": "2026-11-10T12:00:00-05:00",
+        "scientific_limitations_acknowledged": "synthetic unit-test decision only",
+    }
+    path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+    validated = load_continuation_authorization(
+        path,
+        authorization_root=root,
+        pending_review={
+            "policy_version": "v1",
+            "reasons": ["MILESTONE"],
+            "accepted_exposures": 10_002_432,
+        },
+        execution_contract_fingerprint="a" * 64,
+        checkpoint_manifest_sha256="b" * 64,
+        approved_through_exposures=25_001_984,
+        final_approved_through_exposures=500_006_912,
+    )
+    assert validated["decision"] == "CONTINUE_TO_FINAL"
+    assert continuation_authorized_through([validated], 500_006_912)
+    assert not continuation_authorized_through([], 500_006_912)
+
+    payload["approved_through_exposures"] = 250_003_456
+    path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+    with pytest.raises(ValueError, match="provenance mismatch"):
+        load_continuation_authorization(
+            path,
+            authorization_root=root,
+            pending_review={
+                "policy_version": "v1",
+                "reasons": ["MILESTONE"],
+                "accepted_exposures": 10_002_432,
+            },
+            execution_contract_fingerprint="a" * 64,
+            checkpoint_manifest_sha256="b" * 64,
+            approved_through_exposures=25_001_984,
+            final_approved_through_exposures=500_006_912,
+        )
+
+
+def test_main500m_continuation_audit_log_is_idempotent_and_rejects_conflicts(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "continuation_authorizations.jsonl"
+    record = {
+        "accepted_exposures": 10_002_432,
+        "artifact_sha256": "a" * 64,
+        "decision": "CONTINUE",
+    }
+    _record_continuation_authorization(path, record)
+    _record_continuation_authorization(path, record)
+    assert len(path.read_text(encoding="utf-8").splitlines()) == 1
+
+    conflicting = {**record, "artifact_sha256": "b" * 64}
+    with pytest.raises(ValueError, match="conflicting continuation"):
+        _record_continuation_authorization(path, conflicting)
+
+
+def test_main500m_milestone_report_preserves_complete_scientific_diagnostics() -> None:
+    metrics = _complete_main500m_diagnostic(
+        diagnostic_step=1220,
+        accepted_exposures=10_002_432,
+    )
+    metrics["health"] = {"status": "PASS", "events": []}
+    summary = milestone_scientific_summary(metrics)
+    assert summary["accepted_exposures"] == 10_002_432
+    assert summary["activation_full_fvu_summary"]["count"] == 48
+    assert summary["internal_fvu_summary"]["count"] == 168
+    assert len(summary["gate_metrics"]) == 60
+
+
 def test_approved_third_model_contract_registers_exactly_168_unique_targets() -> None:
     payload = _main500m_config().payload()
-    payload["models"][2] = {
-        "key": "third",
-        "approval_status": "APPROVED",
-        "model_id": "synthetic/third-model",
-        "revision": "a" * 40,
-        "tokenizer_id": "synthetic/third-model",
-        "tokenizer_revision": "a" * 40,
-        "family": "synthetic_transformer",
-        "license": "test-only",
-        "access": "local-test",
-        "checkpoint_parameter_count": 2_000_000_000,
-        "selected_layers": list(range(4, 12)),
-        "hidden_size": 32,
-        "intermediate_size": 64,
-        "num_hidden_layers": 16,
-        "num_attention_heads": 4,
-        "num_key_value_heads": 2,
-        "head_dim": 8,
-        "layer_prefixes": ["model.layers"],
-        "residual_pre_suffix": "input_layernorm",
-        "residual_mid_suffix": "post_attention_layernorm",
-        "fused_qkv": False,
-        "fused_gate_up": False,
-        "frozen": True,
-    }
-    payload["architecture"]["model_order"] = ["gemma", "smol", "third"]
-    payload["approvals"]["third_model"] = "APPROVED"
     config = V31Main500MConfig.model_validate(payload)
     registry = build_model_registry_2b(config)
     targets = [target for layout in registry.values() for target in layout.targets()]
-    assert tuple(registry) == ("gemma", "smol", "third")
+    assert tuple(registry) == ("gemma", "smol", "granite")
     assert len(targets) == len({target.key for target in targets}) == 168
     assert {target.logical_name for target in targets} == {
         "q",
@@ -209,6 +1272,40 @@ def test_approved_third_model_contract_registers_exactly_168_unique_targets() ->
         "mlp_up",
         "mlp_down",
     }
+
+
+def test_main500m_alignment_manifest_uses_the_canonical_policy_identifier() -> None:
+    payload = _main500m_config().payload()
+    config = V31Main500MConfig.model_validate(payload)
+    manifest = {
+        "schema_version": 4,
+        "dataset_manifest_sha256": "d" * 64,
+        "model_order": list(config.architecture.model_order),
+        "canonical_text": "identity",
+        "alignment": "exact_fast_tokenizer_offsets_and_exact_prefix_roundtrip_v2",
+        "alignment_acceptance": "intersection_of_exact_canonical_text_boundaries",
+        "sequence_length_native_tokens_per_model": 512,
+        "tokenizers": [
+            {
+                "model_key": model.key,
+                "tokenizer_id": model.tokenizer_id,
+                "tokenizer_revision": model.tokenizer_revision,
+            }
+            for model in config.models
+        ],
+    }
+    _validate_main500m_alignment_manifest(
+        config,
+        manifest,
+        dataset_manifest_sha256="d" * 64,
+    )
+    manifest["alignment"] = "identity_exact_three_way_prefix"
+    with pytest.raises(ValueError, match="alignment manifest contract mismatch"):
+        _validate_main500m_alignment_manifest(
+            config,
+            manifest,
+            dataset_manifest_sha256="d" * 64,
+        )
 
 
 def test_prefetch_checkpoint_preserves_exact_pool_order() -> None:
@@ -544,6 +1641,41 @@ def test_exposure_ledger_records_smol_as_immutable_third_tokenizer_slot(tmp_path
     reopened.close()
 
 
+def test_main500m_exposure_ledger_schema_has_no_legacy_model_columns(
+    tmp_path: Path,
+) -> None:
+    model_order = ("gemma", "smol", "granite")
+    ledger = SQLiteExposureLedger(
+        tmp_path / "main500m.sqlite",
+        dataset_manifest_sha256="c" * 64,
+        world_size=3,
+        model_order=model_order,
+        compact_anchor_ids=True,
+    )
+    ledger.observe_raw_tokens(
+        "document-0",
+        {"gemma": 17, "smol": 19, "granite": 23},
+    )
+    ledger.observe_replicated_optimizer_step(0, ("anchor-0",))
+    for table in ("alignment_observations", "exposure_totals"):
+        columns = {
+            str(row[1])
+            for row in ledger.connection.execute(f"PRAGMA table_info({table})")
+        }
+        assert {
+            "raw_tokens_slot_0",
+            "raw_tokens_slot_1",
+            "raw_tokens_slot_2",
+        } <= columns
+        assert not any(name in columns for name in ("raw_tokens_qwen", "raw_tokens_phi"))
+    receipt = ledger.checkpoint_receipt(expected_optimizer_steps=1)
+    payload = receipt.payload()
+    assert payload["model_order"] == list(model_order)
+    assert payload["counters"]["raw_token_slots"] == [17, 19, 23]
+    assert not any("qwen" in key or "phi" in key for key in payload["counters"])
+    ledger.close()
+
+
 def test_compact_exposure_ledger_preserves_exact_membership_and_resume(tmp_path: Path) -> None:
     path = tmp_path / "compact.sqlite"
     ledger = SQLiteExposureLedger(
@@ -842,6 +1974,11 @@ def _distributed_model_owned_worker(
 
     update()
     manager = ModelOwnedCheckpoint(checkpoint_root, keep_complete=2)
+    if rank == 0:
+        # A fresh external-resume namespace has no checkpoint root until its first
+        # atomic save. Exercise the production storage-probe ordering before save.
+        assert not Path(checkpoint_root).exists()
+        assert _checkpoint_storage_free_bytes(Path(checkpoint_root)) > 0
     saved_parameter = next(model.parameters()).detach().clone()
     recovery_root = Path(checkpoint_root).parent / "live-recovery"
     recovery_databases = None

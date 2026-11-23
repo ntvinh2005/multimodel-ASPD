@@ -1,0 +1,25 @@
+schema_version: 1
+status: RESEARCHER_AUTHORIZED_READ_ONLY_FINAL_HELDOUT
+authorized_by: researcher
+authorized_on: '2026-11-14'
+experiment_family: aspd_v3_1_main500m_final_heldout_v1
+source_experiment_family: aspd_v3_1_three_model_main500m
+split: validation
+split_unit: document
+accepted_anchors: 100352
+pool_anchors: 2048
+pool_count: 49
+bootstrap_unit: source_document
+bootstrap_replicates: 2000
+bootstrap_seed: 20261117
+jaccard_top_features: 256
+jaccard_min_fires: 4
+checkpoint_steps: 61036
+checkpoint_manifest_sha256: 735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969
+accepted_training_exposures: 500006912
+model_order: [gemma, smol, granite]
+gpu_count: 3
+gpu_type: b200
+read_only: true
+training_authorized_by_this_contract: false
+forbidden_model_substrings: [qwen]

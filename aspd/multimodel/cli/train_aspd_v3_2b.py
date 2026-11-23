@@ -18,6 +18,7 @@ import socket
 import subprocess
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -37,7 +38,10 @@ from aspd.multimodel.v3.data import (
     SQLiteExposureLedger,
     write_json_immutable,
 )
-from aspd.multimodel.v3.distributed_checkpoint import MainV1DistributedCheckpoint
+from aspd.multimodel.v3.distributed_checkpoint import (
+    MainV1DistributedCheckpoint,
+    capture_rng_state,
+)
 from aspd.multimodel.v3.encoder_auxk_factorial_config import (
     EXPERIMENT_FAMILY as ENCODER_AUXK_FACTORIAL_FAMILY,
 )
@@ -59,7 +63,15 @@ from aspd.multimodel.v3.main500m_config import (
     EXPERIMENT_FAMILY as MAIN500M_EXPERIMENT_FAMILY,
 )
 from aspd.multimodel.v3.main500m_config import load_main500m_config
-from aspd.multimodel.v3.main500m_monitoring import evaluate_main500m_health
+from aspd.multimodel.v3.main500m_continuation import (
+    continuation_authorized_through,
+    load_continuation_authorization,
+    milestone_diagnostic_due,
+    milestone_pause_due,
+    milestone_scientific_summary,
+    next_review_exposure,
+)
+from aspd.multimodel.v3.main500m_monitoring import SustainedMain500MHealthMonitor
 from aspd.multimodel.v3.main_2b_config import (
     MODEL_ORDER_2B,
     V3Main2BV1Config,
@@ -100,6 +112,58 @@ from aspd.multimodel.v3.two_model_matryoshka_config import (
 )
 
 SOURCE_RANK = {key: index for index, key in enumerate(MODEL_ORDER_2B)}
+CHECKPOINT_GROWTH_MINIMUM_BYTES = 16 * 1024**3
+
+
+def _effective_external_resume_lineage(
+    *,
+    proposed: dict[str, Any] | None,
+    existing: dict[str, Any] | None,
+    in_place_resume: bool,
+) -> dict[str, Any] | None:
+    """Preserve the immutable origin of an in-place resumed run.
+
+    ``--resume-checkpoint`` is used only when a run namespace is first created.
+    Later launches select the latest complete checkpoint inside that namespace, so
+    their command line correctly omits the flag.  The originating external-resume
+    record nevertheless remains part of the run's immutable provenance.
+    """
+
+    return existing if in_place_resume else proposed
+
+
+def _checkpoint_storage_ready(
+    *,
+    free_bytes: int,
+    checkpoint_bytes: int,
+    reserve_bytes: int,
+    growth_margin_bytes: int = 0,
+) -> bool:
+    """Return whether an atomic replacement can preserve the recovery reserve."""
+
+    if min(free_bytes, checkpoint_bytes, reserve_bytes, growth_margin_bytes) < 0:
+        raise ValueError("checkpoint storage accounting cannot use negative byte counts")
+    return free_bytes >= checkpoint_bytes + growth_margin_bytes + reserve_bytes
+
+
+def _checkpoint_storage_free_bytes(checkpoint_root: Path) -> int:
+    """Measure capacity before the first checkpoint directory exists.
+
+    An external resume starts in a fresh run namespace, so the checkpoint manager's
+    root is intentionally absent until its first atomic save.  Capacity belongs to
+    the containing filesystem; probe the nearest existing ancestor without creating
+    a directory or weakening the checkpoint overwrite guard.
+    """
+
+    probe = checkpoint_root
+    while not probe.exists():
+        parent = probe.parent
+        if parent == probe:
+            raise FileNotFoundError(
+                f"checkpoint storage has no existing ancestor: {checkpoint_root}"
+            )
+        probe = parent
+    return shutil.disk_usage(probe).free
 
 
 class _PoolPrefetcher:
@@ -160,7 +224,14 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--mode",
-        choices=("benchmark", "preflight", "pilot", "main", "controlled"),
+        choices=(
+            "benchmark",
+            "preflight",
+            "resume_validation",
+            "pilot",
+            "main",
+            "controlled",
+        ),
         required=True,
     )
     parser.add_argument("--strategy", choices=("fsdp_baseline", "model_owned"), required=True)
@@ -184,6 +255,16 @@ def _parse_args() -> argparse.Namespace:
         "--resume-checkpoint",
         type=Path,
         help="immutable external checkpoint directory for exact cross-namespace resume",
+    )
+    parser.add_argument(
+        "--resume-validation-contract",
+        type=Path,
+        help="immutable bounded authorization for real cross-process resume validation",
+    )
+    parser.add_argument(
+        "--continuation-authorization",
+        type=Path,
+        help="immutable researcher decision for a checkpointed health/milestone pause",
     )
     return parser.parse_args()
 
@@ -264,11 +345,100 @@ def _preflight_identity_requirements(
         if authorization is None:
             raise RuntimeError("Granite pilot is missing its authorization record")
         return {"config_fingerprint": authorization.preflight_config_fingerprint}
+    if config.experiment_family == MAIN500M_EXPERIMENT_FAMILY:
+        return {
+            "execution_contract_fingerprint": config.execution_contract_fingerprint()
+        }
     return {
         "git_sha": git_sha,
         "config_file_sha256": config_file_sha256,
         "config_fingerprint": config.fingerprint(),
     }
+
+
+def _authorize_main500m_mode(config: Any, args: argparse.Namespace) -> None:
+    """Fail closed before NCCL or source loading, with separate preflight/main gates."""
+
+    if args.mode == "preflight":
+        if args.strategy != "model_owned":
+            raise RuntimeError("ASPD v3.1 bounded preflight requires model-owned execution")
+        if args.skip_checkpoint:
+            raise RuntimeError("ASPD v3.1 bounded preflight cannot disable checkpoint recovery")
+        if args.resume_checkpoint is not None:
+            raise RuntimeError("ASPD v3.1 bounded preflight cannot resume an external run")
+        config.require_preflight_authorized(
+            optimizer_steps=args.max_steps,
+            run_dir=args.run_dir,
+        )
+        return
+    if args.mode == "resume_validation":
+        if args.strategy != "model_owned" or args.skip_checkpoint:
+            raise RuntimeError(
+                "ASPD v3.1 resume validation requires checkpointed model-owned execution"
+            )
+        if args.resume_checkpoint is None or args.resume_validation_contract is None:
+            raise RuntimeError(
+                "ASPD v3.1 resume validation requires its checkpoint and contract"
+            )
+        contract = _load_resume_validation_contract(config, args)
+        if args.max_steps != int(contract["target_optimizer_step"]):
+            raise RuntimeError("resume-validation target step differs from authorization")
+        if args.run_dir != Path(contract["output_namespace"]):
+            raise RuntimeError("resume-validation namespace differs from authorization")
+        if args.run_dir.exists():
+            raise RuntimeError("resume-validation refuses to overwrite its namespace")
+        return
+    if args.mode == "main":
+        if args.strategy != "model_owned":
+            raise RuntimeError("ASPD v3.1 main requires model-owned execution")
+        if args.skip_checkpoint:
+            raise RuntimeError("ASPD v3.1 main cannot disable checkpoint recovery")
+        config.require_main_authorized()
+        if args.max_steps != config.data.optimizer_steps:
+            raise RuntimeError("ASPD v3.1 main requires the exact 61,036-step budget")
+        return
+    raise RuntimeError(
+        "ASPD v3.1 main contract permits only preflight, resume_validation, or main mode"
+    )
+
+
+def _load_resume_validation_contract(
+    config: Any, args: argparse.Namespace
+) -> dict[str, Any]:
+    path = args.resume_validation_contract
+    if path is None or not path.is_file():
+        raise RuntimeError("RESUME_VALIDATION_CONTRACT_MISSING")
+    contract = json.loads(path.read_text(encoding="utf-8"))
+    required = {
+        "schema_version": 1,
+        "status": "AUTHORIZED_BOUNDED_RESUME_VALIDATION",
+        "execution_contract_fingerprint": config.execution_contract_fingerprint(),
+        "source_checkpoint": str(args.resume_checkpoint),
+        "output_namespace": str(args.run_dir),
+        "target_optimizer_step": args.max_steps,
+    }
+    mismatch = {
+        key: {"expected": value, "observed": contract.get(key)}
+        for key, value in required.items()
+        if contract.get(key) != value
+    }
+    authorization_reference = contract.get("authorization_reference")
+    if not isinstance(authorization_reference, str) or not authorization_reference.strip():
+        mismatch["authorization_reference"] = "missing"
+    checkpoint = Path(str(contract.get("source_checkpoint", "")))
+    manifest = checkpoint / "manifest.json"
+    preflight_report = Path(str(contract.get("preflight_report", "")))
+    for label, artifact, expected_sha in (
+        ("source_checkpoint_manifest", manifest, contract.get("source_checkpoint_manifest_sha256")),
+        ("preflight_report", preflight_report, contract.get("preflight_report_sha256")),
+    ):
+        if not artifact.is_file():
+            mismatch[label] = "missing"
+        elif _sha256(artifact) != expected_sha:
+            mismatch[label] = "sha256 mismatch"
+    if mismatch:
+        raise RuntimeError(f"RESUME_VALIDATION_CONTRACT_INVALID: {mismatch}")
+    return contract
 
 
 def _git_sha() -> str:
@@ -293,7 +463,10 @@ def _init_distributed() -> tuple[int, int, torch.device]:
     local_rank = int(os.environ["LOCAL_RANK"])
     device = torch.device("cuda", local_rank)
     torch.cuda.set_device(device)
-    dist.init_process_group("nccl", device_id=device)
+    # Rank 0 transactionally snapshots the exact-resume SQLite state while the
+    # other owners wait at a barrier.  Lustre latency can exceed NCCL's default
+    # ten-minute timeout even though checkpoint progress is healthy.
+    dist.init_process_group("nccl", device_id=device, timeout=timedelta(hours=1))
     return dist.get_rank(), dist.get_world_size(), device
 
 
@@ -308,6 +481,22 @@ def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:
         handle.write(json.dumps(payload, sort_keys=True, allow_nan=False) + "\n")
         handle.flush()
         os.fsync(handle.fileno())
+
+
+def _record_continuation_authorization(path: Path, payload: dict[str, Any]) -> None:
+    """Append one decision exactly once, rejecting conflicting audit records."""
+
+    existing = []
+    if path.is_file():
+        existing = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    for record in existing:
+        if record.get("artifact_sha256") == payload["artifact_sha256"]:
+            if record != payload:
+                raise ValueError("continuation authorization audit record changed")
+            return
+        if record.get("accepted_exposures") == payload["accepted_exposures"]:
+            raise ValueError("conflicting continuation authorization for one paused exposure")
+    _append_jsonl(path, payload)
 
 
 def _start_gpu_telemetry(path: Path) -> tuple[subprocess.Popen[str], Any]:
@@ -391,6 +580,40 @@ def _read_manifest(path: Path, kind: str) -> dict[str, Any]:
     if digest != observed:
         raise ValueError(f"manifest checksum mismatch: {path}")
     return payload
+
+
+def _validate_main500m_alignment_manifest(
+    config: Any,
+    alignment_manifest: dict[str, Any],
+    *,
+    dataset_manifest_sha256: str,
+) -> None:
+    """Bind v3.1 execution to the canonical three-tokenizer alignment contract."""
+
+    expected = {
+        "schema_version": 4,
+        "dataset_manifest_sha256": dataset_manifest_sha256,
+        "model_order": list(config.architecture.model_order),
+        "canonical_text": "identity",
+        "alignment": config.data.canonical_text_policy,
+        "alignment_acceptance": config.data.alignment_acceptance,
+        "sequence_length_native_tokens_per_model": config.data.sequence_length,
+        "tokenizers": [
+            {
+                "model_key": model.key,
+                "tokenizer_id": model.tokenizer_id,
+                "tokenizer_revision": model.tokenizer_revision,
+            }
+            for model in config.models
+        ],
+    }
+    mismatch = {
+        key: {"expected": value, "observed": alignment_manifest.get(key)}
+        for key, value in expected.items()
+        if alignment_manifest.get(key) != value
+    }
+    if mismatch:
+        raise ValueError(f"ASPD v3.1 alignment manifest contract mismatch: {mismatch}")
 
 
 def _pad_id(tokenizer: Any) -> int:
@@ -820,13 +1043,111 @@ def _timed(profile: bool, values: dict[str, float], name: str):
     return Timer()
 
 
+def _update_exact_state_digest(digest: Any, value: Any, path: str) -> None:
+    """Hash nested training state without materializing whole GPU tensors on CPU."""
+
+    digest.update(path.encode("utf-8"))
+    digest.update(b"\0")
+    if isinstance(value, torch.Tensor):
+        tensor = value.detach().contiguous()
+        digest.update(str(tensor.dtype).encode("ascii"))
+        digest.update(json.dumps(list(tensor.shape), separators=(",", ":")).encode())
+        raw = tensor.reshape(-1).view(torch.uint8).reshape(-1)
+        chunk_bytes = 64 * 1024 * 1024
+        for start in range(0, raw.numel(), chunk_bytes):
+            chunk = raw[start : start + chunk_bytes].cpu().numpy()
+            digest.update(memoryview(chunk))
+        return
+    if isinstance(value, dict):
+        for key in sorted(value, key=lambda item: (type(item).__name__, repr(item))):
+            _update_exact_state_digest(digest, value[key], f"{path}/{key!r}")
+        return
+    if isinstance(value, (list, tuple)):
+        for index, item in enumerate(value):
+            _update_exact_state_digest(digest, item, f"{path}/{index}")
+        return
+    digest.update(json.dumps(value, sort_keys=True, default=repr).encode("utf-8"))
+
+
+def _exact_training_state_digest(
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scheduler: Any,
+) -> str:
+    digest = hashlib.sha256()
+    _update_exact_state_digest(digest, model.state_dict(), "model")
+    _update_exact_state_digest(digest, optimizer.state_dict(), "optimizer")
+    _update_exact_state_digest(digest, scheduler.state_dict(), "scheduler")
+    _update_exact_state_digest(digest, capture_rng_state(), "rng")
+    return digest.hexdigest()
+
+
+def _module_state_digest(module: torch.nn.Module) -> str:
+    digest = hashlib.sha256()
+    _update_exact_state_digest(digest, module.state_dict(), "module")
+    return digest.hexdigest()
+
+
+def _canonical_metric_rows(
+    raw_rows: list[dict[str, Any]],
+    *,
+    exact_replay_step: int | None,
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    if not raw_rows:
+        raise RuntimeError("training produced no metric rows")
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    for row in raw_rows:
+        grouped.setdefault(int(row["step"]), []).append(row)
+    replay_evidence = None
+    if exact_replay_step is not None:
+        unexpected = {
+            step: len(rows)
+            for step, rows in grouped.items()
+            if len(rows) != (2 if step == exact_replay_step else 1)
+        }
+        if unexpected or exact_replay_step not in grouped:
+            raise RuntimeError(
+                "exact-resume metric replay multiplicity mismatch: "
+                f"expected_step={exact_replay_step}, observed={unexpected}"
+            )
+        reference, resumed = grouped[exact_replay_step]
+        compared_fields = (
+            "ordered_anchor_ids_sha256",
+            "accepted_exposures",
+            "unique_anchors",
+            "repeated_exposures",
+        )
+        mismatch = {
+            field: {"uninterrupted": reference.get(field), "resumed": resumed.get(field)}
+            for field in compared_fields
+            if reference.get(field) != resumed.get(field)
+        }
+        if mismatch:
+            raise RuntimeError(f"exact-resume data replay mismatch: {mismatch}")
+        replay_evidence = {
+            "step": exact_replay_step,
+            **{field: resumed[field] for field in compared_fields},
+        }
+    rows = [grouped[step][-1] for step in sorted(grouped)]
+    return rows, replay_evidence
+
+
 def main() -> None:
     args = _parse_args()
     git_sha = _require_clean_worktree()
     config = _load_training_config(args.config)
     if config.experiment_family == MAIN500M_EXPERIMENT_FAMILY:
         # This happens before NCCL initialization or any source-model/tokenizer load.
-        config.require_execution_authorized()
+        _authorize_main500m_mode(config, args)
+    elif args.continuation_authorization is not None:
+        raise ValueError(
+            "--continuation-authorization is valid only for ASPD v3.1 main execution"
+        )
+    resume_validation_contract = (
+        _load_resume_validation_contract(config, args)
+        if args.mode == "resume_validation"
+        else None
+    )
     rank, world, device = _init_distributed()
     if config.experiment_family in {
         "aspd_v3_granite_normalized_target_v1",
@@ -1070,6 +1391,12 @@ def main() -> None:
         raise ValueError("dataset manifest does not resolve to the pinned revision")
     if alignment_manifest["model_order"] != list(model_order):
         raise ValueError("alignment manifest model order differs from main-2b-v1")
+    if config.experiment_family == MAIN500M_EXPERIMENT_FAMILY:
+        _validate_main500m_alignment_manifest(
+            config,
+            alignment_manifest,
+            dataset_manifest_sha256=dataset_manifest["manifest_sha256"],
+        )
     if args.mode in {"main", "pilot"}:
         preflight_path = Path(config.runtime.preflight_evidence)
         if not preflight_path.is_file():
@@ -1148,7 +1475,10 @@ def main() -> None:
                     f"provenance={mismatch}, recovery={recovery_mismatch}"
                 )
     if rank == 0:
-        args.run_dir.mkdir(parents=True, exist_ok=args.mode in {"main", "controlled", "pilot"})
+        args.run_dir.mkdir(
+            parents=True,
+            exist_ok=args.mode in {"main", "controlled", "pilot"},
+        )
     dist.barrier()
 
     torch.manual_seed(config.optimization.seed)
@@ -1163,6 +1493,7 @@ def main() -> None:
     local_source_smoke = _real_source_correctness_smoke(
         local_key, tokenizer, loaded, registry, device
     )
+    initial_source_state_sha256 = _module_state_digest(loaded.forward_model)
     source_smokes = [None] * world
     dist.all_gather_object(source_smokes, local_source_smoke)
 
@@ -1293,6 +1624,7 @@ def main() -> None:
             dedup_path=stream_dedup_path,
             sequence_length=config.data.sequence_length,
             model_order=model_order,
+            canonical_text_policy=config.data.canonical_text_policy,
         )
         ledger = SQLiteExposureLedger(
             args.run_dir / "exposure_ledger.sqlite",
@@ -1360,6 +1692,11 @@ def main() -> None:
             }
         if run_manifest_path.is_file():
             existing_manifest = json.loads(run_manifest_path.read_text(encoding="utf-8"))
+            run_manifest["external_resume"] = _effective_external_resume_lineage(
+                proposed=run_manifest["external_resume"],
+                existing=existing_manifest.get("external_resume"),
+                in_place_resume=args.resume_checkpoint is None,
+            )
             for key in (
                 "strategy",
                 "git_sha",
@@ -1380,8 +1717,15 @@ def main() -> None:
             write_json_immutable(run_manifest_path, run_manifest)
     dist.barrier()
 
+    health_monitor = (
+        SustainedMain500MHealthMonitor(config.monitoring)
+        if rank == 0 and config.experiment_family == MAIN500M_EXPERIMENT_FAMILY
+        else None
+    )
     completed_steps = 0
     restored_prefetched_pool = None
+    consumed_continuation_authorizations: list[dict[str, Any]] = []
+    pending_review: dict[str, Any] | None = None
     initial_runtime_path = args.run_dir / "initial_runtime.json"
     checkpoints = (
         [args.resume_checkpoint]
@@ -1425,12 +1769,67 @@ def main() -> None:
             if mismatch:
                 raise ValueError(f"controlled checkpoint resume provenance mismatch: {mismatch}")
         completed_steps = int(restored_runtime["completed_steps"])
+        consumed_continuation_authorizations = list(
+            restored_runtime.get("consumed_continuation_authorizations", [])
+        )
+        pending_review = restored_runtime.get("pending_review")
         if rank == 0:
+            if health_monitor is not None:
+                health_state = restored_runtime.get("health_monitor")
+                if not isinstance(health_state, dict):
+                    raise ValueError(
+                        "ASPD v3.1 checkpoint is missing the sustained health-monitor state"
+                    )
+                health_monitor.load_state_dict(health_state)
             stream.load_state_dict(restored_runtime["stream"])
             restored_prefetched_pool = restored_runtime.get("prefetched_pool")
             ledger.recover_to_receipt(
                 ExposureLedgerReceipt.from_payload(restored_runtime["ledger_receipt"])
             )
+        if config.experiment_family == MAIN500M_EXPERIMENT_FAMILY:
+            continuation_record = None
+            if pending_review is not None and completed_steps < args.max_steps:
+                if args.mode != "main":
+                    raise RuntimeError(
+                        "a paused ASPD v3.1 checkpoint can continue only in main mode"
+                    )
+                if args.continuation_authorization is None:
+                    raise RuntimeError(
+                        "paused ASPD v3.1 checkpoint requires --continuation-authorization"
+                    )
+                if rank == 0:
+                    continuation_record = load_continuation_authorization(
+                        args.continuation_authorization,
+                        authorization_root=Path(
+                            config.runtime.continuation_authorization_root
+                        ),
+                        pending_review=pending_review,
+                        execution_contract_fingerprint=(
+                            config.execution_contract_fingerprint()
+                        ),
+                        checkpoint_manifest_sha256=_sha256(latest / "manifest.json"),
+                        approved_through_exposures=next_review_exposure(
+                            int(pending_review["accepted_exposures"]),
+                            config.monitoring.staged_milestone_exposures,
+                        ),
+                        final_approved_through_exposures=(
+                            config.monitoring.staged_milestone_exposures[-1]
+                        ),
+                    )
+                continuation_record = _broadcast_object(continuation_record)
+                consumed_continuation_authorizations.append(continuation_record)
+                if rank == 0:
+                    _record_continuation_authorization(
+                        args.run_dir / "continuation_authorizations.jsonl",
+                        continuation_record,
+                    )
+                pending_review = None
+            elif args.continuation_authorization is not None:
+                raise ValueError(
+                    "continuation authorization supplied without a pending checkpoint review"
+                )
+    elif args.continuation_authorization is not None:
+        raise ValueError("continuation authorization cannot be used for a fresh run")
     elif rank == 0:
         if initial_runtime_path.is_file():
             initial = json.loads(initial_runtime_path.read_text(encoding="utf-8"))
@@ -1485,6 +1884,10 @@ def main() -> None:
         prefetcher.start()
 
     stop_requested = False
+    stop_request_file = os.environ.get("ASPD_STOP_REQUEST_FILE")
+    signal_completion_artifact = os.environ.get(
+        "ASPD_SIGNAL_COMPLETION_ARTIFACT"
+    )
 
     def request_stop(_signum, _frame):
         nonlocal stop_requested
@@ -1498,7 +1901,22 @@ def main() -> None:
     checkpoint_restore_probe = "NOT_RUN"
     checkpoint_path: Path | None = None
     checkpoint_manifest = None
-    resumed = False
+    resumed = bool(checkpoints)
+    exact_resume_parity_enabled = bool(
+        args.mode == "preflight"
+        and config.experiment_family == MAIN500M_EXPERIMENT_FAMILY
+    )
+    exact_resume_replay = False
+    exact_resume_reference_digests: list[str] | None = None
+    exact_resume_replayed_digests: list[str] | None = None
+    exact_resume_parity = "NOT_RUN"
+    checkpoint_probe_parameter = None
+    checkpoint_probe_parameter_value = None
+    checkpoint_probe_optimizer_key = None
+    checkpoint_probe_optimizer_value = None
+    checkpoint_retry_pending = False
+    health_pause_requested = False
+    milestone_pause_requested = False
     diagnostic_steps = {1, 2, 10, 50, 128, 256, 300, 500, 800, 1000, 1221}
     diagnostic_parameter_steps = set(
         getattr(config.runtime, "diagnostic_parameter_steps", ())
@@ -1531,12 +1949,26 @@ def main() -> None:
         stage: dict[str, float] = {}
         step_anchor_ids: list[str] = []
         pool_losses: list[dict[str, float]] = []
+        milestone_diagnostics_required = bool(
+            config.experiment_family == MAIN500M_EXPERIMENT_FAMILY
+            and milestone_diagnostic_due(
+                (completed_steps + 1) * 8192,
+                config.monitoring.staged_milestone_exposures,
+            )
+        )
         if diagnostic_parameter_steps:
-            collect_step_diagnostics = completed_steps in diagnostic_parameter_steps
+            collect_step_diagnostics = (
+                completed_steps in diagnostic_parameter_steps
+                or milestone_diagnostics_required
+            )
             diagnostic_parameter_step = completed_steps if collect_step_diagnostics else None
         elif getattr(config, "monitoring", None) is not None:
             interval = int(config.monitoring.monitor_every_steps)
-            collect_step_diagnostics = completed_steps == 0 or completed_steps % interval == 0
+            collect_step_diagnostics = (
+                completed_steps == 0
+                or completed_steps % interval == 0
+                or milestone_diagnostics_required
+            )
             diagnostic_parameter_step = completed_steps if collect_step_diagnostics else None
         else:
             collect_step_diagnostics = completed_steps + 1 in diagnostic_steps
@@ -1761,16 +2193,85 @@ def main() -> None:
                     "diagnostic_parameter_step": diagnostic_parameter_step,
                 }
             if getattr(config, "monitoring", None) is not None and collect_step_diagnostics:
-                health = evaluate_main500m_health(metrics_row, config.monitoring)
+                if health_monitor is None:
+                    raise RuntimeError(
+                        "ASPD v3.1 diagnostic step has no stateful health monitor"
+                    )
+                health = health_monitor.observe(metrics_row)
                 metrics_row["health"] = health
             _append_jsonl(metrics_path, metrics_row)
         health = _broadcast_object(health)
         if health is not None and health["status"] == "ABORT":
             raise RuntimeError(f"ASPD v3.1 health monitor requested abort: {health['events']}")
+        stop_requested = bool(
+            _broadcast_object(
+                (
+                    stop_requested
+                    or bool(
+                        stop_request_file
+                        and Path(stop_request_file).is_file()
+                    )
+                )
+                if rank == 0
+                else None
+            )
+        )
+        health_pause_requested = bool(
+            health is not None and health["action"] == "CHECKPOINT_AND_PAUSE"
+        )
+        milestone_diagnostic_requested = bool(
+            config.experiment_family == MAIN500M_EXPERIMENT_FAMILY
+            and args.mode == "main"
+            and milestone_diagnostic_due(
+                counter_payload["accepted"],
+                config.monitoring.staged_milestone_exposures,
+            )
+        )
+        final_continuation_authorized = bool(
+            config.experiment_family == MAIN500M_EXPERIMENT_FAMILY
+            and continuation_authorized_through(
+                consumed_continuation_authorizations,
+                config.monitoring.staged_milestone_exposures[-1],
+            )
+        )
+        milestone_pause_requested = bool(
+            milestone_diagnostic_requested
+            and not final_continuation_authorized
+            and milestone_pause_due(
+                counter_payload["accepted"],
+                config.monitoring.staged_milestone_exposures,
+            )
+        )
+        pause_reasons = [
+            reason
+            for reason, requested in (
+                ("HEALTH", health_pause_requested),
+                ("MILESTONE", milestone_pause_requested),
+            )
+            if requested
+        ]
+        if pause_reasons:
+            pending_review = {
+                "policy_version": config.monitoring.milestone_policy_version,
+                "reasons": pause_reasons,
+                "accepted_exposures": int(counter_payload["accepted"]),
+            }
 
         preflight_reload_due = args.mode == "preflight" and completed_steps == args.max_steps - 1
+        checkpoint_boundary_required = bool(
+            health_pause_requested
+            or milestone_pause_requested
+            or milestone_diagnostic_requested
+            or preflight_reload_due
+            or completed_steps == args.max_steps
+            or stop_requested
+        )
         checkpoint_due = not args.skip_checkpoint and (
-            preflight_reload_due
+            checkpoint_retry_pending
+            or health_pause_requested
+            or milestone_pause_requested
+            or milestone_diagnostic_requested
+            or preflight_reload_due
             or (
                 args.mode in {"main", "controlled", "pilot"}
                 and (
@@ -1780,6 +2281,70 @@ def main() -> None:
                 )
             )
         )
+        if (
+            checkpoint_due
+            and args.strategy == "model_owned"
+            and args.mode == "main"
+        ):
+            checkpoint_manager.prune_before_atomic_replacement()
+            storage_preflight = None
+            if rank == 0:
+                complete = checkpoint_manager.complete_checkpoints()
+                storage_reference = (
+                    complete[-1]
+                    if complete
+                    else args.resume_checkpoint
+                )
+                if storage_reference is None:
+                    raise RuntimeError(
+                        "main checkpoint replacement has no complete recovery source"
+                    )
+                latest_manifest = json.loads(
+                    (storage_reference / "manifest.json").read_text(encoding="utf-8")
+                )
+                estimated_checkpoint_bytes = int(
+                    latest_manifest["bytes_before_manifest"]
+                )
+                growth_margin_bytes = max(
+                    CHECKPOINT_GROWTH_MINIMUM_BYTES,
+                    estimated_checkpoint_bytes // 10,
+                )
+                free_bytes = _checkpoint_storage_free_bytes(checkpoint_manager.root)
+                reserve_bytes = int(config.monitoring.storage_reserve_bytes)
+                storage_preflight = {
+                    "step": completed_steps,
+                    "storage_reference": str(storage_reference),
+                    "free_bytes": free_bytes,
+                    "estimated_checkpoint_bytes": estimated_checkpoint_bytes,
+                    "growth_margin_bytes": growth_margin_bytes,
+                    "reserve_bytes": reserve_bytes,
+                    "required_free_bytes": (
+                        estimated_checkpoint_bytes
+                        + growth_margin_bytes
+                        + reserve_bytes
+                    ),
+                    "ready": _checkpoint_storage_ready(
+                        free_bytes=free_bytes,
+                        checkpoint_bytes=estimated_checkpoint_bytes,
+                        reserve_bytes=reserve_bytes,
+                        growth_margin_bytes=growth_margin_bytes,
+                    ),
+                }
+                _append_jsonl(
+                    args.run_dir / "checkpoint_storage_preflight.jsonl",
+                    storage_preflight,
+                )
+            storage_preflight = _broadcast_object(storage_preflight)
+            if not bool(storage_preflight["ready"]):
+                if checkpoint_boundary_required:
+                    raise RuntimeError(
+                        "mandatory checkpoint lacks atomic-write headroom: "
+                        f"{storage_preflight}"
+                    )
+                checkpoint_retry_pending = True
+                checkpoint_due = False
+            else:
+                checkpoint_retry_pending = False
         if checkpoint_due:
             torch.cuda.synchronize()
             checkpoint_started = time.perf_counter()
@@ -1793,6 +2358,9 @@ def main() -> None:
                 ).payload()
                 stream_state = stream.state_dict()
             receipt = _broadcast_object(receipt)
+            health_monitor_state = _broadcast_object(
+                health_monitor.state_dict() if health_monitor is not None else None
+            )
             runtime_state = {
                 "completed_steps": completed_steps,
                 "accepted_exposures": completed_steps * 8192,
@@ -1808,6 +2376,11 @@ def main() -> None:
                 "ledger_receipt": receipt,
                 "stream": stream_state,
                 "prefetched_pool": prefetched_pool,
+                "health_monitor": health_monitor_state,
+                "pending_review": pending_review,
+                "consumed_continuation_authorizations": (
+                    consumed_continuation_authorizations
+                ),
             }
             save_started = time.perf_counter()
             if args.strategy == "model_owned":
@@ -1869,7 +2442,28 @@ def main() -> None:
                 )
             checkpoint_save_seconds = time.perf_counter() - save_started
             checkpoint_path = args.run_dir / "checkpoints" / f"step-{completed_steps:09d}"
-            if preflight_reload_due:
+            if preflight_reload_due and exact_resume_parity_enabled:
+                checkpoint_probe_parameter = next(model.parameters())
+                checkpoint_probe_parameter_value = (
+                    checkpoint_probe_parameter.detach().reshape(-1)[0].clone()
+                )
+                optimizer_state = optimizer.state.get(checkpoint_probe_parameter, {})
+                optimizer_probes = [
+                    (key, value)
+                    for key, value in optimizer_state.items()
+                    if isinstance(value, torch.Tensor) and value.numel() > 1
+                ]
+                if not optimizer_probes:
+                    raise RuntimeError(
+                        "preflight found no materialized Adam tensor to restore"
+                    )
+                checkpoint_probe_optimizer_key, checkpoint_probe_optimizer = (
+                    optimizer_probes[0]
+                )
+                checkpoint_probe_optimizer_value = (
+                    checkpoint_probe_optimizer.detach().reshape(-1)[0].clone()
+                )
+            elif preflight_reload_due:
                 probe_parameter = next(model.parameters())
                 probe_parameter_value = probe_parameter.detach().reshape(-1)[0].clone()
                 optimizer_state = optimizer.state.get(probe_parameter, {})
@@ -1910,6 +2504,13 @@ def main() -> None:
                 if int(restored_runtime["completed_steps"]) != completed_steps:
                     raise RuntimeError("checkpoint restored the wrong optimizer step")
                 if rank == 0:
+                    if health_monitor is not None:
+                        health_state = restored_runtime.get("health_monitor")
+                        if not isinstance(health_state, dict):
+                            raise RuntimeError(
+                                "preflight checkpoint omitted sustained health-monitor state"
+                            )
+                        health_monitor.load_state_dict(health_state)
                     stream.load_state_dict(restored_runtime["stream"])
                     prefetcher.restore(restored_runtime.get("prefetched_pool"))
                     ledger.recover_to_receipt(
@@ -1917,6 +2518,7 @@ def main() -> None:
                     )
                 dist.barrier()
                 checkpoint_reload_seconds = time.perf_counter() - reload_started
+                checkpoint_seconds += checkpoint_reload_seconds
                 if not torch.equal(
                     probe_parameter.detach().reshape(-1)[0], probe_parameter_value
                 ) or not torch.equal(
@@ -1932,7 +2534,136 @@ def main() -> None:
                 checkpoint_manager.prune_after_verified_replacement()
             torch.cuda.synchronize()
             checkpoint_seconds = time.perf_counter() - checkpoint_started
-        if stop_requested:
+            if rank == 0 and milestone_diagnostic_requested:
+                if checkpoint_path is None or checkpoint_manifest is None:
+                    raise RuntimeError("milestone diagnostic has no complete checkpoint")
+                write_json_immutable(
+                    args.run_dir
+                    / f"milestone_diagnostic_step_{completed_steps:09d}.json",
+                    {
+                        "schema_version": 1,
+                        "status": "CONTINUE_TO_FINAL"
+                        if final_continuation_authorized
+                        else "PENDING_RESEARCHER_REVIEW",
+                        "optimizer_step": completed_steps,
+                        "accepted_exposures": int(counter_payload["accepted"]),
+                        "checkpoint_path": str(checkpoint_path),
+                        "checkpoint_manifest_sha256": _sha256(
+                            checkpoint_path / "manifest.json"
+                        ),
+                        "scientific_review": milestone_scientific_summary(metrics_row),
+                        "consumed_continuation_authorizations": (
+                            consumed_continuation_authorizations
+                        ),
+                    },
+                )
+        if exact_resume_parity_enabled and completed_steps == args.max_steps:
+            local_digest = _exact_training_state_digest(model, optimizer, scheduler)
+            gathered_digests = [None] * world
+            dist.all_gather_object(gathered_digests, local_digest)
+            if not exact_resume_replay:
+                exact_resume_reference_digests = gathered_digests
+                if (
+                    checkpoint_path is None
+                    or checkpoint_probe_parameter is None
+                    or checkpoint_probe_parameter_value is None
+                    or checkpoint_probe_optimizer_key is None
+                    or checkpoint_probe_optimizer_value is None
+                ):
+                    raise RuntimeError(
+                        "exact-resume parity probe has no step-before-final checkpoint"
+                    )
+                with torch.no_grad():
+                    checkpoint_probe_parameter.reshape(-1)[0].add_(1)
+                    optimizer.state[checkpoint_probe_parameter][
+                        checkpoint_probe_optimizer_key
+                    ].reshape(-1)[0].add_(1)
+                reload_started = time.perf_counter()
+                restored_runtime, _ = checkpoint_manager.load(
+                    path=checkpoint_path,
+                    model=model,
+                    optimizer=optimizer,
+                    scheduler=scheduler,
+                    config_fingerprint=config.fingerprint(),
+                    config_file_sha256=config_sha,
+                    dataset_manifest_sha256=dataset_manifest["manifest_sha256"],
+                    expected_model_key=local_key,
+                )
+                if int(restored_runtime["completed_steps"]) != args.max_steps - 1:
+                    raise RuntimeError("exact-resume probe restored the wrong step")
+                if rank == 0:
+                    if health_monitor is not None:
+                        health_state = restored_runtime.get("health_monitor")
+                        if not isinstance(health_state, dict):
+                            raise RuntimeError(
+                                "preflight checkpoint omitted sustained health-monitor state"
+                            )
+                        health_monitor.load_state_dict(health_state)
+                    stream.load_state_dict(restored_runtime["stream"])
+                    prefetcher.restore(restored_runtime.get("prefetched_pool"))
+                    ledger.recover_to_receipt(
+                        ExposureLedgerReceipt.from_payload(
+                            restored_runtime["ledger_receipt"]
+                        )
+                    )
+                dist.barrier()
+                checkpoint_reload_seconds = time.perf_counter() - reload_started
+                checkpoint_seconds += checkpoint_reload_seconds
+                if not torch.equal(
+                    checkpoint_probe_parameter.detach().reshape(-1)[0],
+                    checkpoint_probe_parameter_value,
+                ) or not torch.equal(
+                    optimizer.state[checkpoint_probe_parameter][
+                        checkpoint_probe_optimizer_key
+                    ]
+                    .detach()
+                    .reshape(-1)[0],
+                    checkpoint_probe_optimizer_value,
+                ):
+                    raise RuntimeError(
+                        "DCP reload did not restore the perturbed parameter/Adam probe"
+                    )
+                checkpoint_restore_probe = "PASS"
+                resumed = True
+                exact_resume_replay = True
+                completed_steps = int(restored_runtime["completed_steps"])
+                health_pause_requested = False
+                milestone_pause_requested = False
+                continue
+            exact_resume_replayed_digests = gathered_digests
+            if exact_resume_replayed_digests != exact_resume_reference_digests:
+                raise RuntimeError(
+                    "real three-model uninterrupted/resumed state digests differ: "
+                    f"reference={exact_resume_reference_digests}, "
+                    f"resumed={exact_resume_replayed_digests}"
+                )
+            exact_resume_parity = "BITWISE_EXACT"
+        if args.mode == "resume_validation" and completed_steps == args.max_steps:
+            if resume_validation_contract is None:
+                raise RuntimeError("resume-validation contract disappeared")
+            local_digest = _exact_training_state_digest(model, optimizer, scheduler)
+            gathered_digests = [None] * world
+            dist.all_gather_object(gathered_digests, local_digest)
+            reference_report = None
+            if rank == 0:
+                reference_report = json.loads(
+                    Path(resume_validation_contract["preflight_report"]).read_text(
+                        encoding="utf-8"
+                    )
+                )
+            reference_report = _broadcast_object(reference_report)
+            exact_resume_reference_digests = reference_report.get(
+                "uninterrupted_state_sha256_by_rank"
+            )
+            exact_resume_replayed_digests = gathered_digests
+            if exact_resume_replayed_digests != exact_resume_reference_digests:
+                raise RuntimeError(
+                    "external-process resumed state differs from uninterrupted state: "
+                    f"reference={exact_resume_reference_digests}, "
+                    f"resumed={exact_resume_replayed_digests}"
+                )
+            exact_resume_parity = "BITWISE_EXACT"
+        if stop_requested or health_pause_requested or milestone_pause_requested:
             break
         if profiler is not None:
             profiler.step()
@@ -1963,8 +2694,67 @@ def main() -> None:
             final_decoder_norms_by_rank, model.activation_decoder_norm_report()
         )
 
+    final_source_state_sha256 = _module_state_digest(loaded.forward_model)
+    local_source_state = {
+        "rank": rank,
+        "model": local_key,
+        "initial_sha256": initial_source_state_sha256,
+        "final_sha256": final_source_state_sha256,
+        "status": (
+            "PASS"
+            if final_source_state_sha256 == initial_source_state_sha256
+            else "FAIL"
+        ),
+    }
+    source_state_immutability = [None] * world
+    dist.all_gather_object(source_state_immutability, local_source_state)
+    if any(item["status"] != "PASS" for item in source_state_immutability):
+        raise RuntimeError(
+            f"frozen source-model state changed during training: {source_state_immutability}"
+        )
+
     if rank == 0:
-        rows = [json.loads(line) for line in metrics_path.read_text().splitlines()]
+        raw_rows = [json.loads(line) for line in metrics_path.read_text().splitlines()]
+        # Resume validation deliberately records the uninterrupted step and then its
+        # resumed replay. Preserve both raw rows on disk, but report the final occurrence
+        # for each optimizer step so exposure/throughput summaries are not double counted.
+        rows, exact_data_replay = _canonical_metric_rows(
+            raw_rows,
+            exact_replay_step=(args.max_steps if exact_resume_parity_enabled else None),
+        )
+        if args.mode == "resume_validation":
+            if resume_validation_contract is None:
+                raise RuntimeError("resume-validation contract disappeared")
+            reference_report = json.loads(
+                Path(resume_validation_contract["preflight_report"]).read_text(
+                    encoding="utf-8"
+                )
+            )
+            reference_data = reference_report.get("exact_data_replay")
+            compared_fields = (
+                "ordered_anchor_ids_sha256",
+                "accepted_exposures",
+                "unique_anchors",
+                "repeated_exposures",
+            )
+            final_row = rows[-1]
+            mismatch = {
+                field: {
+                    "uninterrupted": (
+                        None if not isinstance(reference_data, dict) else reference_data.get(field)
+                    ),
+                    "resumed": final_row.get(field),
+                }
+                for field in compared_fields
+                if not isinstance(reference_data, dict)
+                or reference_data.get(field) != final_row.get(field)
+            }
+            if mismatch:
+                raise RuntimeError(f"external-process data replay mismatch: {mismatch}")
+            exact_data_replay = {
+                "step": args.max_steps,
+                **{field: final_row[field] for field in compared_fields},
+            }
         measured = [row for row in rows if not row["warmup"]]
         step_times = sorted(row["seconds"] for row in measured)
 
@@ -1979,12 +2769,25 @@ def main() -> None:
         )
         report = {
             "schema_version": 1,
-            "status": "PASS",
+            "status": (
+                "PAUSED_HEALTH_AND_MILESTONE_REVIEW"
+                if health_pause_requested and milestone_pause_requested
+                else "PAUSED_HEALTH_REVIEW"
+                if health_pause_requested
+                else "PAUSED_MILESTONE_REVIEW"
+                if milestone_pause_requested
+                else "PASS"
+            ),
             "mode": args.mode,
             "strategy": args.strategy,
             "git_sha": git_sha,
             "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
             "config_fingerprint": config.fingerprint(),
+            "execution_contract_fingerprint": (
+                config.execution_contract_fingerprint()
+                if config.experiment_family == MAIN500M_EXPERIMENT_FAMILY
+                else None
+            ),
             "config_file_sha256": config_sha,
             "dataset_manifest_sha256": dataset_manifest["manifest_sha256"],
             "alignment_manifest_sha256": alignment_manifest["manifest_sha256"],
@@ -2008,9 +2811,29 @@ def main() -> None:
             "checkpoint_seconds_save": checkpoint_save_seconds,
             "checkpoint_seconds_reload": checkpoint_reload_seconds,
             "checkpoint_parameter_and_adam_restore_probe": checkpoint_restore_probe,
+            "uninterrupted_vs_resumed_next_update": exact_resume_parity,
+            "uninterrupted_state_sha256_by_rank": exact_resume_reference_digests,
+            "resumed_state_sha256_by_rank": exact_resume_replayed_digests,
+            "exact_data_replay": exact_data_replay,
+            "source_state_immutability_by_rank": source_state_immutability,
+            "resume_validation_contract_sha256": (
+                None
+                if args.resume_validation_contract is None
+                else _sha256(args.resume_validation_contract)
+            ),
+            "external_resume_checkpoint": (
+                None if args.resume_checkpoint is None else str(args.resume_checkpoint)
+            ),
             "checkpoint_manifest": checkpoint_manifest,
             "dcp_save_reload_resume_update": (
-                "PASS" if resumed and completed_steps == args.max_steps else "NOT_RUN"
+                "PASS"
+                if resumed
+                and completed_steps == args.max_steps
+                and (
+                    not exact_resume_parity_enabled
+                    or exact_resume_parity == "BITWISE_EXACT"
+                )
+                else "NOT_RUN"
             ),
             "peak_gpu_memory_by_rank": rows[-1]["gpu_memory"],
             "stage_seconds_mean": {
@@ -2023,7 +2846,24 @@ def main() -> None:
             "initial_activation_decoder_norms_by_rank": initial_decoder_norms_by_rank,
             "final_reconstruction_scales_by_rank": rows[-1]["reconstruction_scales_by_rank"],
             "final_activation_decoder_norms_by_rank": final_decoder_norms_by_rank,
+            "pending_review": pending_review,
+            "consumed_continuation_authorizations": (
+                consumed_continuation_authorizations
+            ),
         }
+        if health_pause_requested or milestone_pause_requested:
+            report["scientific_review"] = milestone_scientific_summary(rows[-1])
+            report["recovery_checkpoint"] = {
+                "path": None if checkpoint_path is None else str(checkpoint_path),
+                "manifest_sha256": (
+                    None
+                    if checkpoint_path is None
+                    else _sha256(checkpoint_path / "manifest.json")
+                ),
+                "status": (
+                    None if checkpoint_manifest is None else checkpoint_manifest.get("status")
+                ),
+            }
         if controlled is not None:
             report["controlled_retrain"] = {
                 "arm": controlled.arm,
@@ -2040,8 +2880,45 @@ def main() -> None:
                 "rank_one_matrix_factors": "FROZEN",
                 "optimizer_state": controlled.optimizer_state,
             }
-        write_json_immutable(args.run_dir / "benchmark_report.json", report)
-        if args.mode == "preflight":
+        report_path = (
+            args.run_dir / f"continuation_review_step_{completed_steps:09d}.json"
+            if health_pause_requested or milestone_pause_requested
+            else args.run_dir / f"signal_checkpoint_step_{completed_steps:09d}.json"
+            if stop_requested
+            else args.run_dir / "benchmark_report.json"
+        )
+        write_json_immutable(report_path, report)
+        if stop_requested and signal_completion_artifact:
+            completion_path = Path(signal_completion_artifact)
+            if completion_path.parent != args.run_dir:
+                raise ValueError(
+                    "signal completion artifact must be inside the run directory"
+                )
+            if checkpoint_path is None or checkpoint_manifest is None:
+                raise RuntimeError("signal stop completed without a checkpoint")
+            manifest_path = checkpoint_path / "manifest.json"
+            if checkpoint_manifest.get("status") != "COMPLETE" or not manifest_path.is_file():
+                raise RuntimeError("signal stop checkpoint is not COMPLETE")
+            write_json_immutable(
+                completion_path,
+                {
+                    "schema_version": 1,
+                    "status": "SIGNAL_CHECKPOINT_COMPLETE",
+                    "optimizer_step": completed_steps,
+                    "accepted_exposures": completed_steps * 8192,
+                    "checkpoint_path": str(checkpoint_path),
+                    "checkpoint_manifest_sha256": _sha256(manifest_path),
+                    "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
+                    "slurm_restart_count": int(
+                        os.environ.get("SLURM_RESTART_COUNT", "0")
+                    ),
+                },
+            )
+        if (
+            args.mode == "preflight"
+            and not health_pause_requested
+            and not milestone_pause_requested
+        ):
             expected_preflight = Path(config.runtime.preflight_evidence)
             if args.run_dir != expected_preflight.parent:
                 raise ValueError(
@@ -2054,7 +2931,11 @@ def main() -> None:
         ledger.close()
     dist.barrier()
     dist.destroy_process_group()
-    if stop_requested:
+    if health_pause_requested:
+        raise SystemExit(86)
+    if milestone_pause_requested:
+        raise SystemExit(87)
+    if stop_requested and not signal_completion_artifact:
         raise SystemExit(99)
 
 

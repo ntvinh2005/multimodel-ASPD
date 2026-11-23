@@ -372,6 +372,18 @@ def test_final_intruder_answer_key_is_not_needed_to_render_or_parse() -> None:
     )["valid"]
 
 
+def test_final_intruder_public_llama_fallback_is_exactly_pinned() -> None:
+    contract = FinalIntruderJudgeContract.load(
+        ROOT / "configs/multimodel/aspd_v3/zscore_intruder_final_judge_v1_unsloth.yaml"
+    )
+    assert contract.judge_model_id == "unsloth/Llama-3.3-70B-Instruct"
+    assert contract.judge_revision == "99cd0d2c829e92a67c844f9144c2509632e5c87f"
+    with pytest.raises(ValueError, match="not pinned correctly"):
+        contract.model_copy(
+            update={"judge_revision": "6f6073b423013f6a7d4d9f39144961bfbfbc386b"}
+        ).validate_pinned_judge_pair()
+
+
 def test_final_intruder_scoring_and_parent_aggregation_preserve_rotations() -> None:
     contract = FinalIntruderJudgeContract.load(
         ROOT / "configs/multimodel/aspd_v3/zscore_intruder_final_judge_v1_llama.yaml"

@@ -1,0 +1,40 @@
+schema_version: 1
+experiment_family: aspd_v3_1_quick_intruder_jaccard_500m_v1
+status: RESEARCHER_AUTHORIZED_EVALUATION
+training_authorized_by_this_contract: false
+source_config_sha256: f7a6d87436304956ca0baca955ec2e0e929a7207142f57fc35362369822f63be
+checkpoint_step: 61036
+checkpoint_manifest_sha256: 735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969
+accepted_training_exposures: 500006912
+model_order: [gemma, smol, granite]
+forbidden_model_substrings: [qwen]
+selected_split: test
+split_unit: source_document
+accepted_evaluation_anchors: 100352
+pool_anchors: 2048
+display_model_key: gemma
+context_tokens_per_side: 32
+retained_contexts_per_feature: 12
+contexts_per_feature: 4
+features_per_site: 100
+minimum_feature_fires: 4
+minimum_unique_documents: 4
+frequency_strata: [low, medium, high]
+maximum_normalized_text_jaccard: 0.8
+feature_sampling_seed: 71
+intruder_selection_seed: 73
+jaccard_pair_seed: 43
+jaccard_pairs_per_stratum: 20000
+near_duplicate_threshold: 0.5
+minhash_permutations: 32
+minhash_rows_per_band: 4
+bootstrap_seed: 79
+bootstrap_replicates: 5000
+baseline_label: 10M z-score exploratory
+baseline_intruder_pre: 0.26
+baseline_intruder_mid: 0.16
+baseline_intruder_macro: 0.21
+baseline_jaccard_pre: 0.002913
+baseline_jaccard_mid: 0.002924
+baseline_near_duplicates_pre: 35
+baseline_near_duplicates_mid: 82

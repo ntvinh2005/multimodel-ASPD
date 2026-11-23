@@ -1,0 +1,17 @@
+schema_version: 1
+experiment_family: aspd_v3_1_feature_coherence_embedding_v1
+status: RESEARCHER_AUTHORIZED_EVALUATION
+training_authorized_by_this_contract: false
+forbidden_model_substrings: [qwen]
+embedding_model_id: mistralai/Mistral-Nemo-Instruct-2407
+embedding_model_revision: 04d8a90549d23fc6bd7f642064003592df51e9b3
+embedding_pooling: attention_mask_mean_last_hidden_state
+embedding_tokenizer_fix_mistral_regex: true
+allowed_input_sha256:
+  - 08ed2506a6cc5178d27e05c03acd1569fde59c7aa8a282610e24512f8677901c
+  - be9e85d801d0b311f1ab7cdaa2587f10fd2caa4857d706aaf62609200f60bdaf
+source_context_manifest_sha256: cc62c921c7b59c7e201053a84815b20517b97f7e12be96b4771cda614a38cb9c
+historical_embedding_sha256: b48e7949b44911be03a993f5bfddaea1c415b80496e747b764ba82e0037600da
+scientific_boundary: >-
+  These embeddings support clustering and matched-control construction only. They are
+  not semantic ground truth and are not the independent held-out rule validator.

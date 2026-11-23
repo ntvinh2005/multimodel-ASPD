@@ -1,0 +1,29 @@
+schema_version: 1
+experiment_family: aspd_v3_1_h4_agent_audit_v1
+scientific_status: exploratory_nonhuman_qualitative_audit
+training_authorized_by_this_contract: false
+human_evidence_claimed: false
+dataset_sha256: 956c245cdf34514f78ca13f6144069775b95e27aafd751cea25f953fc589e329
+checkpoint_manifest_sha256: 735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969
+evaluator_type: codex_language_model_agent
+independent_evaluators: 1
+contaminated_items:
+  - Feature Set 001
+coherent_minimum_score: 3
+non_topical_categories:
+  - syntactic
+  - formatting
+  - token-boundary
+exploratory_support_rule:
+  minimum_non_topical_coherent_fraction: 0.25
+  minimum_unique_non_topical_attempts: 10
+  minimum_intruder_accuracy_on_unique_non_topical: 0.50
+adjudication:
+  maximum_h4_verdict: PARTIALLY_SUPPORTED
+  supported_if_rule_passes: PARTIALLY_SUPPORTED
+  otherwise: INCONCLUSIVE
+limitations:
+  - This is not human evidence.
+  - No independent inter-rater agreement is available.
+  - Language-model priors can overlap with judge-model biases.
+  - The item accidentally unblinded during schema inspection is excluded from every estimate.

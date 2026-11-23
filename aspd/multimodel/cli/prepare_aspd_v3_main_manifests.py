@@ -15,6 +15,7 @@ from aspd.multimodel.v3.data import write_json_immutable
 from aspd.multimodel.v3.granite_normalized_config import (
     load_granite_normalized_target_config,
 )
+from aspd.multimodel.v3.main500m_config import load_main500m_config
 from aspd.multimodel.v3.main_2b_config import load_main_2b_v1_config
 from aspd.multimodel.v3.main_config import load_main_v1_config
 from aspd.multimodel.v3.two_model_config import load_two_model_scale_config
@@ -49,6 +50,11 @@ def _parse_args() -> argparse.Namespace:
         help="prepare the incompatible main_2b_v1 manifest instead of legacy main_v1",
     )
     parser.add_argument(
+        "--main500m",
+        action="store_true",
+        help="prepare the fail-closed ASPD v3.1 three-model 500M manifests",
+    )
+    parser.add_argument(
         "--approved",
         type=Path,
         default=Path("configs/multimodel/aspd_v3/approved.yaml"),
@@ -68,7 +74,14 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = _parse_args()
-    if sum((args.two_model_scale, args.main_2b, args.granite_normalized_target)) > 1:
+    if sum(
+        (
+            args.two_model_scale,
+            args.main_2b,
+            args.main500m,
+            args.granite_normalized_target,
+        )
+    ) > 1:
         raise ValueError("manifest family flags are mutually exclusive")
     bundle = None
     if args.granite_normalized_target:
@@ -83,6 +96,14 @@ def main() -> None:
         dataset_id = dataset.dataset_id
         dataset_revision = dataset.dataset_revision
         models = main_config.models
+    elif args.main500m:
+        main_config = load_main500m_config(args.main_config)
+        dataset = main_config.data
+        dataset_id = dataset.dataset_id
+        dataset_revision = dataset.dataset_revision
+        models = main_config.models
+        if any(model.approval_status == "PENDING_RESEARCHER_APPROVAL" for model in models):
+            raise RuntimeError("main500m manifests require the approved third-model contract")
     elif args.main_2b:
         main_config = load_main_2b_v1_config(args.main_config)
         dataset = main_config.data
@@ -142,7 +163,11 @@ def main() -> None:
         }
         for model in models
     ]
-    if args.granite_normalized_target:
+    if args.main500m:
+        alignment_name = main_config.data.canonical_text_policy
+        distributed_source = "rank_zero_stream_broadcast_to_three_model_owner_ranks"
+        alignment_schema_version = 4
+    elif args.granite_normalized_target:
         alignment_name = main_config.data.canonical_text_policy
         distributed_source = "rank_zero_stream_broadcast_to_three_model_owner_ranks"
         alignment_schema_version = 3
@@ -177,6 +202,8 @@ def main() -> None:
         "distributed_source": distributed_source,
         "exact_deduplication": "sqlite_content_sha256_with_checkpoint_high_water",
     }
+    if args.main500m:
+        alignment["alignment_acceptance"] = main_config.data.alignment_acceptance
     alignment["manifest_sha256"] = _fingerprint(alignment)
     dataset_path = Path(main_config.runtime.dataset_manifest)
     alignment_path = Path(main_config.runtime.alignment_manifest)

@@ -1,0 +1,54 @@
+# ASPD v3.1 500M checkpoint -- post-hoc parent-set analysis TEMPLATE.
+# Status: BLOCKED. Every `null` is a decision that the researcher must approve.
+# `--check` lists the blockers of each stage:
+#   python -m aspd.multimodel.cli.posthoc_analysis --config <copy of this file> --check
+# Do not edit this template in place for a run: copy it to a new versioned file.
+schema_version: 1
+experiment_id: posthoc_v31_500m_parent_sets_v1
+
+backend:
+  kind: v31_checkpoint
+  options:
+    # Frozen training configuration used to produce the checkpoint.
+    training_config: configs/multimodel/aspd_v3/main500m_preparation_v1.yaml
+    # Final checkpoint directory (step 61,036). Read-only; never written by this tool.
+    checkpoint: /blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/runs/aspd_v3_1_three_model_168targets_c8192_k32_500m_v1_resume_step16000_authfix_5ca3b43/checkpoints/step-000061036
+    # Provenance facts copied from <checkpoint>/manifest.json on 2026-11-21
+    # (checkpoint manifest SHA-256 735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969).
+    # The loader re-verifies them; they are not researcher decisions.
+    config_file_sha256: f7a6d87436304956ca0baca955ec2e0e929a7207142f57fc35362369822f63be
+    dataset_manifest_sha256: a258974d21ceac3457529644be07459518fde7bc28501abde5c67e5e3719286f
+    split: validation                # researcher decision 2026-11-21
+    source_dtype: bfloat16           # researcher decision 2026-11-21
+    device: cuda:0
+    local_files_only: true
+    pool_anchors: 2048               # training BatchTopK pool size; gates depend on it
+    skip_training_launch_evidence: false   # true only with researcher authorization
+
+anchors:
+  importance_pools: null             # PROPOSED 50 -- see docs/multimodel/posthoc_thresholds.md
+  edge_pools: null                   # PROPOSED 25 -- see posthoc_thresholds.md
+  edge_anchor_source: disjoint_after_importance   # researcher decision 2026-11-21
+
+representatives:
+  screening_metric: beta             # researcher decision 2026-11-21 (rho not used)
+  k_rep: null                        # PROPOSED 3 -- see posthoc_thresholds.md
+  tau_rep: null                      # PROPOSED 0.07 -- see posthoc_thresholds.md
+
+edges:
+  downstream_gates:
+    mode: screened                   # researcher decision 2026-11-21: the screening step decides
+    gates: []                        # explicit mode only
+    count: null                      # optional cap per site (null = every screened gate)
+  max_anchors_per_gate: null         # PROPOSED 20 -- see posthoc_thresholds.md
+  anchor_sampling: null              # PROPOSED seeded_random
+  anchor_seed: null                  # PROPOSED 0
+  anchors_per_backward: null         # memory knob only; does not change results
+  ablation_check_records: null       # exact-ablation checks of the Taylor score
+
+parents:
+  k_par: null                        # PROPOSED 10 -- see posthoc_thresholds.md
+  tau: null                          # PROPOSED 0.0 -- see posthoc_thresholds.md (units caveat)
+
+comparison:
+  model_pairs: all                   # (gemma,smol), (gemma,granite), (smol,granite)

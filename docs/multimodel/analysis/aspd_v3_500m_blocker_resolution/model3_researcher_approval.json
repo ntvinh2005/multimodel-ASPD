@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "status": "MODEL_THREE_APPROVED",
+  "decision_date": "2026-11-09",
+  "decision_source": "researcher_chat_instruction",
+  "decision_text": "Tôi duyệt model 3.",
+  "approved_recommendation": {
+    "model_key": "granite",
+    "model_id": "ibm-granite/granite-3.3-2b-instruct",
+    "model_revision": "707f574c62054322f6b5b04b6d075f0a8f05e0f0",
+    "tokenizer_id": "ibm-granite/granite-3.3-2b-instruct",
+    "tokenizer_revision": "707f574c62054322f6b5b04b6d075f0a8f05e0f0",
+    "selected_layers": [16, 17, 18, 19, 20, 21, 22, 23],
+    "license": "apache-2.0",
+    "access": "public",
+    "checkpoint_parameter_count": 2533539840,
+    "residual_pre_suffix": "input_layernorm",
+    "residual_mid_suffix": "post_attention_layernorm",
+    "fused_qkv": false,
+    "fused_gate_up": false,
+    "residual_scaling_disposition": "desired_cross_model_diversity_not_folded_into_physical_matrix_targets"
+  },
+  "decision_package": {
+    "path": "docs/multimodel/aspd_v3_500m_model3_decision_package.md",
+    "sha256": "47cece532ddd960e0344e7fcfe462f5dde779e691fc4511a08653a6df7d11008"
+  },
+  "machine_recommendation": {
+    "path": "docs/multimodel/analysis/aspd_v3_500m_blocker_resolution/model3_recommendation.json",
+    "sha256": "7dfc3fef13d76ec1f22087c226d032c6fd3f2beb0b60b32903f0e7ad165ed22e"
+  },
+  "authorization_scope": {
+    "populate_main500m_model3_contract": true,
+    "run_tokenizer_alignment_validation": true,
+    "run_bounded_engineering_verification": true,
+    "submit_main_500m": false
+  }
+}

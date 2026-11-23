@@ -456,6 +456,27 @@ class ModelOwnedCheckpoint:
             if path.is_dir() and (path / "COMPLETE").is_file()
         )
 
+    def prune_before_atomic_replacement(self) -> list[Path]:
+        """Bound peak storage while preserving one exact recovery checkpoint.
+
+        A replacement checkpoint is first written to an incomplete directory and
+        becomes visible only after its atomic rename.  Keeping ``keep_complete``
+        old checkpoints during that write temporarily requires space for one extra
+        full checkpoint.  Remove only the oldest complete checkpoints so that the
+        latest complete recovery point remains available throughout the write.
+        """
+
+        rank, _world = self._rank_world()
+        removed: list[Path] = []
+        if rank == 0:
+            complete = self.complete_checkpoints()
+            retain_before_write = max(1, self.keep_complete - 1)
+            for path in complete[:-retain_before_write]:
+                shutil.rmtree(path)
+                removed.append(path)
+        dist.barrier()
+        return removed
+
     def prune_after_verified_replacement(self) -> list[Path]:
         rank, _world = self._rank_world()
         removed: list[Path] = []

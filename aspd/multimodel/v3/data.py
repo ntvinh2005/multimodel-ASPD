@@ -9,7 +9,7 @@ import sqlite3
 import tempfile
 import uuid
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -194,15 +194,21 @@ class SQLiteDuplicateIndex:
 class ExposureCounters:
     accepted_aligned_anchor_exposures: int = 0
     unique_aligned_anchors: int = 0
-    raw_tokens_qwen: int = 0
-    raw_tokens_gemma: int = 0
-    raw_tokens_phi: int = 0
+    raw_token_slots: tuple[int, int, int] = (0, 0, 0)
     optimization_steps: int = 0
     repeated_anchor_exposures: int = 0
     newly_observed_anchor_exposures: int = 0
 
     def validate(self) -> None:
-        if any(value < 0 for value in asdict(self).values()):
+        scalar_values = (
+            self.accepted_aligned_anchor_exposures,
+            self.unique_aligned_anchors,
+            self.optimization_steps,
+            self.repeated_anchor_exposures,
+            self.newly_observed_anchor_exposures,
+            *self.raw_token_slots,
+        )
+        if len(self.raw_token_slots) != 3 or any(value < 0 for value in scalar_values):
             raise AssertionError("v3 exposure counters must be non-negative")
         if self.accepted_aligned_anchor_exposures != (
             self.repeated_anchor_exposures + self.newly_observed_anchor_exposures
@@ -224,10 +230,15 @@ class ExposureLedgerReceipt:
     receipt_sha256: str
     counters: ExposureCounters
     rank_exposures: dict[int, int]
+    model_order: tuple[str, ...] = ("qwen", "gemma", "phi")
 
     def validate(self) -> None:
-        if self.schema_version != 2:
+        if self.schema_version not in {2, 3}:
             raise ValueError("unsupported exposure-ledger receipt schema")
+        if len(self.model_order) not in {2, 3} or len(set(self.model_order)) != len(
+            self.model_order
+        ):
+            raise ValueError("exposure-ledger receipt has invalid model order")
         if self.world_size <= 0 or set(self.rank_exposures) != set(range(self.world_size)):
             raise ValueError("exposure-ledger receipt has incomplete rank counters")
         if self.optimizer_step != self.counters.optimization_steps:
@@ -255,10 +266,11 @@ class ExposureLedgerReceipt:
             "world_size": self.world_size,
             "optimizer_step": self.optimizer_step,
             "receipt_sha256": self.receipt_sha256,
-            "counters": asdict(self.counters),
+            "counters": counters_payload(self.counters),
             "rank_exposures": {
                 str(rank): count for rank, count in sorted(self.rank_exposures.items())
             },
+            "model_order": list(self.model_order),
         }
 
     @classmethod
@@ -270,10 +282,11 @@ class ExposureLedgerReceipt:
             world_size=int(payload["world_size"]),
             optimizer_step=int(payload["optimizer_step"]),
             receipt_sha256=str(payload["receipt_sha256"]),
-            counters=ExposureCounters(**payload["counters"]),
+            counters=counters_from_payload(payload["counters"]),
             rank_exposures={
                 int(rank): int(count) for rank, count in payload["rank_exposures"].items()
             },
+            model_order=tuple(payload.get("model_order", ("qwen", "gemma", "phi"))),
         )
         receipt.validate()
         return receipt
@@ -288,7 +301,7 @@ class SQLiteExposureLedger:
     rank-local IDs before invoking this class.
     """
 
-    SCHEMA_VERSION = 3
+    SCHEMA_VERSION = 5
 
     def __init__(
         self,
@@ -317,7 +330,6 @@ class SQLiteExposureLedger:
             raise ValueError("exposure ledger requires two or three distinct model keys")
         self.model_order = tuple(model_order)
         self.compact_anchor_ids = compact_anchor_ids
-        self.schema_version = 4 if compact_anchor_ids else self.SCHEMA_VERSION
         self.connection = sqlite3.connect(self.path)
         # The ledger lives on Blue. WAL's shared-memory index is unsafe on this parallel
         # filesystem; DELETE mode remains transactional and works with synchronous=FULL.
@@ -325,12 +337,28 @@ class SQLiteExposureLedger:
         if str(journal_mode).lower() != "delete":
             raise RuntimeError("exposure ledger requires DELETE journaling")
         self.connection.execute("PRAGMA synchronous=FULL")
+        self.connection.execute(
+            "CREATE TABLE IF NOT EXISTS exposure_metadata "
+            "(key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+        )
+        existing = dict(self.connection.execute("SELECT key,value FROM exposure_metadata"))
+        if existing:
+            self.schema_version = int(existing.get("schema_version", -1))
+            self._legacy_raw_token_schema = self.schema_version in {3, 4}
+            if self.schema_version not in {3, 4, 5, 6}:
+                self.connection.close()
+                raise ValueError("exposure ledger has an unsupported schema version")
+        else:
+            self.schema_version = self.SCHEMA_VERSION + int(compact_anchor_ids)
+            self._legacy_raw_token_schema = False
+        self._raw_token_columns = (
+            ("raw_tokens_qwen", "raw_tokens_gemma", "raw_tokens_phi")
+            if self._legacy_raw_token_schema
+            else ("raw_tokens_slot_0", "raw_tokens_slot_1", "raw_tokens_slot_2")
+        )
+        raw0, raw1, raw2 = self._raw_token_columns
         self.connection.executescript(
             f"""
-            CREATE TABLE IF NOT EXISTS exposure_metadata (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            );
             CREATE TABLE IF NOT EXISTS seen_anchors (
                 anchor_id {"BLOB" if compact_anchor_ids else "TEXT"} PRIMARY KEY,
                 first_step INTEGER NOT NULL
@@ -354,9 +382,9 @@ class SQLiteExposureLedger:
             CREATE TABLE IF NOT EXISTS alignment_observations (
                 observation_id TEXT PRIMARY KEY,
                 payload_sha256 TEXT NOT NULL,
-                raw_tokens_qwen INTEGER NOT NULL,
-                raw_tokens_gemma INTEGER NOT NULL,
-                raw_tokens_phi INTEGER NOT NULL,
+                {raw0} INTEGER NOT NULL,
+                {raw1} INTEGER NOT NULL,
+                {raw2} INTEGER NOT NULL,
                 observed_before_step INTEGER NOT NULL
             );
             CREATE TABLE IF NOT EXISTS exposure_totals (
@@ -365,9 +393,9 @@ class SQLiteExposureLedger:
                 newly_observed INTEGER NOT NULL,
                 repeated INTEGER NOT NULL,
                 optimization_steps INTEGER NOT NULL,
-                raw_tokens_qwen INTEGER NOT NULL,
-                raw_tokens_gemma INTEGER NOT NULL,
-                raw_tokens_phi INTEGER NOT NULL
+                {raw0} INTEGER NOT NULL,
+                {raw1} INTEGER NOT NULL,
+                {raw2} INTEGER NOT NULL
             );
             CREATE TABLE IF NOT EXISTS rank_exposures (
                 rank INTEGER PRIMARY KEY,
@@ -375,7 +403,6 @@ class SQLiteExposureLedger:
             );
             """
         )
-        existing = dict(self.connection.execute("SELECT key,value FROM exposure_metadata"))
         if existing:
             expected_fixed = {
                 "schema_version": str(self.schema_version),
@@ -383,9 +410,13 @@ class SQLiteExposureLedger:
                 "world_size": str(world_size),
                 "global_writer_rank": "0",
             }
-            if compact_anchor_ids:
+            if self.schema_version in {4, 6}:
                 expected_fixed["anchor_storage"] = "exact_compact_v1"
-            if self.model_order != ("qwen", "gemma", "phi"):
+            if not self._legacy_raw_token_schema or self.model_order != (
+                "qwen",
+                "gemma",
+                "phi",
+            ):
                 expected_fixed["model_order_json"] = json.dumps(
                     self.model_order, separators=(",", ":")
                 )
@@ -417,10 +448,9 @@ class SQLiteExposureLedger:
             }
             if compact_anchor_ids:
                 metadata["anchor_storage"] = "exact_compact_v1"
-            if self.model_order != ("qwen", "gemma", "phi"):
-                metadata["model_order_json"] = json.dumps(
-                    self.model_order, separators=(",", ":")
-                )
+            metadata["model_order_json"] = json.dumps(
+                self.model_order, separators=(",", ":")
+            )
             with self.connection:
                 self.connection.executemany(
                     "INSERT INTO exposure_metadata(key,value) VALUES (?,?)", metadata.items()
@@ -488,20 +518,21 @@ class SQLiteExposureLedger:
         self.close()
 
     def snapshot(self) -> ExposureCounters:
+        raw0, raw1, raw2 = self._raw_token_columns
         row = self.connection.execute(
             "SELECT accepted,newly_observed,repeated,optimization_steps,"
-            "raw_tokens_qwen,raw_tokens_gemma,raw_tokens_phi "
+            f"{raw0},{raw1},{raw2} "
             "FROM exposure_totals WHERE singleton=1"
         ).fetchone()
         if row is None:
             raise ValueError("exposure ledger is missing its durable totals")
-        accepted, new, repeated, steps, qwen, gemma, phi = (int(value) for value in row)
+        accepted, new, repeated, steps, raw_slot_0, raw_slot_1, raw_slot_2 = (
+            int(value) for value in row
+        )
         return ExposureCounters(
             accepted_aligned_anchor_exposures=accepted,
             unique_aligned_anchors=new,
-            raw_tokens_qwen=qwen,
-            raw_tokens_gemma=gemma,
-            raw_tokens_phi=phi,
+            raw_token_slots=(raw_slot_0, raw_slot_1, raw_slot_2),
             optimization_steps=steps,
             repeated_anchor_exposures=repeated,
             newly_observed_anchor_exposures=new,
@@ -590,11 +621,12 @@ class SQLiteExposureLedger:
         durable_unique = int(
             self.connection.execute("SELECT COUNT(*) FROM seen_anchors").fetchone()[0]
         )
+        raw0, raw1, raw2 = self._raw_token_columns
         raw_totals = tuple(
             int(value)
             for value in self.connection.execute(
-                "SELECT COALESCE(SUM(raw_tokens_qwen),0),"
-                "COALESCE(SUM(raw_tokens_gemma),0),COALESCE(SUM(raw_tokens_phi),0) "
+                f"SELECT COALESCE(SUM({raw0}),0),"
+                f"COALESCE(SUM({raw1}),0),COALESCE(SUM({raw2}),0) "
                 "FROM alignment_observations"
             ).fetchone()
         )
@@ -608,11 +640,7 @@ class SQLiteExposureLedger:
             raise ValueError("exposure ledger historical and aggregate counters disagree")
         if durable_unique != counters.unique_aligned_anchors or ranks != self.rank_exposure_counts():
             raise ValueError("exposure ledger membership/rank history is inconsistent")
-        if raw_totals != (
-            counters.raw_tokens_qwen,
-            counters.raw_tokens_gemma,
-            counters.raw_tokens_phi,
-        ):
+        if raw_totals != counters.raw_token_slots:
             raise ValueError("exposure ledger alignment-token history is inconsistent")
         return {
             "status": "PASS",
@@ -639,7 +667,7 @@ class SQLiteExposureLedger:
         else:
             receipt_sha256 = self.genesis_receipt_sha256
         return ExposureLedgerReceipt(
-            schema_version=2,
+            schema_version=3,
             ledger_uuid=self.ledger_uuid,
             dataset_manifest_sha256=self.dataset_manifest_sha256,
             world_size=self.world_size,
@@ -647,6 +675,7 @@ class SQLiteExposureLedger:
             receipt_sha256=receipt_sha256,
             counters=counters,
             rank_exposures=self.rank_exposure_counts(),
+            model_order=self.model_order,
         )
 
     def write_checkpoint_receipt(
@@ -664,6 +693,7 @@ class SQLiteExposureLedger:
             receipt.ledger_uuid != self.ledger_uuid
             or receipt.dataset_manifest_sha256 != self.dataset_manifest_sha256
             or receipt.world_size != self.world_size
+            or (receipt.schema_version >= 3 and receipt.model_order != self.model_order)
         ):
             raise ValueError("exposure-ledger receipt provenance mismatch")
         current = self.snapshot()
@@ -679,15 +709,7 @@ class SQLiteExposureLedger:
             observed_receipt = self.genesis_receipt_sha256
         if observed_receipt != receipt.receipt_sha256:
             raise ValueError("live exposure ledger does not contain the checkpoint receipt")
-        raw_counts_match = (
-            current.raw_tokens_qwen,
-            current.raw_tokens_gemma,
-            current.raw_tokens_phi,
-        ) == (
-            receipt.counters.raw_tokens_qwen,
-            receipt.counters.raw_tokens_gemma,
-            receipt.counters.raw_tokens_phi,
-        )
+        raw_counts_match = current.raw_token_slots == receipt.counters.raw_token_slots
         if current.optimization_steps == receipt.optimizer_step and raw_counts_match:
             self._validate_constant_time_state()
             return current
@@ -705,18 +727,17 @@ class SQLiteExposureLedger:
                 (receipt.optimizer_step,),
             )
             counters = receipt.counters
+            raw0, raw1, raw2 = self._raw_token_columns
             self.connection.execute(
                 "UPDATE exposure_totals SET accepted=?,newly_observed=?,repeated=?,"
-                "optimization_steps=?,raw_tokens_qwen=?,raw_tokens_gemma=?,raw_tokens_phi=? "
+                f"optimization_steps=?,{raw0}=?,{raw1}=?,{raw2}=? "
                 "WHERE singleton=1",
                 (
                     counters.accepted_aligned_anchor_exposures,
                     counters.newly_observed_anchor_exposures,
                     counters.repeated_anchor_exposures,
                     counters.optimization_steps,
-                    counters.raw_tokens_qwen,
-                    counters.raw_tokens_gemma,
-                    counters.raw_tokens_phi,
+                    *counters.raw_token_slots,
                 ),
             )
             self.connection.executemany(
@@ -749,9 +770,9 @@ class SQLiteExposureLedger:
             raise ValueError("raw-token observations cannot be negative")
         payload = json.dumps(counts, sort_keys=True, separators=(",", ":"))
         payload_sha256 = hashlib.sha256(payload.encode("utf-8")).hexdigest()
-        # Schema v3/v4 retains three positional raw-token slots for historical
-        # checkpoint compatibility. Two-model contracts use slots 0/1 and keep slot 2
-        # exactly zero; ``model_order_json`` provides their scientific names.
+        # Three positional slots are interpreted only through immutable
+        # ``model_order_json``. This avoids encoding any historical model family in
+        # the durable schema while keeping fixed-width counter updates.
         positional_counts = [counts[key] for key in self.model_order]
         positional_counts.extend([0] * (3 - len(positional_counts)))
         self.connection.execute("BEGIN IMMEDIATE")
@@ -776,10 +797,10 @@ class SQLiteExposureLedger:
                     before_optimizer_step,
                 ),
             )
+            raw0, raw1, raw2 = self._raw_token_columns
             self.connection.execute(
-                "UPDATE exposure_totals SET raw_tokens_qwen=raw_tokens_qwen+?, "
-                "raw_tokens_gemma=raw_tokens_gemma+?, raw_tokens_phi=raw_tokens_phi+? "
-                "WHERE singleton=1",
+                f"UPDATE exposure_totals SET {raw0}={raw0}+?, "
+                f"{raw1}={raw1}+?, {raw2}={raw2}+? WHERE singleton=1",
                 (
                     positional_counts[0],
                     positional_counts[1],
@@ -804,12 +825,13 @@ class SQLiteExposureLedger:
         """Return named raw-token slots according to this ledger's immutable model order."""
 
         counters = self.snapshot()
-        positional_counts = (
-            counters.raw_tokens_qwen,
-            counters.raw_tokens_gemma,
-            counters.raw_tokens_phi,
+        return dict(
+            zip(
+                self.model_order,
+                counters.raw_token_slots[: len(self.model_order)],
+                strict=True,
+            )
         )
-        return dict(zip(self.model_order, positional_counts[: len(self.model_order)], strict=True))
 
     def observe_optimizer_step(self, step_id: int, anchor_ids: Sequence[str]) -> ExposureCounters:
         return self.observe_global_optimizer_step(step_id, {0: anchor_ids})
@@ -951,9 +973,7 @@ class SQLiteExposureLedger:
         return ExposureCounters(
             accepted_aligned_anchor_exposures=cumulative[0],
             unique_aligned_anchors=cumulative[1],
-            raw_tokens_qwen=current.raw_tokens_qwen,
-            raw_tokens_gemma=current.raw_tokens_gemma,
-            raw_tokens_phi=current.raw_tokens_phi,
+            raw_token_slots=current.raw_token_slots,
             optimization_steps=step_id + 1,
             repeated_anchor_exposures=cumulative[2],
             newly_observed_anchor_exposures=cumulative[1],
@@ -1169,5 +1189,43 @@ def write_json_immutable(path: str | Path, payload: dict[str, Any]) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def counters_payload(counters: ExposureCounters) -> dict[str, int]:
-    return {key: int(value) for key, value in asdict(counters).items()}
+def counters_payload(counters: ExposureCounters) -> dict[str, Any]:
+    counters.validate()
+    return {
+        "accepted_aligned_anchor_exposures": int(
+            counters.accepted_aligned_anchor_exposures
+        ),
+        "unique_aligned_anchors": int(counters.unique_aligned_anchors),
+        "raw_token_slots": [int(value) for value in counters.raw_token_slots],
+        "optimization_steps": int(counters.optimization_steps),
+        "repeated_anchor_exposures": int(counters.repeated_anchor_exposures),
+        "newly_observed_anchor_exposures": int(
+            counters.newly_observed_anchor_exposures
+        ),
+    }
+
+
+def counters_from_payload(payload: Mapping[str, Any]) -> ExposureCounters:
+    """Read generic counters and legacy positional payloads without relabeling values."""
+
+    if "raw_token_slots" in payload:
+        raw_token_slots = tuple(int(value) for value in payload["raw_token_slots"])
+    else:
+        raw_token_slots = tuple(
+            int(payload[key])
+            for key in ("raw_tokens_qwen", "raw_tokens_gemma", "raw_tokens_phi")
+        )
+    counters = ExposureCounters(
+        accepted_aligned_anchor_exposures=int(
+            payload["accepted_aligned_anchor_exposures"]
+        ),
+        unique_aligned_anchors=int(payload["unique_aligned_anchors"]),
+        raw_token_slots=raw_token_slots,
+        optimization_steps=int(payload["optimization_steps"]),
+        repeated_anchor_exposures=int(payload["repeated_anchor_exposures"]),
+        newly_observed_anchor_exposures=int(
+            payload["newly_observed_anchor_exposures"]
+        ),
+    )
+    counters.validate()
+    return counters

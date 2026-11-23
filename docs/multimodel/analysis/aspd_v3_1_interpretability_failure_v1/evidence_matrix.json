@@ -1,0 +1,117 @@
+{
+  "checkpoint_manifest_sha256": "735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969",
+  "checkpoint_step": 61036,
+  "evidence": [
+    {
+      "contradicting_or_limiting_results": "No calibrated human reference; sign and magnitude of semantic-score bias are unidentified.",
+      "confounds": "The paper-style score still uses the failed Llama judge.",
+      "experimental_evidence": "A1/A2",
+      "hypothesis": "H1 Judge and protocol mismatch",
+      "supporting_results": "Llama predicted-position shares 0.0373/0.4186/0.2016/0.0748/0.2678; balanced-rotation all-five-correct fraction 0.0425; independent Mistral calibration status JUDGE_VALIDATION_FAILED.",
+      "verdict": "PARTIALLY_SUPPORTED"
+    },
+    {
+      "contradicting_or_limiting_results": "No final-checkpoint human unique-answer labels and no matched three-donor-condition experiment.",
+      "confounds": "Donor associations use a position-biased judge.",
+      "experimental_evidence": "A3 preparation",
+      "hypothesis": "H2 Donor ambiguity",
+      "supporting_results": "Failed-judge accuracy versus donor source-group match rho=-0.2385; density-gap rho=0.0211.",
+      "verdict": "INCONCLUSIVE"
+    },
+    {
+      "contradicting_or_limiting_results": "No threshold sweep evaluated by a valid semantic instrument.",
+      "confounds": "Observed score association uses the failed Llama judge.",
+      "experimental_evidence": "A4",
+      "hypothesis": "H3 Weak natural firings",
+      "supporting_results": "Median target activation versus failed-judge accuracy rho=0.4214; q90 retains 0.1386 PRE and 0.1437 MID events while retaining 7489 and 7519 eligible features.",
+      "verdict": "INCONCLUSIVE"
+    },
+    {
+      "contradicting_or_limiting_results": "17/18 non-topical coherent items were already in the old judge high-score band; zero-band contained 0/10 non-topical coherent items.",
+      "confounds": "Single language-model agent, no independent agreement, construction-key correctness is not semantic validity, and one accidentally unblinded item was excluded.",
+      "experimental_evidence": "A5 blinded nonhuman qualitative audit",
+      "hypothesis": "H4 Non-topical structure",
+      "supporting_results": "23/59 agent-coherent items; 18/59 (30.5%) syntactic/formatting/token-boundary; 18/18 agent-unique non-topical selections matched the construction key.",
+      "verdict": "PARTIALLY_SUPPORTED"
+    },
+    {
+      "contradicting_or_limiting_results": "Embedding clusters are not human meanings; held-out within-cluster versus cross-cluster Intruder was not run.",
+      "confounds": "One exploratory embedding model; 120-feature stratified sample.",
+      "experimental_evidence": "B1",
+      "hypothesis": "H5 Polysemanticity",
+      "supporting_results": "78/120 stable multi-cluster features: PRE 45/60, MID 33/60; 10311 natural-firing contexts.",
+      "verdict": "PARTIALLY_SUPPORTED"
+    },
+    {
+      "contradicting_or_limiting_results": "Frequency-residual rho=0.0675 and cluster-count-frequency rho=-0.0925; no controlled capacity ablation.",
+      "confounds": "Residual structure can reflect objective or optimization rather than C.",
+      "experimental_evidence": "B2 observational",
+      "hypothesis": "H6 Capacity bottleneck",
+      "supporting_results": "Mean matrix FVU is 0.3178-0.3245 PRE and 0.4393-0.4699 MID; contribution is concentrated.",
+      "verdict": "INCONCLUSIVE"
+    },
+    {
+      "contradicting_or_limiting_results": "Neither predeclared directional rule passed; all-three sign agreement was 0.3333 (95% CI 0.1667-0.5417), versus random-rank-one point mean 0.2361.",
+      "confounds": "Only 24 stratified components; the strongest within-site learned target was selected independently per model; signed correspondence is not algorithm identity.",
+      "experimental_evidence": "B3 signed three-model causal ablation",
+      "hypothesis": "H7 Cross-model functional mismatch",
+      "supporting_results": "Active-effect rho was -0.0817 Gemma-Smol (CI -0.4393 to 0.3667), 0.0452 Gemma-Granite (CI -0.3848 to 0.4781), and 0.5322 Smol-Granite (CI 0.0901 to 0.8234); exact same-context CIs all crossed zero.",
+      "verdict": "INCONCLUSIVE"
+    },
+    {
+      "contradicting_or_limiting_results": "Activation-energy versus internal-contribution rho=0.6492; no objective ablation or causal-specificity outcome.",
+      "confounds": "Contribution norm is not semantic or causal coherence.",
+      "experimental_evidence": "B4 observational",
+      "hypothesis": "H8 Objective mismatch and detached gradients",
+      "supporting_results": "Detached binary internal support and absence of direct encoder gradient are implementation-verified.",
+      "verdict": "INCONCLUSIVE"
+    },
+    {
+      "contradicting_or_limiting_results": "Step-13k weights are absent; samples overlap in only three IDs; semantic protocols differ and both judges are invalid.",
+      "confounds": "Training-batch losses are not held-out checkpoint-matched FVU.",
+      "experimental_evidence": "B5 surviving artifacts",
+      "hypothesis": "H9 Interpretability plateau",
+      "supporting_results": "Activation loss changed 0.400998 to 0.381607 and internal loss 0.419016 to 0.393049 from step 13000 to 61036.",
+      "verdict": "INCONCLUSIVE"
+    },
+    {
+      "contradicting_or_limiting_results": "High-frequency cluster fraction is not larger; no valid human or causal-specificity comparison.",
+      "confounds": "Contribution sum is observational and not marginal ablation loss.",
+      "experimental_evidence": "B6",
+      "hypothesis": "H10 Extreme winners",
+      "supporting_results": "Top 20 carry 0.11998 PRE and 0.05600 MID total internal contribution; frequency-contribution rho=0.8150.",
+      "verdict": "PARTIALLY_SUPPORTED"
+    }
+  ],
+  "h4_agent_audit": {
+    "analysis_git_sha": "5d6114aff7f6320b9cf42aaeefa3cacf5fb6503d",
+    "analysis_summary_sha256": "d24ca06df4f597d1924a8cb1d8c2de2a5301e965fa0c7b261e1779bf26cce6bb",
+    "blinded_response_git_sha": "4600fd7",
+    "contaminated_items_excluded": [
+      "Feature Set 001"
+    ],
+    "human_evidence_claimed": false,
+    "independent_evaluators": 1,
+    "items": 59,
+    "agent_coherent_fraction": 0.3898305084745763,
+    "agent_non_topical_coherent_fraction": 0.3050847457627119,
+    "agent_unique_intruder_fraction": 0.3898305084745763,
+    "intruder_accuracy_unique_non_topical": 1.0,
+    "unique_non_topical_attempts": 18,
+    "verdict": "PARTIALLY_SUPPORTED"
+  },
+  "h7_functional_correspondence": {
+    "analysis_git_sha": "3f028ee5debe5fc323530087dfed2eb4f5023bec",
+    "analysis_summary_sha256": "af8e4793e904519cfe78ccae970c634a250d2a27798efc272a78cb2056de2094",
+    "causal_execution_git_sha": "f50b1d78883ad45059052bea98faeea61f0e7140",
+    "causal_job_id": "51380041",
+    "components": 24,
+    "contract_sha256": "9fe4d5aff914d38ada37ee28d9ed9ba9c4a60c1fcec65e8e6eee235db4bad7e1",
+    "figure_git_sha": "fb81273",
+    "plan_sha256": "e4ed7e1a06d5c8d373fd524881ecaea02ddd0df0c65932c87cb3f605c208d3f3",
+    "result_rows": 3456,
+    "verdict": "INCONCLUSIVE"
+  },
+  "schema_version": 1,
+  "status": "COMPLETE_WITH_EXPLORATORY_NONHUMAN_H4_AUDIT"
+}

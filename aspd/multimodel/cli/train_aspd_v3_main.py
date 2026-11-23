@@ -430,6 +430,7 @@ def main() -> None:
             split_policy=split_policy,
             dedup_path=run_dir / "stream_dedup.sqlite",
             sequence_length=config.data.sequence_length,
+            canonical_text_policy=config.data.canonical_text_policy,
         )
         ledger = SQLiteExposureLedger(
             run_dir / "exposure_ledger.sqlite",

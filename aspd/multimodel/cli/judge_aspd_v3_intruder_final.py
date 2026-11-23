@@ -148,9 +148,14 @@ def _load_model(contract: FinalIntruderJudgeContract) -> tuple[Any, Any]:
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     snapshot = _snapshot_path(contract)
+    tokenizer_kwargs: dict[str, Any] = {
+        "local_files_only": contract.local_files_only,
+    }
+    if contract.judge_model_id == "mistralai/Mistral-Nemo-Instruct-2407":
+        tokenizer_kwargs["fix_mistral_regex"] = True
     tokenizer = AutoTokenizer.from_pretrained(
         snapshot,
-        local_files_only=contract.local_files_only,
+        **tokenizer_kwargs,
     )
     tokenizer.padding_side = "left"
     if tokenizer.pad_token_id is None:
@@ -486,6 +491,9 @@ def main() -> None:
         "judge_config_sha256": sha256_file(snapshot / "config.json"),
         "judge_weight_index_sha256": sha256_file(
             snapshot / "model.safetensors.index.json"
+        ),
+        "tokenizer_fix_mistral_regex": (
+            contract.judge_model_id == "mistralai/Mistral-Nemo-Instruct-2407"
         ),
         "contract_fingerprint": contract.fingerprint(),
         "tasks_sha256": sha256_file(args.tasks),

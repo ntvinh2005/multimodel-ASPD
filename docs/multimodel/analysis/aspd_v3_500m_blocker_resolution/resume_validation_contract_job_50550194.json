@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "status": "AUTHORIZED_BOUNDED_RESUME_VALIDATION",
+  "authorization_reference": "researcher_message_2026-11-09_verify_unverified_up_to_4_gpu",
+  "execution_contract_fingerprint": "45f8b159d737e1096ef0dda78300484667926e2307800969d3fc800802e24944",
+  "source_checkpoint": "/blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/preflight/checkpoints/step-000000003",
+  "source_checkpoint_manifest_sha256": "9d71d00c76ddfc03983121eed39dd7cf6101bfea98b1f2956ffcb46918ff454e",
+  "preflight_report": "/blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/preflight/preflight_report.json",
+  "preflight_report_sha256": "74cd3454f5e84f07d7cae11bf367cc28381a5e464b55cb0d04b8c878a318d7a6",
+  "output_namespace": "/blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/resume_validation_job_50550194",
+  "target_optimizer_step": 4
+}

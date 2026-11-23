@@ -1,0 +1,40 @@
+schema_version: 1
+status: RESEARCHER_AUTHORIZED_READ_ONLY_DIAGNOSIS
+authorized_on: '2026-11-14'
+experiment_family: aspd_v3_1_interpretability_stage2_v1
+training_authorized_by_this_contract: false
+checkpoint_step: 61036
+checkpoint_manifest_sha256: 735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969
+accepted_training_exposures: 500006912
+model_order: [gemma, smol, granite]
+forbidden_model_substrings: [qwen]
+selected_split: test
+accepted_evaluation_anchors: 100352
+dictionary_size_per_site: 8192
+natural_gate_only: true
+activation_thresholds: [0.06, 0.08, 0.12, 0.20]
+within_feature_quantiles: [0.50, 0.75, 0.90]
+calibration_document_hash_modulus: 5
+calibration_document_hash_bucket: 0
+minimum_retained_events: 5
+clustering_features_per_site_frequency_stratum: 20
+clustering_contexts_per_feature: 100
+clustering_minimum_contexts: 50
+clustering_seed: 20261118
+clustering_candidate_k: [2, 3, 4, 5]
+clustering_minimum_silhouette: 0.10
+clustering_minimum_cluster_fraction: 0.10
+clustering_minimum_stability_ari: 0.60
+clustering_random_restarts: 10
+embedding_model_id: mistralai/Mistral-Nemo-Instruct-2407
+embedding_model_revision: 04d8a90549d23fc6bd7f642064003592df51e9b3
+embedding_tokenizer_fix_mistral_regex: true
+embedding_pooling: attention_mask_mean_last_hidden_state
+embedding_dtype: bfloat16
+human_components: 60
+human_trial_per_component: 1
+human_sampling_seed: 20261119
+human_sampling_policy: equal_site_include_all_zero_then_split_intermediate_high
+human_required_raters: 2
+bootstrap_replicates: 5000
+bootstrap_seed: 20261120

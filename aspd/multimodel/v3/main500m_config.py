@@ -29,6 +29,30 @@ RETAINED_MODELS = {
         "selected_layers": tuple(range(8, 16)),
     },
 }
+APPROVED_THIRD_MODEL = {
+    "key": "granite",
+    "model_id": "ibm-granite/granite-3.3-2b-instruct",
+    "revision": "707f574c62054322f6b5b04b6d075f0a8f05e0f0",
+    "tokenizer_id": "ibm-granite/granite-3.3-2b-instruct",
+    "tokenizer_revision": "707f574c62054322f6b5b04b6d075f0a8f05e0f0",
+    "family": "granite",
+    "license": "apache-2.0",
+    "access": "public",
+    "checkpoint_parameter_count": 2_533_539_840,
+    "selected_layers": tuple(range(16, 24)),
+    "hidden_size": 2_048,
+    "intermediate_size": 8_192,
+    "num_hidden_layers": 40,
+    "num_attention_heads": 32,
+    "num_key_value_heads": 8,
+    "head_dim": 64,
+    "layer_prefixes": ("model.layers",),
+    "residual_pre_suffix": "input_layernorm",
+    "residual_mid_suffix": "post_attention_layernorm",
+    "fused_qkv": False,
+    "fused_gate_up": False,
+    "frozen": True,
+}
 
 
 class Main500MSource(BaseModel):
@@ -62,6 +86,13 @@ class Main500MSource(BaseModel):
 
     @model_validator(mode="after")
     def validate_source(self) -> Main500MSource:
+        identity = " ".join(
+            str(value)
+            for value in (self.key, self.model_id, self.tokenizer_id, self.family)
+            if value is not None
+        ).lower()
+        if "qwen" in identity:
+            raise ValueError("Qwen is forbidden in the ASPD v3.1 main source contract")
         scientific = {
             "model_id": self.model_id,
             "revision": self.revision,
@@ -110,6 +141,13 @@ class Main500MSource(BaseModel):
             raise ValueError(f"{self.key} selected layers exceed the source backbone")
         if self.frozen is not True:
             raise ValueError(f"{self.key} source weights must remain frozen")
+        assert self.layer_prefixes is not None
+        if not self.layer_prefixes or any(not value.strip() for value in self.layer_prefixes):
+            raise ValueError(f"{self.key} physical layer prefixes must be non-empty")
+        if not str(self.residual_pre_suffix).strip() or not str(
+            self.residual_mid_suffix
+        ).strip():
+            raise ValueError(f"{self.key} PRE/MID hook suffixes must be non-empty")
         return self
 
     def _required(self, name: str) -> int:
@@ -258,12 +296,40 @@ class Main500MMonitoring(BaseModel):
     maximum_activation_fvu: float = Field(gt=0)
     maximum_internal_fvu: float = Field(gt=0)
     maximum_model_loss_ratio: float = Field(gt=1)
+    expected_gate_groups: Literal[6]
+    expected_activation_fvu_metrics: Literal[48]
+    expected_internal_fvu_metrics: Literal[168]
+    hard_abort_on_missing_diagnostics: Literal[True]
     hard_abort_on_repeated_exposure: Literal[True]
     hard_abort_on_nonfinite: Literal[True]
     hard_abort_on_checkpoint_failure: Literal[True]
     hard_abort_on_storage_reserve_breach: Literal[True]
     storage_reserve_bytes: int = Field(gt=0)
+    sustained_policy_version: Literal["v1"]
+    sustained_gate_failure_diagnostics: int = Field(ge=2)
+    sustained_reconstruction_failure_diagnostics: int = Field(ge=2)
+    reconstruction_pause_minimum_exposures: int = Field(ge=0)
+    milestone_policy_version: Literal["v1"]
+    require_researcher_continuation: Literal[True]
     staged_milestone_exposures: tuple[int, ...]
+
+    @model_validator(mode="after")
+    def validate_milestones(self) -> Main500MMonitoring:
+        expected = (
+            10_002_432,
+            25_001_984,
+            50_003_968,
+            100_007_936,
+            250_003_456,
+            500_006_912,
+        )
+        if self.staged_milestone_exposures != expected:
+            raise ValueError("main 500M staged exposure milestones changed")
+        if self.reconstruction_pause_minimum_exposures != expected[0]:
+            raise ValueError("reconstruction escalation must begin at the first review milestone")
+        if any(exposures % 8192 for exposures in self.staged_milestone_exposures):
+            raise ValueError("every staged milestone must fall on an optimizer-step boundary")
+        return self
 
 
 class Main500MRuntime(BaseModel):
@@ -284,8 +350,11 @@ class Main500MRuntime(BaseModel):
     ledger_anchor_storage: Literal["exact_compact_v1"]
     output_root: str
     checkpoint_root: str
+    startup_storage_required_bytes: Literal[1_099_511_627_776]
     dataset_manifest: str
     alignment_manifest: str
+    continuation_authorization_root: str
+    preflight_output_root: str
     preflight_evidence: str
     max_preflight_steps: int = Field(gt=0, le=20)
     max_preflight_minutes: int = Field(gt=0, le=45)
@@ -297,12 +366,83 @@ class Main500MRuntime(BaseModel):
             self.checkpoint_root,
             self.dataset_manifest,
             self.alignment_manifest,
+            self.continuation_authorization_root,
+            self.preflight_output_root,
             self.preflight_evidence,
         )
         if any("aspd_v3/main500m_preparation_v1" not in value for value in paths):
             raise ValueError("main 500M paths must use the isolated preparation namespace")
         if any(value.startswith(("~", "/home/")) for value in paths):
             raise ValueError("large ASPD artifacts must not default to HOME")
+        if Path(self.checkpoint_root) != Path(self.output_root):
+            raise ValueError(
+                "the current runner stores checkpoints inside each run namespace; "
+                "checkpoint_root must equal output_root"
+            )
+        return self
+
+
+class Main500MBoundedPreflightAuthorization(BaseModel):
+    """Researcher authorization for one bounded engineering preflight only."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["PENDING_RESEARCHER_APPROVAL", "AUTHORIZED"]
+    optimizer_steps: int | None = Field(default=None, ge=3, le=20)
+    output_namespace: str | None = None
+    authorization_reference: str | None = None
+
+    @model_validator(mode="after")
+    def validate_authorization(self) -> Main500MBoundedPreflightAuthorization:
+        evidence = (
+            self.optimizer_steps,
+            self.output_namespace,
+            self.authorization_reference,
+        )
+        if self.status == "PENDING_RESEARCHER_APPROVAL":
+            if any(value is not None for value in evidence):
+                raise ValueError(
+                    "pending bounded preflight must not contain authorization evidence"
+                )
+        elif any(value is None or not str(value).strip() for value in evidence):
+            raise ValueError(
+                "authorized bounded preflight requires an exact step budget, output "
+                "namespace, and authorization reference"
+            )
+        return self
+
+
+class Main500MGPUPreflightEvidence(BaseModel):
+    """Pinned evidence consumed by main authorization after preflight completes."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["PENDING_MODEL_THREE", "PASSED"]
+    artifact_path: str | None = None
+    artifact_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    execution_contract_fingerprint: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
+    source_commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
+    optimizer_steps: int | None = Field(default=None, ge=3, le=20)
+
+    @model_validator(mode="after")
+    def validate_evidence(self) -> Main500MGPUPreflightEvidence:
+        evidence = (
+            self.artifact_path,
+            self.artifact_sha256,
+            self.execution_contract_fingerprint,
+            self.source_commit,
+            self.optimizer_steps,
+        )
+        if self.status == "PENDING_MODEL_THREE":
+            if any(value is not None for value in evidence):
+                raise ValueError("pending three-model preflight must not contain PASS evidence")
+        elif any(value is None or not str(value).strip() for value in evidence):
+            raise ValueError(
+                "passed three-model preflight requires a pinned artifact, contract "
+                "fingerprint, and optimizer-step count"
+            )
         return self
 
 
@@ -311,25 +451,45 @@ class HumanInterpretabilityApproval(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    status: Literal["PENDING_RESEARCHER_DECISION", "APPROVED"]
+    status: Literal[
+        "PENDING_RESEARCHER_RESPONSES",
+        "ANALYSIS_COMPLETE_PENDING_RESEARCHER_DECISION",
+        "APPROVED_HUMAN_EVIDENCE",
+        "APPROVED_SEMANTIC_UNCERTAINTY_ACCEPTED",
+        "REJECTED",
+    ]
     artifact_path: str | None = None
     artifact_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     researcher_decision: str | None = None
+    scientific_limitations: tuple[str, ...]
 
     @model_validator(mode="after")
     def validate_gate(self) -> HumanInterpretabilityApproval:
-        evidence = (self.artifact_path, self.artifact_sha256, self.researcher_decision)
-        if self.status == "PENDING_RESEARCHER_DECISION":
-            if any(value is not None for value in evidence):
-                raise ValueError(
-                    "pending human-interpretability gate must not contain approval evidence"
-                )
-        elif any(value is None or not str(value).strip() for value in evidence):
+        artifact = (self.artifact_path, self.artifact_sha256)
+        if any(value is None or not str(value).strip() for value in artifact):
+            raise ValueError("human-interpretability status requires a pinned artifact")
+        if not self.scientific_limitations or any(
+            not limitation.strip() for limitation in self.scientific_limitations
+        ):
+            raise ValueError("human-interpretability limitations must be explicit")
+        decision_required = self.status in {
+            "APPROVED_HUMAN_EVIDENCE",
+            "APPROVED_SEMANTIC_UNCERTAINTY_ACCEPTED",
+            "REJECTED",
+        }
+        if decision_required and not str(self.researcher_decision or "").strip():
             raise ValueError(
-                "approved human-interpretability gate requires artifact path, SHA-256, "
-                "and researcher decision"
+                "final human-interpretability status requires a researcher decision"
             )
+        if not decision_required and self.researcher_decision is not None:
+            raise ValueError("pending human-interpretability status cannot claim a decision")
         return self
+
+    def permits_main_authorization(self) -> bool:
+        return self.status in {
+            "APPROVED_HUMAN_EVIDENCE",
+            "APPROVED_SEMANTIC_UNCERTAINTY_ACCEPTED",
+        }
 
 
 class Main500MApprovals(BaseModel):
@@ -337,14 +497,32 @@ class Main500MApprovals(BaseModel):
 
     third_model: Literal["PENDING_RESEARCHER_APPROVAL", "APPROVED"]
     three_way_alignment: Literal["PENDING_THIRD_TOKENIZER_VALIDATION", "APPROVED"]
+    three_way_alignment_artifact: str | None = None
+    three_way_alignment_artifact_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
     human_interpretability: HumanInterpretabilityApproval
     exact_resume: Literal[
         "PENDING_ENGINEERING_VALIDATION",
         "SYNTHETIC_VALIDATED_REAL_THREE_MODEL_PENDING",
         "VALIDATED_THREE_MODEL_GPU",
     ]
+    exact_resume_artifact: str | None = None
+    exact_resume_artifact_sha256: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
+    exact_resume_source_commit: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{40}$"
+    )
+    exact_resume_contract_sha256: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
     storage_reservation: Literal["STORAGE_BLOCKED", "APPROVED"]
-    three_model_gpu_preflight: Literal["PENDING_MODEL_THREE", "PASSED"]
+    monitoring_policy: Literal["PENDING_RESEARCHER_APPROVAL", "APPROVED"]
+    milestone_policy: Literal["PENDING_RESEARCHER_APPROVAL", "APPROVED"]
+    bounded_preflight: Main500MBoundedPreflightAuthorization
+    three_model_gpu_preflight: Main500MGPUPreflightEvidence
     full_training: Literal["MAIN_500M_NOT_AUTHORIZED", "AUTHORIZED"]
 
 
@@ -363,7 +541,13 @@ class V31Main500MConfig(BaseModel):
     monitoring: Main500MMonitoring
     runtime: Main500MRuntime
     approvals: Main500MApprovals
-    evaluation_status: Literal["HUMAN_INTERPRETABILITY_DECISION_PENDING"]
+    evaluation_status: Literal[
+        "HUMAN_INTERPRETABILITY_PACKAGE_COMPLETE_RESPONSES_PENDING",
+        "HUMAN_INTERPRETABILITY_ANALYSIS_COMPLETE_DECISION_PENDING",
+        "HUMAN_INTERPRETABILITY_APPROVED",
+        "SEMANTIC_UNCERTAINTY_EXPLICITLY_ACCEPTED",
+        "HUMAN_INTERPRETABILITY_REJECTED",
+    ]
 
     @model_validator(mode="after")
     def validate_contract(self) -> V31Main500MConfig:
@@ -384,8 +568,56 @@ class V31Main500MConfig(BaseModel):
                 raise ValueError("third-model approval cannot precede a complete source contract")
         elif third.approval_status != "APPROVED" or self.approvals.third_model != "APPROVED":
             raise ValueError("the third model requires explicit researcher approval")
+        else:
+            observed_third = {
+                key: getattr(third, key) for key in APPROVED_THIRD_MODEL
+            }
+            if observed_third != APPROVED_THIRD_MODEL:
+                raise ValueError("approved Granite model-3 contract changed")
+        alignment_evidence = (
+            self.approvals.three_way_alignment_artifact,
+            self.approvals.three_way_alignment_artifact_sha256,
+        )
+        if self.approvals.three_way_alignment == "APPROVED":
+            if any(value is None or not str(value).strip() for value in alignment_evidence):
+                raise ValueError(
+                    "approved three-way alignment requires a pinned validation artifact"
+                )
+        elif any(value is not None for value in alignment_evidence):
+            raise ValueError(
+                "pending three-way alignment cannot contain approval evidence"
+            )
+        expected_evaluation_status = {
+            "PENDING_RESEARCHER_RESPONSES": (
+                "HUMAN_INTERPRETABILITY_PACKAGE_COMPLETE_RESPONSES_PENDING"
+            ),
+            "ANALYSIS_COMPLETE_PENDING_RESEARCHER_DECISION": (
+                "HUMAN_INTERPRETABILITY_ANALYSIS_COMPLETE_DECISION_PENDING"
+            ),
+            "APPROVED_HUMAN_EVIDENCE": "HUMAN_INTERPRETABILITY_APPROVED",
+            "APPROVED_SEMANTIC_UNCERTAINTY_ACCEPTED": (
+                "SEMANTIC_UNCERTAINTY_EXPLICITLY_ACCEPTED"
+            ),
+            "REJECTED": "HUMAN_INTERPRETABILITY_REJECTED",
+        }[self.approvals.human_interpretability.status]
+        if self.evaluation_status != expected_evaluation_status:
+            raise ValueError(
+                "human-interpretability approval and evaluation status disagree"
+            )
+        preflight = self.approvals.bounded_preflight
+        if preflight.status == "AUTHORIZED":
+            if preflight.output_namespace != self.runtime.preflight_output_root:
+                raise ValueError(
+                    "bounded-preflight authorization must pin the configured output namespace"
+                )
+            if Path(self.runtime.preflight_evidence).parent != Path(
+                self.runtime.preflight_output_root
+            ):
+                raise ValueError(
+                    "preflight evidence must be inside the dedicated preflight namespace"
+                )
         if self.full_training_authorized:
-            self.require_execution_authorized()
+            self.require_main_authorized()
         elif self.scientific_status != "MAIN_500M_NOT_AUTHORIZED":
             raise ValueError("unauthorized config must remain MAIN_500M_NOT_AUTHORIZED")
         return self
@@ -397,19 +629,73 @@ class V31Main500MConfig(BaseModel):
         encoded = json.dumps(self.payload(), sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(encoded.encode()).hexdigest()
 
+    def execution_contract_fingerprint(self) -> str:
+        """Hash immutable scientific/runtime inputs, excluding mutable approvals."""
+
+        payload = self.payload()
+        for key in (
+            "scientific_status",
+            "full_training_authorized",
+            "approvals",
+            "evaluation_status",
+        ):
+            payload.pop(key)
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode()).hexdigest()
+
+    def alignment_contract_fingerprint(self) -> str:
+        """Hash only inputs that can change canonical three-tokenizer alignment."""
+
+        payload = {
+            "models": [
+                {
+                    "key": model.key,
+                    "tokenizer_id": model.tokenizer_id,
+                    "tokenizer_revision": model.tokenizer_revision,
+                }
+                for model in self.models
+            ],
+            "model_order": list(self.architecture.model_order),
+            "dataset_id": self.data.dataset_id,
+            "dataset_revision": self.data.dataset_revision,
+            "sequence_length": self.data.sequence_length,
+            "split_unit": self.data.split_unit,
+            "split_seed": self.data.split_seed,
+            "split_modulus": self.data.split_modulus,
+            "validation_buckets": list(self.data.validation_buckets),
+            "test_buckets": list(self.data.test_buckets),
+            "canonical_text_policy": self.data.canonical_text_policy,
+            "alignment_acceptance": self.data.alignment_acceptance,
+        }
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode()).hexdigest()
+
     def readiness_blockers(self) -> list[str]:
         blockers: list[str] = []
         if self.models[2].approval_status != "APPROVED":
             blockers.append("MODEL_THREE_BLOCKED")
         if self.approvals.three_way_alignment != "APPROVED":
             blockers.append("ALIGNMENT_BLOCKED")
-        if self.approvals.exact_resume != "VALIDATED_THREE_MODEL_GPU":
+        exact_resume_evidence = (
+            self.approvals.exact_resume_artifact,
+            self.approvals.exact_resume_artifact_sha256,
+            self.approvals.exact_resume_source_commit,
+            self.approvals.exact_resume_contract_sha256,
+        )
+        if self.approvals.exact_resume != "VALIDATED_THREE_MODEL_GPU" or any(
+            value is None or not str(value).strip()
+            for value in exact_resume_evidence
+        ):
             blockers.append("RESUME_BLOCKED")
         if self.approvals.storage_reservation != "APPROVED":
             blockers.append("STORAGE_BLOCKED")
-        if self.approvals.human_interpretability.status != "APPROVED":
+        if self.approvals.monitoring_policy != "APPROVED":
+            blockers.append("MONITORING_POLICY_APPROVAL_PENDING")
+        if self.approvals.milestone_policy != "APPROVED":
+            blockers.append("MILESTONE_POLICY_APPROVAL_PENDING")
+        if not self.approvals.human_interpretability.permits_main_authorization():
             blockers.append("HUMAN_INTERPRETABILITY_APPROVAL_PENDING")
-        if self.approvals.three_model_gpu_preflight != "PASSED":
+        if self.approvals.three_model_gpu_preflight.status != "PASSED":
             blockers.append("THREE_MODEL_GPU_PREFLIGHT_PENDING")
         if (
             self.approvals.full_training != "AUTHORIZED"
@@ -418,39 +704,359 @@ class V31Main500MConfig(BaseModel):
             blockers.append("MAIN_500M_NOT_AUTHORIZED")
         return blockers
 
-    def require_execution_authorized(self) -> None:
+    def require_preflight_authorized(
+        self,
+        *,
+        optimizer_steps: int,
+        run_dir: str | Path,
+    ) -> None:
+        """Authorize one exact, bounded preflight without requiring prior PASS evidence."""
+
+        blockers: list[str] = []
+        if self.models[2].approval_status != "APPROVED":
+            blockers.append("MODEL_THREE_BLOCKED")
+        if self.approvals.third_model != "APPROVED":
+            blockers.append("MODEL_THREE_APPROVAL_PENDING")
+        if self.approvals.three_way_alignment != "APPROVED":
+            blockers.append("ALIGNMENT_BLOCKED")
+        authorization = self.approvals.bounded_preflight
+        if authorization.status != "AUTHORIZED":
+            blockers.append("BOUNDED_PREFLIGHT_NOT_AUTHORIZED")
+        if blockers:
+            raise RuntimeError(
+                "ASPD v3.1 bounded preflight is fail-closed: " + ", ".join(blockers)
+            )
+        self.validate_three_way_alignment_evidence()
+        assert authorization.optimizer_steps is not None
+        assert authorization.output_namespace is not None
+        if optimizer_steps != authorization.optimizer_steps:
+            raise RuntimeError(
+                "ASPD v3.1 bounded preflight step budget differs from its authorization"
+            )
+        if optimizer_steps > min(20, self.runtime.max_preflight_steps):
+            raise RuntimeError("ASPD v3.1 bounded preflight exceeds 20 optimizer steps")
+        run_path = Path(run_dir)
+        if run_path != Path(authorization.output_namespace):
+            raise RuntimeError(
+                "ASPD v3.1 bounded preflight must use its dedicated output namespace"
+            )
+        if run_path.exists():
+            raise RuntimeError(
+                "ASPD v3.1 bounded preflight refuses to overwrite an existing namespace"
+            )
+
+    def validate_preflight_evidence(self) -> dict[str, Any]:
+        evidence = self.approvals.three_model_gpu_preflight
+        if evidence.status != "PASSED":
+            raise RuntimeError("THREE_MODEL_GPU_PREFLIGHT_PENDING")
+        assert evidence.artifact_path is not None
+        assert evidence.artifact_sha256 is not None
+        assert evidence.execution_contract_fingerprint is not None
+        assert evidence.source_commit is not None
+        assert evidence.optimizer_steps is not None
+        artifact = Path(evidence.artifact_path)
+        if artifact != Path(self.runtime.preflight_evidence) or not artifact.is_file():
+            raise RuntimeError("THREE_MODEL_GPU_PREFLIGHT_ARTIFACT_MISSING")
+        observed_sha256 = hashlib.sha256(artifact.read_bytes()).hexdigest()
+        if observed_sha256 != evidence.artifact_sha256:
+            raise RuntimeError("THREE_MODEL_GPU_PREFLIGHT_ARTIFACT_HASH_MISMATCH")
+        report = json.loads(artifact.read_text(encoding="utf-8"))
+        expected = {
+            "status": "PASS",
+            "mode": "preflight",
+            "strategy": "model_owned",
+            "world_size": 3,
+            "logical_target_count": 168,
+            "optimizer_steps": evidence.optimizer_steps,
+            "execution_contract_fingerprint": self.execution_contract_fingerprint(),
+            "git_sha": evidence.source_commit,
+            "dcp_save_reload_resume_update": "PASS",
+            "checkpoint_parameter_and_adam_restore_probe": "PASS",
+        }
+        if self.approvals.exact_resume == "VALIDATED_THREE_MODEL_GPU":
+            expected["uninterrupted_vs_resumed_next_update"] = "BITWISE_EXACT"
+        mismatch = {
+            key: {"expected": value, "observed": report.get(key)}
+            for key, value in expected.items()
+            if report.get(key) != value
+        }
+        if evidence.execution_contract_fingerprint != self.execution_contract_fingerprint():
+            mismatch["approval.execution_contract_fingerprint"] = {
+                "expected": self.execution_contract_fingerprint(),
+                "observed": evidence.execution_contract_fingerprint,
+            }
+        source_correctness = report.get("source_correctness")
+        if not isinstance(source_correctness, list) or len(source_correctness) != 3:
+            mismatch["source_correctness"] = "must contain exactly three source reports"
+        else:
+            for index, source in enumerate(source_correctness):
+                if not isinstance(source, dict) or any(
+                    source.get(key) != value
+                    for key, value in {
+                        "status": "PASS",
+                        "targets": 56,
+                        "frozen_parameters": "PASS",
+                    }.items()
+                ):
+                    mismatch[f"source_correctness[{index}]"] = source
+        if self.approvals.exact_resume == "VALIDATED_THREE_MODEL_GPU":
+            exact_data_replay = report.get("exact_data_replay")
+            if not isinstance(exact_data_replay, dict) or any(
+                exact_data_replay.get(key) != value
+                for key, value in {
+                    "step": evidence.optimizer_steps,
+                    "accepted_exposures": evidence.optimizer_steps * 8192,
+                    "repeated_exposures": 0,
+                }.items()
+            ):
+                mismatch["exact_data_replay"] = exact_data_replay
+            source_immutability = report.get("source_state_immutability_by_rank")
+            if not isinstance(source_immutability, list) or len(source_immutability) != 3:
+                mismatch["source_state_immutability_by_rank"] = source_immutability
+            elif any(
+                not isinstance(item, dict)
+                or item.get("status") != "PASS"
+                or item.get("initial_sha256") != item.get("final_sha256")
+                for item in source_immutability
+            ):
+                mismatch["source_state_immutability_by_rank"] = source_immutability
+        checkpoint_manifest = report.get("checkpoint_manifest")
+        if not isinstance(checkpoint_manifest, dict) or any(
+            checkpoint_manifest.get(key) != value
+            for key, value in {"status": "COMPLETE", "world_size": 3}.items()
+        ):
+            mismatch["checkpoint_manifest"] = checkpoint_manifest
+        if mismatch:
+            raise RuntimeError(f"THREE_MODEL_GPU_PREFLIGHT_EVIDENCE_INVALID: {mismatch}")
+        return report
+
+    def validate_exact_resume_evidence(self) -> dict[str, Any]:
+        approvals = self.approvals
+        if approvals.exact_resume != "VALIDATED_THREE_MODEL_GPU":
+            raise RuntimeError("RESUME_BLOCKED")
+        assert approvals.exact_resume_artifact is not None
+        assert approvals.exact_resume_artifact_sha256 is not None
+        assert approvals.exact_resume_source_commit is not None
+        assert approvals.exact_resume_contract_sha256 is not None
+        artifact = Path(approvals.exact_resume_artifact)
+        if not artifact.is_file():
+            raise RuntimeError("EXACT_RESUME_ARTIFACT_MISSING")
+        if hashlib.sha256(artifact.read_bytes()).hexdigest() != (
+            approvals.exact_resume_artifact_sha256
+        ):
+            raise RuntimeError("EXACT_RESUME_ARTIFACT_HASH_MISMATCH")
+        report = json.loads(artifact.read_text(encoding="utf-8"))
+        expected = {
+            "status": "PASS",
+            "mode": "resume_validation",
+            "strategy": "model_owned",
+            "git_sha": approvals.exact_resume_source_commit,
+            "world_size": 3,
+            "logical_target_count": 168,
+            "optimizer_steps": 4,
+            "accepted_exposures": 32_768,
+            "uninterrupted_vs_resumed_next_update": "BITWISE_EXACT",
+            "dcp_save_reload_resume_update": "PASS",
+            "resume_validation_contract_sha256": (
+                approvals.exact_resume_contract_sha256
+            ),
+        }
+        mismatch = {
+            key: {"expected": value, "observed": report.get(key)}
+            for key, value in expected.items()
+            if report.get(key) != value
+        }
+        reference = report.get("uninterrupted_state_sha256_by_rank")
+        resumed = report.get("resumed_state_sha256_by_rank")
+        if (
+            not isinstance(reference, list)
+            or len(reference) != 3
+            or resumed != reference
+        ):
+            mismatch["state_sha256_by_rank"] = {
+                "uninterrupted": reference,
+                "resumed": resumed,
+            }
+        data = report.get("exact_data_replay")
+        if not isinstance(data, dict) or any(
+            data.get(key) != value
+            for key, value in {
+                "step": 4,
+                "accepted_exposures": 32_768,
+                "unique_anchors": 32_768,
+                "repeated_exposures": 0,
+            }.items()
+        ):
+            mismatch["exact_data_replay"] = data
+        source = report.get("source_state_immutability_by_rank")
+        if not isinstance(source, list) or len(source) != 3 or any(
+            not isinstance(item, dict)
+            or item.get("status") != "PASS"
+            or item.get("initial_sha256") != item.get("final_sha256")
+            for item in source
+        ):
+            mismatch["source_state_immutability_by_rank"] = source
+        if mismatch:
+            raise RuntimeError(f"EXACT_RESUME_EVIDENCE_INVALID: {mismatch}")
+        return report
+
+    def validate_three_way_alignment_evidence(self) -> dict[str, Any]:
+        if self.approvals.three_way_alignment != "APPROVED":
+            raise RuntimeError("ALIGNMENT_BLOCKED")
+        artifact_path = self.approvals.three_way_alignment_artifact
+        expected_sha256 = self.approvals.three_way_alignment_artifact_sha256
+        assert artifact_path is not None
+        assert expected_sha256 is not None
+        artifact = Path(artifact_path)
+        if not artifact.is_file():
+            raise RuntimeError("THREE_WAY_ALIGNMENT_ARTIFACT_MISSING")
+        observed_sha256 = hashlib.sha256(artifact.read_bytes()).hexdigest()
+        if observed_sha256 != expected_sha256:
+            raise RuntimeError("THREE_WAY_ALIGNMENT_ARTIFACT_HASH_MISMATCH")
+        report = json.loads(artifact.read_text(encoding="utf-8"))
+        expected_tokenizers = [
+            {
+                "model_key": model.key,
+                "id": model.tokenizer_id,
+                "revision": model.tokenizer_revision,
+            }
+            for model in self.models
+        ]
+        observed_tokenizers = [
+            {
+                "model_key": row.get("model_key"),
+                "id": row.get("id"),
+                "revision": row.get("revision"),
+            }
+            for row in report.get("tokenizers", [])
+        ]
+        expected = {
+            "status": "PASS",
+            "alignment_contract_fingerprint": self.alignment_contract_fingerprint(),
+            "alignment_policy": self.data.canonical_text_policy,
+            "alignment_acceptance": self.data.alignment_acceptance,
+            "model_order": list(self.architecture.model_order),
+            "tokenizers": expected_tokenizers,
+            "audit.boundary_invariants": "PASS",
+            "audit.within_process_repeatability": "PASS",
+            "audit.dataset_stream_prefix_replay": "PASS",
+            "selection_bias.status": "PASS",
+            "capacity.status": "PASS",
+        }
+        observed = {
+            "status": report.get("status"),
+            "alignment_contract_fingerprint": report.get(
+                "alignment_contract_fingerprint"
+            ),
+            "alignment_policy": report.get("alignment_policy"),
+            "alignment_acceptance": report.get("alignment_acceptance"),
+            "model_order": report.get("model_order"),
+            "tokenizers": observed_tokenizers,
+            "audit.boundary_invariants": report.get("audit", {}).get(
+                "boundary_invariants"
+            ),
+            "audit.within_process_repeatability": report.get("audit", {}).get(
+                "within_process_repeatability"
+            ),
+            "audit.dataset_stream_prefix_replay": report.get("audit", {}).get(
+                "dataset_stream_prefix_replay"
+            ),
+            "selection_bias.status": report.get("selection_bias", {}).get("status"),
+            "capacity.status": report.get("capacity", {}).get("status"),
+        }
+        mismatches = {
+            key: {"expected": expected[key], "observed": observed[key]}
+            for key in expected
+            if observed[key] != expected[key]
+        }
+        if mismatches:
+            raise RuntimeError(
+                f"THREE_WAY_ALIGNMENT_EVIDENCE_INVALID: {mismatches}"
+            )
+        return report
+
+    def validate_human_interpretability_artifact(self) -> dict[str, Any]:
+        human = self.approvals.human_interpretability
+        if not human.permits_main_authorization():
+            raise RuntimeError("HUMAN_INTERPRETABILITY_APPROVAL_PENDING")
+        assert human.artifact_path is not None and human.artifact_sha256 is not None
+        artifact = Path(human.artifact_path)
+        if not artifact.is_file():
+            raise RuntimeError("HUMAN_INTERPRETABILITY_ARTIFACT_MISSING")
+        observed = hashlib.sha256(artifact.read_bytes()).hexdigest()
+        if observed != human.artifact_sha256:
+            raise RuntimeError("HUMAN_INTERPRETABILITY_ARTIFACT_HASH_MISMATCH")
+        decision = json.loads(artifact.read_text(encoding="utf-8"))
+        expected_decision = {
+            "APPROVED_HUMAN_EVIDENCE": "APPROVE_HUMAN_EVIDENCE",
+            "APPROVED_SEMANTIC_UNCERTAINTY_ACCEPTED": "ACCEPT_SEMANTIC_UNCERTAINTY",
+        }[human.status]
+        expected = {
+            "schema_version": 1,
+            "status": "HUMAN_INTERPRETABILITY_RESEARCHER_DECISION",
+            "decision": expected_decision,
+            "researcher_decision": human.researcher_decision,
+            "scientific_limitations": list(human.scientific_limitations),
+        }
+        mismatch = {
+            key: {"expected": value, "observed": decision.get(key)}
+            for key, value in expected.items()
+            if decision.get(key) != value
+        }
+        evidence_path = decision.get("evaluation_artifact_path")
+        evidence_sha256 = decision.get("evaluation_artifact_sha256")
+        if not isinstance(evidence_path, str) or not isinstance(evidence_sha256, str):
+            mismatch["evaluation_artifact"] = "path and SHA-256 are required"
+        else:
+            evidence = Path(evidence_path)
+            if not evidence.is_file():
+                mismatch["evaluation_artifact"] = "missing"
+            elif hashlib.sha256(evidence.read_bytes()).hexdigest() != evidence_sha256:
+                mismatch["evaluation_artifact"] = "SHA-256 mismatch"
+            elif human.status == "APPROVED_HUMAN_EVIDENCE":
+                evaluation = json.loads(evidence.read_text(encoding="utf-8"))
+                if evaluation.get("status") != "HUMAN_INTERPRETABILITY_ANALYSIS_COMPLETE":
+                    mismatch["evaluation_artifact.status"] = {
+                        "expected": "HUMAN_INTERPRETABILITY_ANALYSIS_COMPLETE",
+                        "observed": evaluation.get("status"),
+                    }
+        if mismatch:
+            raise RuntimeError(f"HUMAN_INTERPRETABILITY_DECISION_INVALID: {mismatch}")
+        return decision
+
+    def require_main_authorized(self) -> None:
         blockers = self.readiness_blockers()
         if blockers:
             raise RuntimeError(
                 "ASPD v3.1 main 500M execution is fail-closed: " + ", ".join(blockers)
             )
-        human = self.approvals.human_interpretability
-        assert human.artifact_path is not None and human.artifact_sha256 is not None
-        artifact = Path(human.artifact_path)
-        if not artifact.is_file():
-            raise RuntimeError(
-                "ASPD v3.1 main 500M execution is fail-closed: "
-                "HUMAN_INTERPRETABILITY_ARTIFACT_MISSING"
-            )
-        observed = hashlib.sha256(artifact.read_bytes()).hexdigest()
-        if observed != human.artifact_sha256:
-            raise RuntimeError(
-                "ASPD v3.1 main 500M execution is fail-closed: "
-                "HUMAN_INTERPRETABILITY_ARTIFACT_HASH_MISMATCH"
-            )
+        self.validate_three_way_alignment_evidence()
+        self.validate_preflight_evidence()
+        self.validate_exact_resume_evidence()
+        self.validate_human_interpretability_artifact()
+
+    def require_execution_authorized(self) -> None:
+        """Backward-compatible alias for full main authorization only."""
+
+        self.require_main_authorized()
 
     def structural_report(self) -> dict[str, Any]:
+        approved_models = sum(
+            model.approval_status in {"RETAINED_APPROVED", "APPROVED"}
+            for model in self.models
+        )
+        blockers = self.readiness_blockers()
         return {
-            "status": "DRAFT_FAIL_CLOSED",
+            "status": "AUTHORIZED_READY" if not blockers else "DRAFT_FAIL_CLOSED",
             "config_fingerprint": self.fingerprint(),
             "required_model_count": 3,
             "logical_target_slots": 3 * 8 * 7,
-            "approved_physical_targets": 2 * 8 * 7,
-            "pending_physical_targets": 8 * 7,
+            "approved_physical_targets": approved_models * 8 * 7,
+            "pending_physical_targets": (3 - approved_models) * 8 * 7,
             "optimizer_steps": self.data.optimizer_steps,
             "target_accepted_anchor_exposures": self.data.target_accepted_anchor_exposures,
             "planned_accepted_anchor_exposures": self.data.planned_accepted_anchor_exposures,
-            "blockers": self.readiness_blockers(),
+            "blockers": blockers,
         }
 
 

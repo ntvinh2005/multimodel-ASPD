@@ -1,0 +1,25 @@
+{
+  "corrections": [
+    {
+      "authoritative_value": "901edad36c885efdd595dee06159300877d0a9cf",
+      "evidence": "slurm/logs/aspd-v3-final-heldout-51367637.out logs git_sha before either torchrun command",
+      "field": "diagnostic_git_sha",
+      "observed_value": "979c8ca8613779bb3f6add28e2c656194d1f2ff1",
+      "reason": "The manifest queried repository HEAD at render time after reporting-tool commits occurred in the shared worktree. The already-running Python process had imported evaluation code from the logged start commit.",
+      "scope": "job 51367637 heldout/experiment_manifest.json"
+    },
+    {
+      "authoritative_value": true,
+      "evidence": "main500m config uses per_anchor_l2 and heldout/experiment_manifest.json records original_space_uses_oracle_target_norm=true",
+      "field": "original_space_uses_oracle_target_norm",
+      "observed_value": false,
+      "reason": "The pre-fix renderer inferred the field from an arm-name equality check. Numeric reconstruction outputs are unaffected.",
+      "scope": "job 51367637 heldout/heldout_reconstruction.json"
+    }
+  ],
+  "heldout_manifest_sha256": "f1d4c46343bd9bb2ce2dcf2c22b2e33f4f45d2f6d41a50c4e66e38894bd55d88",
+  "job_id": "51367637",
+  "schema_version": 1,
+  "source_weights_unchanged": "PASS",
+  "status": "DOCUMENTED_WITHOUT_MUTATING_SCIENTIFIC_OUTPUT"
+}

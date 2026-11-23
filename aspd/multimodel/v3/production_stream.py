@@ -217,6 +217,7 @@ class PileAlignedAnchorStream:
         dedup_path: str | Path,
         sequence_length: int = 512,
         model_order: tuple[str, ...] = MODEL_ORDER,
+        canonical_text_policy: str | None = None,
     ):
         self.model_order = tuple(model_order)
         if len(self.model_order) < 2:
@@ -232,12 +233,20 @@ class PileAlignedAnchorStream:
         self.tokenizer_revisions = dict(tokenizer_revisions)
         self.split_policy = split_policy
         self.sequence_length = sequence_length
-        canonical_policy = {
+        legacy_policy = {
             2: "identity_exact_two_way_prefix",
             3: "identity_exact_three_way_prefix",
         }.get(len(self.model_order))
-        if canonical_policy is None:
+        if legacy_policy is None:
             raise ValueError("production stream has no approved alignment policy for model count")
+        canonical_policy = canonical_text_policy or legacy_policy
+        if canonical_policy not in {
+            legacy_policy,
+            "exact_fast_tokenizer_offsets_and_exact_prefix_roundtrip_v2",
+        }:
+            raise ValueError(
+                "production stream alignment policy is not the implemented exact-prefix contract"
+            )
         self.provenance = {
             "schema_version": self.STATE_SCHEMA,
             "dataset_id": dataset_id,

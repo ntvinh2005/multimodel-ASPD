@@ -388,8 +388,16 @@ class FinalIntruderJudgeContract(BaseModel):
     schema_version: Literal[4]
     status: Literal["RESEARCHER_AUTHORIZED_LOCAL_INTRUDER_JUDGE"]
     experiment_family: Literal["aspd_v3_zscore_intruder_final_judge_v1"]
-    judge_model_id: Literal["meta-llama/Llama-3.3-70B-Instruct"]
-    judge_revision: Literal["6f6073b423013f6a7d4d9f39144961bfbfbc386b"]
+    judge_model_id: Literal[
+        "meta-llama/Llama-3.3-70B-Instruct",
+        "unsloth/Llama-3.3-70B-Instruct",
+        "mistralai/Mistral-Nemo-Instruct-2407",
+    ]
+    judge_revision: Literal[
+        "6f6073b423013f6a7d4d9f39144961bfbfbc386b",
+        "99cd0d2c829e92a67c844f9144c2509632e5c87f",
+        "04d8a90549d23fc6bd7f642064003592df51e9b3",
+    ]
     local_files_only: Literal[True]
     paid_api: Literal[False]
     dtype: Literal["bfloat16"]
@@ -411,6 +419,23 @@ class FinalIntruderJudgeContract(BaseModel):
     position_bias_familywise_alpha: Literal[0.01]
     deterministic_replay_prompts: Literal[20]
     require_exact_deterministic_replay: Literal[True]
+
+    @model_validator(mode="after")
+    def validate_pinned_judge_pair(self) -> FinalIntruderJudgeContract:
+        expected = {
+            "meta-llama/Llama-3.3-70B-Instruct": (
+                "6f6073b423013f6a7d4d9f39144961bfbfbc386b"
+            ),
+            "unsloth/Llama-3.3-70B-Instruct": (
+                "99cd0d2c829e92a67c844f9144c2509632e5c87f"
+            ),
+            "mistralai/Mistral-Nemo-Instruct-2407": (
+                "04d8a90549d23fc6bd7f642064003592df51e9b3"
+            ),
+        }
+        if self.judge_revision != expected[self.judge_model_id]:
+            raise ValueError("judge model/revision pair is not pinned correctly")
+        return self
 
     @classmethod
     def load(cls, path: str | Path) -> FinalIntruderJudgeContract:

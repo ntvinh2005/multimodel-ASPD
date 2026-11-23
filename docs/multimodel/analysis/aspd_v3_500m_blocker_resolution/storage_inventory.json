@@ -1,0 +1,179 @@
+{
+  "schema_version": 1,
+  "status": "DRY_RUN_NO_DELETION_AUTHORIZED",
+  "measured_at": "2026-11-09T18:32:46-05:00",
+  "base_commit": "738f1a0d8742ce6c97c74cadb2550ffade648b19",
+  "required_free_bytes": 1099511627776,
+  "filesystems": {
+    "/blue/thai": {
+      "available_bytes": 381422133248,
+      "free_inodes": 4107495892,
+      "user_quota_hard_bytes": null,
+      "group_quota_hard_bytes": null
+    },
+    "/orange/thai": {
+      "available_bytes": 213821587456,
+      "free_inodes": 13422163115,
+      "user_quota_hard_bytes": null,
+      "group_quota_hard_bytes": null
+    }
+  },
+  "recommended_blue_tier_a": {
+    "candidate_ids": [
+      "blue_preflight_granite_baseline",
+      "blue_preflight_granite_normalized",
+      "blue_preflight_two_model_baseline",
+      "blue_preflight_two_model_treatment",
+      "blue_preflight_unconstrained_decoder",
+      "blue_redundant_scale_baseline_step1000",
+      "blue_redundant_scale_treatment_step1000"
+    ],
+    "reclaimable_bytes": 731456405504,
+    "projected_available_bytes": 1112878538752,
+    "projected_margin_over_required_bytes": 13366910976,
+    "robust_margin": false
+  },
+  "candidates": [
+    {
+      "id": "blue_preflight_granite_baseline",
+      "path": "/blue/thai/vinhnguyen1/multimodel-ASPD/work/out/multimodel/aspd_v3/granite_normalized_target_v1/preflight/baseline/checkpoints",
+      "experiment": "granite_normalized_target_baseline_preflight",
+      "bytes": 127280418816,
+      "classification": "REGENERABLE",
+      "estimated_reclaimed_bytes": 127280418816,
+      "report_sha256": "a28b22b8cd233e8d15a86c2ab4e38ea0ae13a97adbe7bda9660da12d5542ba3e",
+      "checkpoint_manifest_sha256": "dd4130ede8d75143a3c1eceb1c481695dcd3f3da8a9f39393739585a28609f62"
+    },
+    {
+      "id": "blue_preflight_granite_normalized",
+      "path": "/blue/thai/vinhnguyen1/multimodel-ASPD/work/out/multimodel/aspd_v3/granite_normalized_target_v1/preflight/normalized_target/checkpoints",
+      "experiment": "granite_normalized_target_treatment_preflight",
+      "bytes": 127280365568,
+      "classification": "REGENERABLE",
+      "estimated_reclaimed_bytes": 127280365568,
+      "report_sha256": "00500532a7c4e5e3dae33d7472028cf6717edebfd23d697d5318df491cdde454",
+      "checkpoint_manifest_sha256": "bd65de816febfd9bb6a2c944a5fb7c1739bc675dad005911ed46a4d26848829f"
+    },
+    {
+      "id": "blue_preflight_two_model_baseline",
+      "path": "/blue/thai/vinhnguyen1/multimodel-ASPD/work/out/multimodel/aspd_v3/two_model_scale_v1/preflight/baseline/checkpoints",
+      "experiment": "two_model_scale_baseline_preflight",
+      "bytes": 87403884544,
+      "classification": "REGENERABLE",
+      "estimated_reclaimed_bytes": 87403884544,
+      "report_sha256": "d3d5c0d8408a6be08d4216ac63f815fdd6eb879a2e9daeb80701cd83729d472a",
+      "checkpoint_manifest_sha256": "4339ba9c57348480a55688218a82fd8367c05bd587af7aadebc60e1cfaf65679"
+    },
+    {
+      "id": "blue_preflight_two_model_treatment",
+      "path": "/blue/thai/vinhnguyen1/multimodel-ASPD/work/out/multimodel/aspd_v3/two_model_scale_v1/preflight/treatment/checkpoints",
+      "experiment": "two_model_scale_treatment_preflight",
+      "bytes": 87403913216,
+      "classification": "REGENERABLE",
+      "estimated_reclaimed_bytes": 87403913216,
+      "report_sha256": "96e3fb892811563d1a24d7af7fd405d8c82cff9d26f5fe648f7db76b34c3dd05",
+      "checkpoint_manifest_sha256": "65c5b1650e92204fb9ab3ad431f597660ad7fd86459da64a856a1caba6c4312f"
+    },
+    {
+      "id": "blue_preflight_unconstrained_decoder",
+      "path": "/blue/thai/vinhnguyen1/multimodel-ASPD/work/out/multimodel/aspd_v3/granite_normalized_target_unconstrained_decoder_v1/preflight/normalized_target/checkpoints",
+      "experiment": "granite_unconstrained_decoder_preflight",
+      "bytes": 127280353280,
+      "classification": "REGENERABLE",
+      "estimated_reclaimed_bytes": 127280353280,
+      "report_sha256": "8d3e58ef981401e2a03d9b88e60f69ce26f27377fbbbf214ca9d80e063597c8b",
+      "checkpoint_manifest_sha256": "79716ec5c8a3e9404096b81fd4b04f307ddc57ef9f17003c888d899df01c39fc"
+    },
+    {
+      "id": "blue_redundant_scale_baseline_step1000",
+      "path": "/blue/thai/vinhnguyen1/multimodel-ASPD/work/out/multimodel/aspd_v3/two_model_scale_v1/baseline/job_49977094/checkpoints/step-000001000",
+      "experiment": "two_model_scale_baseline_10m",
+      "bytes": 87403720704,
+      "classification": "REDUNDANT_VERIFIED",
+      "estimated_reclaimed_bytes": 87403720704,
+      "replacement_checkpoint_step": 1221,
+      "checkpoint_manifest_sha256": "6b2ceeb361eedcf0d95dad5f63e2b468006fac723f97297de433cad21ed4e612"
+    },
+    {
+      "id": "blue_redundant_scale_treatment_step1000",
+      "path": "/blue/thai/vinhnguyen1/multimodel-ASPD/work/out/multimodel/aspd_v3/two_model_scale_v1/treatment/job_49977095/checkpoints/step-000001000",
+      "experiment": "two_model_scale_treatment_10m",
+      "bytes": 87403749376,
+      "classification": "REDUNDANT_VERIFIED",
+      "estimated_reclaimed_bytes": 87403749376,
+      "replacement_checkpoint_step": 1221,
+      "checkpoint_manifest_sha256": "2164402e65333cc235ae00818863e56663b59f502beca8f945417bb8857ae484"
+    },
+    {
+      "id": "orange_redundant_full_only_step1000",
+      "path": "/orange/thai/vinhnguyen1/aspd_v3/gemma_smol_matryoshka_ablation_v1/full_only/pilot/runs/job_50231651_1/checkpoints/step-000001000",
+      "experiment": "full_only_10m",
+      "bytes": 87401779200,
+      "classification": "REDUNDANT_VERIFIED",
+      "estimated_reclaimed_bytes": 87401779200,
+      "replacement_checkpoint_step": 1221,
+      "checkpoint_manifest_sha256": "3cd6a76192d04260332baca2f885d49061281841bd0460b5d9c90e21a121045c"
+    },
+    {
+      "id": "orange_redundant_matryoshka_step1000",
+      "path": "/orange/thai/vinhnguyen1/aspd_v3/gemma_smol_matryoshka_ablation_v1/matryoshka/pilot/runs/job_50231651_0/checkpoints/step-000001000",
+      "experiment": "matryoshka_10m",
+      "bytes": 87401996288,
+      "classification": "REDUNDANT_VERIFIED",
+      "estimated_reclaimed_bytes": 87401996288,
+      "replacement_checkpoint_step": 1221,
+      "checkpoint_manifest_sha256": "6e380baac301d77a0341b678333326a427a46b2d8a2b57a0b514e1670f5f2de3"
+    },
+    {
+      "id": "orange_preflight_zscore",
+      "path": "/orange/thai/vinhnguyen1/aspd_v3/gemma_smol_gate_collapse_recovery_v1/per_anchor_zscore/preflight_r1/checkpoints",
+      "experiment": "zscore_recovery_preflight",
+      "bytes": 87401902080,
+      "classification": "REGENERABLE",
+      "estimated_reclaimed_bytes": 87401902080,
+      "checkpoint_manifest_sha256": "4a3c3c88cc9590db565192d8bfad70376bcc9b755eb532aef84b3a0a3dab3433"
+    },
+    {
+      "id": "orange_preflight_control",
+      "path": "/orange/thai/vinhnguyen1/aspd_v3/gemma_smol_gate_collapse_recovery_v1/full_only_control/preflight_r1/checkpoints",
+      "experiment": "full_only_control_preflight",
+      "bytes": 87401979904,
+      "classification": "REGENERABLE",
+      "estimated_reclaimed_bytes": 87401979904,
+      "checkpoint_manifest_sha256": "5daa12d6f83b73d460a465b6196ddb9e549a299d6ac33ac186d70708893dc3e8"
+    },
+    {
+      "id": "orange_intruder_core_c0904a",
+      "path": "/orange/thai/vinhnguyen1/aspd_v3/zscore_intruder_final_validation_v1/failures/job_50435027/core_dumps/core.pt_nccl_watchdg-6-1794242312-5268-3059-c0904a-s15.ufhpc.2917985",
+      "experiment": "zscore_intruder_failed_job_50435027",
+      "bytes": 2382708736,
+      "classification": "INCOMPLETE_OR_TEMPORARY",
+      "estimated_reclaimed_bytes": 2382708736
+    },
+    {
+      "id": "orange_intruder_core_c1003a",
+      "path": "/orange/thai/vinhnguyen1/aspd_v3/zscore_intruder_final_validation_v1/failures/job_50435027/core_dumps/core.pt_nccl_watchdg-6-1794242108-5268-3059-c1003a-s5.ufhpc.1298597",
+      "experiment": "zscore_intruder_failed_job_50435027",
+      "bytes": 2352959488,
+      "classification": "INCOMPLETE_OR_TEMPORARY",
+      "estimated_reclaimed_bytes": 2352959488
+    },
+    {
+      "id": "blue_llama70b_model_cache",
+      "path": "/blue/thai/vinhnguyen1/multimodel-ASPD/cache/huggingface/hub/models--meta-llama--Llama-3.3-70B-Instruct",
+      "experiment": "historical_local_semantic_judge_cache",
+      "bytes": 141127479296,
+      "classification": "RESEARCHER_REVIEW_REQUIRED",
+      "estimated_reclaimed_bytes": 141127479296
+    },
+    {
+      "id": "blue_qwen_main_v1_preflight",
+      "path": "/blue/thai/vinhnguyen1/multimodel-ASPD/work/out/multimodel/aspd_v3/main_v1/preflight/aspd_v3_qwen_gemma_phi_168targets_c8192_k32_preflight_v12_3gpu_b200_tensor_dcp/checkpoints",
+      "experiment": "historical_qwen_gemma_phi_main_v1_preflight",
+      "bytes": 150938775552,
+      "classification": "KEEP_UNTIL_REPRODUCED",
+      "estimated_reclaimed_bytes": 0,
+      "report_sha256": "5393cdfc9070ee9786240e2c6f68eb30c8c2009b7f779e49794ef6d92828a4c7"
+    }
+  ]
+}

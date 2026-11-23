@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "status": "ASPD_V3_1_MAIN500M_REMAINING_POLICIES_APPROVED",
+  "researcher_message_date": "2026-11-10",
+  "monitoring_policy": {
+    "version": "v1",
+    "decision": "APPROVED"
+  },
+  "milestone_policy": {
+    "version": "v1",
+    "decision": "APPROVED"
+  },
+  "human_interpretability": {
+    "decision": "ACCEPT_SEMANTIC_UNCERTAINTY",
+    "artifact_path": "docs/multimodel/analysis/aspd_v3_500m_blocker_resolution/human_interpretability_researcher_decision_2026-11-10.json",
+    "artifact_sha256": "833127f63542d8268b0c460036c4de29598c559d626baafc513e7c4217b135ad"
+  },
+  "external_submission": {
+    "executed": false,
+    "requirement": "A separate explicit request to execute sbatch remains required."
+  }
+}

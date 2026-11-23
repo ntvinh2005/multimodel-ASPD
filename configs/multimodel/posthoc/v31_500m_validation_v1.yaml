@@ -1,0 +1,56 @@
+# ASPD v3.1 500M checkpoint -- post-hoc parent-set analysis, validation split, v1.
+# All values approved by the researcher on 2026-11-21; rationale and tuning log:
+# docs/multimodel/posthoc_thresholds.md and docs/multimodel/posthoc_decisions.md.
+# Immutable once it has produced results: retune by creating _v2.
+schema_version: 1
+experiment_id: posthoc_v31_500m_validation_v1
+
+backend:
+  kind: v31_checkpoint
+  options:
+    # Frozen training configuration used to produce the checkpoint.
+    training_config: configs/multimodel/aspd_v3/main500m_preparation_v1.yaml
+    # Final checkpoint directory (step 61,036). Read-only; never written by this tool.
+    checkpoint: /blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/runs/aspd_v3_1_three_model_168targets_c8192_k32_500m_v1_resume_step16000_authfix_5ca3b43/checkpoints/step-000061036
+    # Provenance facts copied from <checkpoint>/manifest.json on 2026-11-21
+    # (checkpoint manifest SHA-256 735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969).
+    # The loader re-verifies them; they are not researcher decisions.
+    config_file_sha256: f7a6d87436304956ca0baca955ec2e0e929a7207142f57fc35362369822f63be
+    dataset_manifest_sha256: a258974d21ceac3457529644be07459518fde7bc28501abde5c67e5e3719286f
+    split: validation                # researcher decision 2026-11-21
+    source_dtype: bfloat16           # researcher decision 2026-11-21
+    device: cuda:0
+    local_files_only: true
+    pool_anchors: 2048               # training BatchTopK pool size; gates depend on it
+    # Researcher authorization 2026-11-22, this run only: skip the two training-launch
+    # evidence checks (owner-only files). Config still verified against the checkpoint.
+    skip_training_launch_evidence: true
+
+anchors:
+  importance_pools: 50
+  edge_pools: 25
+  edge_anchor_source: disjoint_after_importance   # researcher decision 2026-11-21
+
+representatives:
+  screening_metric: beta             # researcher decision 2026-11-21 (rho not used)
+  k_rep: 3
+  tau_rep: 0.07
+
+edges:
+  downstream_gates:
+    mode: screened                   # researcher decision 2026-11-21: the screening step decides
+    gates: []                        # explicit mode only
+    count: null
+    min_importance_fires: 50
+  max_anchors_per_gate: 20
+  anchor_sampling: seeded_random
+  anchor_seed: 0
+  anchors_per_backward: 4            # cost knob only (2026-11-22: 16 -> 4, see decisions C.9)
+  ablation_check_records: 50
+
+parents:
+  k_par: 10
+  tau: 0.0                           # units caveat: posthoc_thresholds.md
+
+comparison:
+  model_pairs: all                   # (gemma,smol), (gemma,granite), (smol,granite)

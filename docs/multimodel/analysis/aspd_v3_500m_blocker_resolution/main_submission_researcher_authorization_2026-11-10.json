@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "status": "MAIN_500M_SUBMISSION_AUTHORIZED",
+  "researcher_message_date": "2026-11-10",
+  "experiment_family": "aspd_v3_1_three_model_main500m",
+  "scope": "Submit the main job for the first staged interval under the approved monitoring and milestone policies.",
+  "monitoring_policy_version": "v1",
+  "milestone_policy_version": "v1",
+  "target_accepted_anchor_exposures": 500000000,
+  "first_staged_review_exposures": 10002432,
+  "main_submission_authorized": true
+}
