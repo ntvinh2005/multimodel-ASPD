@@ -127,6 +127,12 @@ Derivations are in `posthoc_thresholds.md`.
     375 GB pool and kept two shards from running together. Now 32 GB per GPU job and 48 GB
     for compare.
 
+12. **Profiles stage** (2026-11-23). The first v1 run wrote only the pairwise comparison
+    (`compare`); Pa with E/w and S/π were computed but not saved, and there were no
+    component or edge profiles. The `profiles` stage recomputes them from the saved edges,
+    using the same rule and records as compare (tested to give identical $\mathcal G$),
+    and lists the top 20 parents per component and per gate. CPU only.
+
 ## E. Open (needs a decision later)
 
 1. **Units of $\tau$.** $E_{b\to a}$ is in the output units of matrix $j_a$, which differ
