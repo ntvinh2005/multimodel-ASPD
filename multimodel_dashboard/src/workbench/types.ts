@@ -33,6 +33,16 @@ export interface DatasetManifest {
       edgeShard: string;
     }>;
     sourceHashes: Record<string, unknown>;
+    parentBackend?: {
+      stage: "profiles";
+      status: string;
+      sourceRevision: string;
+      slurmJobId: string;
+      parentRows: number;
+      distributionSource: string;
+      parentSetSource: string;
+      rule: { k_par: number; tau: number };
+    };
     activationExamples?: {
       artifactRoot: string;
       checkpointStep: number;

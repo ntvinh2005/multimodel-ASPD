@@ -15,6 +15,8 @@ does not load model weights, run inference, request a GPU, or expose a public po
 - The Examples tab uses up to four saved natural-firing contexts per displayed gate from a separate
   hash-verified test-split extraction. They are not the selected contribution-graph anchors and are
   evidence for forming semantic hypotheses, not validated feature labels.
+- Parent edges and per-anchor parent distributions are exported from the completed, hash-verified
+  profiles backend (job `52480152`), rather than reconstructed by the browser adapter.
 
 ## 1. Prepare the checkout
 

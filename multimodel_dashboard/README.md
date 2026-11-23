@@ -7,8 +7,8 @@ or request a GPU.
 ## Universal Mechanism Discovery Workbench
 
 The default route is a graph-first local workbench for the ASPD v3.1 three-model 500M lineage. It
-runs from a bounded measured bundle exported from the completed 29.39 GB post-hoc validation run;
-the browser does not load model weights, checkpoints, or the raw tensor shards.
+runs from a bounded measured bundle exported from the completed post-hoc validation and parent-profile
+artifacts; the browser does not load model weights, checkpoints, or the raw tensor shards.
 
 ```powershell
 npm install

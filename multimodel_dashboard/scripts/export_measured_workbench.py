@@ -29,6 +29,7 @@ from typing import Any
 import numpy as np
 
 DTYPES = {
+    "BOOL": np.dtype("?"),
     "F32": np.dtype("<f4"),
     "F64": np.dtype("<f8"),
     "I16": np.dtype("<i2"),
@@ -104,6 +105,147 @@ class SafeTensorFile:
             offset=self.data_start + start,
             shape=shape,
         )
+
+
+class ProfileStore:
+    """Verified read-only adapter for the completed parent-profile stage."""
+
+    def __init__(self, root: Path):
+        self.root = root / "profiles"
+        complete = read_json(self.root / "COMPLETE")
+        required = (
+            "manifest.json",
+            "parents_vocab.json",
+            "parents_per_anchor.safetensors",
+            "distributions_vocab.json",
+            "parent_distributions.safetensors",
+        )
+        for name in required:
+            actual = sha256_file(self.root / name)
+            if actual != complete["sha256"][name]:
+                raise ValueError(f"profiles artifact failed SHA-256 verification: {name}")
+        self.complete_hash = sha256_file(self.root / "COMPLETE")
+        self.source_hashes = {name: complete["sha256"][name] for name in required}
+        self.manifest = read_json(self.root / "manifest.json")
+        if self.manifest["runtime"]["git_sha"] != "1348bf9587122c396e2b741cc8ba7e7394a13253":
+            raise ValueError("unsupported parent-profile source revision")
+        if self.manifest["rule"] != {"k_par": 10, "tau": 0.0}:
+            raise ValueError("parent-profile rule differs from the frozen Workbench contract")
+
+        parent_vocab = read_json(self.root / "parents_vocab.json")
+        self.parent_anchor_ids = parent_vocab["anchor_ids"]
+        self.parent_components = parent_vocab["components"]
+        self.parent_anchor_index = {key: index for index, key in enumerate(self.parent_anchor_ids)}
+        self.parent_component_index = {
+            key: index for index, key in enumerate(self.parent_components)
+        }
+        self.parents = SafeTensorFile(self.root / "parents_per_anchor.safetensors")
+
+        distribution_vocab = read_json(self.root / "distributions_vocab.json")
+        self.distribution_anchor_index = {
+            key: index for index, key in enumerate(distribution_vocab["anchor_ids"])
+        }
+        self.distribution_gate_index = {
+            key: index for index, key in enumerate(distribution_vocab["gates"])
+        }
+        self.distribution_gates = distribution_vocab["gates"]
+        self.distribution_model_index = {
+            key: index for index, key in enumerate(distribution_vocab["models"])
+        }
+        self.distributions = SafeTensorFile(self.root / "parent_distributions.safetensors")
+
+    def parent_rows(
+        self, requested_pairs: list[tuple[str, str]]
+    ) -> dict[tuple[str, str], list[dict[str, Any]]]:
+        """Return stored Pa rows for the requested (anchor, downstream component) pairs."""
+        component_count = len(self.parent_components)
+        code_to_pair: dict[int, tuple[str, str]] = {}
+        for anchor_id, downstream in requested_pairs:
+            try:
+                code = (
+                    self.parent_anchor_index[anchor_id] * component_count
+                    + self.parent_component_index[downstream]
+                )
+            except KeyError as error:
+                raise ValueError(f"profiles artifact lacks requested parent row: {error}") from error
+            code_to_pair[code] = (anchor_id, downstream)
+        requested_codes = np.asarray(sorted(code_to_pair), dtype=np.int64)
+        result = {pair: [] for pair in code_to_pair.values()}
+
+        anchor = self.parents.tensor("anchor")
+        downstream = self.parents.tensor("downstream")
+        parent = self.parents.tensor("parent")
+        rank = self.parents.tensor("rank")
+        score = self.parents.tensor("E")
+        weight = self.parents.tensor("w")
+        chunk = 1_000_000
+        for start in range(0, len(anchor), chunk):
+            stop = min(start + chunk, len(anchor))
+            codes = anchor[start:stop].astype(np.int64) * component_count + downstream[
+                start:stop
+            ].astype(np.int64)
+            positions = np.flatnonzero(np.isin(codes, requested_codes)) + start
+            for position in positions:
+                pair = code_to_pair[
+                    int(anchor[position]) * component_count + int(downstream[position])
+                ]
+                parent_component = self.parent_components[int(parent[position])]
+                result[pair].append(
+                    {
+                        "component": parent_component,
+                        "parentGate": component_gate(parent_component),
+                        "rank": int(rank[position]) + 1,
+                        "score": float(score[position]),
+                        "weight": float(weight[position]),
+                    }
+                )
+        for rows in result.values():
+            rows.sort(key=lambda row: row["rank"])
+        return result
+
+    def distribution(self, gate: str, model: str, anchor_id: str) -> dict[str, Any]:
+        """Read stored formulation S and pi for one (gate, model, anchor) row."""
+        try:
+            gate_index = self.distribution_gate_index[gate]
+            model_index = self.distribution_model_index[model]
+            anchor_index = self.distribution_anchor_index[anchor_id]
+        except KeyError as error:
+            raise ValueError(f"profiles artifact lacks requested distribution: {error}") from error
+        header_gate = self.distributions.tensor("header_gate")
+        header_model = self.distributions.tensor("header_model")
+        header_anchor = self.distributions.tensor("header_anchor")
+        matches = np.flatnonzero(
+            (header_gate == gate_index)
+            & (header_model == model_index)
+            & (header_anchor == anchor_index)
+        )
+        if len(matches) != 1:
+            raise ValueError(
+                f"expected one profile distribution for {(gate, model, anchor_id)}, got {len(matches)}"
+            )
+        row = int(matches[0])
+        entry_row = self.distributions.tensor("entry_row")
+        start = int(np.searchsorted(entry_row, row, side="left"))
+        stop = int(np.searchsorted(entry_row, row, side="right"))
+        entry_gate = self.distributions.tensor("entry_xi")[start:stop]
+        entry_score = self.distributions.tensor("entry_S")[start:stop]
+        entry_pi = self.distributions.tensor("entry_pi")[start:stop]
+        valid = bool(self.distributions.tensor("header_valid")[row])
+        values = {
+            gate_key(*_split_gate(self.distribution_gates[int(xi)])): float(pi)
+            for xi, pi in zip(entry_gate, entry_pi)  # noqa: B905 - lengths share one tensor row
+        } if valid else None
+        scores = {
+            gate_key(*_split_gate(self.distribution_gates[int(xi)])): float(value)
+            for xi, value in zip(entry_gate, entry_score)  # noqa: B905 - same row length
+        }
+        return {
+            "status": "measured" if valid else "undefined",
+            "totalStrength": float(self.distributions.tensor("header_M")[row]),
+            "values": values,
+            "scores": scores,
+            "representatives": int(self.distributions.tensor("header_representatives")[row]),
+        }
 
 
 def parse_component(key: str) -> tuple[str, int, str, int]:
@@ -297,7 +439,7 @@ def load_activation_examples(
                     center_candidates = [
                         position
                         for position, (activation, firing) in enumerate(
-                            zip(activations, firings, strict=True)
+                            zip(activations, firings)  # noqa: B905 - lengths checked above
                         )
                         if firing
                         and math.isclose(
@@ -380,10 +522,14 @@ def build_bundle(
         raise ValueError(f"chosen gates missing edge shards: {sorted(missing_shards)}")
 
     importance = SafeTensorFile(root / "importance/importance.safetensors")
-    importance_meta = read_json(root / "importance/importance_meta.json")
-    loaded_shards = {
-        stage: EdgeShard(root / stage) for stage in sorted(set(shard_for_gate.values()))
-    }
+    profiles = ProfileStore(root)
+    requested_parent_rows = [
+        (selection["anchors"][gate][0], downstream)
+        for gate in chosen_gates
+        for model in MODEL_SPECS
+        for downstream in representatives[gate][model]
+    ]
+    stored_parents = profiles.parent_rows(requested_parent_rows)
     k_par, tau = 10, 0.0
     representative_set = {
         component
@@ -400,53 +546,42 @@ def build_bundle(
 
     for gate in chosen_gates:
         anchor_id = selection["anchors"][gate][0]
-        shard = loaded_shards[shard_for_gate[gate]]
         model_parents: dict[str, dict[str, list[dict[str, Any]]]] = {}
         model_scores: dict[str, dict[str, float]] = {}
 
         for model in MODEL_SPECS:
             downstream_components = representatives[gate][model]
             parents_by_downstream: dict[str, list[dict[str, Any]]] = {}
-            gate_scores: dict[str, float] = defaultdict(float)
             for downstream in downstream_components:
-                parents = shard.parents(anchor_id, downstream, k_par, tau)
+                parents = stored_parents[(anchor_id, downstream)]
                 parents_by_downstream[downstream] = parents
                 all_components.add(downstream)
-                sigma = float(importance_meta[downstream.rsplit("/", 1)[0]]["sigma"])
-                write_norm = float(selection["downstream_write_norms"][downstream])
-                for parent in parents:
-                    parent_gate = component_gate(parent["component"])
-                    weight = abs(parent["score"]) * write_norm / sigma
-                    parent["weight"] = weight
-                    parent["parentGate"] = parent_gate
-                    gate_scores[parent_gate] += weight / len(downstream_components)
             model_parents[model] = parents_by_downstream
-            model_scores[model] = dict(gate_scores)
-            total = sum(gate_scores.values())
+            distribution = profiles.distribution(gate, model, anchor_id)
+            if distribution["representatives"] != len(downstream_components):
+                raise ValueError(
+                    f"profile representative count mismatch for {(gate, model, anchor_id)}"
+                )
+            model_scores[model] = distribution["values"] or {}
             parent_distributions.append(
                 {
                     "gateId": gate_key(*_split_gate(gate)),
                     "modelId": model,
                     "anchorId": anchor_id,
-                    "status": "measured" if total > 0 else "undefined",
-                    "totalStrength": total if total > 0 else 0.0,
-                    "values": (
-                        {key: value / total for key, value in sorted(gate_scores.items())}
-                        if total > 0
-                        else None
-                    ),
+                    "status": distribution["status"],
+                    "totalStrength": distribution["totalStrength"],
+                    "values": distribution["values"],
                 }
             )
 
         pooled: dict[str, float] = defaultdict(float)
         valid_models = 0
-        for gate_scores in model_scores.values():
-            total = sum(gate_scores.values())
-            if total <= 0:
+        for distribution_values in model_scores.values():
+            if not distribution_values:
                 continue
             valid_models += 1
-            for parent_gate, value in gate_scores.items():
-                pooled[parent_gate] += value / total
+            for parent_gate, value in distribution_values.items():
+                pooled[parent_gate] += value
         if valid_models:
             for parent_gate in list(pooled):
                 pooled[parent_gate] /= valid_models
@@ -460,7 +595,7 @@ def build_bundle(
 
         for model, parents_by_downstream in model_parents.items():
             for downstream, parents in parents_by_downstream.items():
-                for rank, parent in enumerate(parents, start=1):
+                for parent in parents:
                     if parent["parentGate"] not in displayed_set:
                         continue
                     source = parent["component"]
@@ -478,7 +613,7 @@ def build_bundle(
                             "gradient": None,
                             "normalization": "w=|E|*||u_target||2/sigma_target",
                             "evidence": "measured-taylor",
-                            "parentRank": rank,
+                            "parentRank": parent["rank"],
                         }
                     )
 
@@ -543,6 +678,8 @@ def build_bundle(
         "importanceComplete": sha256_file(root / "importance/COMPLETE"),
         "representativesComplete": sha256_file(root / "representatives/COMPLETE"),
         "edgesComplete": sha256_file(root / "edges/COMPLETE"),
+        "profilesComplete": profiles.complete_hash,
+        "profileArtifacts": profiles.source_hashes,
         "posthocConfig": importance_manifest["config_sha256"],
         "datasetManifest": importance_manifest["backend"]["dataset_manifest_sha256"],
         "selectedShardComplete": {
@@ -556,7 +693,7 @@ def build_bundle(
             "datasetId": "aspd-v3.1-500m-measured-workbench-v1",
             "label": "Measured bounded graph from ASPD v3.1 500M post-hoc validation",
             "synthetic": False,
-            "sourceRevision": importance_manifest["runtime"]["git_sha"],
+            "sourceRevision": profiles.manifest["runtime"]["git_sha"],
             "trainingBranch": "aspd-v3.1-main500m-checkpoint-timeout-fix",
             "trainingConfig": "configs/multimodel/aspd_v3/main500m_preparation_v1.yaml",
             "specification": {
@@ -598,14 +735,25 @@ def build_bundle(
                 ),
                 "selectedScenarios": scenarios,
                 "sourceHashes": source_hashes,
+                "parentBackend": {
+                    "stage": "profiles",
+                    "status": profiles.manifest["status"],
+                    "sourceRevision": profiles.manifest["runtime"]["git_sha"],
+                    "slurmJobId": profiles.manifest["runtime"]["slurm_job_id"],
+                    "parentRows": profiles.manifest["parent_rows"],
+                    "distributionSource": "profiles/parent_distributions.safetensors",
+                    "parentSetSource": "profiles/parents_per_anchor.safetensors",
+                    "rule": profiles.manifest["rule"],
+                },
                 "activationExamples": activation_provenance,
-                "verification": "uses immutable COMPLETE hash chain; selected tensors read-only",
+                "verification": "uses immutable COMPLETE hash chain, including parent profiles; selected tensors read-only",
                 "floatPrecision": "12 decimal places for cross-runtime deterministic JSON",
                 "limitations": [
                     "canonical context text and continuous g^s were not stored in the edge artifact",
                     "displayed natural-firing contexts come from a separate test-split extraction and are not the graph anchors",
                     "four saved contexts per gate support semantic inspection, not a validated feature interpretation",
                     "graph edges are first-order Taylor measurements, not general causal validation",
+                    "parent sets and S/pi are formulation objects; profile means over anchors are descriptive additions",
                     "the bounded bundle is a deterministic visualization subset, not a population estimate",
                 ],
             },

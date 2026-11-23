@@ -32,7 +32,14 @@ export function validateMeasuredWorkbenchDataset(value: unknown): WorkbenchDatas
   if (manifest.schemaVersion !== "1.0") throw new Error("unsupported Workbench schema version");
   if (manifest.synthetic !== false) throw new Error("measured Workbench bundle must set synthetic=false");
   requireString(manifest.datasetId, "dataset.manifest.datasetId");
-  requireRecord(manifest.export, "dataset.manifest.export");
+  const exportManifest = requireRecord(manifest.export, "dataset.manifest.export");
+  const parentBackend = requireRecord(exportManifest.parentBackend, "dataset.manifest.export.parentBackend");
+  if (parentBackend.stage !== "profiles") throw new Error("measured Workbench must use the profiles parent backend");
+  requireString(parentBackend.sourceRevision, "dataset.manifest.export.parentBackend.sourceRevision");
+  requireString(parentBackend.slurmJobId, "dataset.manifest.export.parentBackend.slurmJobId");
+  if (typeof parentBackend.parentRows !== "number" || !Number.isInteger(parentBackend.parentRows) || parentBackend.parentRows <= 0) throw new Error("parent backend must report a positive parent row count");
+  const parentRule = requireRecord(parentBackend.rule, "dataset.manifest.export.parentBackend.rule");
+  if (parentRule.k_par !== 10 || parentRule.tau !== 0) throw new Error("parent backend rule differs from the frozen Workbench contract");
 
   const models = requireArray(root.models, "dataset.models").map((value, index) => requireRecord(value, `dataset.models[${index}]`));
   const modelIds = new Set(models.map((model, index) => requireString(model.id, `dataset.models[${index}].id`)));

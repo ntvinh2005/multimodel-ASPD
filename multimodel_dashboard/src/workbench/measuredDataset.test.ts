@@ -6,6 +6,9 @@ describe("measured Workbench bundle", () => {
   it("loads a bounded non-synthetic graph with immutable provenance", () => {
     expect(measuredWorkbenchDataset.manifest.synthetic).toBe(false);
     expect(measuredWorkbenchDataset.manifest.export?.checkpointStep).toBe(61036);
+    expect(measuredWorkbenchDataset.manifest.sourceRevision).toBe("1348bf9587122c396e2b741cc8ba7e7394a13253");
+    expect(measuredWorkbenchDataset.manifest.export?.parentBackend?.slurmJobId).toBe("52480152");
+    expect(measuredWorkbenchDataset.manifest.export?.parentBackend?.parentRows).toBe(24819978);
     expect(measuredWorkbenchDataset.models).toHaveLength(3);
     expect(measuredWorkbenchDataset.anchors).toHaveLength(4);
     expect(measuredWorkbenchDataset.components.length).toBeGreaterThan(0);
@@ -47,5 +50,9 @@ describe("measured Workbench bundle", () => {
     const brokenContext = structuredClone(rawDataset) as unknown as Record<string, any>;
     brokenContext.activationExamples[0].examples[0].firings[brokenContext.activationExamples[0].examples[0].centerPosition] = false;
     expect(() => validateMeasuredWorkbenchDataset(brokenContext)).toThrow(/natural center firing/);
+
+    const wrongParentRule = structuredClone(rawDataset) as unknown as Record<string, any>;
+    wrongParentRule.manifest.export.parentBackend.rule.k_par = 9;
+    expect(() => validateMeasuredWorkbenchDataset(wrongParentRule)).toThrow(/parent backend rule/);
   });
 });

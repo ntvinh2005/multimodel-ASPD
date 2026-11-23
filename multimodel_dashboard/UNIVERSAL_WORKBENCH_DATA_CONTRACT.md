@@ -8,7 +8,8 @@ remains source-only and is not imported by the application.
 Every dataset includes a stable dataset ID, schema version, synthetic flag, exact source commit,
 training branch/config, screening settings, edge scoring method, and normalization method. The
 measured export records the post-hoc source revision, checkpoint step, immutable COMPLETE-chain
-hashes, selection rule, browser graph bound, source artifact root, and explicit limitations.
+hashes, selection rule, browser graph bound, source artifact root, parent-profile backend, and
+explicit limitations.
 
 TypeScript interfaces live in `src/workbench/types.ts`. They cover the dataset manifest, models,
 shared gates, model-specific rank-one components, aligned anchors with model-specific tokenization,
@@ -38,6 +39,15 @@ stored seeded-random natural anchor for each. Parent sets retain the frozen run 
 `tau=0`; graph rendering retains edges from the top six parent gates by mean parent-distribution mass
 across models. Full parent distributions for the selected scenarios remain in the bundle. This is a
 deterministic visualization subset, not an estimate for the full dictionary.
+
+Parent edges now come from the hash-verified `profiles/parents_per_anchor.safetensors` artifact, and
+per-anchor `S`/`pi` comes from `profiles/parent_distributions.safetensors`. The completed profiles
+stage is Slurm job `52480152`, source revision
+`1348bf9587122c396e2b741cc8ba7e7394a13253`, with 24,819,978 stored parent rows. The exporter
+verifies every profile file it reads against `profiles/COMPLETE`. The profile-backed export was
+checked against the previous edge-shard adapter on the same bounded scenarios: all 293 edge IDs and
+signed `E` values were identical, all 12 parent distributions were identical, and only float32
+rounding in stored `w` changed (maximum absolute difference approximately `1.27e-8`).
 
 Canonical context text and continuous `g^s` were not retained in the immutable edge artifact. The
 Examples panel therefore uses a separate, hash-verified natural-firing extraction from checkpoint
