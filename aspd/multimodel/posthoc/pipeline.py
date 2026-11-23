@@ -48,6 +48,7 @@ from aspd.multimodel.posthoc.importance import ImportanceTable, MatrixImportance
 from aspd.multimodel.posthoc.parents import parent_set
 from aspd.multimodel.posthoc.profiles import (
     ComponentProfile,
+    DistributionRows,
     GateModelProfile,
     ParentRows,
     dumps,
@@ -529,6 +530,7 @@ def run_profiles(config: PosthocConfig, root: Path, *, top: int = 20) -> Path:
     edges = load_edge_table(root)
     stage = StageDirectory(root, "profiles")
     rows = ParentRows()
+    distributions = DistributionRows(models)
     timing = _Timing()
     components_written = gates_written = 0
     with (stage.path / "component_parent_profile.jsonl").open("x", encoding="utf-8") as comp_out, \
@@ -552,7 +554,8 @@ def run_profiles(config: PosthocConfig, root: Path, *, top: int = 20) -> Path:
                         parents[a] = parent_set(record, rule)
                         components[a].add(record.coefficient, parents[a])
                         rows.add(anchor_id, a, parents[a], norms[a], sigmas[a])
-                    gate_profile.add(parents, norms, sigmas)
+                    scores, pi = gate_profile.add(parents, norms, sigmas)
+                    distributions.add(gate, model, anchor_id, len(representatives), scores, pi)
                 gate_profiles[model] = gate_profile
                 for profile in components.values():
                     if profile.anchors:
@@ -566,6 +569,7 @@ def run_profiles(config: PosthocConfig, root: Path, *, top: int = 20) -> Path:
             }) + "\n")
             gates_written += 1
             rows.flush()
+            distributions.flush()
             if (index + 1) % 1000 == 0:
                 _log(f"profiles: {index + 1}/{len(selection['gates'])} gates")
     timing.add("parent_profiles", timing.started)
@@ -576,6 +580,14 @@ def run_profiles(config: PosthocConfig, root: Path, *, top: int = 20) -> Path:
         "description": "rows of parents_per_anchor.safetensors: Pa(a; alpha) entries; "
                        "anchor/downstream/parent index anchor_ids/components",
         **rows.vocab(),
+    })
+    save_file(distributions.tensors(), str(stage.path / "parent_distributions.safetensors"))
+    (stage.path / "parent_distributions.safetensors").chmod(0o664)
+    write_json(stage.path / "distributions_vocab.json", {
+        "description": "header_* rows: one per (gate, model, anchor) with |R|, M and validity; "
+                       "entry_* rows: S and pi per parent gate xi (entry_row -> header row; "
+                       "pi is NaN when the anchor is invalid). Indices into models/gates/anchor_ids.",
+        **distributions.vocab(),
     })
     start = time.perf_counter()
     write_json(stage.path / "edge_profile.json", _finite({

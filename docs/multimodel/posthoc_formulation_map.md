@@ -115,12 +115,15 @@ modules exactly as the evaluation extractors do (`v31_backend._gates`, `:180–2
   parent, signed $E$, $w$ and rank (`parents_vocab.json` for the ids).
 - `compare/comparisons.jsonl` stores $\mathcal G^{(n)}_{p,i}(\alpha)$, $J$, $D_{TV}$ and
   $M$ per gate, anchor and model pair.
-- $S$ and $\pi$ per anchor are recomputed from Pa. Their means over valid anchors are in
-  `profiles/gate_parent_profile.jsonl`.
+- `profiles/parent_distributions.safetensors` stores $S^{(n)}_{p,i}(\xi;\alpha)$ and
+  $\pi^{(n)}_{p,i}(\xi;\alpha)$ for every gate, model, anchor and parent gate $\xi$, with
+  $|\mathcal R|$, $M$ and validity per (gate, model, anchor). `distributions_vocab.json`
+  has the ids. Their means over valid anchors are in `profiles/gate_parent_profile.jsonl`.
 - Raw $E_{b\to a}$ for all firing upstream components are in the edge shards.
 
 Until 2026-11-23 only `compare` existed: Pa, $S$ and $\pi$ were computed but not written.
-The `profiles` stage adds them.
+The `profiles` stage writes them. It is part of the default pipeline (`--stage all`) and of
+the CPU job of the sharded chain.
 
 ### 4.6 Computed but not in the formulation (ADDED)
 

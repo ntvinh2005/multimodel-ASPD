@@ -376,3 +376,36 @@ def test_profile_parent_gate_sets_equal_compare(profiled: Path) -> None:
             assert set(gate_set) == rebuilt.get((row["gate"], row["anchor_id"], model), set())
             compared += 1
     assert compared > 0
+
+
+def test_per_anchor_S_and_pi_match_compare(profiled: Path) -> None:
+    from safetensors.torch import load_file
+
+    t = load_file(str(profiled / "profiles/parent_distributions.safetensors"))
+    vocab = json.loads((profiled / "profiles/distributions_vocab.json").read_text())
+    selection = json.loads((profiled / "edges/selection.json").read_text())
+    expected_rows = sum(len(a) for a in selection["anchors"].values()) * len(vocab["models"])
+    assert t["header_gate"].numel() == expected_rows
+    # pi sums to one on valid rows and S sums to M on every row
+    pi_sum = torch.zeros(expected_rows, dtype=torch.float64).index_add_(
+        0, t["entry_row"], torch.nan_to_num(t["entry_pi"]))
+    s_sum = torch.zeros(expected_rows, dtype=torch.float64).index_add_(0, t["entry_row"], t["entry_S"])
+    valid = t["header_valid"]
+    torch.testing.assert_close(pi_sum[valid], torch.ones(int(valid.sum()), dtype=torch.float64))
+    torch.testing.assert_close(s_sum, t["header_M"])
+    strength = {}
+    for r in range(expected_rows):
+        key = (vocab["gates"][int(t["header_gate"][r])], vocab["anchor_ids"][int(t["header_anchor"][r])],
+               vocab["models"][int(t["header_model"][r])])
+        strength[key] = float(t["header_M"][r])
+    for line in (profiled / "compare/comparisons.jsonl").read_text().splitlines():
+        row = json.loads(line)
+        for model, m in zip(row["models"], row["strength"], strict=True):
+            assert strength[(row["gate"], row["anchor_id"], model)] == pytest.approx(m)
+
+
+def test_default_pipeline_includes_profiles(tmp_path: Path) -> None:
+    root = tmp_path / "all"
+    assert cli_main(["--config", str(TOY), "--output-dir", str(root)]) == 0
+    for stage in ("importance", "representatives", "edges", "compare", "profiles"):
+        assert (root / stage / "COMPLETE").is_file(), stage
