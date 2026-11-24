@@ -3,6 +3,7 @@ import { componentsForSelection, edgesForAnchor, jaccard, traceGraph, tvDistance
 import { activationOpacity, activationWindow, DEFAULT_GRAPH_VIEWBOX, edgeThresholdScale, formatEdgeMagnitude, panGraphViewBox, zoomGraphViewBox, type ActivationContextView, type GraphViewBox } from "./displayUtils";
 import { formatBytes, measuredValidationArtifact, modelPairLabel } from "./measuredArtifact";
 import { measuredWorkbenchDataset as data } from "./measuredDataset";
+import InductionGateExplorer, { CircuitSelect } from "./InductionGateExplorer";
 import type { Component, DependencyEdge, ResearchHypothesis, TraceDirection } from "./types";
 import "./workbench.css";
 import "./researcherFixes.css";
@@ -14,6 +15,7 @@ const gateColors: Record<string, string> = Object.fromEntries(data.gates.map((ga
 const defaultGates = new Set(data.manifest.display?.defaultGateIds ?? data.gates.slice(0, 3).map((gate) => gate.id));
 
 export default function UniversalWorkbench() {
+  const [circuitView, setCircuitView] = useState<"natural" | "induction">("natural");
   const [gateIds, setGateIds] = useState(defaultGates);
   const [modelIds, setModelIds] = useState(new Set(data.models.map((model) => model.id)));
   const [spotlight, setSpotlight] = useState<string | null>(data.manifest.display?.defaultSpotlight ?? data.gates[0]?.id ?? null);
@@ -92,10 +94,12 @@ export default function UniversalWorkbench() {
     setNote("");
   }
 
+  if (circuitView === "induction") return <InductionGateExplorer onCircuitView={setCircuitView} />;
+
   return <div className="uw-shell">
     <header className="uw-header">
       <div><span className="uw-kicker">MULTI-MODEL ASPD · UNIVERSAL MECHANISM DISCOVERY</span><h1>Circuit Workbench</h1><p>Select a gate, reveal its components, trace measured dependencies, compare model-specific realizations.</p></div>
-      <div className="uw-provenance"><span>POST-HOC SOURCE</span><code>{data.manifest.sourceRevision.slice(0, 12)}</code><small>Gemma · SmolLM2 · Granite</small></div>
+      <div className="uw-header-actions"><CircuitSelect value="natural" onChange={setCircuitView} /><div className="uw-provenance"><span>POST-HOC SOURCE</span><code>{data.manifest.sourceRevision.slice(0, 12)}</code><small>Gemma · SmolLM2 · Granite</small></div></div>
     </header>
     <nav className="uw-data-switch" aria-label="Data view"><button className={showMeasuredSummary ? "active" : ""} onClick={() => setShowMeasuredSummary(true)}>Measured validation summary</button><button className={!showMeasuredSummary ? "active" : ""} onClick={() => setShowMeasuredSummary(false)}>Measured graph subset</button></nav>
     {showMeasuredSummary ? <MeasuredSummary onExplore={() => setShowMeasuredSummary(false)} /> : <>
