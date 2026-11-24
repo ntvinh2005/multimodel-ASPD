@@ -2,8 +2,7 @@
 
 import { useEffect, useState, type ComponentProps, type ComponentType } from "react";
 import { traceGraph } from "./graphQueries";
-import { CircuitSelect, CONDITIONS, CONDITION_LABEL, type CircuitView } from "./InductionGateExplorer";
-import type { InductionCondition } from "./inductionGateDataset";
+import { CONDITIONS, CONDITION_LABEL, type InductionCondition } from "./inductionGateDataset";
 import type { Component, DependencyEdge } from "./types";
 import type { ModelGraph } from "./UniversalWorkbench";
 
@@ -39,22 +38,25 @@ type Example = {
 type Bundle = {
   schemaVersion: 1;
   split: "discovery";
-  provenance: { scope: string; kPar: number; tau: number; runtime: { slurm_job_id: string; git_sha: string } };
+  provenance: {
+    scope: string;
+    discoveryManifestSha256: string;
+    kPar: number;
+    runtime: { slurm_job_id: string; git_sha: string };
+  };
   selection: Record<string, { kind: "induction_contrast" | "fires_across_conditions"; groups: string[] }>;
   examples: Example[];
 };
-type GraphRenderer = ComponentType<ComponentProps<typeof ModelGraph>>;
+export type GraphRenderer = ComponentType<ComponentProps<typeof ModelGraph>>;
 const MODEL_LABELS = { gemma: "Gemma 2", smol: "SmolLM2", granite: "Granite 3.3" };
 const MODELS = ["gemma", "smol", "granite"] as const;
 const number = (value: number | null) => value === null ? "—" : value.toPrecision(4);
 
-export default function InductionQueryWorkbench({ onCircuitView, Graph }: {
-  onCircuitView: (view: CircuitView) => void;
-  Graph: GraphRenderer;
-}) {
+export function useInductionQueryGraphs(discoveryManifest: string | null) {
   const [bundle, setBundle] = useState<Bundle | null>(null);
   const [loadError, setLoadError] = useState("");
   useEffect(() => {
+    if (!discoveryManifest || bundle || loadError) return;
     const controller = new AbortController();
     async function load() {
       try {
@@ -67,8 +69,9 @@ export default function InductionQueryWorkbench({ onCircuitView, Graph }: {
         const value: Bundle = await response.json();
         if (value.schemaVersion !== 1 || value.split !== "discovery"
             || value.provenance?.scope !== "final_query_same_anchor_frozen_discovery_support"
+            || value.provenance.discoveryManifestSha256 !== discoveryManifest
             || !value.examples?.length || !Object.keys(value.selection).length) {
-          throw new Error("The discovery graph artifact has an unsupported format.");
+          throw new Error("The graph artifact does not match this discovery dataset.");
         }
         setBundle(value);
       } catch (error) {
@@ -77,27 +80,15 @@ export default function InductionQueryWorkbench({ onCircuitView, Graph }: {
     }
     void load();
     return () => controller.abort();
-  }, []);
-  return <div className="uw-shell">
-    <header className="uw-header">
-      <div>
-        <span className="uw-kicker">MULTI-MODEL ASPD · DISCOVERY</span>
-        <h1>Induction at the final query</h1>
-        <p>Measured same-anchor dependencies into representative components at the prediction position.</p>
-      </div>
-      <CircuitSelect value="induction-query" onChange={onCircuitView} />
-    </header>
-    {bundle
-      ? <QueryPanel bundle={bundle} Graph={Graph} />
-      : <p className="uw-empty" role="status">{loadError || "Loading measured discovery graphs…"}</p>}
-  </div>;
+  }, [discoveryManifest, bundle, loadError]);
+  return { bundle, loadError };
 }
 
-function QueryPanel({ bundle, Graph }: { bundle: Bundle; Graph: GraphRenderer }) {
-  const gates = Object.keys(bundle.selection).sort();
-  const [gate, setGate] = useState(
-    gates.find((id) => bundle.selection[id].kind === "induction_contrast") ?? gates[0],
-  );
+export default function InductionQueryGraph({ gate, bundle, Graph }: {
+  gate: string;
+  bundle: Bundle;
+  Graph: GraphRenderer;
+}) {
   const [group, setGroup] = useState("");
   const [condition, setCondition] = useState<InductionCondition>("induction");
   const [model, setModel] = useState<(typeof MODELS)[number]>("gemma");
@@ -107,15 +98,12 @@ function QueryPanel({ bundle, Graph }: { bundle: Bundle; Graph: GraphRenderer })
   const example = gateExamples.find((item) => item.groupId === groupId && item.condition === condition);
   const graph = example?.graphs[gate];
   const prompt = Array.from(example?.prompt ?? "");
-  return <>
-    <div className="uw-warning">
-      <strong>MEASURED · DISCOVERY SHORTLIST</strong>
-      Parent candidates include all naturally active upstream components at this anchor. Each representative shows up to {bundle.provenance.kPar} parents.
-    </div>
+  return <section className="ig-examples iq-section" aria-labelledby="induction-query-heading">
+    <header>
+      <div><span className="uw-eyebrow">MEASURED · FINAL QUERY</span><h3 id="induction-query-heading">Dependency graph</h3></div>
+      <p>Same-anchor dependencies into {gate} representatives. Up to {bundle.provenance.kPar} parents per representative.</p>
+    </header>
     <section className="ig-toolbar iq-toolbar">
-      <label>Gate<select value={gate} onChange={(event) => { setGate(event.target.value); setGroup(""); }}>
-        {gates.map((id) => <option key={id} value={id}>{id} · {bundle.selection[id].kind === "induction_contrast" ? "induction contrast" : "fires across conditions"}</option>)}
-      </select></label>
       <label>Example group<select value={groupId} onChange={(event) => setGroup(event.target.value)}>
         {groups.map((id) => <option key={id} value={id}>{id} · {gateExamples.find((item) => item.groupId === id)?.family.replaceAll("_", " ")}</option>)}
       </select></label>
@@ -140,7 +128,7 @@ function QueryPanel({ bundle, Graph }: { bundle: Bundle; Graph: GraphRenderer })
         <QueryGraphPanel key={`${gate}/${example.exampleId}/${model}`} graph={graph} model={model} Graph={Graph} />}
       <footer className="uw-footer"><span>Anchor {graph.anchorId} · {MODEL_LABELS[model]} token index {example.modelPositions[model]}</span><span>Job {bundle.provenance.runtime.slurm_job_id} · {bundle.provenance.runtime.git_sha.slice(0, 12)}</span></footer>
     </> : <p className="uw-empty">No stored graph record for this selection.</p>}
-  </>;
+  </section>;
 }
 
 function QueryGraphPanel({ graph, model, Graph }: {
@@ -178,7 +166,7 @@ function QueryGraphPanel({ graph, model, Graph }: {
   const trace = selectedComponent ? traceGraph(edges, selectedComponent, "both", 1) : null;
   const node = selectedComponent ? components.get(selectedComponent) : null;
   const edge = edges.find((item) => item.id === selectedEdge);
-  return <main className="uw-main iq-main">
+  return <div className="uw-main iq-main">
     <section className="uw-graph-area">
       <div className="uw-graph-toolbar">
         <button onClick={() => { setComponent(null); setEdge(null); }}>Restore graph</button>
@@ -203,7 +191,7 @@ function QueryGraphPanel({ graph, model, Graph }: {
       <p>Cross-model comparisons at this anchor</p>
       <dl>{graph.comparisons.map((pair) => <ComparisonRow key={pair.models.join("/")} pair={pair} />)}</dl>
     </aside>
-  </main>;
+  </div>;
 }
 
 function DistributionRow({ gate, value }: { gate: string; value: number }) {
