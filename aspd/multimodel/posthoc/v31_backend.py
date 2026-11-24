@@ -32,7 +32,12 @@ import torch
 import yaml
 from torch import Tensor, nn
 
-from aspd.multimodel.posthoc.backend import AnchorPool, MatrixHookSpec, ModelInputs
+from aspd.multimodel.posthoc.backend import (
+    AnchorPool,
+    EncodedAnchorPool,
+    MatrixHookSpec,
+    ModelInputs,
+)
 from aspd.multimodel.posthoc.ids import MatrixId
 
 SOURCE_DTYPES = {"bfloat16": torch.bfloat16, "float32": torch.float32}
@@ -233,7 +238,7 @@ class V31CheckpointBackend:
             model_order=self.model_keys,
         )
 
-    def _gates(self, pool: Any) -> dict[str, Tensor]:
+    def _gate_codes(self, pool: Any) -> tuple[dict[str, Tensor], dict[str, Tensor]]:
         from aspd.multimodel.v3.training_capture import capture_family_pool
 
         valid = torch.ones(1, pool.anchor_count, dtype=torch.bool, device=self.device)
@@ -250,14 +255,25 @@ class V31CheckpointBackend:
                     tokens[site][key] = self.owners[key].local_encoders[site](activations[site])
         shared = self.owners[self.model_keys[0]]
         gates = {}
+        continuous = {}
         with torch.no_grad(), autocast:
             for site in ("pre", "mid"):
                 scores, _ = shared.shared_encoders[site].forward_with_logits(tokens[site], valid)
                 code = shared.gates[site](scores, valid, update_statistics=False)
-                gates[site] = (code.values[0] > 0).cpu()
-        return gates
+                values = code.values[0].detach().cpu()
+                gates[site] = values > 0
+                continuous[site] = values
+                expected = int(self.config.architecture.batch_topk_k) * pool.anchor_count
+                observed = int(gates[site].sum().item())
+                if observed != expected:
+                    raise ValueError(
+                        f"{site} BatchTopK selected {observed} entries; expected {expected}"
+                    )
+        return gates, continuous
 
-    def _to_pool(self, pool: Any) -> AnchorPool:
+    def _model_inputs(self, pool: Any) -> dict[str, ModelInputs]:
+        """Convert the established aligned-pool payload without changing anchor order."""
+
         from aspd.multimodel.v3.training_capture import padded_model_inputs
 
         models = {}
@@ -266,12 +282,35 @@ class V31CheckpointBackend:
                 pool.models[key], pad_token_id=_pad_id(self.tokenizers[key]),
                 device=torch.device("cpu"),
             )
-            models[key] = ModelInputs(inputs["input_ids"], inputs["attention_mask"],
-                                      documents, tokens)
-        return AnchorPool(anchor_ids=tuple(pool.anchor_ids), gates=self._gates(pool),
-                          models=models)
+            models[key] = ModelInputs(
+                inputs["input_ids"], inputs["attention_mask"], documents, tokens
+            )
+        return models
+
+    def _to_pool(self, pool: Any) -> AnchorPool:
+        return self.encode_aligned_pool(pool).pool
+
+    def encode_aligned_pool(self, pool: Any) -> EncodedAnchorPool:
+        """Evaluate one caller-supplied exact 2,048-anchor pool with natural BatchTopK."""
+
+        pool.validate(
+            expected_anchors=self.pool_anchors,
+            sequence_length=int(self.config.data.sequence_length),
+            model_order=self.model_keys,
+        )
+        gates, continuous = self._gate_codes(pool)
+        binary = AnchorPool(
+            anchor_ids=tuple(pool.anchor_ids), gates=gates, models=self._model_inputs(pool)
+        )
+        return EncodedAnchorPool(pool=binary, continuous=continuous)
 
     def pools(self, count: int, *, skip: int = 0) -> Iterator[AnchorPool]:
+        for pool in self.aligned_pools(count, skip=skip):
+            yield self._to_pool(pool)
+
+    def aligned_pools(self, count: int, *, skip: int = 0) -> Iterator[Any]:
+        """Yield raw canonical pools for deterministic custom-pool composition."""
+
         if self._stream is None:
             self._stream = self._open_stream()
         if skip < self._position:
@@ -282,7 +321,7 @@ class V31CheckpointBackend:
         for _ in range(count):
             pool = self._stream.next_pool(pool_anchors=self.pool_anchors)
             self._position += 1
-            yield self._to_pool(pool)
+            yield pool
 
     def provenance(self) -> dict[str, Any]:
         return {

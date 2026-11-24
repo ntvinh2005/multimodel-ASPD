@@ -110,6 +110,26 @@ class AnchorPool:
         return len(self.anchor_ids)
 
 
+@dataclass(frozen=True)
+class EncodedAnchorPool:
+    """Binary post-hoc pool plus the exact selected continuous code ``g^s``.
+
+    Existing dependency code consumes :attr:`pool` and is unchanged.  Evaluation tools
+    that need activation magnitudes consume :attr:`continuous`; the invariant below
+    prevents a positive candidate score from being mistaken for selected BatchTopK support.
+    """
+
+    pool: AnchorPool
+    continuous: Mapping[str, Tensor]  # site -> [A,C], zero outside selected support
+
+    def __post_init__(self) -> None:
+        for site, values in self.continuous.items():
+            if site not in self.pool.gates or values.shape != self.pool.gates[site].shape:
+                raise ValueError(f"continuous gate {site!r} does not match binary support")
+            if not torch.equal(values > 0, self.pool.gates[site].bool()):
+                raise ValueError(f"continuous/binary gate mismatch at site {site!r}")
+
+
 class PosthocBackend(Protocol):
     """Source of frozen models, trained factors and natural anchor pools."""
 
