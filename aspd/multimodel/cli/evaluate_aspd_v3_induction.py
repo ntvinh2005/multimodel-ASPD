@@ -305,6 +305,9 @@ def _component_rows(
                 normalized_value: float | None = float(normalized[local])
                 if not math.isfinite(normalized_value):
                     normalized_value = None
+                beta: float | None = float(importance[matrix].beta[feature])
+                if not math.isfinite(beta):
+                    beta = None
                 writer.write(
                     {
                         "pool_id": pool_id,
@@ -320,6 +323,10 @@ def _component_rows(
                         "contribution_norm": norm,
                         "matrix_output_sigma": sigma,
                         "normalized_contribution_magnitude": normalized_value,
+                        "reference_beta": beta,
+                        "reference_beta_fire_count": int(
+                            importance[matrix].fire_count[feature]
+                        ),
                     }
                 )
                 aggregate[(model, matrix.site, feature)].append(norm)
@@ -330,6 +337,8 @@ def _component_rows(
 def _gate_summary(
     examples: dict[str, dict[str, Any]],
     contribution: dict[tuple[str, str, int], list[float]],
+    importance: ImportanceTable,
+    representatives: dict[tuple[GateId, str], tuple[ComponentId, ...]],
 ) -> list[dict[str, Any]]:
     context_sets: dict[tuple[str, int, str], set[str]] = defaultdict(set)
     active_values: dict[tuple[str, int], list[float]] = defaultdict(list)
@@ -397,6 +406,21 @@ def _gate_summary(
         }
         for model in MODEL_ORDER:
             values = contribution.get((model, site, feature), [])
+            components = representatives.get((GateId(site, feature), model), ())
+            beta_pairs = [
+                (component.key, float(importance[component.matrix].beta[feature]))
+                for component in components
+                if math.isfinite(float(importance[component.matrix].beta[feature]))
+            ]
+            row[f"{model}_representative_components"] = json.dumps(
+                [key for key, _value in beta_pairs], separators=(",", ":")
+            )
+            row[f"{model}_max_reference_beta"] = max(
+                (value for _key, value in beta_pairs), default=0.0
+            )
+            row[f"{model}_mean_reference_beta"] = (
+                sum(value for _key, value in beta_pairs) / len(beta_pairs) if beta_pairs else 0.0
+            )
             row[f"{model}_representative_contribution_n"] = len(values)
             row[f"{model}_mean_representative_contribution_norm"] = (
                 sum(values) / len(values) if values else 0.0
@@ -540,7 +564,9 @@ def main() -> None:
         with _JsonlWriter(args.output_dir / "activation_examples.jsonl") as writer:
             for example_id in sorted(example_outputs):
                 writer.write(example_outputs[example_id])
-        gate_rows = _gate_summary(example_outputs, contribution_aggregate)
+        gate_rows = _gate_summary(
+            example_outputs, contribution_aggregate, importance, representatives
+        )
         with (args.output_dir / "gate_summary.csv").open("x", newline="", encoding="utf-8") as handle:
             fieldnames = list(gate_rows[0]) if gate_rows else ["site", "feature"]
             csv_writer = csv.DictWriter(handle, fieldnames=fieldnames)
