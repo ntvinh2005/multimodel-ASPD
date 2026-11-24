@@ -148,4 +148,88 @@ html, body { background: #f6f8fb; }
 .uw-measured-boundary { display: grid; grid-template-columns: auto auto 1fr; gap: 12px; align-items: center; padding: 13px 16px; border: 1px solid #e7c77f; background: #fffaf0; font-size: 9px; color: #72571d; }
 .uw-measured-boundary span { font-family: ui-monospace, monospace; font-weight: 700; }
 .uw-measured-boundary p { margin: 0; }
+
+/* The induction explorer is another workbench view, not a separate dark app. */
+.uw-circuit-select > span { color: #087f75; }
+.uw-circuit-select select,
+.ig-toolbar select,
+.ig-toolbar input {
+  border-color: #cbd5e1;
+  background: #ffffff;
+  color: #334155;
+}
+.uw-circuit-select small { color: #64748b; }
+
+.ig-toolbar {
+  border-color: #d9e0e8;
+  background: #d9e0e8;
+}
+.ig-toolbar > label,
+.ig-run-meta {
+  background: #ffffff;
+  color: #526176;
+}
+.ig-run-meta strong { color: #087f75; }
+
+.ig-layout { border-color: #d9e0e8; }
+.ig-gate-list {
+  border-color: #d9e0e8;
+  background: #ffffff;
+}
+.ig-gate-list > header {
+  border-color: #d9e0e8;
+  background: #f8fafc;
+}
+.ig-gate-list > header span,
+.ig-gate-list > button small { color: #64748b; }
+.ig-gate-list > button {
+  border-color: #e2e8f0;
+  background: #ffffff;
+}
+.ig-gate-list > button strong { color: #172033; }
+.ig-gate-list > button span { color: #087f75; }
+.ig-gate-list > button.selected {
+  background: #e3f5f2;
+  box-shadow: inset 3px 0 #168f83;
+}
+
+.ig-detail { background: #f6f8fb; }
+.ig-badges span {
+  border-color: #cbd5e1;
+  background: #ffffff;
+  color: #526176;
+}
+.ig-metrics { background: #d9e0e8; }
+.ig-metrics > div,
+.ig-condition-grid > div,
+.ig-beta,
+.ig-context {
+  border-color: #d9e0e8;
+  background: #ffffff;
+}
+.ig-metrics span,
+.ig-condition-grid span,
+.ig-condition-grid small,
+.ig-beta > header p,
+.ig-examples > header p,
+.ig-beta-models > div > span,
+.ig-context > header span { color: #64748b; }
+.ig-beta-grid i {
+  background: color-mix(in srgb, #59d3c3 calc(var(--beta) * 100%), #e8eef5);
+  color: #17332f;
+}
+.ig-beta-grid i.representative { box-shadow: inset 0 0 0 2px #172033; }
+.ig-context > header code { color: #805d14; }
+.ig-sequence {
+  border-color: #d9e0e8;
+  background: #f8fafc;
+  color: #1e293b;
+}
+.ig-predictions span {
+  border: 1px solid #d9e0e8;
+  background: #f8fafc;
+  color: #526176;
+}
+.ig-predictions b { color: #172033; }
+.ig-sequence span.final-query { outline-color: #b7791f; }
 @media(max-width:1100px){.uw-stat-grid{grid-template-columns:repeat(3,1fr)}.uw-measured-grid{grid-template-columns:1fr}.uw-measured-boundary{grid-template-columns:1fr}.uw-measured-hero{flex-direction:column}.uw-run-state{border-left:0;border-top:3px solid #168f83;padding:12px 0 0}}
