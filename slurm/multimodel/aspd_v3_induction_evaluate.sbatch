@@ -18,6 +18,7 @@ CONFIG=${CONFIG:-configs/multimodel/aspd_v3/induction_mechanism_eval_v1.yaml}
 SPLIT=${SPLIT:?set SPLIT=smoke or SPLIT=discovery}
 PREPARATION=${PREPARATION:?set PREPARATION to the completed CPU preparation}
 OUTPUT_DIR=${OUTPUT_DIR:?set OUTPUT_DIR to a new immutable output directory}
+SCOPE=${SCOPE:-gates}
 
 if [[ "${SPLIT}" != smoke && "${SPLIT}" != discovery ]]; then
   echo "SPLIT must be smoke or discovery" >&2
@@ -38,4 +39,5 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
   --config "${CONFIG}" \
   --preparation "${PREPARATION}" \
   --split "${SPLIT}" \
+  --scope "${SCOPE}" \
   --output-dir "${OUTPUT_DIR}"

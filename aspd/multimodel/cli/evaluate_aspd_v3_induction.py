@@ -36,6 +36,10 @@ def _args() -> argparse.Namespace:
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--preparation", type=Path, required=True)
     parser.add_argument("--split", choices=("smoke", "discovery"), required=True)
+    parser.add_argument(
+        "--scope", choices=("gates", "gates-and-components"), default="gates",
+        help="gates is the fast researcher-discovery export; components is optional",
+    )
     parser.add_argument("--output-dir", type=Path, required=True)
     return parser.parse_args()
 
@@ -485,7 +489,10 @@ def main() -> None:
         contribution_aggregate: dict[tuple[str, str, int], list[float]] = defaultdict(list)
         pool_manifests = []
         activation_writer = _JsonlWriter(args.output_dir / "anchor_activations.jsonl")
-        component_writer = _JsonlWriter(args.output_dir / "component_contributions.jsonl")
+        component_writer = (
+            _JsonlWriter(args.output_dir / "component_contributions.jsonl")
+            if args.scope == "gates-and-components" else None
+        )
         try:
             backgrounds = backend.aligned_pools(len(plan["splits"][args.split]))
             for pool_spec, background in zip(plan["splits"][args.split], backgrounds, strict=True):
@@ -536,13 +543,14 @@ def main() -> None:
                     example["positions"].append(
                         {"anchor_id": anchor_id, **meta, **site_payload}
                     )
-                pool_contributions = _component_rows(
-                    backend=backend, encoded=encoded, anchor_meta=anchor_meta,
-                    importance=importance, representatives=representatives,
-                    pool_id=pool_id, writer=component_writer,
-                )
-                for key, values in pool_contributions.items():
-                    contribution_aggregate[key].extend(values)
+                if component_writer is not None:
+                    pool_contributions = _component_rows(
+                        backend=backend, encoded=encoded, anchor_meta=anchor_meta,
+                        importance=importance, representatives=representatives,
+                        pool_id=pool_id, writer=component_writer,
+                    )
+                    for key, values in pool_contributions.items():
+                        contribution_aggregate[key].extend(values)
                 pool_manifests.append(
                     {
                         "pool_id": pool_id,
@@ -559,7 +567,8 @@ def main() -> None:
                     torch.cuda.empty_cache()
         finally:
             activation_writer.close()
-            component_writer.close()
+            if component_writer is not None:
+                component_writer.close()
 
         with _JsonlWriter(args.output_dir / "activation_examples.jsonl") as writer:
             for example_id in sorted(example_outputs):
@@ -609,7 +618,11 @@ def main() -> None:
         "reference_representatives_complete_sha256": sha256_file(
             reference_root / "representatives/COMPLETE"
         ),
-        "component_scope": config["components"]["sparse_scope"],
+        "component_scope": (
+            config["components"]["sparse_scope"]
+            if args.scope == "gates-and-components" else "reference_beta_lookup_only"
+        ),
+        "evaluation_scope": args.scope,
         "dependency_edges_computed": False,
         "heldout_opened": False,
         "runtime": runtime,
