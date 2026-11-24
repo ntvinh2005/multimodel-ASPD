@@ -3,7 +3,8 @@ import { componentsForSelection, edgesForAnchor, jaccard, traceGraph, tvDistance
 import { activationOpacity, activationWindow, DEFAULT_GRAPH_VIEWBOX, edgeThresholdScale, formatEdgeMagnitude, panGraphViewBox, zoomGraphViewBox, type ActivationContextView, type GraphViewBox } from "./displayUtils";
 import { formatBytes, measuredValidationArtifact, modelPairLabel } from "./measuredArtifact";
 import { measuredWorkbenchDataset as data } from "./measuredDataset";
-import InductionGateExplorer, { CircuitSelect } from "./InductionGateExplorer";
+import InductionGateExplorer, { CircuitSelect, type CircuitView } from "./InductionGateExplorer";
+import InductionQueryWorkbench from "./InductionQueryWorkbench";
 import type { Component, DependencyEdge, ResearchHypothesis, TraceDirection } from "./types";
 import "./workbench.css";
 import "./researcherFixes.css";
@@ -12,10 +13,11 @@ import "./activationExamples.css";
 
 const palette = ["#51d6c3", "#f0b45b", "#8ca8ff", "#de7cdf", "#73c982", "#ed7d77", "#55a6d9", "#c49a6c"];
 const gateColors: Record<string, string> = Object.fromEntries(data.gates.map((gate, index) => [gate.id, palette[index % palette.length]]));
+const workbenchGateColors = gateColors;
 const defaultGates = new Set(data.manifest.display?.defaultGateIds ?? data.gates.slice(0, 3).map((gate) => gate.id));
 
 export default function UniversalWorkbench() {
-  const [circuitView, setCircuitView] = useState<"natural" | "induction">("natural");
+  const [circuitView, setCircuitView] = useState<CircuitView>("natural");
   const [gateIds, setGateIds] = useState(defaultGates);
   const [modelIds, setModelIds] = useState(new Set(data.models.map((model) => model.id)));
   const [spotlight, setSpotlight] = useState<string | null>(data.manifest.display?.defaultSpotlight ?? data.gates[0]?.id ?? null);
@@ -95,6 +97,7 @@ export default function UniversalWorkbench() {
   }
 
   if (circuitView === "induction") return <InductionGateExplorer onCircuitView={setCircuitView} />;
+  if (circuitView === "induction-query") return <InductionQueryWorkbench onCircuitView={setCircuitView} Graph={ModelGraph} />;
 
   return <div className="uw-shell">
     <header className="uw-header">
@@ -157,8 +160,9 @@ function Metric({ label, value }: { label: string; value: string }) {
   return <article><span>{label}</span><strong>{value}</strong></article>;
 }
 
-function ModelGraph({ modelId, components, edges, spotlight, selectedComponent, selectedEdge, trace, direction, widthScale, onComponent, onEdge }: { modelId: string; components: Component[]; edges: DependencyEdge[]; spotlight: string | null; selectedComponent: string | null; selectedEdge: string | null; trace: ReturnType<typeof traceGraph> | null; direction: TraceDirection; widthScale: "linear" | "sqrt" | "log"; onComponent: (id: string) => void; onEdge: (id: string) => void }) {
+export function ModelGraph({ modelId, components, edges, spotlight, selectedComponent, selectedEdge, trace, direction, widthScale, onComponent, onEdge, colors }: { modelId: string; components: Component[]; edges: DependencyEdge[]; spotlight: string | null; selectedComponent: string | null; selectedEdge: string | null; trace: ReturnType<typeof traceGraph> | null; direction: TraceDirection; widthScale: "linear" | "sqrt" | "log"; onComponent: (id: string) => void; onEdge: (id: string) => void; colors?: Record<string, string> }) {
   const svgRef = useRef<SVGSVGElement>(null);
+  const gateColors = colors ?? workbenchGateColors;
   const [viewBox, setViewBox] = useState<GraphViewBox>(DEFAULT_GRAPH_VIEWBOX);
   const drag = useRef<{ pointerId: number; clientX: number; clientY: number; origin: GraphViewBox } | null>(null);
   const model = data.models.find((item) => item.id === modelId)!;
@@ -186,7 +190,7 @@ function ModelGraph({ modelId, components, edges, spotlight, selectedComponent, 
     <defs><marker id={`arrow-${modelId}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke" /></marker></defs>
     {model.selectedLayers.map((layer, index) => <g key={layer}><line x1={72 + index * 86} y1="50" x2={72 + index * 86} y2="472" className="uw-layer-line" /><text x={72 + index * 86} y="28" className="uw-layer-label">L{layer}</text></g>)}
     {["Q", "K", "V", "O", "gate", "up", "down"].map((matrix, index) => <text key={matrix} x="15" y={79 + index * 58} className="uw-matrix-label">{matrix}</text>)}
-    {edges.map((edge) => { const a = positions.get(edge.source); const b = positions.get(edge.target); if (!a || !b) return null; const relevant = !selectedComponent || trace?.edges.has(edge.id); const measure = (value: number | null) => value === null ? "missing" : value.toFixed(4); const label = `${edge.source} to ${edge.target}; signed E ${measure(edge.signedEffect)}; normalized w ${measure(edge.normalizedMagnitude)}`; return <line key={edge.id} role="button" tabIndex={0} aria-label={label} x1={a.x} y1={a.y} x2={b.x} y2={b.y} markerEnd={`url(#arrow-${modelId})`} className={`uw-edge ${edge.signedEffect === null ? "unknown" : edge.signedEffect < 0 ? "negative" : "positive"} ${selectedEdge === edge.id ? "selected" : ""} ${relevant ? "" : "dim"}`} strokeWidth={edgeWidth(edge.normalizedMagnitude)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onEdge(edge.id); }} onClick={(event) => { event.stopPropagation(); onEdge(edge.id); }} />; })}
+    {edges.map((edge) => { const a = positions.get(edge.source); const b = positions.get(edge.target); if (!a || !b) return null; const relevant = !selectedComponent || trace?.edges.has(edge.id); const measure = (value: number | null) => value === null ? "missing" : value.toFixed(4); const label = `${edge.source} to ${edge.target}; signed E ${measure(edge.signedEffect)}; normalized w ${measure(edge.normalizedMagnitude)}`; return <line key={edge.id} role="button" tabIndex={0} aria-label={label} x1={a.x} y1={a.y} x2={b.x} y2={b.y} markerEnd={`url(#arrow-${modelId})`} className={`uw-edge ${edge.signedEffect === null ? "unknown" : edge.signedEffect < 0 ? "negative" : "positive"} ${selectedEdge === edge.id ? "selected" : ""} ${relevant ? "" : "dim"}`} strokeWidth={edgeWidth(edge.normalizedMagnitude)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onEdge(edge.id); }} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onEdge(edge.id); }} />; })}
     {components.map((component) => { const point = positions.get(component.id)!; const relevant = selectedComponent ? Boolean(trace?.nodes.has(component.id)) : (!spotlight || component.gateId === spotlight); const distance = trace?.distance.get(component.id); const hopPrefix = direction === "parents" ? "P" : direction === "children" ? "C" : "H"; const hopLabel = distance !== undefined && distance > 0 ? `${hopPrefix}${distance}` : null; const measure = (value: number | null) => value === null ? "missing" : value.toFixed(3); const label = `${component.gateId}, ${model.label}, layer ${component.layer}, matrix ${component.matrix}, beta ${measure(component.beta)}, rho ${measure(component.rho)}${hopLabel ? `, trace ${hopLabel}` : ""}`; return <g key={component.id} role="button" tabIndex={0} aria-label={label} transform={`translate(${point.x} ${point.y})`} className={`uw-node ${relevant ? "" : "dim"} ${selectedComponent === component.id ? "selected" : ""}`} onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onComponent(component.id); }} onClick={() => onComponent(component.id)}><circle r={component.representative ? 12 : 9} fill={gateColors[component.gateId] ?? "#8fa1b8"} /><circle r={component.representative ? 16 : 13} className="uw-node-ring" /><text y="4">{component.gateId.split(":")[1]}</text>{hopLabel && <g className="uw-hop-badge" transform="translate(14 -15)"><rect x="-7" y="-8" width="16" height="12" rx="3" /><text x="1" y="1">{hopLabel}</text></g>}<title>{label}</title></g>; })}
   </svg><div className="uw-legend"><span><i className="positive" />positive E</span><span><i className="negative" />negative E</span><span><b>◎</b> representative</span><span><b className="uw-color-dot" />fill = gate identity</span><span>Wheel zoom · drag background to pan</span></div></article>;
 }

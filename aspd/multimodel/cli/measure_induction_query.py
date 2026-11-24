@@ -99,9 +99,14 @@ def _select(rows, representatives):
                 gate = GateId(site, feature)
                 if not all(representatives.get((gate, model)) for model in MODEL_ORDER):
                     continue
-                clean, counter, no_match, other = [
-                    support[condition][site].get(feature, 0.0) for condition in CONDITIONS
-                ]
+                by_condition = {
+                    condition: support[condition][site].get(feature, 0.0)
+                    for condition in CONDITIONS
+                }
+                clean = by_condition["induction"]
+                counter = by_condition["counterfactual"]
+                no_match = by_condition["no_match"]
+                other = by_condition["repeated_no_association"]
                 if clean > 0 and counter > 0:
                     scores[gate][group] = (
                         min(clean, counter) - max(no_match, other),

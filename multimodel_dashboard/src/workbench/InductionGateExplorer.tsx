@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
 import { inductionGateDataset, type InductionCondition, type InductionContext, type InductionGate, type MeasuredInductionSplit } from "./inductionGateDataset";
 
-const CONDITIONS: InductionCondition[] = ["induction", "counterfactual", "no_match", "repeated_no_association"];
-const CONDITION_LABEL: Record<InductionCondition, string> = {
+export type CircuitView = "natural" | "induction" | "induction-query";
+export const CONDITIONS: InductionCondition[] = ["induction", "counterfactual", "no_match", "repeated_no_association"];
+export const CONDITION_LABEL: Record<InductionCondition, string> = {
   induction: "Induction",
   counterfactual: "Counterfactual (+)",
   no_match: "No prior match",
@@ -10,7 +11,7 @@ const CONDITION_LABEL: Record<InductionCondition, string> = {
 };
 const MODEL_LABEL: Record<string, string> = { gemma: "Gemma 2", smol: "SmolLM2", granite: "Granite 3.3" };
 
-export default function InductionGateExplorer({ onCircuitView }: { onCircuitView: (value: "natural" | "induction") => void }) {
+export default function InductionGateExplorer({ onCircuitView }: { onCircuitView: (value: CircuitView) => void }) {
   const discovery = inductionGateDataset.splits.discovery;
   const [splitName, setSplitName] = useState<"smoke" | "discovery">("smoke");
   const split = (splitName === "discovery" && discovery.status === "measured" ? discovery : inductionGateDataset.splits.smoke) as MeasuredInductionSplit;
@@ -65,8 +66,16 @@ export default function InductionGateExplorer({ onCircuitView }: { onCircuitView
   </div>;
 }
 
-export function CircuitSelect({ value, onChange }: { value: "natural" | "induction"; onChange: (value: "natural" | "induction") => void }) {
-  return <label className="uw-circuit-select"><span>CIRCUIT / EVALUATION VIEW</span><select aria-label="Circuit or evaluation view" value={value} onChange={(event) => onChange(event.target.value as "natural" | "induction")}><option value="natural">Natural validation · measured dependencies</option><option value="induction">Induction · shared gates and β</option></select><small>Changing view does not reuse edges across datasets.</small></label>;
+export function CircuitSelect({ value, onChange }: { value: CircuitView; onChange: (value: CircuitView) => void }) {
+  return <label className="uw-circuit-select">
+    <span>CIRCUIT / EVALUATION VIEW</span>
+    <select aria-label="Circuit or evaluation view" value={value} onChange={(event) => onChange(event.target.value as CircuitView)}>
+      <option value="natural">Natural validation · measured dependencies</option>
+      <option value="induction">Induction · shared gates and β</option>
+      <option value="induction-query">Induction at the final query · measured graph</option>
+    </select>
+    <small>Changing view does not reuse edges across datasets.</small>
+  </label>;
 }
 
 function positiveFires(gate: InductionGate) { return gate.finalQueryFires.induction + gate.finalQueryFires.counterfactual; }
