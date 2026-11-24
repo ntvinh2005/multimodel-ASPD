@@ -1,7 +1,8 @@
 /// <reference types="vite/client" />
 
 import { useEffect, useState, type ComponentProps, type ComponentType } from "react";
-import { traceGraph } from "./graphQueries";
+import { edgeThresholdScale, formatEdgeMagnitude } from "./displayUtils";
+import { edgesForAnchor, traceGraph } from "./graphQueries";
 import { CONDITIONS, CONDITION_LABEL, type InductionCondition } from "./inductionGateDataset";
 import type { Component, DependencyEdge } from "./types";
 import type { ModelGraph } from "./UniversalWorkbench";
@@ -138,6 +139,7 @@ function QueryGraphPanel({ graph, model, Graph }: {
 }) {
   const [selectedComponent, setComponent] = useState<string | null>(null);
   const [selectedEdge, setEdge] = useState<string | null>(null);
+  const [threshold, setThreshold] = useState(0);
   const parents = graph.models[model];
   if (!parents) return <p className="uw-empty">Missing graph artifact for {MODEL_LABELS[model]}.</p>;
   const components = new Map<string, Component>();
@@ -163,28 +165,47 @@ function QueryGraphPanel({ graph, model, Graph }: {
     const hue = (Number(feature) * 137.508 + (site === "MID" ? 67 : 0)) % 360;
     return [gate, `hsl(${hue} 60% 69%)`];
   }));
-  const trace = selectedComponent ? traceGraph(edges, selectedComponent, "both", 1) : null;
+  const thresholdScale = edgeThresholdScale(edges);
+  const visibleEdges = edgesForAnchor(edges, graph.anchorId, new Set(components.keys()), threshold);
+  const trace = selectedComponent ? traceGraph(visibleEdges, selectedComponent, "both", 1) : null;
   const node = selectedComponent ? components.get(selectedComponent) : null;
-  const edge = edges.find((item) => item.id === selectedEdge);
+  const edge = visibleEdges.find((item) => item.id === selectedEdge);
   return <div className="uw-main iq-main">
     <section className="uw-graph-area">
       <div className="uw-graph-toolbar">
-        <button onClick={() => { setComponent(null); setEdge(null); }}>Restore graph</button>
-        <span>{components.size} components · {edges.length} stored parents</span>
+        <button onClick={() => { setComponent(null); setEdge(null); setThreshold(0); }}>Restore graph</button>
+        <span>{components.size} components · {visibleEdges.length}/{edges.length} parent edges shown</span>
       </div>
-      <Graph modelId={model} components={[...components.values()]} edges={edges}
-        spotlight={null} selectedComponent={selectedComponent} selectedEdge={selectedEdge}
+      <div className="iq-edge-filter">
+        <label className="uw-threshold-label">
+          <span>Minimum normalized edge weight <i>w</i></span>
+          <output>{formatEdgeMagnitude(threshold)}</output>
+          <input
+            aria-label="Minimum normalized edge weight"
+            aria-valuetext={formatEdgeMagnitude(threshold)}
+            type="range" min="0" max={thresholdScale.maximum || thresholdScale.step}
+            step={Math.min(thresholdScale.maximum || thresholdScale.step, thresholdScale.step)}
+            value={threshold} disabled={thresholdScale.maximum === 0}
+            onChange={(event) => setThreshold(Number(event.target.value))}
+          />
+        </label>
+        <small>Range 0–{formatEdgeMagnitude(thresholdScale.maximum)} for this example and model.</small>
+      </div>
+      <Graph modelId={model} components={[...components.values()]} edges={visibleEdges}
+        spotlight={null} selectedComponent={selectedComponent} selectedEdge={edge?.id ?? null}
         trace={trace} colors={colors} direction="both" widthScale="sqrt"
         onComponent={(id) => { setComponent(id); setEdge(null); }}
         onEdge={(id) => { setEdge(id); setComponent(null); }} />
-      {!edges.length && <p className="uw-empty">No parent passed the strict |E| threshold at this anchor.</p>}
+      {!visibleEdges.length && <p className="uw-empty">{edges.length
+        ? "The display threshold hides all recorded edges."
+        : "No parent passed the strict |E| threshold at this anchor."}</p>}
     </section>
     <aside className="uw-inspector uw-detail">
       <span className="uw-eyebrow">FINAL QUERY · SAME-ANCHOR PARENTS</span>
       <h2>{edge ? "Selected dependency" : node?.gateId ?? "Parent summary"}</h2>
       {edge && <dl><dt>From</dt><dd>{edge.source}</dd><dt>To</dt><dd>{edge.target}</dd><dt>Signed E</dt><dd>{number(edge.signedEffect)}</dd><dt>Normalized w</dt><dd>{number(edge.normalizedMagnitude)}</dd></dl>}
       {node && <dl><dt>Component</dt><dd>{node.id}</dd><dt>Reference β</dt><dd>{number(node.beta)}</dd><dt>Coefficient e</dt><dd>{number(coefficients.get(node.id) ?? null)}</dd></dl>}
-      <p>Parent strength M = <b>{number(parents.strength)}</b></p>
+      <p>Parent strength M = <b>{number(parents.strength)}</b> · stored parent set</p>
       {parents.distribution && <dl>{Object.entries(parents.distribution).sort((left, right) => right[1] - left[1]).map(([id, value]) =>
         <DistributionRow key={id} gate={id} value={value} />
       )}</dl>}
