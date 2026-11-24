@@ -84,6 +84,8 @@ def _load_preparation(path: Path, split: str) -> tuple[list[dict[str, Any]], dic
         raise ValueError("preparation manifest changed after PREPARED")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     for relative, digest in manifest["artifacts"].items():
+        if Path(relative).parts[0] == "heldout_sealed":
+            continue
         if sha256_file(path / relative) != digest:
             raise ValueError(f"prepared artifact changed: {relative}")
     # Deliberately never open heldout_sealed in this executable.
