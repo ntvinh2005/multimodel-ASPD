@@ -48,7 +48,43 @@ def load_graphs(root, measured, discovery):
     return payload
 
 
-def validate_graph(ex, measured, reps):
+def validate_target(target, final):
+    destination = ComponentId.from_key(target["component"]["id"])
+    scale = target["outputScale"]
+    norm = target["writeNorm"]
+    if (
+        not math.isfinite(target["coefficient"])
+        or not math.isfinite(scale)
+        or scale <= 0
+        or not math.isfinite(norm)
+        or norm < 0
+        or not math.isclose(target["contributionNorm"], abs(target["coefficient"]) * norm)
+        or destination.feature not in final[destination.gate.site]["active_gate_ids"]
+    ):
+        raise ValueError("invalid measured component coefficient, scale or support")
+    edges = target["parents"]
+    if len(edges) > 10 or list(range(1, len(edges) + 1)) != [edge["rank"] for edge in edges]:
+        raise ValueError("invalid parent count/rank")
+    if [abs(edge["E"]) for edge in edges] != sorted(
+        (abs(edge["E"]) for edge in edges), reverse=True
+    ):
+        raise ValueError("parent records are out of rank order")
+    for edge in edges:
+        parent = ComponentId.from_key(edge["component"]["id"])
+        if (
+            not parent.matrix.is_upstream_of(destination.matrix)
+            or not math.isfinite(edge["E"])
+            or abs(edge["E"]) <= 0
+            or not math.isfinite(edge["w"])
+            or edge["w"] < 0
+            or not math.isclose(edge["w"], abs(edge["E"]) * norm / scale)
+            or parent.feature not in final[parent.gate.site]["active_gate_ids"]
+        ):
+            raise ValueError("invalid measured parent edge")
+        yield parent, edge
+
+
+def validate_graph(ex, measured, reps, *, comprehensive=False):
     (final,) = (r for r in measured["positions"] if r["final_query"])
     for key, field in (
         ("exampleId", "example_id"),
@@ -80,45 +116,18 @@ def validate_graph(ex, measured, reps):
             expected = {
                 item.key for item in reps if item.model == model and _gate_label(item.gate) == name
             }
-            if not expected or expected != {target["component"]["id"] for target in targets}:
+            if expected != {target["component"]["id"] for target in targets}:
                 raise ValueError("measured representatives differ from frozen lookup")
-            for target in targets:
-                destination = ComponentId.from_key(target["component"]["id"])
-                scale = target["outputScale"]
-                norm = target["writeNorm"]
+            if not expected:
                 if (
-                    not math.isfinite(target["coefficient"])
-                    or not math.isfinite(scale)
-                    or scale <= 0
-                    or not math.isfinite(norm)
-                    or norm < 0
-                    or not math.isclose(
-                        target["contributionNorm"], abs(target["coefficient"]) * norm
-                    )
+                    not comprehensive
+                    or row["status"] != "no_reference_representatives"
+                    or any(row[key] is not None for key in ("strength", "scores", "distribution"))
                 ):
-                    raise ValueError("invalid measured component coefficient or scale")
-                edges = target["parents"]
-                if len(edges) > 10 or list(range(1, len(edges) + 1)) != [
-                    edge["rank"] for edge in edges
-                ]:
-                    raise ValueError("invalid parent count/rank")
-                if [abs(edge["E"]) for edge in edges] != sorted(
-                    (abs(edge["E"]) for edge in edges), reverse=True
-                ):
-                    raise ValueError("parent records are out of rank order")
-                for edge in edges:
-                    parent = ComponentId.from_key(edge["component"]["id"])
-                    if (
-                        parent.model != model
-                        or not parent.matrix.is_upstream_of(destination.matrix)
-                        or not math.isfinite(edge["E"])
-                        or abs(edge["E"]) <= 0
-                        or not math.isfinite(edge["w"])
-                        or edge["w"] < 0
-                        or not math.isclose(edge["w"], abs(edge["E"]) * norm / scale)
-                        or parent.feature not in final[parent.gate.site]["active_gate_ids"]
-                    ):
-                        raise ValueError("invalid measured parent edge")
+                    raise ValueError("missing representatives must remain unavailable")
+                continue
+            for target in targets:
+                for parent, edge in validate_target(target, final):
                     parents[_gate_label(parent.gate)] += edge["w"] / len(targets)
             if not math.isclose(sum(parents.values()), row["strength"]) or set(parents) != set(
                 row["scores"]

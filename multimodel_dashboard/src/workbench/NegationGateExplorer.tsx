@@ -4,14 +4,17 @@ import { QueryGraphPanel, type GraphRenderer } from "./InductionQueryGraph";
 import { searchSharedGates } from "./graphQueries";
 import SharedGateSearch from "./SharedGateSearch";
 import {
-  activationAt, CONDITION_OUTCOMES, FAMILY_LABELS, graphAtFinalQuery, MODEL_IDS, MODEL_NAMES,
+  activationAt, CONDITION_OUTCOMES, expandedAtFinalQuery, FAMILY_LABELS, graphAtFinalQuery,
+  matchesExpandedDiscovery, MODEL_IDS, MODEL_NAMES,
   NEGATION_LABELS, readNegationAsset, validateNegationIndex,
-  type EvalModel, type MatrixLocator, type NegationCondition, type NegationExample,
+  type EvalModel, type ExpandedNegationGroup, type ExpandedNegationIndex, type MatrixLocator,
+  type NegationCondition, type NegationExample,
   type NegationGate, type NegationGroup, type NegationIndex, type Outcome,
 } from "./negationWorkbenchData";
 
 type Split = keyof NegationIndex["splits"];
 const numeric = (value: number | null | undefined) => value == null ? "—" : value.toPrecision(4);
+const FACTORIAL = ["affirmative", "negative", "counterfactual_affirmative", "counterfactual_negative"] as const;
 
 function useAsset<T>(path: string | null, hash?: string) {
   const [result, setResult] = useState<{ path: string; data?: T; error?: string }>();
@@ -61,43 +64,68 @@ function NegationPanel({ index, Graph }: { index: NegationIndex; Graph: GraphRen
   const [model, setModel] = useState<EvalModel>("gemma");
   const [outcome, setOutcome] = useState<Outcome | "">("");
   const [peer, setPeer] = useState("");
+  const [comprehensive, setComprehensive] = useState(false);
   const split = index.splits[splitName];
+  const expansionIndex = useAsset<ExpandedNegationIndex>("expanded/index.json")?.data;
+  const expansions = splitName === "discovery" && expansionIndex && matchesExpandedDiscovery(expansionIndex, index)
+    ? expansionIndex.groups : undefined;
+  const expandedGroupIds = expansions ? Object.keys(expansions).filter((id) => id in split.groups) : [];
+  const expandedGroupId = comprehensive && expandedGroupIds.length
+    ? (expandedGroupIds.includes(groupId) ? groupId : expandedGroupIds[0]) : undefined;
+  const expansion = expandedGroupId ? expansions?.[expandedGroupId] : undefined;
+  const expansionAsset = useAsset<ExpandedNegationGroup>(expansion?.path ?? null, expansion?.sha256);
   const locator = useAsset<{ mechanism: string; matrices: MatrixLocator[] }>("locator.json", index.assetHashes["locator.json"]);
   const gates = useMemo(() => {
+    const groupGates = expansion ? new Set(expansion.gates) : undefined;
     const rows = split.gates.filter((gate) => (site === "ALL" || gate.id.startsWith(site + ":"))
-      && (!graphOnly || gate.id in split.selection));
+      && (groupGates ? groupGates.has(gate.id) : !graphOnly || gate.id in split.selection));
     rows.sort((left, right) => {
       if (sort === "fires") return queryFires(right) - queryFires(left);
       if (sort === "beta") return (maxBeta(right) ?? -1) - (maxBeta(left) ?? -1);
       return Math.abs(right.contrast) - Math.abs(left.contrast);
     });
     return searchSharedGates(rows, query);
-  }, [split, site, graphOnly, query, sort]);
+  }, [split, site, graphOnly, query, sort, expansion]);
   const gate = gates.find((item) => item.id === gateId) ?? gates[0];
   const defaultCondition = gate && split.selection[gate.id]?.kind === "affirmative" ? "affirmative" : "negative";
-  const conditionChoice = condition ?? defaultCondition;
+  const conditionChoice = expandedGroupId && condition && !FACTORIAL.some((key) => key === condition)
+    ? defaultCondition : condition ?? defaultCondition;
   const contextGroups = gate ? [...new Set([
     ...(split.selection[gate.id]?.groups ?? []), ...(split.gateGroups[gate.id] ?? []),
   ])] : [];
-  const groupOptions = outcome
+  const groupOptions = expandedGroupId ? expandedGroupIds : outcome
     ? Object.keys(split.groups).filter((id) => split.groups[id].outcomes.negative?.[model] === outcome)
     : [...new Set([...contextGroups, ...(groupId in split.groups ? [groupId] : [])])];
-  const selectedGroup = groupOptions.includes(groupId) ? groupId : groupOptions[0];
+  const selectedGroup = expandedGroupId ?? (groupOptions.includes(groupId) ? groupId : groupOptions[0]);
   const groupMeta = selectedGroup ? split.groups[selectedGroup] : undefined;
   const source = groupMeta ? `${splitName}/${groupMeta.path}` : null;
   const groupAsset = useAsset<NegationGroup>(source, source ? index.assetHashes[source] : undefined);
   const group = groupAsset?.data?.mechanism === "negation" && groupAsset.data.groupId === selectedGroup
     ? groupAsset.data : undefined;
-  const example = group?.examples.find((record) => record.condition === conditionChoice)
-    ?? group?.examples.find((record) => record.condition === defaultCondition);
-  const graph = example && gate ? graphAtFinalQuery(example, gate.id) : undefined;
+  const examples = group?.examples.filter((row) => !expandedGroupId || FACTORIAL.some((key) => key === row.condition));
+  const example = examples?.find((record) => record.condition === conditionChoice)
+    ?? examples?.find((record) => record.condition === defaultCondition);
   const final = example?.positions.find((position) => position.final_query);
+  let expandedQuery: ReturnType<typeof expandedAtFinalQuery> | undefined;
+  let expansionError = expansionAsset?.error;
+  if (expansionAsset?.data && example && gate) {
+    try {
+      const data = expansionAsset.data;
+      if (!matchesExpandedDiscovery(data, index) || data.groupId !== expandedGroupId) {
+        throw new Error("Expanded artifact provenance differs from the selected Discovery group.");
+      }
+      expandedQuery = expandedAtFinalQuery(data, example, gate.id, model);
+    } catch (failure) {
+      expansionError = failure instanceof Error ? failure.message : String(failure);
+    }
+  }
+  const graph = expandedGroupId ? expandedQuery?.graph : example && gate ? graphAtFinalQuery(example, gate.id) : undefined;
 
   function selectGate(id: string) {
     setGateId(id);
-    setGroupId("");
+    if (!expandedGroupId) setGroupId("");
     setPeer("");
-    setCondition(outcome ? "negative" : null);
+    if (!expandedGroupId) setCondition(outcome ? "negative" : null);
   }
 
   function exploreSameExample(id: string) {
@@ -114,12 +142,15 @@ function NegationPanel({ index, Graph }: { index: NegationIndex; Graph: GraphRen
 
   return <>
     <div className="uw-warning"><strong>MEASURED · {splitName.toUpperCase()}</strong>
-      Dependencies are measured at the final aligned query for the discovery shortlist. PRE and MID identify distinct shared gates.
+      {expandedGroupId ? "Final-query graphs cover every active gate with eligible β representatives in this group."
+        : "Dependencies are measured at the final aligned query for the discovery shortlist."}
+      {" PRE and MID identify distinct shared gates."}
     </div>
     <section className="ig-toolbar">
       <label>Split<select value={splitName} onChange={(event) => {
         const next = event.target.value as Split;
         setSplitName(next);
+        setComprehensive(false);
         setGraphOnly(next === "discovery");
         setOutcome("");
         selectGate("");
@@ -127,6 +158,25 @@ function NegationPanel({ index, Graph }: { index: NegationIndex; Graph: GraphRen
         <option value="smoke">Smoke · {Object.keys(index.splits.smoke.groups).length} groups</option>
         <option value="discovery">Discovery · {Object.keys(index.splits.discovery.groups).length} groups</option>
       </select></label>
+      {expandedGroupIds.length > 0 && <label>Dependency coverage<select value={expandedGroupId ? "expanded" : "shortlist"}
+        onChange={(event) => {
+          setComprehensive(event.target.value === "expanded");
+          setQuery("");
+          setSite("ALL");
+          setGroupId("");
+          setOutcome("");
+          setCondition(null);
+        }}>
+        <option value="shortlist">Discovery shortlist</option>
+        <option value="expanded">Comprehensive groups · {expandedGroupIds.length}</option>
+      </select></label>}
+      {expandedGroupId && <label>Comprehensive group<select value={expandedGroupId} onChange={(event) => {
+        setGroupId(event.target.value);
+        setQuery("");
+        setSite("ALL");
+      }}>
+        {expandedGroupIds.map((id) => <option key={id} value={id}>{id.replace("negation-discovery-", "")}</option>)}
+      </select></label>}
       <label>Site<select value={site} onChange={(event) => setSite(event.target.value)}>
         <option>ALL</option><option>PRE</option><option>MID</option>
       </select></label>
@@ -145,7 +195,7 @@ function NegationPanel({ index, Graph }: { index: NegationIndex; Graph: GraphRen
           <SharedGateSearch value={query} onChange={setQuery} onSelectFirst={() => {
             if (gates[0]) selectGate(gates[0].id);
           }} />
-          {splitName === "discovery" && <label className="ig-graph-filter">
+          {splitName === "discovery" && !expandedGroupId && <label className="ig-graph-filter">
             <input type="checkbox" checked={graphOnly} onChange={(event) => setGraphOnly(event.target.checked)} />
             With measured graphs ({Object.keys(split.selection).length})
           </label>}
@@ -155,7 +205,8 @@ function NegationPanel({ index, Graph }: { index: NegationIndex; Graph: GraphRen
           onClick={() => selectGate(item.id)}>
           <strong>{item.id}</strong><span>Δ {numeric(item.contrast)}</span>
           <small>{queryFires(item)} query fires · β {numeric(maxBeta(item))}</small>
-          {item.id in split.selection && <small className="ig-graph-indicator">Measured graph</small>}
+          {expandedGroupId ? <small>Active at a matched final query</small>
+            : item.id in split.selection && <small className="ig-graph-indicator">Measured graph</small>}
         </button>)}
       </aside>
       {gate ? <section className="ig-detail">
@@ -181,34 +232,37 @@ function NegationPanel({ index, Graph }: { index: NegationIndex; Graph: GraphRen
         <section className="ig-examples">
           <header><div><span className="uw-eyebrow">MATCHED EXAMPLES</span><h3>Activation and dependency</h3></div></header>
           <div className="ig-toolbar negation-example-toolbar">
-            <label>Example group<select value={selectedGroup ?? ""} onChange={(event) => setGroupId(event.target.value)}>
+            {!expandedGroupId && <label>Example group<select value={selectedGroup ?? ""} onChange={(event) => setGroupId(event.target.value)}>
               {!groupOptions.length && <option value="">No matching examples</option>}
               {groupOptions.map((id) => <option key={id} value={id}>
                 {id.slice("negation-".length)} · {FAMILY_LABELS[split.groups[id].family]}
               </option>)}
-            </select></label>
+            </select></label>}
             <label>Condition<select value={example?.condition ?? conditionChoice}
               onChange={(event) => setCondition(event.target.value as NegationCondition)}>
-              {groupMeta?.conditions.map((key) => <option key={key} value={key}>{NEGATION_LABELS[key]}</option>)}
+              {(expandedGroupId ? FACTORIAL : groupMeta?.conditions)?.map((key) => <option key={key} value={key}>{NEGATION_LABELS[key]}</option>)}
             </select></label>
             <label>Model<select value={model} onChange={(event) => setModel(event.target.value as EvalModel)}>
               {MODEL_IDS.map((key) => <option key={key} value={key}>{MODEL_NAMES[key]}</option>)}
             </select></label>
-            <label>Negative outcome<select value={outcome} onChange={(event) => {
+            {!expandedGroupId && <label>Negative outcome<select value={outcome} onChange={(event) => {
               setOutcome(event.target.value as Outcome | "");
               if (event.target.value) setCondition("negative");
             }}>
               <option value="">All outcomes</option>
               {Object.entries(CONDITION_OUTCOMES).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
-            </select></label>
+            </select></label>}
           </div>
-          {example && group ? <>
+          {example && examples ? <>
             <p className="ig-graph-status"><b>{NEGATION_LABELS[example.condition]}</b> · {example.example_id}
               {" · final query gˢ "}{numeric(final ? activationAt(final, gate.id) : null)}</p>
             {graph && graph.activation > 0 ? <QueryGraphPanel
-              key={`${gate.id}/${example.example_id}/${model}`} graph={graph} Graph={Graph} model={model}
+              key={`${gate.id}/${example.example_id}/${model}/${expandedGroupId ?? "shortlist"}`}
+              graph={graph} Graph={Graph} model={model} traceTargets={expandedQuery?.targets}
               onExploreGate={exploreSameExample} />
-              : <p className="ig-graph-status" role="status">{graph
+              : <p className="ig-graph-status" role="status">{expandedGroupId
+                ? expansionError ?? (expandedQuery ? "The gate did not naturally fire at this final query." : "Loading comprehensive dependencies…")
+                : graph
                 ? "The gate did not fire at this measured final query."
                 : "No dependency graph was measured for this gate and exact example."}</p>}
             <p className="ig-graph-status">Anchor {final?.anchor_id} · {MODEL_NAMES[model]} token {final?.model_positions[model]}</p>
@@ -216,7 +270,7 @@ function NegationPanel({ index, Graph }: { index: NegationIndex; Graph: GraphRen
               Compare a second gate on these sequences
               <input type="search" placeholder="e.g. PRE:4312" value={peer} onChange={(event) => setPeer(event.target.value)} />
             </label>
-            <MatchedContexts examples={group.examples} selected={example.condition} onSelect={setCondition}
+            <MatchedContexts examples={examples} selected={example.condition} onSelect={setCondition}
               gate={gate.id} peer={split.gates.find((item) => item.id === peer.trim().toUpperCase())?.id} />
           </> : <p className="uw-empty" role="status">{groupAsset?.error ?? (groupOptions.length
             ? "Loading matched examples…" : "No activation contexts match this selection.")}</p>}
@@ -226,7 +280,8 @@ function NegationPanel({ index, Graph }: { index: NegationIndex; Graph: GraphRen
       </section> : <p className="uw-empty">No gates match these filters.</p>}
     </main>
     <footer className="uw-footer"><span>Checkpoint 61,036 · {split.poolCount} × 2,048 aligned anchors</span>
-      <span>{split.graphProvenance && <>Graph job {split.graphProvenance.runtime.slurm_job_id} · </>}{split.manifestSha256.slice(0, 12)}</span>
+      <span>{expansion ? <>Graph job {expansion.jobId} · </>
+        : split.graphProvenance && <>Graph job {split.graphProvenance.runtime.slurm_job_id} · </>}{split.manifestSha256.slice(0, 12)}</span>
     </footer>
   </>;
 }

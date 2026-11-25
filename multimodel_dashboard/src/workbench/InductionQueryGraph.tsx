@@ -8,23 +8,25 @@ import type { Component, DependencyEdge } from "./types";
 import type { ModelGraph } from "./UniversalWorkbench";
 
 type QueryComponent = Omit<Component, "representative">;
+export type QueryTarget = {
+  component: QueryComponent;
+  coefficient: number;
+  contributionNorm?: number;
+  outputScale?: number;
+  parents: Array<{ component: QueryComponent; E: number; w: number }>;
+};
 type ModelParents = {
-  targets: Array<{
-    component: QueryComponent;
-    coefficient: number;
-    contributionNorm?: number;
-    outputScale?: number;
-    parents: Array<{ component: QueryComponent; E: number; w: number }>;
-  }>;
-  strength: number;
+  targets: QueryTarget[];
+  status?: "measured" | "no_reference_representatives";
+  strength: number | null;
   distribution: Record<string, number> | null;
-  scores?: Record<string, number>;
+  scores?: Record<string, number> | null;
 };
 export type QueryGraph = {
   anchorId: string;
   activation: number;
   models: Record<string, ModelParents>;
-  comparisons: Array<{ models: [string, string]; jaccard: number | null; total_variation: number | null }>;
+  comparisons: Array<{ models: [string, string]; jaccard: number | null; total_variation: number | null; available?: boolean }>;
 };
 type Example = {
   exampleId: string;
@@ -135,31 +137,46 @@ export default function InductionQueryGraph({ gate, bundle, Graph }: {
   </section>;
 }
 
-export function QueryGraphPanel({ graph, model, Graph, onExploreGate }: {
+export function QueryGraphPanel({ graph, model, Graph, onExploreGate, traceTargets }: {
   graph: QueryGraph;
   model: (typeof MODELS)[number];
   Graph: GraphRenderer;
   onExploreGate?: (gate: string) => void;
+  traceTargets?: ReadonlyMap<string, { target: QueryTarget; representative: boolean }>;
 }) {
   const [selectedComponent, setComponent] = useState<string | null>(null);
   const [selectedEdge, setEdge] = useState<string | null>(null);
   const [threshold, setThreshold] = useState(0);
+  const [expanded, setExpanded] = useState<string[]>([]);
   const parents = graph.models[model];
   if (!parents) return <p className="uw-empty">Missing graph artifact for {MODEL_LABELS[model]}.</p>;
+  if (parents.status === "no_reference_representatives") {
+    return <p className="uw-empty">This gate fired but {MODEL_LABELS[model]} has no frozen β representative for it.</p>;
+  }
   const components = new Map<string, Component>();
   const coefficients = new Map<string, number>();
   const measuredNorms = new Map<string, { contribution: number; scale?: number }>();
   const edges: DependencyEdge[] = [];
-  for (const target of parents.targets) {
+  const officialIds = new Set(parents.targets.map((target) => target.component.id));
+  const targets = [
+    ...parents.targets.map((target) => ({ target, representative: true })),
+    ...expanded.flatMap((id) => {
+      const entry = traceTargets?.get(id);
+      return entry && !officialIds.has(id) ? [entry] : [];
+    }),
+  ];
+  for (const { target, representative } of targets) {
     const id = target.component.id;
-    components.set(id, { ...target.component, representative: true });
+    components.set(id, { ...target.component, representative });
     coefficients.set(id, target.coefficient);
     if (target.contributionNorm !== undefined) {
       measuredNorms.set(id, { contribution: target.contributionNorm, scale: target.outputScale });
     }
     for (const parent of target.parents) {
       const source = parent.component.id;
-      if (!components.has(source)) components.set(source, { ...parent.component, representative: false });
+      if (!components.has(source)) {
+        components.set(source, { ...parent.component, representative: traceTargets?.get(source)?.representative ?? false });
+      }
       edges.push({
         id: `${source}→${id}`, modelId: model, anchorId: graph.anchorId, source, target: id,
         signedEffect: parent.E, normalizedMagnitude: parent.w,
@@ -179,10 +196,13 @@ export function QueryGraphPanel({ graph, model, Graph, onExploreGate }: {
   const node = selectedComponent ? components.get(selectedComponent) : null;
   const norm = selectedComponent ? measuredNorms.get(selectedComponent) : undefined;
   const edge = visibleEdges.find((item) => item.id === selectedEdge);
+  const isUpstream = node && edges.some((item) => item.source === node.id);
+  const targetRecorded = node && traceTargets?.has(node.id);
+  const edgeTrace = edge && !officialIds.has(edge.target) ? traceTargets?.get(edge.target) : undefined;
   return <div className="uw-main iq-main">
     <section className="uw-graph-area">
       <div className="uw-graph-toolbar">
-        <button onClick={() => { setComponent(null); setEdge(null); setThreshold(0); }}>Restore graph</button>
+        <button onClick={() => { setComponent(null); setEdge(null); setThreshold(0); setExpanded([]); }}>Restore graph</button>
         <span>{components.size} components · {visibleEdges.length}/{edges.length} parent edges shown</span>
       </div>
       <div className="iq-edge-filter">
@@ -213,9 +233,15 @@ export function QueryGraphPanel({ graph, model, Graph, onExploreGate }: {
       <span className="uw-eyebrow">FINAL QUERY · SAME-ANCHOR PARENTS</span>
       <h2>{edge ? "Selected dependency" : node?.gateId ?? "Parent summary"}</h2>
       {edge && <dl><dt>From</dt><dd>{edge.source}</dd><dt>To</dt><dd>{edge.target}</dd><dt>Signed E</dt><dd>{number(edge.signedEffect)}</dd><dt>Normalized w</dt><dd>{number(edge.normalizedMagnitude)}</dd></dl>}
+      {edgeTrace && <p>{edgeTrace.representative ? "Expanded representative dependency" : "Supplemental component dependency"}</p>}
       {node && <dl><dt>Component</dt><dd>{node.id}</dd><dt>Reference β</dt><dd>{number(node.beta)}</dd><dt>Coefficient e</dt><dd>{number(coefficients.get(node.id) ?? null)}</dd></dl>}
       {norm && <dl><dt>Contribution ‖Δy‖</dt><dd>{number(norm.contribution)}</dd><dt>Reference σ</dt><dd>{number(norm.scale ?? null)}</dd></dl>}
       {node && onExploreGate && <button type="button" onClick={() => onExploreGate(node.gateId)}>Explore {node.gateId} on this example</button>}
+      {node && isUpstream && traceTargets && !officialIds.has(node.id) && !expanded.includes(node.id)
+        && (targetRecorded ? <button type="button" onClick={() => setExpanded([...expanded, node.id])}>
+          Expand this component’s measured parents
+        </button> : <p>No parent measurement is cached for this exact component and anchor.</p>)}
+      {expanded.length > 0 && <p>The summary below uses the selected gate’s representatives. Expanded component edges are shown in the graph.</p>}
       <p>Parent strength M = <b>{number(parents.strength)}</b> · stored parent set</p>
       {parents.distribution && <dl>{Object.entries(parents.distribution).sort((left, right) => right[1] - left[1]).map(([id, value]) =>
         <DistributionRow key={id} gate={id} value={value} score={parents.scores?.[id]} onExploreGate={onExploreGate} />
@@ -238,5 +264,7 @@ function DistributionRow({ gate, value, score, onExploreGate }: {
 }
 
 function ComparisonRow({ pair }: { pair: QueryGraph["comparisons"][number] }) {
-  return <><dt>{pair.models.join(" / ")}</dt><dd>J {number(pair.jaccard)} · TV {number(pair.total_variation)}</dd></>;
+  return <><dt>{pair.models.join(" / ")}</dt><dd>{pair.available === false
+    ? "Unavailable · missing β representatives"
+    : `J ${number(pair.jaccard)} · TV ${number(pair.total_variation)}`}</dd></>;
 }

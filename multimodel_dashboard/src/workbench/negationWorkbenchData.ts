@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import type { QueryGraph } from "./InductionQueryGraph";
+import type { QueryGraph, QueryTarget } from "./InductionQueryGraph";
 import type { MatrixType } from "./types";
 
 export const NEGATION_LABELS = {
@@ -111,6 +111,27 @@ export type NegationExample = {
   graphs?: Record<string, QueryGraph>;
 };
 export type NegationGroup = { mechanism: "negation"; groupId: string; examples: NegationExample[] };
+export type ExpandedNegationIndex = {
+  schemaVersion: 1;
+  mechanism: "negation";
+  split: "discovery";
+  checkpointSha256: string;
+  discoveryManifestSha256: string;
+  groups: Record<string, { path: string; sha256: string; gates: string[]; jobId: string }>;
+};
+type ExpandedQuery = {
+  exampleId: string;
+  groupId: string;
+  condition: NegationCondition;
+  anchorId: string;
+  poolId: string;
+  modelPositions: Record<EvalModel, number>;
+  graphs: Record<string, QueryGraph>;
+  traceTargets: Record<string, QueryTarget>;
+};
+export type ExpandedNegationGroup = Pick<ExpandedNegationIndex,
+  "schemaVersion" | "mechanism" | "split" | "checkpointSha256" | "discoveryManifestSha256"
+> & { groupId: string; examples: ExpandedQuery[] };
 
 export async function readNegationAsset<T>(path: string, signal: AbortSignal, hash?: string): Promise<T> {
   const response = await fetch(`${import.meta.env.BASE_URL}negation/${path}`, { signal });
@@ -144,6 +165,51 @@ export function graphAtFinalQuery(example: Pick<NegationExample, "positions" | "
     throw new Error("Graph and full-sequence activation record disagree at the final query.");
   }
   return graph;
+}
+
+export function matchesExpandedDiscovery(
+  expansion: Pick<ExpandedNegationIndex, "schemaVersion" | "mechanism" | "split" | "checkpointSha256" | "discoveryManifestSha256">,
+  index: NegationIndex,
+) {
+  return expansion.schemaVersion === 1 && expansion.mechanism === "negation" && expansion.split === "discovery"
+    && expansion.checkpointSha256 === index.checkpointSha256
+    && expansion.discoveryManifestSha256 === index.splits.discovery.manifestSha256;
+}
+
+export function expandedAtFinalQuery(
+  group: ExpandedNegationGroup,
+  example: NegationExample,
+  gate: string,
+  model: EvalModel,
+) {
+  const row = group.examples.find((item) => item.exampleId === example.example_id);
+  const final = example.positions.find((item) => item.final_query);
+  if (!row || !final || group.groupId !== example.group_id || row.groupId !== example.group_id
+      || row.condition !== example.condition || row.poolId !== example.pool_id
+      || row.anchorId !== final.anchor_id
+      || MODEL_IDS.some((key) => row.modelPositions[key] !== final.model_positions[key])) {
+    throw new Error("Expanded dependency and activation records disagree on the example or anchor.");
+  }
+  const graph = graphAtFinalQuery({ positions: example.positions, graphs: row.graphs }, gate);
+  if (!graph && activationAt(final, gate) > 0) {
+    throw new Error("An active gate is missing from the comprehensive artifact.");
+  }
+  const targets = new Map<string, { target: QueryTarget; representative: boolean }>();
+  for (const candidate of Object.values(row.graphs)) {
+    if (candidate.anchorId !== final.anchor_id) throw new Error("Mixed dependency anchors.");
+    for (const target of candidate.models[model]?.targets ?? []) {
+      if (target.component.modelId !== model || targets.has(target.component.id)) {
+        throw new Error("Invalid representative component identity in expanded graph.");
+      }
+      targets.set(target.component.id, { target, representative: true });
+    }
+  }
+  for (const [id, target] of Object.entries(row.traceTargets)) {
+    if (target.component.modelId !== model) continue;
+    if (id !== target.component.id || targets.has(id)) throw new Error("Invalid supplemental component identity.");
+    targets.set(id, { target, representative: false });
+  }
+  return { graph, targets };
 }
 
 export function activationAt(position: NegationPosition, gate: string): number {
