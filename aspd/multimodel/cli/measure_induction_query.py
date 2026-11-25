@@ -244,13 +244,15 @@ def _bundle_graph(gate, row, results, norms, representatives, importance):
                             "component": _describe_component(p.component, importance),
                             "E": p.score,
                             "w": edge_weight(p.score, norms[rep], sigmas[rep]),
+                            "rank": rank,
                         }
-                        for p in parents[rep]
+                        for rank, p in enumerate(parents[rep], start=1)
                     ],
                 }
                 for rep in reps
             ],
             "strength": sum(view.scores.values()),
+            "scores": {_gate_label(key): value for key, value in view.scores.items()},
             "distribution": {
                 _gate_label(key): value
                 for key, value in (parent_distribution(view.scores) or {}).items()
