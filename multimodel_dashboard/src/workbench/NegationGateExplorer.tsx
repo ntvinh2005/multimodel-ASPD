@@ -3,6 +3,8 @@ import { CircuitSelect, type CircuitView } from "./InductionGateExplorer";
 import { QueryGraphPanel, type GraphRenderer } from "./InductionQueryGraph";
 import { searchSharedGates } from "./graphQueries";
 import SharedGateSearch from "./SharedGateSearch";
+import { NotesLocatorCell, ResearchGateLabel, ResearchNotesEditor, ResearchNotesLibrary } from "./ResearchNotes";
+import { noteKey, notesForGate, type NoteTarget } from "./researchNotes";
 import {
   activationAt, CONDITION_OUTCOMES, expandedAtFinalQuery, FAMILY_LABELS, graphAtFinalQuery,
   matchesExpandedDiscovery, MODEL_IDS, MODEL_NAMES,
@@ -45,7 +47,7 @@ export default function NegationGateExplorer({ onCircuitView, Graph }: {
     <header className="uw-header">
       <div><span className="uw-kicker">MULTI-MODEL ASPD</span><h1>Negation Gate Explorer</h1>
         <p>Explore matched polarity and scope controls, gate activations, and final-query dependencies.</p></div>
-      <CircuitSelect value="negation" onChange={onCircuitView} />
+      <div className="uw-header-actions"><ResearchNotesLibrary /><CircuitSelect value="negation" onChange={onCircuitView} /></div>
     </header>
     {index ? <NegationPanel index={index} Graph={Graph} />
       : <p className="uw-empty" role="status">{error ?? "Loading measured Negation data…"}</p>}
@@ -106,6 +108,9 @@ function NegationPanel({ index, Graph }: { index: NegationIndex; Graph: GraphRen
   const example = examples?.find((record) => record.condition === conditionChoice)
     ?? examples?.find((record) => record.condition === defaultCondition);
   const final = example?.positions.find((position) => position.final_query);
+  const noteReference = example && final
+    ? `Negation ${splitName} · ${example.example_id} · anchor ${final.anchor_id}`
+    : undefined;
   let expandedQuery: ReturnType<typeof expandedAtFinalQuery> | undefined;
   let expansionError = expansionAsset?.error;
   if (expansionAsset?.data && example && gate) {
@@ -203,15 +208,16 @@ function NegationPanel({ index, Graph }: { index: NegationIndex; Graph: GraphRen
         {gates.slice(0, 250).map((item) => <button type="button" key={item.id}
           className={item.id === gate?.id ? "selected" : ""} aria-pressed={item.id === gate?.id}
           onClick={() => selectGate(item.id)}>
-          <strong>{item.id}</strong><span>Δ {numeric(item.contrast)}</span>
+          <strong><ResearchGateLabel checkpoint={index.checkpointSha256} gateId={item.id} /></strong><span>Δ {numeric(item.contrast)}</span>
           <small>{queryFires(item)} query fires · β {numeric(maxBeta(item))}</small>
           {expandedGroupId ? <small>Active at a matched final query</small>
             : item.id in split.selection && <small className="ig-graph-indicator">Measured graph</small>}
         </button>)}
       </aside>
       {gate ? <section className="ig-detail">
-        <header><div><span className="uw-eyebrow">SHARED GATE</span><h2>{gate.id}</h2></div>
+        <header><div><span className="uw-eyebrow">SHARED GATE</span><h2><ResearchGateLabel checkpoint={index.checkpointSha256} gateId={gate.id} /></h2></div>
           <span className="ig-badges"><span>Final-query contrast {numeric(gate.contrast)}</span></span></header>
+        <ResearchNotesEditor key={gate.id} targets={notesForGate(index.checkpointSha256, gate.id)} evidenceReference={noteReference} />
         <section className="ig-condition-grid negation-conditions">
           {Object.entries(gate.conditions).map(([key, row]) => <div key={key}>
             <strong>{NEGATION_LABELS[key as NegationCondition]}</strong>
@@ -259,6 +265,7 @@ function NegationPanel({ index, Graph }: { index: NegationIndex; Graph: GraphRen
             {graph && graph.activation > 0 ? <QueryGraphPanel
               key={`${gate.id}/${example.example_id}/${model}/${expandedGroupId ?? "shortlist"}`}
               graph={graph} Graph={Graph} model={model} traceTargets={expandedQuery?.targets}
+              gateId={gate.id} annotationCheckpoint={index.checkpointSha256} evidenceReference={noteReference}
               onExploreGate={exploreSameExample} />
               : <p className="ig-graph-status" role="status">{expandedGroupId
                 ? expansionError ?? (expandedQuery ? "The gate did not naturally fire at this final query." : "Loading comprehensive dependencies…")
@@ -275,8 +282,9 @@ function NegationPanel({ index, Graph }: { index: NegationIndex; Graph: GraphRen
           </> : <p className="uw-empty" role="status">{groupAsset?.error ?? (groupOptions.length
             ? "Loading matched examples…" : "No activation contexts match this selection.")}</p>}
         </section>
-        <NegationBetaLocator gate={gate.id} matrices={locator?.data?.mechanism === "negation"
-          ? locator.data.matrices : undefined} error={locator?.error} />
+        <NegationBetaLocator key={gate.id} gate={gate.id} checkpoint={index.checkpointSha256}
+          matrices={locator?.data?.mechanism === "negation" ? locator.data.matrices : undefined}
+          evidenceReference={noteReference} error={locator?.error} />
       </section> : <p className="uw-empty">No gates match these filters.</p>}
     </main>
     <footer className="uw-footer"><span>Checkpoint 61,036 · {split.poolCount} × 2,048 aligned anchors</span>
@@ -358,7 +366,10 @@ function SequenceHeatmap({ example, gate, scale }: { example: NegationExample; g
   </div>;
 }
 
-function NegationBetaLocator({ gate, matrices, error }: { gate: string; matrices?: MatrixLocator[]; error?: string }) {
+function NegationBetaLocator({ gate, checkpoint, matrices, evidenceReference, error }: {
+  gate: string; checkpoint: string; matrices?: MatrixLocator[]; evidenceReference?: string; error?: string;
+}) {
+  const [target, setTarget] = useState<NoteTarget>();
   const [site, index] = gate.split(":");
   const feature = Number(index);
   return <section className="ig-beta">
@@ -367,12 +378,14 @@ function NegationBetaLocator({ gate, matrices, error }: { gate: string; matrices
     {matrices ? <div className="ig-beta-models">{MODEL_IDS.map((model) => <div key={model}>
       <strong>{MODEL_NAMES[model]}</strong><div className="ig-beta-grid">{matrices.filter((matrix) => matrix.model === model && matrix.site === site).map((row) => {
         const beta = row.beta[feature];
-        return <i key={`${row.layer}/${row.matrix}`} className={row.representatives.includes(feature) ? "representative" : ""}
-          style={{ "--beta": Math.min(1, beta ?? 0) } as React.CSSProperties}
-          title={`L${row.layer}/${row.matrix} · β ${numeric(beta)}`}>
+        return <NotesLocatorCell key={`${row.layer}/${row.matrix}`} beta={beta} representative={row.representatives.includes(feature)}
+          title={`L${row.layer}/${row.matrix} · β ${numeric(beta)}`}
+          target={{ checkpoint, gateId: gate, scope: "component", modelId: model, layer: row.layer, matrix: row.matrix }}
+          onSelect={setTarget}>
           <small>L{row.layer}</small><b>{row.matrix}</b>
-        </i>;
+        </NotesLocatorCell>;
       })}</div>
     </div>)}</div> : <p className="ig-graph-status" role="status">{error ?? "Loading reference β…"}</p>}
+    {target && <ResearchNotesEditor key={noteKey(target)} targets={[target]} evidenceReference={evidenceReference} openByDefault />}
   </section>;
 }

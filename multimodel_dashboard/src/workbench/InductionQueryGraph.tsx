@@ -3,7 +3,9 @@
 import { useEffect, useState, type ComponentProps, type ComponentType } from "react";
 import { edgeThresholdScale, formatEdgeMagnitude } from "./displayUtils";
 import { edgesForAnchor, traceGraph } from "./graphQueries";
-import { CONDITIONS, CONDITION_LABEL, type InductionCondition } from "./inductionGateDataset";
+import { CONDITIONS, CONDITION_LABEL, inductionCheckpointManifest, type InductionCondition } from "./inductionGateDataset";
+import { ResearchNotesEditor } from "./ResearchNotes";
+import { notesForSelection } from "./researchNotes";
 import type { Component, DependencyEdge } from "./types";
 import type { ModelGraph } from "./UniversalWorkbench";
 
@@ -46,6 +48,7 @@ type Bundle = {
   split: "discovery";
   provenance: {
     scope: string;
+    checkpointManifestSha256: string;
     discoveryManifestSha256: string;
     kPar: number;
     runtime: { slurm_job_id: string; git_sha: string };
@@ -76,6 +79,7 @@ export function useInductionQueryGraphs(discoveryManifest: string | null) {
         if (value.schemaVersion !== 1 || value.split !== "discovery"
             || value.provenance?.scope !== "final_query_same_anchor_frozen_discovery_support"
             || value.provenance.discoveryManifestSha256 !== discoveryManifest
+            || (inductionCheckpointManifest && value.provenance.checkpointManifestSha256 !== inductionCheckpointManifest)
             || !value.examples?.length || !Object.keys(value.selection).length) {
           throw new Error("The graph artifact does not match this discovery dataset.");
         }
@@ -131,18 +135,23 @@ export default function InductionQueryGraph({ gate, bundle, Graph }: {
         </div>
       </article>
       {graph.activation === 0 ? <p className="uw-empty" role="status">{gate} did not fire at this query in the original BatchTopK pool.</p> :
-        <QueryGraphPanel key={`${gate}/${example.exampleId}/${model}`} graph={graph} model={model} Graph={Graph} />}
+        <QueryGraphPanel key={`${gate}/${example.exampleId}/${model}`} graph={graph} model={model} Graph={Graph}
+          gateId={gate} annotationCheckpoint={bundle.provenance.checkpointManifestSha256}
+          evidenceReference={`Induction · ${example.exampleId} · anchor ${graph.anchorId}`} />}
       <footer className="uw-footer"><span>Anchor {graph.anchorId} · {MODEL_LABELS[model]} token index {example.modelPositions[model]}</span><span>Job {bundle.provenance.runtime.slurm_job_id} · {bundle.provenance.runtime.git_sha.slice(0, 12)}</span></footer>
     </> : <p className="uw-empty">No stored graph record for this selection.</p>}
   </section>;
 }
 
-export function QueryGraphPanel({ graph, model, Graph, onExploreGate, traceTargets }: {
+export function QueryGraphPanel({ graph, model, Graph, onExploreGate, traceTargets, gateId, annotationCheckpoint, evidenceReference }: {
   graph: QueryGraph;
   model: (typeof MODELS)[number];
   Graph: GraphRenderer;
   onExploreGate?: (gate: string) => void;
   traceTargets?: ReadonlyMap<string, { target: QueryTarget; representative: boolean }>;
+  gateId: string;
+  annotationCheckpoint?: string;
+  evidenceReference?: string;
 }) {
   const [selectedComponent, setComponent] = useState<string | null>(null);
   const [selectedEdge, setEdge] = useState<string | null>(null);
@@ -222,6 +231,7 @@ export function QueryGraphPanel({ graph, model, Graph, onExploreGate, traceTarge
       </div>
       <Graph modelId={model} components={[...components.values()]} edges={visibleEdges}
         spotlight={null} selectedComponent={selectedComponent} selectedEdge={edge?.id ?? null}
+        annotationCheckpoint={annotationCheckpoint}
         trace={trace} colors={colors} direction="both" widthScale="sqrt"
         onComponent={(id) => { setComponent(id); setEdge(null); }}
         onEdge={(id) => { setEdge(id); setComponent(null); }} />
@@ -236,6 +246,12 @@ export function QueryGraphPanel({ graph, model, Graph, onExploreGate, traceTarge
       {edgeTrace && <p>{edgeTrace.representative ? "Expanded representative dependency" : "Supplemental component dependency"}</p>}
       {node && <dl><dt>Component</dt><dd>{node.id}</dd><dt>Reference β</dt><dd>{number(node.beta)}</dd><dt>Coefficient e</dt><dd>{number(coefficients.get(node.id) ?? null)}</dd></dl>}
       {norm && <dl><dt>Contribution ‖Δy‖</dt><dd>{number(norm.contribution)}</dd><dt>Reference σ</dt><dd>{number(norm.scale ?? null)}</dd></dl>}
+      {annotationCheckpoint && <ResearchNotesEditor
+        key={node?.id ?? gateId}
+        targets={notesForSelection(annotationCheckpoint, node?.gateId ?? gateId, model, node ?? undefined)}
+        evidenceReference={[evidenceReference ?? `Anchor ${graph.anchorId}`, MODEL_LABELS[model], node?.id, edge?.id].filter(Boolean).join(" · ")}
+        openByDefault={Boolean(node)}
+      />}
       {node && onExploreGate && <button type="button" onClick={() => onExploreGate(node.gateId)}>Explore {node.gateId} on this example</button>}
       {node && isUpstream && traceTargets && !officialIds.has(node.id) && !expanded.includes(node.id)
         && (targetRecorded ? <button type="button" onClick={() => setExpanded([...expanded, node.id])}>

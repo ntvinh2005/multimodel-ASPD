@@ -95,3 +95,11 @@ export function validateInductionGateDataset(value: unknown): InductionGateDatas
 }
 
 export const inductionGateDataset = validateInductionGateDataset(rawDataset);
+
+// The existing Induction activation export records the checkpoint path. Resolve the
+// published path to the manifest SHA-256 verified for its measured graph and checkpoint.
+const pinnedCheckpoint = "/blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/runs/"
+  + "aspd_v3_1_three_model_168targets_c8192_k32_500m_v1_resume_step16000_authfix_5ca3b43/checkpoints/step-000061036";
+export const inductionCheckpointManifest = inductionGateDataset.checkpointPath === pinnedCheckpoint
+  ? "735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969"
+  : undefined;

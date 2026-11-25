@@ -6,6 +6,8 @@ import { measuredWorkbenchDataset as data } from "./measuredDataset";
 import InductionGateExplorer, { CircuitSelect, type CircuitView } from "./InductionGateExplorer";
 import NegationGateExplorer from "./NegationGateExplorer";
 import SharedGateSearch from "./SharedGateSearch";
+import { ResearchGateLabel, ResearchNotesEditor, ResearchNotesLibrary, ResearchNotesProvider, useResearchNotes } from "./ResearchNotes";
+import { notesForGate, notesForSelection, SCOPE_LABEL, selectionNotes } from "./researchNotes";
 import type { Component, DependencyEdge, ResearchHypothesis, TraceDirection } from "./types";
 import "./workbench.css";
 import "./researcherFixes.css";
@@ -16,8 +18,14 @@ const palette = ["#51d6c3", "#f0b45b", "#8ca8ff", "#de7cdf", "#73c982", "#ed7d77
 const gateColors: Record<string, string> = Object.fromEntries(data.gates.map((gate, index) => [gate.id, palette[index % palette.length]]));
 const workbenchGateColors = gateColors;
 const defaultGates = new Set(data.manifest.display?.defaultGateIds ?? data.gates.slice(0, 3).map((gate) => gate.id));
+const naturalCheckpoint = data.manifest.export?.activationExamples?.checkpointManifestSha256
+  ?? measuredValidationArtifact.checkpoint.manifestSha256;
 
 export default function UniversalWorkbench() {
+  return <ResearchNotesProvider><CircuitWorkbench /></ResearchNotesProvider>;
+}
+
+function CircuitWorkbench() {
   const [circuitView, setCircuitView] = useState<CircuitView>("natural");
   const [gateIds, setGateIds] = useState(defaultGates);
   const [gateQuery, setGateQuery] = useState("");
@@ -32,10 +40,15 @@ export default function UniversalWorkbench() {
   const [representativeOnly, setRepresentativeOnly] = useState(false);
   const [widthScale, setWidthScale] = useState<"linear" | "sqrt" | "log">("sqrt");
   const [tab, setTab] = useState<"details" | "examples" | "locator" | "parents" | "pinned" | "notes">("details");
-  const [hypotheses, setHypotheses] = useState<ResearchHypothesis[]>(() => JSON.parse(localStorage.getItem("aspd-universal-hypotheses") || "[]") as ResearchHypothesis[]);
+  const [hypotheses] = useState<ResearchHypothesis[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("aspd-universal-hypotheses") || "[]") as ResearchHypothesis[];
+    } catch {
+      return [];
+    }
+  });
   const [pinnedComponentIds, setPinnedComponentIds] = useState<string[]>(() => JSON.parse(localStorage.getItem("aspd-pinned-components") || "[]") as string[]);
   const [pinnedEdgeIds, setPinnedEdgeIds] = useState<string[]>(() => JSON.parse(localStorage.getItem("aspd-pinned-edges") || "[]") as string[]);
-  const [note, setNote] = useState("");
   const [showMeasuredSummary, setShowMeasuredSummary] = useState(true);
   const matchingGates = useMemo(() => searchSharedGates(data.gates, gateQuery), [gateQuery]);
 
@@ -53,7 +66,6 @@ export default function UniversalWorkbench() {
     };
   }, []);
 
-  useEffect(() => localStorage.setItem("aspd-universal-hypotheses", JSON.stringify(hypotheses)), [hypotheses]);
   useEffect(() => localStorage.setItem("aspd-pinned-components", JSON.stringify(pinnedComponentIds)), [pinnedComponentIds]);
   useEffect(() => localStorage.setItem("aspd-pinned-edges", JSON.stringify(pinnedEdgeIds)), [pinnedEdgeIds]);
   const visibleComponents = useMemo(() => componentsForSelection(data.components, gateIds, modelIds, representativeOnly), [gateIds, modelIds, representativeOnly]);
@@ -66,6 +78,17 @@ export default function UniversalWorkbench() {
   const component = data.components.find((item) => item.id === selectedComponent) ?? null;
   const inspectedGateId = component?.gateId ?? spotlight;
   const anchor = data.anchors.find((item) => item.id === anchorId)!;
+  const noteTargets = inspectedGateId
+    ? component
+      ? notesForSelection(naturalCheckpoint, inspectedGateId, component.modelId, component)
+      : notesForGate(naturalCheckpoint, inspectedGateId, data.models.map(({ id }) => id))
+    : [];
+  const noteEditor = inspectedGateId && <ResearchNotesEditor
+    key={component?.id ?? inspectedGateId}
+    targets={noteTargets}
+    evidenceReference={`Natural Validation · ${data.manifest.datasetId} · anchor ${anchorId}`}
+    openByDefault={Boolean(component)}
+  />;
 
   useEffect(() => {
     if (selectedComponent && !visibleIds.has(selectedComponent)) setSelectedComponent(null);
@@ -83,6 +106,9 @@ export default function UniversalWorkbench() {
   function spotlightGate(id: string) {
     setGateIds((old) => old.has(id) ? old : new Set(old).add(id));
     setSpotlight(id);
+    setSelectedComponent(null);
+    setSelectedEdge(null);
+    setTab("details");
   }
   function toggleModel(id: string) { setModelIds((old) => { const next = new Set(old); next.has(id) ? next.delete(id) : next.add(id); return next; }); }
   function selectAnchor(id: string) {
@@ -97,11 +123,6 @@ export default function UniversalWorkbench() {
   }
   function togglePinnedComponent(id: string) { setPinnedComponentIds((old) => old.includes(id) ? old.filter((item) => item !== id) : [...old, id]); }
   function togglePinnedEdge(id: string) { setPinnedEdgeIds((old) => old.includes(id) ? old.filter((item) => item !== id) : [...old, id]); }
-  function saveHypothesis() {
-    if (!note.trim()) return;
-    setHypotheses((old) => [...old, { id: crypto.randomUUID(), title: note.trim().slice(0, 72), notes: note.trim(), status: "Unreviewed", gateIds: [...gateIds], componentId: selectedComponent, edgeId: selectedEdge, anchorId, modelIds: [...modelIds], sourceRevision: data.manifest.sourceRevision, createdAt: new Date().toISOString() }]);
-    setNote("");
-  }
 
   if (circuitView === "induction") return <InductionGateExplorer onCircuitView={setCircuitView} Graph={ModelGraph} />;
   if (circuitView === "negation") return <NegationGateExplorer onCircuitView={setCircuitView} Graph={ModelGraph} />;
@@ -109,7 +130,7 @@ export default function UniversalWorkbench() {
   return <div className="uw-shell">
     <header className="uw-header">
       <div><span className="uw-kicker">MULTI-MODEL ASPD · UNIVERSAL MECHANISM DISCOVERY</span><h1>Circuit Workbench</h1><p>Select a gate, reveal its components, trace measured dependencies, compare model-specific realizations.</p></div>
-      <div className="uw-header-actions"><CircuitSelect value="natural" onChange={setCircuitView} /><div className="uw-provenance"><span>POST-HOC SOURCE</span><code>{data.manifest.sourceRevision.slice(0, 12)}</code><small>Gemma · SmolLM2 · Granite</small></div></div>
+      <div className="uw-header-actions"><ResearchNotesLibrary /><CircuitSelect value="natural" onChange={setCircuitView} /><div className="uw-provenance"><span>POST-HOC SOURCE</span><code>{data.manifest.sourceRevision.slice(0, 12)}</code><small>Gemma · SmolLM2 · Granite</small></div></div>
     </header>
     <nav className="uw-data-switch" aria-label="Data view"><button className={showMeasuredSummary ? "active" : ""} onClick={() => setShowMeasuredSummary(true)}>Measured validation summary</button><button className={!showMeasuredSummary ? "active" : ""} onClick={() => setShowMeasuredSummary(false)}>Measured graph subset</button></nav>
     {showMeasuredSummary ? <MeasuredSummary onExplore={() => setShowMeasuredSummary(false)} /> : <>
@@ -119,7 +140,7 @@ export default function UniversalWorkbench() {
         <SharedGateSearch value={gateQuery} onChange={setGateQuery} onSelectFirst={() => {
           if (matchingGates[0]) spotlightGate(matchingGates[0].id);
         }} />
-        <div>{matchingGates.map((gate) => { const selected = gateIds.has(gate.id); const activate = () => spotlightGate(gate.id); return <button key={gate.id} aria-pressed={selected} aria-label={`${selected ? "Selected" : "Available"} gate ${gate.id}${spotlight === gate.id ? ", spotlighted" : ""}`} className={`${selected ? "selected" : "available"} ${spotlight === gate.id ? "spotlit" : ""}`} style={{ "--gate": gateColors[gate.id] } as React.CSSProperties} onClick={activate} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); activate(); } }} onDoubleClick={() => { setGateIds(new Set([gate.id])); setSpotlight(gate.id); setSelectedComponent(null); setSelectedEdge(null); }}>{gate.label}<span title={selected ? "Remove from selection" : "Add to selection"} onClick={(event) => { event.stopPropagation(); toggleGate(gate.id); if (selected && spotlight === gate.id) setSpotlight(null); }}>{selected ? "×" : "+"}</span></button>; })}</div>
+        <div>{matchingGates.map((gate) => { const selected = gateIds.has(gate.id); const activate = () => spotlightGate(gate.id); return <button key={gate.id} aria-pressed={selected} aria-label={`${selected ? "Selected" : "Available"} gate ${gate.id}${spotlight === gate.id ? ", spotlighted" : ""}`} className={`${selected ? "selected" : "available"} ${spotlight === gate.id ? "spotlit" : ""}`} style={{ "--gate": gateColors[gate.id] } as React.CSSProperties} onClick={activate} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); activate(); } }} onDoubleClick={() => { setGateIds(new Set([gate.id])); setSpotlight(gate.id); setSelectedComponent(null); setSelectedEdge(null); }}><ResearchGateLabel checkpoint={naturalCheckpoint} gateId={gate.id} /><span title={selected ? "Remove from selection" : "Add to selection"} onClick={(event) => { event.stopPropagation(); toggleGate(gate.id); if (selected && spotlight === gate.id) setSpotlight(null); }}>{selected ? "×" : "+"}</span></button>; })}</div>
         {!matchingGates.length && <small role="status">No matching gate in this measured subset.</small>}
         <small className="uw-gate-color-note"><b>Color = shared-gate identity only.</b> Parent/child status appears as P/C hop badges after selecting a component.</small><button className="uw-text-button" onClick={() => { setGateIds(new Set()); setSpotlight(null); setSelectedComponent(null); setSelectedEdge(null); }}>Clear selection</button></div>
       <div className="uw-control-group"><label>MODELS</label>{data.models.map((model) => <label className="uw-check" key={model.id}><input type="checkbox" checked={modelIds.has(model.id)} onChange={() => toggleModel(model.id)} />{model.label.split(" ").slice(0, 2).join(" ")}</label>)}</div>
@@ -138,17 +159,24 @@ export default function UniversalWorkbench() {
         </div>
         <div className="uw-graph-key"><span><i className="gate-fill" />Fill color = shared gate</span><span><i className="selection-ring" />Ring = selected component</span><span><b>P1</b>/<b>C1</b> = parent/child hop</span><span>Dimmed = outside current trace</span></div>
         {visibleEdges.length === 0 && <div className="uw-edge-state">{anchorEdgeRecords.length === 0 ? "Missing: no edge records exist for this selection and anchor." : anchorEdgeRecords.every((item) => item.normalizedMagnitude === 0) ? "Valid zero: edge records were measured, but all normalized magnitudes are exactly zero." : `Filtered: ${anchorEdgeRecords.length} measured edge records are below the current threshold ${formatEdgeMagnitude(threshold)}.`}</div>}
-        <div className="uw-panels">{data.models.filter((model) => modelIds.has(model.id)).map((model) => <ModelGraph key={model.id} modelId={model.id} components={visibleComponents.filter((item) => item.modelId === model.id)} edges={visibleEdges.filter((item) => item.modelId === model.id)} spotlight={spotlight} selectedComponent={selectedComponent} selectedEdge={selectedEdge} trace={trace} direction={direction} widthScale={widthScale} onComponent={(id) => { setSelectedComponent(id); setSelectedEdge(null); setTab("details"); }} onEdge={(id) => { setSelectedEdge(id); setTab("details"); }} />)}</div>
+        <div className="uw-panels">{data.models.filter((model) => modelIds.has(model.id)).map((model) => <ModelGraph key={model.id} modelId={model.id} components={visibleComponents.filter((item) => item.modelId === model.id)} edges={visibleEdges.filter((item) => item.modelId === model.id)} spotlight={spotlight} selectedComponent={selectedComponent} selectedEdge={selectedEdge} trace={trace} direction={direction} widthScale={widthScale} annotationCheckpoint={naturalCheckpoint} onComponent={(id) => { setSelectedComponent(id); setSelectedEdge(null); setTab("details"); }} onEdge={(id) => { setSelectedEdge(id); setTab("details"); }} />)}</div>
         {visibleComponents.length === 0 && <div className="uw-empty">Select at least one gate and model to materialize a bounded graph subset.</div>}
       </section>
       <aside className="uw-inspector">
         <div className="uw-tabs"><button className={tab === "details" ? "active" : ""} onClick={() => setTab("details")}>Details</button><button className={tab === "examples" ? "active" : ""} onClick={() => setTab("examples")}>Examples</button><button className={tab === "locator" ? "active" : ""} onClick={() => setTab("locator")}>Locator</button><button className={tab === "parents" ? "active" : ""} onClick={() => setTab("parents")}>Parents</button><button className={tab === "pinned" ? "active" : ""} onClick={() => setTab("pinned")}>Pinned {pinnedComponentIds.length + pinnedEdgeIds.length}</button><button className={tab === "notes" ? "active" : ""} onClick={() => setTab("notes")}>Notes {hypotheses.length}</button></div>
         {tab === "details" && <Details edge={edge} component={component} anchorId={anchorId} trace={trace} direction={direction} depth={depth} edges={visibleEdges} componentPinned={component ? pinnedComponentIds.includes(component.id) : false} edgePinned={edge ? pinnedEdgeIds.includes(edge.id) : false} onPinComponent={togglePinnedComponent} onPinEdge={togglePinnedEdge} onSelectEdge={(id) => setSelectedEdge(id)} />}
+        {tab === "details" && noteEditor}
         {tab === "examples" && <ActivationExamples gateId={inspectedGateId} />}
         {tab === "locator" && <Locator gateId={spotlight} modelIds={modelIds} selected={selectedComponent} onSelect={(id) => { setSelectedComponent(id); setTab("details"); }} />}
         {tab === "parents" && <ParentComparison gateId={spotlight} anchorId={anchorId} modelIds={modelIds} />}
         {tab === "pinned" && <PinnedSubgraph componentIds={pinnedComponentIds} edgeIds={pinnedEdgeIds} onSelectComponent={(id) => { setSelectedComponent(id); setSelectedEdge(null); setTab("details"); }} onSelectEdge={(id) => { setSelectedEdge(id); setTab("details"); }} onRemoveComponent={togglePinnedComponent} onRemoveEdge={togglePinnedEdge} />}
-        {tab === "notes" && <div className="uw-notes"><h2>Research hypotheses</h2><textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="Record a testable hypothesis or finding…" /><button onClick={saveHypothesis}>Save current view</button>{hypotheses.map((item) => <article key={item.id}><span>{item.status}</span><strong>{item.title}</strong><small>{item.gateIds.join(", ")} · {item.anchorId}</small></article>)}</div>}
+        {tab === "notes" && <div className="uw-notes"><ResearchNotesLibrary />{noteEditor}
+          {hypotheses.length > 0 && <details><summary>Legacy view notes · {hypotheses.length}</summary>
+            {hypotheses.map((item) => <article key={item.id}><span>{item.status}</span><strong>{item.title}</strong>
+              <p>{item.notes}</p><small>{item.gateIds.join(", ")} · {item.anchorId}</small>
+            </article>)}
+          </details>}
+        </div>}
       </aside>
     </main>
     <details className="uw-provenance-drawer"><summary>Experimental provenance</summary><dl><dt>Dataset</dt><dd>{data.manifest.dataset.id}@{data.manifest.dataset.revision}</dd><dt>Graph split</dt><dd>{data.manifest.dataset.splitPolicy}</dd><dt>Parent backend</dt><dd>job {data.manifest.export?.parentBackend?.slurmJobId} · {data.manifest.export?.parentBackend?.parentRows.toLocaleString()} stored parent rows · K={data.manifest.export?.parentBackend?.rule.k_par}, τ={data.manifest.export?.parentBackend?.rule.tau}</dd><dt>Activation examples</dt><dd>{data.manifest.export?.activationExamples?.experimentFamily} · split {data.manifest.export?.activationExamples?.selectedSplit} · independent graph anchors</dd><dt>Source</dt><dd>{data.manifest.sourceRevision}</dd><dt>Config</dt><dd>{data.manifest.trainingConfig}</dd><dt>Specification</dt><dd>{data.manifest.specification.path} · SHA-256 {data.manifest.specification.sha256}</dd><dt>Screening</dt><dd>β · K_rep={data.manifest.screening.kRep} · τ_rep={data.manifest.screening.tauRep}</dd><dt>Bundle selection</dt><dd>{data.manifest.export?.selectionRule}</dd><dt>Graph bound</dt><dd>{data.manifest.export?.graphBound}</dd><dt>Verification</dt><dd>{data.manifest.export?.verification}</dd>{data.models.map((model) => <Fragment key={model.id}><dt>{model.id} tokenizer</dt><dd>{model.tokenizer}</dd></Fragment>)}</dl></details>
@@ -173,7 +201,8 @@ function Metric({ label, value }: { label: string; value: string }) {
   return <article><span>{label}</span><strong>{value}</strong></article>;
 }
 
-export function ModelGraph({ modelId, components, edges, spotlight, selectedComponent, selectedEdge, trace, direction, widthScale, onComponent, onEdge, colors }: { modelId: string; components: Component[]; edges: DependencyEdge[]; spotlight: string | null; selectedComponent: string | null; selectedEdge: string | null; trace: ReturnType<typeof traceGraph> | null; direction: TraceDirection; widthScale: "linear" | "sqrt" | "log"; onComponent: (id: string) => void; onEdge: (id: string) => void; colors?: Record<string, string> }) {
+export function ModelGraph({ modelId, components, edges, spotlight, selectedComponent, selectedEdge, trace, direction, widthScale, onComponent, onEdge, colors, annotationCheckpoint }: { modelId: string; components: Component[]; edges: DependencyEdge[]; spotlight: string | null; selectedComponent: string | null; selectedEdge: string | null; trace: ReturnType<typeof traceGraph> | null; direction: TraceDirection; widthScale: "linear" | "sqrt" | "log"; onComponent: (id: string) => void; onEdge: (id: string) => void; colors?: Record<string, string>; annotationCheckpoint?: string }) {
+  const { records } = useResearchNotes();
   const svgRef = useRef<SVGSVGElement>(null);
   const gateColors = colors ?? workbenchGateColors;
   const [viewBox, setViewBox] = useState<GraphViewBox>(DEFAULT_GRAPH_VIEWBOX);
@@ -204,7 +233,48 @@ export function ModelGraph({ modelId, components, edges, spotlight, selectedComp
     {model.selectedLayers.map((layer, index) => <g key={layer}><line x1={72 + index * 86} y1="50" x2={72 + index * 86} y2="472" className="uw-layer-line" /><text x={72 + index * 86} y="28" className="uw-layer-label">L{layer}</text></g>)}
     {["Q", "K", "V", "O", "gate", "up", "down"].map((matrix, index) => <text key={matrix} x="15" y={79 + index * 58} className="uw-matrix-label">{matrix}</text>)}
     {edges.map((edge) => { const a = positions.get(edge.source); const b = positions.get(edge.target); if (!a || !b) return null; const relevant = !selectedComponent || trace?.edges.has(edge.id); const measure = (value: number | null) => value === null ? "missing" : value.toFixed(4); const label = `${edge.source} to ${edge.target}; signed E ${measure(edge.signedEffect)}; normalized w ${measure(edge.normalizedMagnitude)}`; return <line key={edge.id} role="button" tabIndex={0} aria-label={label} x1={a.x} y1={a.y} x2={b.x} y2={b.y} markerEnd={`url(#arrow-${modelId})`} className={`uw-edge ${edge.signedEffect === null ? "unknown" : edge.signedEffect < 0 ? "negative" : "positive"} ${selectedEdge === edge.id ? "selected" : ""} ${relevant ? "" : "dim"}`} strokeWidth={edgeWidth(edge.normalizedMagnitude)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onEdge(edge.id); }} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onEdge(edge.id); }} />; })}
-    {components.map((component) => { const point = positions.get(component.id)!; const relevant = selectedComponent ? Boolean(trace?.nodes.has(component.id)) : (!spotlight || component.gateId === spotlight); const distance = trace?.distance.get(component.id); const hopPrefix = direction === "parents" ? "P" : direction === "children" ? "C" : "H"; const hopLabel = distance !== undefined && distance > 0 ? `${hopPrefix}${distance}` : null; const measure = (value: number | null) => value === null ? "missing" : value.toFixed(3); const label = `${component.gateId}, ${model.label}, layer ${component.layer}, matrix ${component.matrix}, beta ${measure(component.beta)}, rho ${measure(component.rho)}${hopLabel ? `, trace ${hopLabel}` : ""}`; return <g key={component.id} role="button" tabIndex={0} aria-label={label} transform={`translate(${point.x} ${point.y})`} className={`uw-node ${relevant ? "" : "dim"} ${selectedComponent === component.id ? "selected" : ""}`} onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onComponent(component.id); }} onClick={() => onComponent(component.id)}><circle r={component.representative ? 12 : 9} fill={gateColors[component.gateId] ?? "#8fa1b8"} /><circle r={component.representative ? 16 : 13} className="uw-node-ring" /><text y="4">{component.gateId.split(":")[1]}</text>{hopLabel && <g className="uw-hop-badge" transform="translate(14 -15)"><rect x="-7" y="-8" width="16" height="12" rx="3" /><text x="1" y="1">{hopLabel}</text></g>}<title>{label}</title></g>; })}
+    {components.map((component) => {
+      const point = positions.get(component.id)!;
+      const relevant = selectedComponent ? Boolean(trace?.nodes.has(component.id)) : (!spotlight || component.gateId === spotlight);
+      const distance = trace?.distance.get(component.id);
+      const hopPrefix = direction === "parents" ? "P" : direction === "children" ? "C" : "H";
+      const hopLabel = distance !== undefined && distance > 0 ? `${hopPrefix}${distance}` : null;
+      const measure = (value: number | null) => value === null ? "missing" : value.toFixed(3);
+      const identity = `${component.gateId}, ${model.label}, layer ${component.layer}, matrix ${component.matrix}, beta ${measure(component.beta)}, rho ${measure(component.rho)}${hopLabel ? `, trace ${hopLabel}` : ""}`;
+      const notes = annotationCheckpoint
+        ? selectionNotes(records, notesForSelection(annotationCheckpoint, component.gateId, component.modelId, component)) : [];
+      const status = notes[0]?.fields.status;
+      const statusText = status ? `${SCOPE_LABEL[notes[0].target.scope]} · ${status}` : "";
+      const label = notes.find(({ fields }) => fields.label.trim())?.fields.label.trim();
+      const shortLabel = label && (label.length <= 24 ? label : `${label.slice(0, 23)}…`);
+      const tooltip = [identity, ...notes.map(({ target, fields }) =>
+        `${SCOPE_LABEL[target.scope]} · ${fields.status}${fields.label ? ` · ${fields.label}` : ""}${fields.hypothesis ? `\nHypothesis: ${fields.hypothesis}` : ""}`
+      )].join("\n");
+      const nodeRadius = component.representative ? 12 : 9;
+      return <g key={component.id} role="button" tabIndex={0}
+        aria-label={[identity, label, statusText].filter(Boolean).join(", ")}
+        transform={`translate(${point.x} ${point.y})`}
+        className={`uw-node ${relevant ? "" : "dim"} ${selectedComponent === component.id ? "selected" : ""}`}
+        onPointerDown={(event) => event.stopPropagation()}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onComponent(component.id);
+          }
+        }}
+        onClick={() => onComponent(component.id)}>
+        <circle r={nodeRadius} fill={gateColors[component.gateId] ?? "#8fa1b8"} />
+        <circle r={nodeRadius + 4} className="uw-node-ring" />
+        <text y="4">{component.gateId.split(":")[1]}</text>
+        {hopLabel && <g className="uw-hop-badge" transform="translate(14 -15)">
+          <rect x="-7" y="-8" width="16" height="12" rx="3" /><text x="1" y="1">{hopLabel}</text>
+        </g>}
+        {status && <circle className={`rn-node-dot ${status !== "Unreviewed" ? "reviewed" : ""}`} cx={-nodeRadius} cy={-nodeRadius} r="3.2" />}
+        {shortLabel && <text y={nodeRadius + 10} className="rn-node-label">{component.gateId} · {shortLabel}</text>}
+        {status && <text y={nodeRadius + (shortLabel ? 19 : 10)} className="rn-node-status">{statusText}</text>}
+        <title>{tooltip}</title>
+      </g>;
+    })}
   </svg><div className="uw-legend"><span><i className="positive" />positive E</span><span><i className="negative" />negative E</span><span><b>◎</b> representative</span><span><b className="uw-color-dot" />fill = gate identity</span><span>Wheel zoom · drag background to pan</span></div></article>;
 }
 
