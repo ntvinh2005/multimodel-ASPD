@@ -219,6 +219,27 @@ def _describe_component(component, importance):
     }
 
 
+def _bundle_target(component, result, write_norm, importance):
+    coefficient, parents = result
+    scale = importance[component.matrix].sigma
+    return {
+        "component": _describe_component(component, importance),
+        "coefficient": coefficient,
+        "writeNorm": write_norm,
+        "outputScale": scale,
+        "contributionNorm": abs(coefficient) * write_norm,
+        "parents": [
+            {
+                "component": _describe_component(parent.component, importance),
+                "E": parent.score,
+                "w": edge_weight(parent.score, write_norm, scale),
+                "rank": rank,
+            }
+            for rank, parent in enumerate(parents, start=1)
+        ],
+    }
+
+
 def _bundle_graph(gate, row, results, norms, representatives, importance):
     anchor = row["anchor_id"]
     activation = _supports(row)[gate.site].get(gate.feature, 0.0)
@@ -227,7 +248,7 @@ def _bundle_graph(gate, row, results, norms, representatives, importance):
     models = {}
     views = []
     for model in MODEL_ORDER:
-        reps = representatives[(gate, model)]
+        reps = representatives.get((gate, model), ())
         if any(rep not in results[anchor] for rep in reps):
             raise ValueError(f"missing active representative for {gate.key}/{anchor}/{model}")
         parents = {rep: results[anchor][rep][1] for rep in reps}
@@ -236,22 +257,7 @@ def _bundle_graph(gate, row, results, norms, representatives, importance):
         views.append(view)
         models[model] = {
             "targets": [
-                {
-                    "component": _describe_component(rep, importance),
-                    "coefficient": results[anchor][rep][0],
-                    "writeNorm": norms[rep],
-                    "outputScale": sigmas[rep],
-                    "contributionNorm": abs(results[anchor][rep][0]) * norms[rep],
-                    "parents": [
-                        {
-                            "component": _describe_component(p.component, importance),
-                            "E": p.score,
-                            "w": edge_weight(p.score, norms[rep], sigmas[rep]),
-                            "rank": rank,
-                        }
-                        for rank, p in enumerate(parents[rep], start=1)
-                    ],
-                }
+                _bundle_target(rep, results[anchor][rep], norms[rep], importance)
                 for rep in reps
             ],
             "strength": sum(view.scores.values()),
