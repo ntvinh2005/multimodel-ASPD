@@ -57,7 +57,7 @@ function NegationPanel({ index, Graph }: { index: NegationIndex; Graph: GraphRen
   const [graphOnly, setGraphOnly] = useState(true);
   const [gateId, setGateId] = useState("");
   const [groupId, setGroupId] = useState("");
-  const [condition, setCondition] = useState<NegationCondition>("negative");
+  const [condition, setCondition] = useState<NegationCondition | null>(null);
   const [model, setModel] = useState<EvalModel>("gemma");
   const [outcome, setOutcome] = useState<Outcome | "">("");
   const [peer, setPeer] = useState("");
@@ -74,6 +74,8 @@ function NegationPanel({ index, Graph }: { index: NegationIndex; Graph: GraphRen
     return searchSharedGates(rows, query);
   }, [split, site, graphOnly, query, sort]);
   const gate = gates.find((item) => item.id === gateId) ?? gates[0];
+  const defaultCondition = gate && split.selection[gate.id]?.kind === "affirmative" ? "affirmative" : "negative";
+  const conditionChoice = condition ?? defaultCondition;
   const contextGroups = gate ? [...new Set([
     ...(split.selection[gate.id]?.groups ?? []), ...(split.gateGroups[gate.id] ?? []),
   ])] : [];
@@ -86,7 +88,8 @@ function NegationPanel({ index, Graph }: { index: NegationIndex; Graph: GraphRen
   const groupAsset = useAsset<NegationGroup>(source, source ? index.assetHashes[source] : undefined);
   const group = groupAsset?.data?.mechanism === "negation" && groupAsset.data.groupId === selectedGroup
     ? groupAsset.data : undefined;
-  const example = group?.examples.find((record) => record.condition === condition) ?? group?.examples[0];
+  const example = group?.examples.find((record) => record.condition === conditionChoice)
+    ?? group?.examples.find((record) => record.condition === defaultCondition);
   const graph = example && gate ? graphAtFinalQuery(example, gate.id) : undefined;
   const final = example?.positions.find((position) => position.final_query);
 
@@ -94,6 +97,7 @@ function NegationPanel({ index, Graph }: { index: NegationIndex; Graph: GraphRen
     setGateId(id);
     setGroupId("");
     setPeer("");
+    setCondition(outcome ? "negative" : null);
   }
 
   function exploreSameExample(id: string) {
@@ -101,6 +105,7 @@ function NegationPanel({ index, Graph }: { index: NegationIndex; Graph: GraphRen
     setPeer(gate?.id ?? "");
     setGateId(id);
     setGroupId(selectedGroup ?? "");
+    setCondition(example?.condition ?? conditionChoice);
     setQuery(id);
     setSite("ALL");
     setGraphOnly(false);
@@ -182,7 +187,7 @@ function NegationPanel({ index, Graph }: { index: NegationIndex; Graph: GraphRen
                 {id.slice("negation-".length)} · {FAMILY_LABELS[split.groups[id].family]}
               </option>)}
             </select></label>
-            <label>Condition<select value={example?.condition ?? condition}
+            <label>Condition<select value={example?.condition ?? conditionChoice}
               onChange={(event) => setCondition(event.target.value as NegationCondition)}>
               {groupMeta?.conditions.map((key) => <option key={key} value={key}>{NEGATION_LABELS[key]}</option>)}
             </select></label>

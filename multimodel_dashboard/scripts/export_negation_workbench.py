@@ -84,11 +84,28 @@ def validate_graph(ex, measured, reps):
                 raise ValueError("measured representatives differ from frozen lookup")
             for target in targets:
                 destination = ComponentId.from_key(target["component"]["id"])
+                scale = target["outputScale"]
+                norm = target["writeNorm"]
+                if (
+                    not math.isfinite(target["coefficient"])
+                    or not math.isfinite(scale)
+                    or scale <= 0
+                    or not math.isfinite(norm)
+                    or norm < 0
+                    or not math.isclose(
+                        target["contributionNorm"], abs(target["coefficient"]) * norm
+                    )
+                ):
+                    raise ValueError("invalid measured component coefficient or scale")
                 edges = target["parents"]
                 if len(edges) > 10 or list(range(1, len(edges) + 1)) != [
                     edge["rank"] for edge in edges
                 ]:
                     raise ValueError("invalid parent count/rank")
+                if [abs(edge["E"]) for edge in edges] != sorted(
+                    (abs(edge["E"]) for edge in edges), reverse=True
+                ):
+                    raise ValueError("parent records are out of rank order")
                 for edge in edges:
                     parent = ComponentId.from_key(edge["component"]["id"])
                     if (
@@ -98,6 +115,7 @@ def validate_graph(ex, measured, reps):
                         or abs(edge["E"]) <= 0
                         or not math.isfinite(edge["w"])
                         or edge["w"] < 0
+                        or not math.isclose(edge["w"], abs(edge["E"]) * norm / scale)
                         or parent.feature not in final[parent.gate.site]["active_gate_ids"]
                     ):
                         raise ValueError("invalid measured parent edge")
@@ -109,6 +127,14 @@ def validate_graph(ex, measured, reps):
             for gate_id, score in parents.items():
                 if not math.isclose(row["scores"][gate_id], score):
                     raise ValueError("parent score differs from normalized weights")
+            if row["strength"] == 0:
+                if row["distribution"] is not None:
+                    raise ValueError("zero-strength parent distribution must stay undefined")
+            elif set(row["distribution"]) != set(parents) or any(
+                not math.isclose(row["distribution"][gate], score / row["strength"])
+                for gate, score in parents.items()
+            ):
+                raise ValueError("parent distribution disagrees with scores or strength")
 
 
 def to_view_gate(row, totals):
@@ -156,9 +182,19 @@ def build_split(root, outfile, graphs, reps):
         or not graph_rows.keys() <= by_example.keys()
     ):
         raise ValueError("graph examples must uniquely belong to this exact split")
+    targets = defaultdict(set)
+    for gate, details in graphs.get("selection", {}).items():
+        for group_id in details["groups"]:
+            targets[group_id].add(gate)
     grouped = defaultdict(list)
     for example in examples:
         example_id = example["example_id"]
+        if set(graph_rows.get(example_id, {}).get("graphs", {})) != targets.get(
+            example["group_id"], set()
+        ):
+            raise ValueError(
+                "measured graph coverage differs from the frozen matched-group selection"
+            )
         if example_id in graph_rows:
             validate_graph(graph_rows[example_id], example, reps)
             example["graphs"] = graph_rows[example_id]["graphs"]
