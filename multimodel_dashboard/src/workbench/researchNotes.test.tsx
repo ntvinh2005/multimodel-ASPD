@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ResearchGateLabel, ResearchNotesEditor, ResearchNotesLibrary, ResearchNotesProvider } from "./ResearchNotes";
+import { preliminaryNotes, seedPreliminaryNotes } from "./preliminaryResearchNotes";
 import {
   EMPTY_NOTE, EMPTY_NOTE_FILTERS, NOTE_STORAGE_PREFIX, exportNotesCsv, exportNotesJson, filterNotes,
   importNotesJson, loadNotes, noteKey, notesForGate, notesForSelection, selectionNotes, storeNote,
@@ -30,6 +31,22 @@ function makeStorage(): Storage {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("checkpoint-scoped research notes", () => {
+  it("imports nine unvalidated SmolLM2 drafts once and preserves existing notes", () => {
+    const storage = makeStorage();
+    const existing = makeNote(preliminaryNotes[0].target, { label: "My own note", status: "Rejected" });
+    storeNote(storage, existing);
+    seedPreliminaryNotes(storage);
+    const { records } = loadNotes(storage);
+    expect(Object.keys(records)).toHaveLength(9);
+    expect(records[noteKey(existing.target)]).toEqual(existing);
+    const drafts = Object.values(records).filter((note) => note.fields.label !== "My own note");
+    expect(drafts.every(({ target, fields }) => target.scope === "model" && target.modelId === "smol"
+      && fields.status === "Hypothesis proposed")).toBe(true);
+    expect(drafts.some(({ target }) => target.gateId === "PRE:953")).toBe(true);
+    storage.removeItem(NOTE_STORAGE_PREFIX + noteKey(preliminaryNotes[1].target));
+    seedPreliminaryNotes(storage);
+    expect(Object.keys(loadNotes(storage).records)).toHaveLength(8);
+  });
   it("restores distinct checkpoint, site, model, layer and matrix identities after reload", () => {
     const locations = [
       shared, model, component,

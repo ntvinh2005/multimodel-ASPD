@@ -6,6 +6,7 @@ import {
   type NoteFields, type NoteRecords, type NoteTarget, type ResearchNote,
 } from "./researchNotes";
 import "./researchNotes.css";
+import { seedPreliminaryNotes, selectionFrameGateIds, selectionFrameHypothesis, selectionFrameTitle } from "./preliminaryResearchNotes";
 
 type NotesState = { records: NoteRecords; warning: string };
 type NotesContext = NotesState & {
@@ -31,6 +32,12 @@ export function ResearchNotesProvider({ children }: { children: ReactNode }) {
     setSaved(next);
   }
   useEffect(() => {
+    try {
+      seedPreliminaryNotes(window.localStorage);
+      publish(readSaved());
+    } catch {
+      publish({ ...current.current, warning: "Browser storage could not import the example notes. Export or retry after enabling storage." });
+    }
     function sync(event: StorageEvent) {
       if (event.key === null || event.key.startsWith(NOTE_STORAGE_PREFIX)) publish(readSaved());
     }
@@ -257,6 +264,11 @@ export function ResearchNotesLibrary() {
         </table>
       </div>
       {!results.length && <p>{notes.length ? "No notes match these filters." : "Select a gate or component to start recording notes."}</p>}
+      <details className="rn-library-note">
+        <summary>SmolLM2 · {selectionFrameTitle} · Hypothesis proposed</summary>
+        <p>{selectionFrameHypothesis}</p>
+        <p>{selectionFrameGateIds.join(", ")}</p>
+      </details>
       {selected && <section className="rn-library-note" aria-label="Edit selected note">
         <header><strong>Edit selected note</strong><button type="button" onClick={() => setSelected(null)}>Done</button></header>
         <NoteFieldsEditor target={selected} />
