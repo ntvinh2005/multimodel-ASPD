@@ -1,9 +1,10 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { componentsForSelection, edgesForAnchor, jaccard, traceGraph, tvDistance } from "./graphQueries";
+import { componentsForSelection, edgesForAnchor, jaccard, searchSharedGates, traceGraph, tvDistance } from "./graphQueries";
 import { activationOpacity, activationWindow, DEFAULT_GRAPH_VIEWBOX, edgeThresholdScale, formatEdgeMagnitude, panGraphViewBox, zoomGraphViewBox, type ActivationContextView, type GraphViewBox } from "./displayUtils";
 import { formatBytes, measuredValidationArtifact, modelPairLabel } from "./measuredArtifact";
 import { measuredWorkbenchDataset as data } from "./measuredDataset";
 import InductionGateExplorer, { CircuitSelect, type CircuitView } from "./InductionGateExplorer";
+import SharedGateSearch from "./SharedGateSearch";
 import type { Component, DependencyEdge, ResearchHypothesis, TraceDirection } from "./types";
 import "./workbench.css";
 import "./researcherFixes.css";
@@ -18,6 +19,7 @@ const defaultGates = new Set(data.manifest.display?.defaultGateIds ?? data.gates
 export default function UniversalWorkbench() {
   const [circuitView, setCircuitView] = useState<CircuitView>("natural");
   const [gateIds, setGateIds] = useState(defaultGates);
+  const [gateQuery, setGateQuery] = useState("");
   const [modelIds, setModelIds] = useState(new Set(data.models.map((model) => model.id)));
   const [spotlight, setSpotlight] = useState<string | null>(data.manifest.display?.defaultSpotlight ?? data.gates[0]?.id ?? null);
   const [anchorId, setAnchorId] = useState(data.manifest.display?.defaultAnchorId ?? data.anchors[0].id);
@@ -34,6 +36,7 @@ export default function UniversalWorkbench() {
   const [pinnedEdgeIds, setPinnedEdgeIds] = useState<string[]>(() => JSON.parse(localStorage.getItem("aspd-pinned-edges") || "[]") as string[]);
   const [note, setNote] = useState("");
   const [showMeasuredSummary, setShowMeasuredSummary] = useState(true);
+  const matchingGates = useMemo(() => searchSharedGates(data.gates, gateQuery), [gateQuery]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -76,6 +79,10 @@ export default function UniversalWorkbench() {
   }, [threshold, thresholdScale.maximum]);
 
   function toggleGate(id: string) { setGateIds((old) => { const next = new Set(old); next.has(id) ? next.delete(id) : next.add(id); return next; }); }
+  function spotlightGate(id: string) {
+    setGateIds((old) => old.has(id) ? old : new Set(old).add(id));
+    setSpotlight(id);
+  }
   function toggleModel(id: string) { setModelIds((old) => { const next = new Set(old); next.has(id) ? next.delete(id) : next.add(id); return next; }); }
   function selectAnchor(id: string) {
     setAnchorId(id);
@@ -106,7 +113,13 @@ export default function UniversalWorkbench() {
     {showMeasuredSummary ? <MeasuredSummary onExplore={() => setShowMeasuredSummary(false)} /> : <>
     <div className="uw-warning"><strong>MEASURED · PROFILE-BACKED BOUNDED VISUALIZATION</strong> Components, stored parent sets, per-anchor S/π, and signed edges come from the completed hash-verified post-hoc artifact. The deterministic browser subset is not a dictionary-wide estimate, and first-order Taylor edges are not general causal validation.</div>
     <section className="uw-controls">
-      <div className="uw-control-group uw-gates"><label>SHARED GATES <b>{gateIds.size} selected</b>{spotlight && <em>Spotlight: {spotlight}</em>}</label><div>{data.gates.map((gate) => { const selected = gateIds.has(gate.id); const activate = () => { if (!selected) toggleGate(gate.id); setSpotlight(gate.id); }; return <button key={gate.id} aria-pressed={selected} aria-label={`${selected ? "Selected" : "Available"} gate ${gate.id}${spotlight === gate.id ? ", spotlighted" : ""}`} className={`${selected ? "selected" : "available"} ${spotlight === gate.id ? "spotlit" : ""}`} style={{ "--gate": gateColors[gate.id] } as React.CSSProperties} onClick={activate} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); activate(); } }} onDoubleClick={() => { setGateIds(new Set([gate.id])); setSpotlight(gate.id); setSelectedComponent(null); setSelectedEdge(null); }}>{gate.label}<span title={selected ? "Remove from selection" : "Add to selection"} onClick={(event) => { event.stopPropagation(); toggleGate(gate.id); if (selected && spotlight === gate.id) setSpotlight(null); }}>{selected ? "×" : "+"}</span></button>; })}</div><small className="uw-gate-color-note"><b>Color = shared-gate identity only.</b> Parent/child status appears as P/C hop badges after selecting a component.</small><button className="uw-text-button" onClick={() => { setGateIds(new Set()); setSpotlight(null); setSelectedComponent(null); setSelectedEdge(null); }}>Clear selection</button></div>
+      <div className="uw-control-group uw-gates"><label>SHARED GATES <b>{gateIds.size} selected</b>{spotlight && <em>Spotlight: {spotlight}</em>}</label>
+        <SharedGateSearch value={gateQuery} onChange={setGateQuery} onSelectFirst={() => {
+          if (matchingGates[0]) spotlightGate(matchingGates[0].id);
+        }} />
+        <div>{matchingGates.map((gate) => { const selected = gateIds.has(gate.id); const activate = () => spotlightGate(gate.id); return <button key={gate.id} aria-pressed={selected} aria-label={`${selected ? "Selected" : "Available"} gate ${gate.id}${spotlight === gate.id ? ", spotlighted" : ""}`} className={`${selected ? "selected" : "available"} ${spotlight === gate.id ? "spotlit" : ""}`} style={{ "--gate": gateColors[gate.id] } as React.CSSProperties} onClick={activate} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); activate(); } }} onDoubleClick={() => { setGateIds(new Set([gate.id])); setSpotlight(gate.id); setSelectedComponent(null); setSelectedEdge(null); }}>{gate.label}<span title={selected ? "Remove from selection" : "Add to selection"} onClick={(event) => { event.stopPropagation(); toggleGate(gate.id); if (selected && spotlight === gate.id) setSpotlight(null); }}>{selected ? "×" : "+"}</span></button>; })}</div>
+        {!matchingGates.length && <small role="status">No matching gate in this measured subset.</small>}
+        <small className="uw-gate-color-note"><b>Color = shared-gate identity only.</b> Parent/child status appears as P/C hop badges after selecting a component.</small><button className="uw-text-button" onClick={() => { setGateIds(new Set()); setSpotlight(null); setSelectedComponent(null); setSelectedEdge(null); }}>Clear selection</button></div>
       <div className="uw-control-group"><label>MODELS</label>{data.models.map((model) => <label className="uw-check" key={model.id}><input type="checkbox" checked={modelIds.has(model.id)} onChange={() => toggleModel(model.id)} />{model.label.split(" ").slice(0, 2).join(" ")}</label>)}</div>
       <div className="uw-control-group"><label htmlFor="uw-anchor">ANCHOR</label><select id="uw-anchor" aria-label="Aligned anchor" value={anchorId} onChange={(event) => selectAnchor(event.target.value)}>{data.anchors.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select><small>Measured canonical anchor identity; original text was not retained in the edge artifact.</small></div>
       <div className="uw-control-group uw-display-control"><label>DISPLAY</label><label className="uw-check"><input type="checkbox" checked={representativeOnly} onChange={(event) => setRepresentativeOnly(event.target.checked)} />Representative only</label><label className="uw-threshold-label">Minimum normalized w <output>{formatEdgeMagnitude(threshold)}</output><input aria-label="Minimum normalized edge magnitude" aria-valuetext={formatEdgeMagnitude(threshold)} type="range" min="0" max={thresholdScale.maximum || thresholdScale.step} step={thresholdScale.step} value={threshold} disabled={thresholdScale.count === 0} onChange={(event) => setThreshold(Number(event.target.value))} /></label><div className="uw-threshold-presets"><button onClick={() => setThreshold(0)}>All</button><button disabled={!thresholdScale.count} onClick={() => setThreshold(thresholdScale.median)}>≥ median</button><button disabled={!thresholdScale.count} onClick={() => setThreshold(thresholdScale.upperQuartile)}>Top 25%</button></div><small>{visibleEdges.length}/{thresholdScale.count} edges · range 0–{formatEdgeMagnitude(thresholdScale.maximum)} · step {formatEdgeMagnitude(thresholdScale.step)}</small></div>

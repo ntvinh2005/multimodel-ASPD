@@ -1,5 +1,18 @@
 import type { Component, DependencyEdge, TraceDirection, TraceResult } from "./types";
 
+export function searchSharedGates<T extends { id: string }>(gates: T[], query: string): T[] {
+  const term = query.trim().toUpperCase().replace(/^(PRE|MID)[\s:/_-]*/, "$1:");
+  if (!term) return gates;
+  const numeric = /^\d+$/.test(term);
+  // Stable sort preserves the view's existing order among equally good matches.
+  return gates.flatMap((gate) => {
+    const key = numeric ? gate.id.split(":")[1] : gate.id;
+    if (!key?.includes(term)) return [];
+    const rank = key === term ? 0 : key.startsWith(term) ? 1 : 2;
+    return [{ gate, rank }];
+  }).sort((left, right) => left.rank - right.rank).map(({ gate }) => gate);
+}
+
 export function componentsForSelection(components: Component[], gateIds: Set<string>, modelIds: Set<string>, representativeOnly: boolean) {
   return components.filter((component) => gateIds.has(component.gateId) && modelIds.has(component.modelId) && (!representativeOnly || component.representative));
 }

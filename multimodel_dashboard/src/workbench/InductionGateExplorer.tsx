@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import { CONDITIONS, CONDITION_LABEL, inductionGateDataset, type InductionContext, type InductionGate, type MeasuredInductionSplit } from "./inductionGateDataset";
 import InductionQueryGraph, { useInductionQueryGraphs, type GraphRenderer } from "./InductionQueryGraph";
+import { searchSharedGates } from "./graphQueries";
+import SharedGateSearch from "./SharedGateSearch";
 
 export type CircuitView = "natural" | "induction";
 const MODEL_LABEL: Record<string, string> = { gemma: "Gemma 2", smol: "SmolLM2", granite: "Granite 3.3" };
@@ -16,19 +18,18 @@ export default function InductionGateExplorer({ onCircuitView, Graph }: { onCirc
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"contrast" | "fires" | "beta">("contrast");
   const [selectedId, setSelectedId] = useState("");
-  const gates = useMemo(() => {
-    const normalized = query.trim().toUpperCase();
+  const sortedGates = useMemo(() => {
     const rows = split.gates.filter((gate) =>
       (site === "ALL" || gate.site === site)
-      && (!normalized || gate.id.includes(normalized))
       && (!onlyMeasured || Boolean(graphSelection?.[gate.id])),
     );
-    return [...rows].sort((left, right) => {
+    return rows.sort((left, right) => {
       if (sort === "fires") return positiveFires(right) - positiveFires(left);
       if (sort === "beta") return maxBeta(right) - maxBeta(left);
       return Math.abs(right.contrast) - Math.abs(left.contrast);
     });
-  }, [graphSelection, onlyMeasured, query, site, sort, split]);
+  }, [graphSelection, onlyMeasured, site, sort, split]);
+  const gates = useMemo(() => searchSharedGates(sortedGates, query), [sortedGates, query]);
   const selected = gates.find((gate) => gate.id === selectedId) ?? gates[0];
   const contexts = selected ? split.contexts[selected.id] ?? [] : [];
   const components = selected ? split.components[selected.id] ?? [] : [];
@@ -50,13 +51,15 @@ export default function InductionGateExplorer({ onCircuitView, Graph }: { onCirc
       <label>Split<select value={splitName} onChange={(event) => changeSplit(event.target.value as "smoke" | "discovery")}><option value="smoke">Smoke · 32 paired groups</option><option value="discovery" disabled={discovery.status !== "measured"}>Discovery {discovery.status === "measured" ? `· ${discovery.groups} paired groups` : "· running / not bundled"}</option></select></label>
       <label>Site<select value={site} onChange={(event) => setSite(event.target.value as typeof site)}><option>ALL</option><option>PRE</option><option>MID</option></select></label>
       <label>Sort<select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}><option value="contrast">|Induction − control|</option><option value="fires">Positive final-query fires</option><option value="beta">Maximum representative β</option></select></label>
-      <label>Gate search<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="PRE:1386" /></label>
       <div className="ig-run-meta"><strong>{split.gates.length.toLocaleString()}</strong><span>active gates</span><strong>{split.pools}</strong><span>BatchTopK pools</span></div>
     </section>
     <main className="ig-layout">
       <aside className="ig-gate-list" aria-label="Shared gates">
         <header>
           <div><strong>Shared gates</strong><span>showing {Math.min(250, gates.length)} / {gates.length}</span></div>
+          <SharedGateSearch value={query} onChange={setQuery} onSelectFirst={() => {
+            if (gates[0]) setSelectedId(gates[0].id);
+          }} />
           {graphSelection && <label className="ig-graph-filter">
             <input type="checkbox" checked={onlyMeasured} onChange={(event) => setOnlyMeasured(event.target.checked)} />
             With measured graphs ({Object.keys(graphSelection).length})
