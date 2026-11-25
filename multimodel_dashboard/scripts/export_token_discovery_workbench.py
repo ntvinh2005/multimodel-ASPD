@@ -47,7 +47,12 @@ def group_examples(rows):
     anchors = {}
     for row in rows:
         group, example, text = row["group_id"], row["example_id"], row["prompt"]
-        positions = row["positions"]
+        positions = []
+        for position in row["positions"]:
+            pool_id = position.get("pool_id", row.get("pool_id"))
+            if not pool_id or ("pool_id" in row and row["pool_id"] != pool_id):
+                raise ValueError(f"unresolved activation pool for {example}")
+            positions.append({**position, "pool_id": pool_id})
         boundaries = [position["character_boundary"] for position in positions]
         if not boundaries or boundaries[-1] != len(text) or sorted(set(boundaries)) != boundaries:
             raise ValueError(f"invalid canonical positions for {example}")
@@ -56,7 +61,10 @@ def group_examples(rows):
             if key in anchors or position["example_id"] != example:
                 raise ValueError(f"invalid or duplicate canonical anchor for {example}")
             anchors[key] = position
-        groups[group].append({key: row[key] for key in ("example_id", "group_id", "prompt", "condition", "positions")})
+        groups[group].append({
+            **{key: row[key] for key in ("example_id", "group_id", "prompt", "condition")},
+            "positions": positions,
+        })
     return groups, anchors
 
 
