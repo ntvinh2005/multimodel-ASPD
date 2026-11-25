@@ -133,16 +133,26 @@ export type ExpandedNegationGroup = Pick<ExpandedNegationIndex,
   "schemaVersion" | "mechanism" | "split" | "checkpointSha256" | "discoveryManifestSha256"
 > & { groupId: string; examples: ExpandedQuery[] };
 
-export async function readNegationAsset<T>(path: string, signal: AbortSignal, hash?: string): Promise<T> {
-  const response = await fetch(`${import.meta.env.BASE_URL}negation/${path}`, { signal });
-  if (!response.ok || !response.headers.get("content-type")?.includes("json")) {
-    throw new Error("This build has no measured Negation artifact at the requested path.");
+export function readNegationAsset<T>(path: string, signal: AbortSignal, hash?: string): Promise<T> {
+  return readWorkbenchAsset<T>(`negation/${path}`, signal, hash);
+}
+
+export async function readWorkbenchAsset<T>(path: string, signal: AbortSignal, hash?: string): Promise<T> {
+  const response = await fetch(`${import.meta.env.BASE_URL}${path}`, { signal });
+  const compressed = path.endsWith(".json.gz");
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!response.ok || !(compressed ? /gzip|octet-stream/.test(contentType) : contentType.includes("json"))) {
+    throw new Error("This build has no measured artifact at the requested path.");
   }
   const bytes = await response.arrayBuffer();
   if (hash && globalThis.crypto?.subtle) {
     const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))]
       .map((value) => value.toString(16).padStart(2, "0")).join("");
-    if (digest !== hash) throw new Error("Negation artifact hash mismatch.");
+    if (digest !== hash) throw new Error("Measured artifact hash mismatch.");
+  }
+  if (compressed) {
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+    return JSON.parse(await new Response(stream).text()) as T;
   }
   return JSON.parse(new TextDecoder().decode(bytes)) as T;
 }

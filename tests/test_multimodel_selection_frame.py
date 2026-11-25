@@ -1,6 +1,11 @@
 from collections import defaultdict
+from pathlib import Path
+
+import pytest
 
 from aspd.multimodel.cli.benchmark_token_dependencies import benchmark_batches, component_requests
+from aspd.multimodel.cli.measure_token_dependency_shard import plan_batches, validate_cached
+from aspd.multimodel.posthoc.artifacts import sha256_file, write_json
 from aspd.multimodel.posthoc.ids import MatrixId
 from aspd.multimodel.v3.selection_frame import CONDITIONS, examples
 
@@ -42,3 +47,25 @@ def test_benchmark_requests_all_active_components_at_exact_nonfinal_positions():
     assert {component.key for _, component in requests} == {
         "gemma.L09.q/44", "gemma.L10.k/44", "smol.L08.mlp_up/44", "smol.L08.mlp_up/63",
     }
+
+
+def test_deterministic_shards_and_resume_integrity(tmp_path: Path):
+    population = [{"example_id": str(doc), "anchor_id": f"{doc}/{tok}"}
+                  for doc, size in enumerate((2, 5, 1, 4, 3)) for tok in range(size)]
+    batches = list(plan_batches(population))
+    assert batches == list(plan_batches(population))
+    assert sorted(row["anchor_id"] for batch in batches for row in batch) == sorted(
+        row["anchor_id"] for row in population
+    )
+    assert all(1 <= len({row["example_id"] for row in batch}) == len(batch) <= 4 for batch in batches)
+    path, marker = tmp_path / "batch.gz", tmp_path / "complete.json"
+    path.write_bytes(b"sample")
+    contract = {"checkpoint": "verified"}
+    assert not validate_cached(0, batches[0], path, marker, contract)
+    write_json(marker, {"batch": 0, "anchors": [row["anchor_id"] for row in batches[0]],
+                        "contract": contract, "sha256": sha256_file(path)})
+    assert validate_cached(0, batches[0], path, marker, contract)
+    with pytest.raises(ValueError, match="cache integrity"):
+        validate_cached(0, batches[0], path, marker, {"checkpoint": "different"})
+    with pytest.raises(ValueError, match="cache integrity"):
+        validate_cached(0, batches[1], path, marker, contract)

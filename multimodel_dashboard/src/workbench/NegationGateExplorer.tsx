@@ -3,8 +3,10 @@ import { CircuitSelect, type CircuitView } from "./InductionGateExplorer";
 import { QueryGraphPanel, type GraphRenderer } from "./InductionQueryGraph";
 import { searchSharedGates } from "./graphQueries";
 import SharedGateSearch from "./SharedGateSearch";
-import { NotesLocatorCell, ResearchGateLabel, ResearchNotesEditor, ResearchNotesLibrary } from "./ResearchNotes";
-import { noteKey, notesForGate, type NoteTarget } from "./researchNotes";
+import { ResearchGateLabel, ResearchNotesEditor, ResearchNotesLibrary } from "./ResearchNotes";
+import { notesForGate } from "./researchNotes";
+import ComponentBetaLocator from "./ComponentBetaLocator";
+import TokenCircuitExplorer from "./TokenCircuitExplorer";
 import {
   activationAt, CONDITION_OUTCOMES, expandedAtFinalQuery, FAMILY_LABELS, graphAtFinalQuery,
   matchesExpandedDiscovery, MODEL_IDS, MODEL_NAMES,
@@ -49,7 +51,8 @@ export default function NegationGateExplorer({ onCircuitView, Graph }: {
         <p>Explore matched polarity and scope controls, gate activations, and final-query dependencies.</p></div>
       <div className="uw-header-actions"><ResearchNotesLibrary /><CircuitSelect value="negation" onChange={onCircuitView} /></div>
     </header>
-    {index ? <NegationPanel index={index} Graph={Graph} />
+    {index ? <><TokenCircuitExplorer checkpoint={index.checkpointSha256} Graph={Graph} initial="negation-discovery" />
+      <NegationPanel index={index} Graph={Graph} /></>
       : <p className="uw-empty" role="status">{error ?? "Loading measured Negation data…"}</p>}
   </div>;
 }
@@ -282,7 +285,7 @@ function NegationPanel({ index, Graph }: { index: NegationIndex; Graph: GraphRen
           </> : <p className="uw-empty" role="status">{groupAsset?.error ?? (groupOptions.length
             ? "Loading matched examples…" : "No activation contexts match this selection.")}</p>}
         </section>
-        <NegationBetaLocator key={gate.id} gate={gate.id} checkpoint={index.checkpointSha256}
+        <ComponentBetaLocator key={gate.id} gate={gate.id} checkpoint={index.checkpointSha256}
           matrices={locator?.data?.mechanism === "negation" ? locator.data.matrices : undefined}
           evidenceReference={noteReference} error={locator?.error} />
       </section> : <p className="uw-empty">No gates match these filters.</p>}
@@ -364,28 +367,4 @@ function SequenceHeatmap({ example, gate, scale }: { example: NegationExample; g
       </span>;
     })}</p>
   </div>;
-}
-
-function NegationBetaLocator({ gate, checkpoint, matrices, evidenceReference, error }: {
-  gate: string; checkpoint: string; matrices?: MatrixLocator[]; evidenceReference?: string; error?: string;
-}) {
-  const [target, setTarget] = useState<NoteTarget>();
-  const [site, index] = gate.split(":");
-  const feature = Number(index);
-  return <section className="ig-beta">
-    <header><div><span className="uw-eyebrow">IMPORTED NATURAL-VALIDATION β</span><h3>Model-specific component locator</h3></div>
-      <p>All component cells for this site. White insets mark the frozen β representatives.</p></header>
-    {matrices ? <div className="ig-beta-models">{MODEL_IDS.map((model) => <div key={model}>
-      <strong>{MODEL_NAMES[model]}</strong><div className="ig-beta-grid">{matrices.filter((matrix) => matrix.model === model && matrix.site === site).map((row) => {
-        const beta = row.beta[feature];
-        return <NotesLocatorCell key={`${row.layer}/${row.matrix}`} beta={beta} representative={row.representatives.includes(feature)}
-          title={`L${row.layer}/${row.matrix} · β ${numeric(beta)}`}
-          target={{ checkpoint, gateId: gate, scope: "component", modelId: model, layer: row.layer, matrix: row.matrix }}
-          onSelect={setTarget}>
-          <small>L{row.layer}</small><b>{row.matrix}</b>
-        </NotesLocatorCell>;
-      })}</div>
-    </div>)}</div> : <p className="ig-graph-status" role="status">{error ?? "Loading reference β…"}</p>}
-    {target && <ResearchNotesEditor key={noteKey(target)} targets={[target]} evidenceReference={evidenceReference} openByDefault />}
-  </section>;
 }

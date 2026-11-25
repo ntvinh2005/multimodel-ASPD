@@ -143,7 +143,8 @@ export default function InductionQueryGraph({ gate, bundle, Graph }: {
   </section>;
 }
 
-export function QueryGraphPanel({ graph, model, Graph, onExploreGate, traceTargets, gateId, annotationCheckpoint, evidenceReference }: {
+export function QueryGraphPanel({ graph, model, Graph, onExploreGate, traceTargets, gateId, annotationCheckpoint, evidenceReference,
+  completeComponents = false, anchorLabel = "FINAL QUERY" }: {
   graph: QueryGraph;
   model: (typeof MODELS)[number];
   Graph: GraphRenderer;
@@ -152,14 +153,18 @@ export function QueryGraphPanel({ graph, model, Graph, onExploreGate, traceTarge
   gateId: string;
   annotationCheckpoint?: string;
   evidenceReference?: string;
+  completeComponents?: boolean;
+  anchorLabel?: string;
 }) {
   const [selectedComponent, setComponent] = useState<string | null>(null);
   const [selectedEdge, setEdge] = useState<string | null>(null);
   const [threshold, setThreshold] = useState(0);
   const [expanded, setExpanded] = useState<string[]>([]);
+  const [allGateComponents, setAllGateComponents] = useState(false);
   const parents = graph.models[model];
   if (!parents) return <p className="uw-empty">Missing graph artifact for {MODEL_LABELS[model]}.</p>;
-  if (parents.status === "no_reference_representatives") {
+  const hasRepresentatives = parents.status !== "no_reference_representatives";
+  if (!hasRepresentatives && !completeComponents) {
     return <p className="uw-empty">This gate fired but {MODEL_LABELS[model]} has no frozen β representative for it.</p>;
   }
   const components = new Map<string, Component>();
@@ -167,9 +172,13 @@ export function QueryGraphPanel({ graph, model, Graph, onExploreGate, traceTarge
   const measuredNorms = new Map<string, { contribution: number; scale?: number }>();
   const edges: DependencyEdge[] = [];
   const officialIds = new Set(parents.targets.map((target) => target.component.id));
+  const displayedIds = new Set([...officialIds, ...expanded]);
+  if (completeComponents && (allGateComponents || !hasRepresentatives)) {
+    for (const [id, value] of traceTargets ?? []) if (value.target.component.gateId === gateId) displayedIds.add(id);
+  }
   const targets = [
     ...parents.targets.map((target) => ({ target, representative: true })),
-    ...expanded.flatMap((id) => {
+    ...[...displayedIds].flatMap((id) => {
       const entry = traceTargets?.get(id);
       return entry && !officialIds.has(id) ? [entry] : [];
     }),
@@ -208,10 +217,18 @@ export function QueryGraphPanel({ graph, model, Graph, onExploreGate, traceTarge
   const isUpstream = node && edges.some((item) => item.source === node.id);
   const targetRecorded = node && traceTargets?.has(node.id);
   const edgeTrace = edge && !officialIds.has(edge.target) ? traceTargets?.get(edge.target) : undefined;
+  const children = node && completeComponents ? [...(traceTargets ?? [])].flatMap(([id, record]) => {
+    if (displayedIds.has(id)) return [];
+    const incoming = record.target.parents.find((parent) => parent.component.id === node.id);
+    return incoming ? [{ id, weight: incoming.w }] : [];
+  }).sort((a, b) => b.weight - a.weight || a.id.localeCompare(b.id)) : [];
   return <div className="uw-main iq-main">
     <section className="uw-graph-area">
       <div className="uw-graph-toolbar">
         <button onClick={() => { setComponent(null); setEdge(null); setThreshold(0); setExpanded([]); }}>Restore graph</button>
+        {completeComponents && hasRepresentatives && <label>
+          <input type="checkbox" checked={allGateComponents} onChange={(event) => setAllGateComponents(event.target.checked)} /> All components for {gateId}
+        </label>}
         <span>{components.size} components · {visibleEdges.length}/{edges.length} parent edges shown</span>
       </div>
       <div className="iq-edge-filter">
@@ -240,7 +257,7 @@ export function QueryGraphPanel({ graph, model, Graph, onExploreGate, traceTarge
         : "No parent passed the strict |E| threshold at this anchor."}</p>}
     </section>
     <aside className="uw-inspector uw-detail">
-      <span className="uw-eyebrow">FINAL QUERY · SAME-ANCHOR PARENTS</span>
+      <span className="uw-eyebrow">{anchorLabel} · SAME-ANCHOR PARENTS</span>
       <h2>{edge ? "Selected dependency" : node?.gateId ?? "Parent summary"}</h2>
       {edge && <dl><dt>From</dt><dd>{edge.source}</dd><dt>To</dt><dd>{edge.target}</dd><dt>Signed E</dt><dd>{number(edge.signedEffect)}</dd><dt>Normalized w</dt><dd>{number(edge.normalizedMagnitude)}</dd></dl>}
       {edgeTrace && <p>{edgeTrace.representative ? "Expanded representative dependency" : "Supplemental component dependency"}</p>}
@@ -253,16 +270,20 @@ export function QueryGraphPanel({ graph, model, Graph, onExploreGate, traceTarge
         openByDefault={Boolean(node)}
       />}
       {node && onExploreGate && <button type="button" onClick={() => onExploreGate(node.gateId)}>Explore {node.gateId} on this example</button>}
-      {node && isUpstream && traceTargets && !officialIds.has(node.id) && !expanded.includes(node.id)
+      {node && isUpstream && traceTargets && !displayedIds.has(node.id)
         && (targetRecorded ? <button type="button" onClick={() => setExpanded([...expanded, node.id])}>
           Expand this component’s measured parents
         </button> : <p>No parent measurement is cached for this exact component and anchor.</p>)}
-      {expanded.length > 0 && <p>The summary below uses the selected gate’s representatives. Expanded component edges are shown in the graph.</p>}
-      <p>Parent strength M = <b>{number(parents.strength)}</b> · stored parent set</p>
+      {children.length > 0 && <button type="button" onClick={() => setExpanded([...expanded, ...children.slice(0, 12).map((item) => item.id)])}>
+        Expand measured children ({Math.min(12, children.length)} of {children.length})
+      </button>}
+      {(expanded.length > 0 || allGateComponents) && <p>The summary below uses the selected gate’s representatives. Expanded component edges are shown in the graph.</p>}
+      {hasRepresentatives ? <p>Parent strength M = <b>{number(parents.strength)}</b> · stored parent set</p>
+        : <p>Representative parent distribution unavailable for {MODEL_LABELS[model]}. Exact component measurements appear in the graph.</p>}
       {parents.distribution && <dl>{Object.entries(parents.distribution).sort((left, right) => right[1] - left[1]).map(([id, value]) =>
         <DistributionRow key={id} gate={id} value={value} score={parents.scores?.[id]} onExploreGate={onExploreGate} />
       )}</dl>}
-      {!parents.distribution && <p>Parent distribution undefined at zero total strength.</p>}
+      {hasRepresentatives && !parents.distribution && <p>Parent distribution undefined at zero total strength.</p>}
       <p>Cross-model comparisons at this anchor</p>
       <dl>{graph.comparisons.map((pair) => <ComparisonRow key={pair.models.join("/")} pair={pair} />)}</dl>
     </aside>

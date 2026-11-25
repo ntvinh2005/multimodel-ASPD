@@ -5,6 +5,7 @@ import { searchSharedGates } from "./graphQueries";
 import SharedGateSearch from "./SharedGateSearch";
 import { NotesLocatorCell, ResearchGateLabel, ResearchNotesEditor, ResearchNotesLibrary } from "./ResearchNotes";
 import { noteKey, notesForGate, type NoteTarget } from "./researchNotes";
+import TokenCircuitExplorer from "./TokenCircuitExplorer";
 
 export type CircuitView = "natural" | "induction" | "negation";
 const MODEL_LABEL: Record<string, string> = { gemma: "Gemma 2", smol: "SmolLM2", granite: "Granite 3.3" };
@@ -49,6 +50,7 @@ export default function InductionGateExplorer({ onCircuitView, Graph }: { onCirc
       <div className="uw-header-actions"><ResearchNotesLibrary /><CircuitSelect value="induction" onChange={onCircuitView} /></div>
     </header>
     <div className="uw-warning"><strong>MEASURED · NO CIRCUIT CLAIM</strong>{inductionGateDataset.scientificBoundary}</div>
+    <TokenCircuitExplorer checkpoint={inductionCheckpointManifest} Graph={Graph} initial="induction-discovery" />
     <section className="ig-toolbar">
       <label>Split<select value={splitName} onChange={(event) => changeSplit(event.target.value as "smoke" | "discovery")}><option value="smoke">Smoke · 32 paired groups</option><option value="discovery" disabled={discovery.status !== "measured"}>Discovery {discovery.status === "measured" ? `· ${discovery.groups} paired groups` : "· running / not bundled"}</option></select></label>
       <label>Site<select value={site} onChange={(event) => setSite(event.target.value as typeof site)}><option>ALL</option><option>PRE</option><option>MID</option></select></label>
