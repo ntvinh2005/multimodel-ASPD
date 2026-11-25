@@ -12,12 +12,15 @@ type ModelParents = {
   targets: Array<{
     component: QueryComponent;
     coefficient: number;
+    contributionNorm?: number;
+    outputScale?: number;
     parents: Array<{ component: QueryComponent; E: number; w: number }>;
   }>;
   strength: number;
   distribution: Record<string, number> | null;
+  scores?: Record<string, number>;
 };
-type QueryGraph = {
+export type QueryGraph = {
   anchorId: string;
   activation: number;
   models: Record<string, ModelParents>;
@@ -132,10 +135,11 @@ export default function InductionQueryGraph({ gate, bundle, Graph }: {
   </section>;
 }
 
-function QueryGraphPanel({ graph, model, Graph }: {
+export function QueryGraphPanel({ graph, model, Graph, onExploreGate }: {
   graph: QueryGraph;
   model: (typeof MODELS)[number];
   Graph: GraphRenderer;
+  onExploreGate?: (gate: string) => void;
 }) {
   const [selectedComponent, setComponent] = useState<string | null>(null);
   const [selectedEdge, setEdge] = useState<string | null>(null);
@@ -144,11 +148,15 @@ function QueryGraphPanel({ graph, model, Graph }: {
   if (!parents) return <p className="uw-empty">Missing graph artifact for {MODEL_LABELS[model]}.</p>;
   const components = new Map<string, Component>();
   const coefficients = new Map<string, number>();
+  const measuredNorms = new Map<string, { contribution: number; scale?: number }>();
   const edges: DependencyEdge[] = [];
   for (const target of parents.targets) {
     const id = target.component.id;
     components.set(id, { ...target.component, representative: true });
     coefficients.set(id, target.coefficient);
+    if (target.contributionNorm !== undefined) {
+      measuredNorms.set(id, { contribution: target.contributionNorm, scale: target.outputScale });
+    }
     for (const parent of target.parents) {
       const source = parent.component.id;
       if (!components.has(source)) components.set(source, { ...parent.component, representative: false });
@@ -169,6 +177,7 @@ function QueryGraphPanel({ graph, model, Graph }: {
   const visibleEdges = edgesForAnchor(edges, graph.anchorId, new Set(components.keys()), threshold);
   const trace = selectedComponent ? traceGraph(visibleEdges, selectedComponent, "both", 1) : null;
   const node = selectedComponent ? components.get(selectedComponent) : null;
+  const norm = selectedComponent ? measuredNorms.get(selectedComponent) : undefined;
   const edge = visibleEdges.find((item) => item.id === selectedEdge);
   return <div className="uw-main iq-main">
     <section className="uw-graph-area">
@@ -205,18 +214,27 @@ function QueryGraphPanel({ graph, model, Graph }: {
       <h2>{edge ? "Selected dependency" : node?.gateId ?? "Parent summary"}</h2>
       {edge && <dl><dt>From</dt><dd>{edge.source}</dd><dt>To</dt><dd>{edge.target}</dd><dt>Signed E</dt><dd>{number(edge.signedEffect)}</dd><dt>Normalized w</dt><dd>{number(edge.normalizedMagnitude)}</dd></dl>}
       {node && <dl><dt>Component</dt><dd>{node.id}</dd><dt>Reference β</dt><dd>{number(node.beta)}</dd><dt>Coefficient e</dt><dd>{number(coefficients.get(node.id) ?? null)}</dd></dl>}
+      {norm && <dl><dt>Contribution ‖Δy‖</dt><dd>{number(norm.contribution)}</dd><dt>Reference σ</dt><dd>{number(norm.scale ?? null)}</dd></dl>}
+      {node && onExploreGate && <button type="button" onClick={() => onExploreGate(node.gateId)}>Explore {node.gateId} on this example</button>}
       <p>Parent strength M = <b>{number(parents.strength)}</b> · stored parent set</p>
       {parents.distribution && <dl>{Object.entries(parents.distribution).sort((left, right) => right[1] - left[1]).map(([id, value]) =>
-        <DistributionRow key={id} gate={id} value={value} />
+        <DistributionRow key={id} gate={id} value={value} score={parents.scores?.[id]} onExploreGate={onExploreGate} />
       )}</dl>}
+      {!parents.distribution && <p>Parent distribution undefined at zero total strength.</p>}
       <p>Cross-model comparisons at this anchor</p>
       <dl>{graph.comparisons.map((pair) => <ComparisonRow key={pair.models.join("/")} pair={pair} />)}</dl>
     </aside>
   </div>;
 }
 
-function DistributionRow({ gate, value }: { gate: string; value: number }) {
-  return <><dt>{gate}</dt><dd>π {number(value)}</dd></>;
+function DistributionRow({ gate, value, score, onExploreGate }: {
+  gate: string;
+  value: number;
+  score?: number;
+  onExploreGate?: (gate: string) => void;
+}) {
+  return <><dt>{onExploreGate ? <button type="button" onClick={() => onExploreGate(gate)}>{gate}</button> : gate}</dt>
+    <dd>π {number(value)}{score !== undefined && <> · S {number(score)}</>}</dd></>;
 }
 
 function ComparisonRow({ pair }: { pair: QueryGraph["comparisons"][number] }) {

@@ -26,3 +26,33 @@ Use stored natural gate support and exact canonical input from the matched disco
 Induction baseline is `b8228fc9f4146f4675f55d5c79e6de24da2b578e`. The measured-workbench branch resolves to `2c7233e`, while GitHub main resolves to `a1ec76b`. The expected PDF is absent from those local tracked paths; the checked-in formulation map, decisions, thresholds and training/evaluation configs define the implementation contract.
 
 The Induction discovery and graph jobs peaked around 63 and 56 decimal GB of GPU allocation respectively. Use one B200 per stage with 32 GiB of host RAM. Estimate 5–15 minutes for the smoke, 12–25 minutes for discovery, and 5–15 minutes for targeted graphs, excluding queue time. Budget 1 GiB for preparation, sparse raw records and frontend exports combined at this scope. These are estimates until the measured resource manifests are produced. Run native evaluation before ASPD on the same smoke job. Continue only when exact anchor native scoring and frozen natural gate validation succeed.
+
+## Reproduction
+
+Run the following from the Negation checkout root. Use exclusive output paths for every stage.
+
+```bash
+PY=/blue/thai/share/multimodel-ASPD/repo/.venv/bin/python
+CONFIG=configs/multimodel/aspd_v3/negation_mechanism_eval_v1.yaml
+export HF_HOME=/blue/thai/vinhnguyen1/multimodel-ASPD/cache/huggingface
+export TOKENIZERS_PARALLELISM=false
+"$PY" -m aspd.multimodel.cli.prepare_aspd_v3_negation --config "$CONFIG" --output "$PREPARATION"
+
+# Use the recorded compute Git revisions, or set REVISION to the exact approved rerun revision.
+sbatch --export=ALL,REPO="$PWD",REVISION="$REVISION",PREPARATION="$PREPARATION",OUTPUT="$SMOKE",STAGE=smoke slurm/multimodel/aspd_v3_negation.sbatch
+# After verifying SMOKE/COMPLETE and the behavioral results:
+sbatch --export=ALL,REPO="$PWD",REVISION="$REVISION",PREPARATION="$PREPARATION",SMOKE="$SMOKE",OUTPUT="$DISCOVERY",STAGE=discovery slurm/multimodel/aspd_v3_negation.sbatch
+# After validating the discovery manifest:
+"$PY" -m aspd.multimodel.cli.measure_negation_query --plan-only --config "$CONFIG" --preparation "$PREPARATION" --discovery "$DISCOVERY" --output "$GRAPHS"
+sbatch --export=ALL,REPO="$PWD",REVISION="$REVISION",PREPARATION="$PREPARATION",DISCOVERY="$DISCOVERY",OUTPUT="$GRAPHS",STAGE=graphs slurm/multimodel/aspd_v3_negation.sbatch
+
+# In a clean copy without a previously exported Negation asset directory:
+PYTHONPATH=. "$PY" multimodel_dashboard/scripts/export_negation_workbench.py \
+  --config "$CONFIG" --smoke "$SMOKE" --discovery "$DISCOVERY" --graphs "$GRAPHS" \
+  --output multimodel_dashboard/public/negation
+cd multimodel_dashboard
+npm test
+npm run build
+```
+
+Preparation contains the full frozen native tokenizations and marked canonical anchor identities. Each measured split contains `native_predictions.jsonl`, `behavior_summary.json`, `anchor_activations.jsonl`, `activation_examples.jsonl`, `component_contributions.jsonl`, `gate_summary.json`, `pools.json`, and a hash-checked manifest. Sparse direct component rows in the smoke cover a small diagnostic subset. Targeted discovery graphs include coefficients and contribution norms for their active representative targets. A browser group asset contains all combinations in that exact group alongside any measured graphs for its individual examples; its path and hash are recorded in the frontend index.

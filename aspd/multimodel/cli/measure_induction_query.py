@@ -239,6 +239,9 @@ def _bundle_graph(gate, row, results, norms, representatives, importance):
                 {
                     "component": _describe_component(rep, importance),
                     "coefficient": results[anchor][rep][0],
+                    "writeNorm": norms[rep],
+                    "outputScale": sigmas[rep],
+                    "contributionNorm": abs(results[anchor][rep][0]) * norms[rep],
                     "parents": [
                         {
                             "component": _describe_component(p.component, importance),

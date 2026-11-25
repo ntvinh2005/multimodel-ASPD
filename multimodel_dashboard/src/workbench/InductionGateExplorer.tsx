@@ -4,7 +4,7 @@ import InductionQueryGraph, { useInductionQueryGraphs, type GraphRenderer } from
 import { searchSharedGates } from "./graphQueries";
 import SharedGateSearch from "./SharedGateSearch";
 
-export type CircuitView = "natural" | "induction";
+export type CircuitView = "natural" | "induction" | "negation";
 const MODEL_LABEL: Record<string, string> = { gemma: "Gemma 2", smol: "SmolLM2", granite: "Granite 3.3" };
 
 export default function InductionGateExplorer({ onCircuitView, Graph }: { onCircuitView: (value: CircuitView) => void; Graph: GraphRenderer }) {
@@ -96,6 +96,7 @@ export function CircuitSelect({ value, onChange }: { value: CircuitView; onChang
     <select aria-label="Circuit or evaluation view" value={value} onChange={(event) => onChange(event.target.value as CircuitView)}>
       <option value="natural">Natural validation · measured dependencies</option>
       <option value="induction">Induction · shared gates and measured graphs</option>
+      <option value="negation">Negation · shared gates and measured graphs</option>
     </select>
     <small>Changing view does not reuse edges across datasets.</small>
   </label>;

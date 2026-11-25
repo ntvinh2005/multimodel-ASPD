@@ -4,6 +4,7 @@ import { activationOpacity, activationWindow, DEFAULT_GRAPH_VIEWBOX, edgeThresho
 import { formatBytes, measuredValidationArtifact, modelPairLabel } from "./measuredArtifact";
 import { measuredWorkbenchDataset as data } from "./measuredDataset";
 import InductionGateExplorer, { CircuitSelect, type CircuitView } from "./InductionGateExplorer";
+import NegationGateExplorer from "./NegationGateExplorer";
 import SharedGateSearch from "./SharedGateSearch";
 import type { Component, DependencyEdge, ResearchHypothesis, TraceDirection } from "./types";
 import "./workbench.css";
@@ -103,6 +104,7 @@ export default function UniversalWorkbench() {
   }
 
   if (circuitView === "induction") return <InductionGateExplorer onCircuitView={setCircuitView} Graph={ModelGraph} />;
+  if (circuitView === "negation") return <NegationGateExplorer onCircuitView={setCircuitView} Graph={ModelGraph} />;
 
   return <div className="uw-shell">
     <header className="uw-header">

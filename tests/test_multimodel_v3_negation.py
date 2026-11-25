@@ -2,6 +2,9 @@ from collections import Counter
 
 import pytest
 
+from aspd.multimodel.cli.measure_negation_query import select_shortlist
+from aspd.multimodel.posthoc.ids import GateId
+from aspd.multimodel.v3.induction import MODEL_ORDER
 from aspd.multimodel.v3.negation import (
     FACTORIAL,
     build_group,
@@ -77,3 +80,42 @@ def test_behavior_preserves_fixed_orientation_and_failure_prerequisite():
         failure_class({**negative, **n}, {**a, "exact_correct": False})
         == "affirmative_task_failure"
     )
+
+
+def test_shortlist_includes_both_contrast_directions_and_across_conditions():
+    rows = {}
+    for family in ("binary", "attribute"):
+        for index in range(2):
+            group_id = f"{family}-{index}"
+            for condition in FACTORIAL:
+                negative = condition in {"negative", "counterfactual_negative"}
+                active = {"active_gate_ids": [int(negative), 2], "values": [0.25, 0.5]}
+                rows[f"{group_id}/{condition}"] = {
+                    "group_id": group_id,
+                    "condition": condition,
+                    "family": family,
+                    "pool_id": group_id,
+                    "pre": active,
+                    "mid": active,
+                }
+    reps = {
+        (GateId(site, feature), model): (object(),)
+        for site in ("pre", "mid")
+        for model in MODEL_ORDER
+        for feature in range(3)
+    }
+    policy = {
+        "minimum_qualifying_groups": 4,
+        "minimum_qualifying_families": 2,
+        "groups_per_gate": 4,
+        "gates_per_site": {"negative": 2, "affirmative": 2, "across": 2},
+        "seed": 0,
+    }
+    selection, _, _ = select_shortlist(rows, reps, policy)
+    assert len(selection) == 6
+    for site in ("pre", "mid"):
+        assert [selection[GateId(site, feature)]["kind"] for feature in range(3)] == [
+            "affirmative",
+            "negative",
+            "across",
+        ]
