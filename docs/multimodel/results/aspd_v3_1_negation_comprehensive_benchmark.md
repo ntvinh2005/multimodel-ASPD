@@ -41,7 +41,25 @@ The four-group plan uses the lower median by representative target count within 
 | `scope-0008` | 207 | 1,688 |
 | Total | 815 | 6,616 |
 
-With the benchmark group cached, a single job would measure 4,925 additional representative targets and pay model initialization once. Extrapolating from the one measured group, allow **6–8 minutes on one B200 (0.10–0.13 GPU-h), excluding queue time**. Plan on approximately the same GPU and host peaks with groups processed sequentially and request 32 GiB host memory. The four-group raw export, shared cache and frontend addon should total about 67 MB. Allow approximately 90 MB for those artifacts including preservation of the benchmark and its CPU replay, excluding the base dashboard build. The estimate covers representative targets and existing supplemental records. Further recursive targets depend on which parents are requested. Scaling is pending researcher approval.
+With the benchmark group cached, a single job would measure 4,925 additional representative targets and pay model initialization once. The benchmark estimate was **6–8 minutes on one B200 (0.10–0.13 GPU-h), excluding queue time**. The proposed allocation requested 32 GiB host memory. The estimated four-group raw export, shared cache and frontend addon totaled about 67 MB. The estimate covered representative targets and existing supplemental records. Further recursive targets depend on which parents are requested.
+
+## Approved four-group run
+
+Slurm job `52792763` completed with exit code `0:0` in **5 min 11 s on one B200 (0.086 GPU-h)**. It measured all 4,925 new representative targets and reused all 1,691 representative targets and 12 supplemental targets in the benchmark cache. The exported benchmark group is byte-identical to its original artifact.
+
+| Group | Active gate–anchor pairs | Representative targets | Parent edges | Active gate–anchor–model slots without β representatives |
+|---|---:|---:|---:|---:|
+| `attribute-0005` | 198 | 1,580 | 14,030 | 53 |
+| `binary-0032` | 202 | 1,657 | 14,840 | 46 |
+| `multiple-0026` | 208 | 1,691 | 15,170 | 54 |
+| `scope-0008` | 207 | 1,688 | 15,230 | 44 |
+| **Total** | **815** | **6,616** | **59,270** | **197** |
+
+The four groups contain 16 final-query anchors and 126 distinct active PRE/MID gates. Of the 6,616 measured representative targets, 689 have empty parent sets. Across all models, 197 of 2,445 active gate–anchor–model slots lack a frozen representative and are marked unavailable. The 12 non-representative targets and their 60 edges are from `multiple-0026`. Other groups support recursive exploration where the exact upstream component was itself measured as a representative. An unmeasured non-representative parent requires a targeted request.
+
+Backend initialization took 255.52 s. Measuring and caching the three new groups took 32.24 s in total. Peak allocated GPU memory was 52.44 GiB, peak reserved GPU memory was 52.49 GiB and peak process RSS was 5.82 GiB. The raw group exports total 42.56 MB and the shared SQLite cache is 5.51 MB.
+
+The raw four-group run and manifest are in `comprehensive-four-groups-edbeb9f/`. The verified static deployment is in `comprehensive-four-groups-edbeb9f-workbench/`, under the same artifact root below. The expanded addon is 17.44 MB. Its index points the benchmark group to its original GPU job and the three new groups to job `52792763`. The frontend data loader accepted the measured records for each active gate, anchor and model. All 166 base build files matched the benchmark deployment byte for byte. The 60 Python tests, 25 frontend tests and TypeScript check were rerun successfully. In the Workbench, use **Negation → Dependency coverage → Comprehensive groups** to select one of the four groups.
 
 ## Verification and access
 
