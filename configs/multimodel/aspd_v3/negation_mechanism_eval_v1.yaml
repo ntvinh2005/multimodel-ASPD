@@ -1,0 +1,18 @@
+schema_version: 1
+experiment_id: aspd_v3_1_negation_mechanism_eval_v1
+seed: 381419
+reference_contract: configs/multimodel/aspd_v3/induction_mechanism_eval_v1.yaml
+reference_contract_sha256: ffb7465dc4225a0af966d5c3f29c95746be117954d55de463857203e96258d77
+checkpoint_step: 61036
+dataset:
+  split_groups: {smoke: 32, discovery: 128, heldout: 256}
+  families: [binary, attribute, multiple, scope]
+  max_sequence_tokens: 128
+graph:
+  gates_per_site: {negative: 2, affirmative: 2, across: 2}
+  groups_per_gate: 8
+  minimum_qualifying_groups: 4
+  minimum_qualifying_families: 2
+  seed: 712931
+  k_par: 10
+  tau: 0

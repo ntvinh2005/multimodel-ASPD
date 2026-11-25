@@ -505,7 +505,9 @@ def _alignment_payload(alignment: AlignmentResult) -> dict[str, Any]:
     }
 
 
-def task_pool_from_verified(records: Sequence[Mapping[str, Any]]) -> AlignedAnchorPool:
+def task_pool_from_verified(
+    records: Sequence[Mapping[str, Any]], *, mechanism: str = "induction",
+) -> AlignedAnchorPool:
     """Convert verified examples into one pool fragment containing every shared anchor."""
 
     if not records:
@@ -535,7 +537,7 @@ def task_pool_from_verified(records: Sequence[Mapping[str, Any]]) -> AlignedAnch
         observations.append(
             {
                 "document_id": str(example["example_id"]),
-                "source_group": f"induction/{example['split']}/{example['family']}/{example['condition']}",
+                "source_group": f"{mechanism}/{example['split']}/{example['family']}/{example['condition']}",
                 "canonical_text": str(example["prompt"]),
                 "anchor_character_boundaries": boundaries,
                 "example": dict(example),
