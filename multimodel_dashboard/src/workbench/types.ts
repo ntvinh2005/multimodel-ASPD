@@ -31,6 +31,8 @@ export interface DatasetManifest {
       anchorId: string;
       displayParentGateIds: string[];
       edgeShard: string;
+      discoveryGateIds?: string[];
+      edgeShardsByTargetGate?: Record<string, string>;
     }>;
     sourceHashes: Record<string, unknown>;
     parentBackend?: {

@@ -1,3 +1,5 @@
+@import "./workbenchDialog.css";
+
 .uw-shell .rn-editor {
   margin: .75rem 0;
   border: 1px solid #d9e0e8;
@@ -64,11 +66,8 @@
   overflow: auto;
   border: 1px solid #a7b7c8;
   border-radius: 8px;
-  background: #fff;
-  color: #172033;
   box-shadow: 0 12px 48px #0f172a30;
 }
-.rn-library::backdrop { background: #0f172a66; }
 .rn-library header { display: flex; justify-content: space-between; align-items: start; gap: .5rem; }
 .rn-library h2 { margin: 0; font: 600 1.35rem Georgia, serif; }
 .rn-library-actions, .rn-library-filters { display: flex; flex-wrap: wrap; gap: .6rem; margin: .8rem 0; }
@@ -79,7 +78,29 @@
 .rn-table :is(td, th) { padding: .45rem; vertical-align: top; border-bottom: 1px solid #d9e0e8; font-size: .78rem; overflow-wrap: anywhere; }
 .rn-table th small { display: block; margin-top: .24rem; font-weight: 400; }
 .rn-table td:nth-child(3) { min-width: 8rem; max-width: 24rem; white-space: pre-wrap; }
+.rn-table .rn-open-graph { margin: .3rem 0 0 .45rem; white-space: nowrap; }
 .rn-library-note { margin-top: 1rem; padding: .65rem; border: 1px solid #d9e0e8; border-radius: 6px; }
 .rn-locator-cell { cursor: pointer; position: relative; }
 .rn-locator-cell .rn-dot { position: absolute; top: 2px; right: 2px; width: 4px; height: 4px; }
 .rn-locator-cell:focus-visible { outline: 2px solid #54428f; outline-offset: 1px; }
+.rn-circuit-links {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 14px;
+}
+.rn-circuit-links h3 { margin: 0; font-size: 13px; }
+.rn-circuit-links details {
+  padding: 7px 8px;
+  border: 1px solid #d9e0e8;
+  border-radius: 4px;
+  background: #f8fafc;
+  font-size: 12px;
+}
+.rn-circuit-links summary { cursor: pointer; }
+.rn-circuit-links ul { padding-left: 16px; }
+.rn-circuit-links li + li { margin-top: 8px; }
+.rn-circuit-links .rn-circuit-path {
+  display: block;
+  overflow-wrap: anywhere;
+  margin: 2px 0;
+}

@@ -1,14 +1,12 @@
-import { useState } from "react";
-import { NotesLocatorCell, ResearchNotesEditor } from "./ResearchNotes";
-import { noteKey, type NoteTarget } from "./researchNotes";
+import { NotesLocatorCell } from "./ResearchNotes";
+import type { NoteTarget } from "./researchNotes";
 import { MODEL_IDS, MODEL_NAMES, type MatrixLocator } from "./negationWorkbenchData";
 
 const numeric = (value: number | null | undefined) => value == null ? "—" : value.toPrecision(4);
 
-export default function ComponentBetaLocator({ gate, checkpoint, matrices, evidenceReference, error }: {
-  gate: string; checkpoint: string; matrices?: MatrixLocator[]; evidenceReference?: string; error?: string;
+export default function ComponentBetaLocator({ gate, checkpoint, matrices, onAnnotate, error }: {
+  gate: string; checkpoint: string; matrices?: MatrixLocator[]; onAnnotate: (target: NoteTarget) => void; error?: string;
 }) {
-  const [target, setTarget] = useState<NoteTarget>();
   const [site, index] = gate.split(":");
   const feature = Number(index);
   return <section className="ig-beta">
@@ -20,11 +18,10 @@ export default function ComponentBetaLocator({ gate, checkpoint, matrices, evide
         return <NotesLocatorCell key={`${row.layer}/${row.matrix}`} beta={beta} representative={row.representatives.includes(feature)}
           title={`L${row.layer}/${row.matrix} · β ${numeric(beta)}`}
           target={{ checkpoint, gateId: gate, scope: "component", modelId: model, layer: row.layer, matrix: row.matrix }}
-          onSelect={setTarget}>
+          onSelect={onAnnotate}>
           <small>L{row.layer}</small><b>{row.matrix}</b>
         </NotesLocatorCell>;
       })}</div>
     </div>)}</div> : <p className="ig-graph-status" role="status">{error ?? "Loading reference β…"}</p>}
-    {target && <ResearchNotesEditor key={noteKey(target)} targets={[target]} evidenceReference={evidenceReference} openByDefault />}
   </section>;
 }

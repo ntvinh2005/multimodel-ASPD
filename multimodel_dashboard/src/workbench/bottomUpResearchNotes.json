@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "notes": [
+    {
+      "target": {
+        "checkpoint": "735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969",
+        "gateId": "MID:7027",
+        "scope": "shared"
+      },
+      "fields": {
+        "label": "Opening-parenthesis fan-out",
+        "observation": "Shared MID:7027 supplies PRE:483 and PRE:3182 in all three models. The strongest saved natural windows show casts, arithmetic grouping and arrow-function parameters.",
+        "hypothesis": "The write may encode an opening-group signal that downstream attention uses to distinguish expression grouping from cast or parameter-list contexts.",
+        "evidence": "One fixed fan-out per model co-recurs at all 18 jointly measured validation anchors. A same-gate upstream hop joins both arms in SmolLM2 and Granite. Compare grouping, casts and parentheticals with the same opening token. Patch each arm separately and test the predicted difference on grouped-expression versus cast or parameter-list continuation.\n\nFrozen natural-validation post-hoc edges and independent natural test windows. Full anchors, component IDs and score provenance in docs/multimodel/analysis/natural_validation_circuit_discovery_61036/evidence.json.",
+        "status": "Hypothesis proposed",
+        "tags": "bottom-up discovery, natural validation, unvalidated"
+      },
+      "updatedAt": "2026-11-25T21:52:32.196Z"
+    },
+    {
+      "target": {
+        "checkpoint": "735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969",
+        "gateId": "MID:6439",
+        "scope": "shared"
+      },
+      "fields": {
+        "label": "Member-access operator fan-out",
+        "observation": "MID:6439, PRE:1341 and PRE:485 peak on code in the saved windows. Both dot and arrow operators appear.",
+        "hypothesis": "A MID:6439 MLP down write may supply an operator-normalized member-access state to later key and query reads.",
+        "evidence": "Fixed fan-outs recur on 13/14, 14/14 and 12/14 jointly measured anchors for Gemma 2, SmolLM2 and Granite. The two operators share a coding context, so a generic code-punctuation signal remains plausible. Hold the operator constant while varying its role and compare member lookup across equivalent dot and arrow examples.\n\nFrozen natural-validation post-hoc edges and independent natural test windows. Full anchors, component IDs and score provenance in docs/multimodel/analysis/natural_validation_circuit_discovery_61036/evidence.json.",
+        "status": "Hypothesis proposed",
+        "tags": "bottom-up discovery, natural validation, unvalidated"
+      },
+      "updatedAt": "2026-11-25T21:52:32.196Z"
+    },
+    {
+      "target": {
+        "checkpoint": "735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969",
+        "gateId": "PRE:4587",
+        "scope": "shared"
+      },
+      "fields": {
+        "label": "Demonstrative number routing",
+        "observation": "The saved windows for MID:7352 peak at this or This, while MID:2635 and PRE:4587 peak at these or These, often before plural nominals.",
+        "hypothesis": "A broadly shared demonstrative write may feed a plural-refined intermediate used by later attention projections.",
+        "evidence": "MID:7352 → MID:2635 → PRE:4587 joins on the identical component and anchor in each model. The strongest fixed path recurs on 17/18, 16/18 and 16/18 jointly measured anchors. A token-identity relay is a viable alternative. Cross number with determiner versus pronominal use, and test whether restoring the intermediate rescues effects on plural continuation.\n\nFrozen natural-validation post-hoc edges and independent natural test windows. Full anchors, component IDs and score provenance in docs/multimodel/analysis/natural_validation_circuit_discovery_61036/evidence.json.",
+        "status": "Hypothesis proposed",
+        "tags": "bottom-up discovery, natural validation, unvalidated"
+      },
+      "updatedAt": "2026-11-25T21:52:32.196Z"
+    },
+    {
+      "target": {
+        "checkpoint": "735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969",
+        "gateId": "MID:3437",
+        "scope": "shared"
+      },
+      "fields": {
+        "label": "Sentence-period integration and relay",
+        "observation": "PRE:7237 and MID:1759 converge at MID:3437, with an onward PRE:6393 read. Saved top windows emphasize sentence-final periods, especially in scientific prose.",
+        "hypothesis": "Two sentence-ending signals may converge at MID:3437 to update the local boundary state used by later attention.",
+        "evidence": "Convergence occurs in all three models on 19/20 validation anchors and the full convergence-plus-relay topology on nine common anchors. A period or scientific-style detector could produce this pattern. Compare matched sentence endings, decimals, abbreviations and code dots using single and joint patching and rescue at MID:3437.\n\nFrozen natural-validation post-hoc edges and independent natural test windows. Full anchors, component IDs and score provenance in docs/multimodel/analysis/natural_validation_circuit_discovery_61036/evidence.json.",
+        "status": "Hypothesis proposed",
+        "tags": "bottom-up discovery, natural validation, unvalidated"
+      },
+      "updatedAt": "2026-11-25T21:52:32.196Z"
+    },
+    {
+      "target": {
+        "checkpoint": "735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969",
+        "gateId": "PRE:5171",
+        "scope": "shared"
+      },
+      "fields": {
+        "label": "Cleaning-related convergence",
+        "observation": "MID:6908 peaks on clean, cleaning and tidy. MID:5648 peaks on bath, washed, toilet and moisture. The target PRE:5171 also peaks on abstract uses of clean and clear.",
+        "hypothesis": "The two parents may jointly shape a hygiene or removal-related interpretation of an ambiguous lexical cue.",
+        "evidence": "Different parent components converge on one PRE:5171 representative in every model at 14/20 validation anchors. Shared firing is stronger for MID:6908 than MID:5648 in the independent test sample. Compare literal cleaning with clean-energy, clean-code and clean-record uses, then test synonym transfer and differential effects of each parent.\n\nFrozen natural-validation post-hoc edges and independent natural test windows. Full anchors, component IDs and score provenance in docs/multimodel/analysis/natural_validation_circuit_discovery_61036/evidence.json.",
+        "status": "Hypothesis proposed",
+        "tags": "bottom-up discovery, natural validation, unvalidated"
+      },
+      "updatedAt": "2026-11-25T21:52:32.196Z"
+    }
+  ]
+}

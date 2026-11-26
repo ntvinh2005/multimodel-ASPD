@@ -1,6 +1,8 @@
 import type { QueryGraph, QueryTarget } from "./InductionQueryGraph";
 import { activationAt, type MatrixLocator, type NegationPosition } from "./negationWorkbenchData";
+import type { EvalModel } from "./negationWorkbenchData";
 import type { MatrixType } from "./types";
+import { searchSharedGates } from "./graphQueries";
 
 export type AssetRef = { path: string; sha256: string };
 export type TokenIndex = {
@@ -8,12 +10,13 @@ export type TokenIndex = {
   datasets: Record<string, Record<string, AssetRef>>;
   graphs: Record<string, AssetRef>;
 };
+export type TokenPosition = NegationPosition & { pool_id: string };
 export type TokenExample = {
   example_id: string;
   group_id: string;
   condition: string;
   prompt: string;
-  positions: (NegationPosition & { pool_id: string })[];
+  positions: TokenPosition[];
 };
 export type TokenGroup = { checkpointSha256: string; dataset: string; groupId: string; examples: TokenExample[] };
 export type TokenGraphAsset = {
@@ -28,15 +31,49 @@ export type TokenGraphAsset = {
   supplementalTargets?: Record<string, QueryTarget>;
 };
 
+export type GraphWitness = { group: string; condition: string; anchor: string; final: boolean };
+export type GraphWitnessDataset = { anchors: GraphWitness[]; gates: Record<string, [number, number][]> };
+export type GraphWitnessIndex = { schemaVersion: 1; checkpointSha256: string; datasets: Record<string, GraphWitnessDataset> };
+const modelBits = { gemma: 1, smol: 2, granite: 4 };
+
+export function graphWitnessForGate(
+  witnesses: GraphWitnessDataset | undefined, gate: string, model: EvalModel, group?: string, condition?: string, anchor?: string,
+) {
+  if (!witnesses) return undefined;
+  const rows = witnesses.gates[gate]?.flatMap(([i, mask]) => mask & modelBits[model] && witnesses.anchors[i] ? [witnesses.anchors[i]] : []) ?? [];
+  return rows.find(row => row.anchor === anchor)
+    ?? rows.find(row => row.group === group && row.condition === condition && row.final)
+    ?? rows.find(row => row.group === group && row.condition === condition)
+    ?? rows.find(row => row.final && row.condition === condition)
+    ?? rows.find(row => row.final)
+    ?? rows[0];
+}
+
 export function selectToken(example: TokenExample | undefined, anchorId: string) {
   return example?.positions.find((row) => row.anchor_id === anchorId)
     ?? example?.positions.find((row) => row.final_query);
+}
+
+export function selectExample<T extends Pick<TokenExample, "condition">>(
+  examples: readonly T[] | undefined, condition: string, defaultCondition: string,
+) {
+  return examples?.find(row => row.condition === condition) ?? examples?.find(row => row.condition === defaultCondition)
+    ?? examples?.[0];
+}
+
+export function selectGroup(groups: readonly string[], explicit: string, preferred: readonly string[]) {
+  return groups.includes(explicit) ? explicit : preferred.find(id => groups.includes(id)) ?? groups[0];
 }
 
 export function tokenGates(position?: NegationPosition) {
   return position ? (["pre", "mid"] as const).flatMap((site) => position[site].active_gate_ids.map((id, index) => ({
     id: `${site.toUpperCase()}:${id}`, value: position[site].values[index],
   }))).sort((a, b) => b.value - a.value) : [];
+}
+
+export function filterTokenGates(active: ReturnType<typeof tokenGates>, site: string, query: string, preferred: string) {
+  const rows = searchSharedGates(active.filter(item => site === "ALL" || item.id.startsWith(site + ":")), query);
+  return { rows, selected: rows.find(item => item.id === preferred)?.id ?? rows[0]?.id };
 }
 
 export function tokenGraph(

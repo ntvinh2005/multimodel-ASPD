@@ -1,4 +1,8 @@
-import { EMPTY_NOTE, NOTE_STORAGE_PREFIX, noteKey, storeNote, type ResearchNote } from "./researchNotes";
+import { EMPTY_NOTE, NOTE_STORAGE_PREFIX, importNotesJson, noteKey, storeNote, type ResearchNote } from "./researchNotes";
+import bottomUpBackup from "./bottomUpResearchNotes.json";
+import bottomUpBatch2Backup from "./bottomUpResearchNotesBatch2.json";
+import relatedCircuitBackup from "./relatedCircuitResearchNotes.json";
+import expandedNaturalValidationBackup from "./expandedNaturalValidationResearchNotes.json";
 
 const checkpoint = "735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969";
 const importMarker = "aspd.research-note-import.smol-selection-frame.v1";
@@ -35,10 +39,34 @@ export const preliminaryNotes: ResearchNote[] = observations.map(([gateId, obser
   updatedAt: "2026-11-25T21:12:30.000Z",
 }));
 
-export function seedPreliminaryNotes(storage: Storage) {
-  if (storage.getItem(importMarker)) return;
-  for (const note of preliminaryNotes) {
+function seedMissingNotes(storage: Storage, marker: string, drafts: ResearchNote[]) {
+  if (storage.getItem(marker)) return;
+  for (const note of drafts) {
     if (storage.getItem(NOTE_STORAGE_PREFIX + noteKey(note.target)) === null) storeNote(storage, note);
   }
-  storage.setItem(importMarker, "complete");
+  storage.setItem(marker, "complete");
+}
+
+export function seedPreliminaryNotes(storage: Storage) {
+  seedMissingNotes(storage, importMarker, preliminaryNotes);
+}
+
+export function seedBottomUpNotes(storage: Storage) {
+  seedMissingNotes(storage, "aspd.research-note-import.natural-validation-61036.v1",
+    importNotesJson(JSON.stringify(bottomUpBackup)));
+}
+
+export function seedBottomUpBatch2Notes(storage: Storage) {
+  seedMissingNotes(storage, "aspd.research-note-import.natural-validation-61036-batch2.v1",
+    importNotesJson(JSON.stringify(bottomUpBatch2Backup)));
+}
+
+export function seedRelatedCircuitNotes(storage: Storage) {
+  seedMissingNotes(storage, "aspd.research-note-import.natural-validation-61036-circuit-relatives.v1",
+    importNotesJson(JSON.stringify(relatedCircuitBackup)));
+}
+
+export function seedExpandedNaturalValidationNotes(storage: Storage) {
+  seedMissingNotes(storage, "aspd.research-note-import.natural-validation-61036-expanded.v1",
+    importNotesJson(JSON.stringify(expandedNaturalValidationBackup)));
 }

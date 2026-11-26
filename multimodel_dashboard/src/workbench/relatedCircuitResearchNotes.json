@@ -1,0 +1,197 @@
+{
+  "schemaVersion": 1,
+  "notes": [
+    {
+      "target": {
+        "checkpoint": "735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969",
+        "gateId": "PRE:1884",
+        "scope": "shared"
+      },
+      "fields": {
+        "label": "Compound delimiter branch",
+        "observation": "Independent top examples center on ((, {{, [[ and a fused opening-markup token.",
+        "hypothesis": "An opening-delimiter write may be reused by a reader sensitive to compound openers. Test identical leading delimiters alone and doubled, while matching tokenization and programming language.",
+        "evidence": "Linked hypothesis MID:7027. C1, downstream child of MID:7027. The exact topology recurs across Gemma 2, Granite, SmolLM2 at 8/18 shared validation anchors supporting the original fixed paths. Component identities may vary by anchor. Example exact anchor 075d86bb1669dc437b6bae3bb7786947ba84c3187435c71c3e8fdfbb48b6afcf.\nGemma 2 · gemma.L09.mlp_gate/7027 → gemma.L15.v/1884\nGranite · granite.L19.mlp_gate/7027 → granite.L20.v/1884\nSmolLM2 · smol.L08.mlp_down/7027 → smol.L09.q/1884\n\nIndependent test co-firing for the end gates: 27/136 target firings, 14 documents. Same-site, firing-matched alternative gates have P95 1 anchors. Full paths and controls: docs/multimodel/analysis/natural_validation_circuit_discovery_61036_related/evidence.json (parenthesis-C1-pre-1884).",
+        "status": "Hypothesis proposed",
+        "tags": "circuit relative, natural validation, unvalidated"
+      },
+      "updatedAt": "2026-11-25T23:47:58.582Z"
+    },
+    {
+      "target": {
+        "checkpoint": "735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969",
+        "gateId": "PRE:3595",
+        "scope": "shared"
+      },
+      "fields": {
+        "label": "Dot-access input to the member-access motif",
+        "observation": "Top centers are dots in x.trim(), userField.text, user.id and Target.Size.",
+        "hypothesis": "This branch may supply dot-specific evidence to the member-access readout. Compare access dots with decimal and sentence dots, and check whether arrow syntax bypasses this branch.",
+        "evidence": "Linked hypothesis MID:6439. P2, two-hop upstream relative of PRE:485. The exact topology recurs across Gemma 2, Granite, SmolLM2 at 4/12 shared validation anchors supporting the original fixed paths. Component identities may vary by anchor. Example exact anchor 129086fbd37baf036be3460f150e76afe154db2b3c1a7748d2d0c5d4d8b5b95a.\nGemma 2 · gemma.L09.q/3595 → gemma.L09.mlp_down/3459 → gemma.L10.k/485\nGranite · granite.L17.q/3595 → granite.L20.q/3595 → granite.L21.q/485\nSmolLM2 · smol.L08.q/3595 → smol.L08.mlp_down/3459 → smol.L09.q/485\n\nIndependent test co-firing for the end gates: 79/174 target firings, 26 documents. Same-site, firing-matched alternative gates have P95 2 anchors. Full paths and controls: docs/multimodel/analysis/natural_validation_circuit_discovery_61036_related/evidence.json (member-access-P2-pre-3595).",
+        "status": "Hypothesis proposed",
+        "tags": "circuit relative, natural validation, unvalidated"
+      },
+      "updatedAt": "2026-11-25T23:47:58.582Z"
+    },
+    {
+      "target": {
+        "checkpoint": "735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969",
+        "gateId": "PRE:3719",
+        "scope": "shared"
+      },
+      "fields": {
+        "label": "This-sensitive precursor of the demonstrative path",
+        "observation": "All four top examples center on this or This in uses such as “this year” and “this means”.",
+        "hypothesis": "The precursor may supply a general demonstrative read. The independent extremes emphasize this while the target favors these. Compare the this/these and that/those contrasts at matched syntax, and test rescue at the measured middle component.",
+        "evidence": "Linked hypothesis PRE:4587. P2, two-hop upstream relative of PRE:4587. The exact topology recurs across Gemma 2, Granite, SmolLM2 at 9/15 shared validation anchors supporting the original fixed paths. Component identities may vary by anchor. Example exact anchor 1cf037d0e062f996a153cc7f34cfa4a060c7889da33e82832ec0b037816f0cba.\nGemma 2 · gemma.L13.q/3719 → gemma.L14.mlp_down/2635 → gemma.L15.v/4587\nGranite · granite.L16.q/3719 → granite.L22.mlp_down/2635 → granite.L23.q/4587\nSmolLM2 · smol.L08.q/3719 → smol.L08.mlp_gate/2635 → smol.L09.k/4587\n\nIndependent test co-firing for the end gates: 79/137 target firings, 56 documents. Same-site, firing-matched alternative gates have P95 2 anchors. Full paths and controls: docs/multimodel/analysis/natural_validation_circuit_discovery_61036_related/evidence.json (demonstratives-P2-pre-3719).",
+        "status": "Hypothesis proposed",
+        "tags": "circuit relative, natural validation, unvalidated"
+      },
+      "updatedAt": "2026-11-25T23:47:58.582Z"
+    },
+    {
+      "target": {
+        "checkpoint": "735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969",
+        "gateId": "PRE:7938",
+        "scope": "shared"
+      },
+      "fields": {
+        "label": "Parallel sentence-ending period readout",
+        "observation": "Top test windows show periods ending sentences, including paragraph breaks and scientific prose.",
+        "hypothesis": "This may be a parallel readout from the MID:1759 branch. Hold the period token fixed in sentence endings, decimals and abbreviations, and compare with the PRE:6393 readout using within-model interventions.",
+        "evidence": "Linked hypothesis MID:3437. C1, downstream child of MID:1759. The exact topology recurs across Granite, SmolLM2 at 6/9 shared validation anchors supporting the original fixed paths. Component identities may vary by anchor. Example exact anchor 1395e4ccdba10929606ed58498d96bd74e7b3ed6951227e392b863266a31379e.\nGranite · granite.L19.mlp_up/1759 → granite.L20.v/7938\nSmolLM2 · smol.L08.o/1759 → smol.L09.v/7938\n\nIndependent test co-firing for the end gates: 248/632 target firings, 70 documents. Same-site, firing-matched alternative gates have P95 36 anchors. Full paths and controls: docs/multimodel/analysis/natural_validation_circuit_discovery_61036_related/evidence.json (period-convergence-relay-C1-pre-7938).",
+        "status": "Hypothesis proposed",
+        "tags": "circuit relative, natural validation, unvalidated"
+      },
+      "updatedAt": "2026-11-25T23:47:58.582Z"
+    },
+    {
+      "target": {
+        "checkpoint": "735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969",
+        "gateId": "PRE:6393",
+        "scope": "shared"
+      },
+      "fields": {
+        "label": "Period relay output in abstracts",
+        "observation": "The four strongest saved contexts center on sentence-ending periods in PubMed abstracts.",
+        "hypothesis": "The component is a measured relay endpoint. Its behavior may depend on sentence boundaries or abstract-writing style. Match punctuation and genre separately before testing downstream sentence-start behavior.",
+        "evidence": "Linked hypothesis MID:3437. C1, downstream child of MID:3437. The exact topology recurs across Gemma 2, Granite, SmolLM2 at 3/3 shared validation anchors supporting the original fixed paths. Component identities may vary by anchor. Example exact anchor 1395e4ccdba10929606ed58498d96bd74e7b3ed6951227e392b863266a31379e.\nGemma 2 · gemma.L15.mlp_down/3437 → gemma.L16.q/6393\nGranite · granite.L20.o/3437 → granite.L23.q/6393\nSmolLM2 · smol.L08.mlp_down/3437 → smol.L09.v/6393\n\nIndependent test co-firing for the end gates: 226/391 target firings, 61 documents. Same-site, firing-matched alternative gates have P95 4 anchors. Full paths and controls: docs/multimodel/analysis/natural_validation_circuit_discovery_61036_related/evidence.json (period-convergence-relay-C1-pre-6393).",
+        "status": "Hypothesis proposed",
+        "tags": "circuit relative, natural validation, unvalidated"
+      },
+      "updatedAt": "2026-11-25T23:47:58.582Z"
+    },
+    {
+      "target": {
+        "checkpoint": "735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969",
+        "gateId": "MID:6908",
+        "scope": "shared"
+      },
+      "fields": {
+        "label": "Clean and tidy input to the convergence",
+        "observation": "Top examples include cleaning, clean-energy, a clean way and tidy up across software, energy and prose.",
+        "hypothesis": "This is the measured lexical-removal branch. Compare literal and abstract uses of the same word and use wash or tidy as transfer tests. Then hold the paired MID:5648 branch fixed to check the effects separately.",
+        "evidence": "Linked hypothesis PRE:5171. P1, upstream parent of PRE:5171. The exact topology recurs across Gemma 2, Granite, SmolLM2 at 8/8 shared validation anchors supporting the original fixed paths. Component identities may vary by anchor. Example exact anchor 039e771fcef270ee76a0a7de67d45342ef609b35a3264b2715a54f314e66ccef.\nGemma 2 · gemma.L15.mlp_down/6908 → gemma.L16.v/5171\nGranite · granite.L19.mlp_down/6908 → granite.L22.q/5171\nSmolLM2 · smol.L08.mlp_down/6908 → smol.L09.q/5171\n\nIndependent test co-firing for the end gates: 64/183 target firings, 28 documents. Same-site, firing-matched alternative gates have P95 2 anchors. Full paths and controls: docs/multimodel/analysis/natural_validation_circuit_discovery_61036_related/evidence.json (clean-P1-mid-6908).",
+        "status": "Hypothesis proposed",
+        "tags": "circuit relative, natural validation, unvalidated"
+      },
+      "updatedAt": "2026-11-25T23:47:58.582Z"
+    },
+    {
+      "target": {
+        "checkpoint": "735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969",
+        "gateId": "MID:2170",
+        "scope": "shared"
+      },
+      "fields": {
+        "label": "Digit 8 input into the year-format family",
+        "observation": "The four strongest test examples are digit 8 in citations and a phone number.",
+        "hypothesis": "This source is a useful lexical alternative to an abstract year-position account. Swap digit identity independently of year-versus-phone/citation formatting and compare the same downstream read.",
+        "evidence": "Linked hypothesis MID:2548. P2, two-hop upstream relative of PRE:8147. The exact topology recurs across Gemma 2, Granite, SmolLM2 at 3/7 shared validation anchors supporting the original fixed paths. Component identities may vary by anchor. Example exact anchor 111afede47970f70816377ae2596b2cc3eb73f794fcb4639759c877da9571952.\nGemma 2 · gemma.L15.mlp_up/2170 → gemma.L15.mlp_down/2548 → gemma.L16.v/8147\nGranite · granite.L16.mlp_up/2170 → granite.L17.mlp_gate/2548 → granite.L19.v/8147\nSmolLM2 · smol.L08.mlp_up/2170 → smol.L09.mlp_gate/2548 → smol.L10.k/8147\n\nIndependent test co-firing for the end gates: 10/132 target firings, 7 documents. Same-site, firing-matched alternative gates have P95 2 anchors. Full paths and controls: docs/multimodel/analysis/natural_validation_circuit_discovery_61036_related/evidence.json (digit-format-P2-mid-2170).",
+        "status": "Hypothesis proposed",
+        "tags": "circuit relative, natural validation, unvalidated"
+      },
+      "updatedAt": "2026-11-25T23:47:58.582Z"
+    },
+    {
+      "target": {
+        "checkpoint": "735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969",
+        "gateId": "PRE:7288",
+        "scope": "shared"
+      },
+      "fields": {
+        "label": "Year-final readout in legal citations",
+        "observation": "All four strongest examples center on final year digits before a period in legal text.",
+        "hypothesis": "A later attention read may specialize in year termination in legal formatting. Match the year and final period across legal and other genres, and use decimal numbers or identifiers before the same punctuation as controls.",
+        "evidence": "Linked hypothesis MID:2548. C2, two-hop downstream relative of MID:2548. The exact topology recurs across Gemma 2, Granite, SmolLM2 at 2/7 shared validation anchors supporting the original fixed paths. Component identities may vary by anchor. Example exact anchor 608e2d79dbfb307fad6e9e865f070ba4e654231c211116be2282c391ac1521de.\nGemma 2 · gemma.L15.mlp_gate/2548 → gemma.L15.mlp_down/2548 → gemma.L16.v/7288\nGranite · granite.L17.mlp_down/2548 → granite.L18.mlp_gate/2548 → granite.L21.q/7288\nSmolLM2 · smol.L08.mlp_up/2548 → smol.L09.o/6847 → smol.L13.q/7288\n\nIndependent test co-firing for the end gates: 26/190 target firings, 13 documents. Same-site, firing-matched alternative gates have P95 1 anchors. Full paths and controls: docs/multimodel/analysis/natural_validation_circuit_discovery_61036_related/evidence.json (digit-format-C2-pre-7288).",
+        "status": "Hypothesis proposed",
+        "tags": "circuit relative, natural validation, unvalidated"
+      },
+      "updatedAt": "2026-11-25T23:47:58.582Z"
+    },
+    {
+      "target": {
+        "checkpoint": "735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969",
+        "gateId": "MID:346",
+        "scope": "shared"
+      },
+      "fields": {
+        "label": "Postal abbreviation precursor",
+        "observation": "Top examples center on MA, PA and CA in addresses and legal or geographic attributions.",
+        "hypothesis": "This precursor may carry address-abbreviation information. Compare the same abbreviation in postal and non-geographic contexts, and compare full state names in the same slots.",
+        "evidence": "Linked hypothesis MID:4214. P2, two-hop upstream relative of PRE:5139. The exact topology recurs across Gemma 2, Granite, SmolLM2 at 2/6 shared validation anchors supporting the original fixed paths. Component identities may vary by anchor. Example exact anchor 73b305e83f6d6e6554f857969e4b24465ed5b68e7a7a1e9fbfaed3afe2d0d926.\nGemma 2 · gemma.L15.mlp_gate/346 → gemma.L15.mlp_down/5937 → gemma.L16.q/5139\nGranite · granite.L20.mlp_up/346 → granite.L20.mlp_down/5937 → granite.L22.q/5139\nSmolLM2 · smol.L09.mlp_up/346 → smol.L09.mlp_down/5937 → smol.L10.k/5139\n\nIndependent test co-firing for the end gates: 16/138 target firings, 9 documents. Same-site, firing-matched alternative gates have P95 2 anchors. Full paths and controls: docs/multimodel/analysis/natural_validation_circuit_discovery_61036_related/evidence.json (geography-fanout-P2-mid-346).",
+        "status": "Hypothesis proposed",
+        "tags": "circuit relative, natural validation, unvalidated"
+      },
+      "updatedAt": "2026-11-25T23:47:58.582Z"
+    },
+    {
+      "target": {
+        "checkpoint": "735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969",
+        "gateId": "MID:4857",
+        "scope": "shared"
+      },
+      "fields": {
+        "label": "Intermediate type-like identifier component",
+        "observation": "Top contexts contain Map, List, Message and String in declarations or code expressions.",
+        "hypothesis": "This is the measured MLP-down intermediate between MID:7001 and PRE:6041. Restore it after an upstream ablation while controlling the same identifier in declaration, variable and string roles.",
+        "evidence": "Linked hypothesis PRE:6041. P1, upstream parent of PRE:6041. The exact topology recurs across Gemma 2, Granite, SmolLM2 at 8/8 shared validation anchors supporting the original fixed paths. Component identities may vary by anchor. Example exact anchor 2d131d77f8254f397891b3f0998e55b0c6b66f7a3c9e676d459fe10c0fd75e6a.\nGemma 2 · gemma.L13.mlp_down/4857 → gemma.L14.q/6041\nGranite · granite.L19.mlp_down/4857 → granite.L20.v/6041\nSmolLM2 · smol.L08.mlp_down/4857 → smol.L10.q/6041\n\nIndependent test co-firing for the end gates: 206/314 target firings, 32 documents. Same-site, firing-matched alternative gates have P95 6 anchors. Full paths and controls: docs/multimodel/analysis/natural_validation_circuit_discovery_61036_related/evidence.json (object-code-P1-mid-4857).",
+        "status": "Hypothesis proposed",
+        "tags": "circuit relative, natural validation, unvalidated"
+      },
+      "updatedAt": "2026-11-25T23:47:58.582Z"
+    },
+    {
+      "target": {
+        "checkpoint": "735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969",
+        "gateId": "MID:7523",
+        "scope": "shared"
+      },
+      "fields": {
+        "label": "Range-specific lexical input",
+        "observation": "The four strongest examples center on range, including range followed by of, a colon or a period.",
+        "hypothesis": "This input may explain part of the convergence by lexical identity. Compare range across complement types and other quantifying nouns with and without an of-complement.",
+        "evidence": "Linked hypothesis PRE:7189. P1, upstream parent of PRE:7189. The exact topology recurs across Gemma 2, Granite, SmolLM2 at 2/6 shared validation anchors supporting the original fixed paths. Component identities may vary by anchor. Example exact anchor 5811fb9210f1c8d44dc5ca717340a1195d80a5626f283f5aa0339e9ff97d0705.\nGemma 2 · gemma.L14.mlp_down/7523 → gemma.L15.k/7189\nGranite · granite.L17.mlp_gate/7523 → granite.L18.q/7189\nSmolLM2 · smol.L08.mlp_down/7523 → smol.L09.q/7189\n\nIndependent test co-firing for the end gates: 5/177 target firings, 4 documents. Same-site, firing-matched alternative gates have P95 1 anchors. Full paths and controls: docs/multimodel/analysis/natural_validation_circuit_discovery_61036_related/evidence.json (quantity-P1-mid-7523).",
+        "status": "Hypothesis proposed",
+        "tags": "circuit relative, natural validation, unvalidated"
+      },
+      "updatedAt": "2026-11-25T23:47:58.582Z"
+    },
+    {
+      "target": {
+        "checkpoint": "735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969",
+        "gateId": "MID:1591",
+        "scope": "shared"
+      },
+      "fields": {
+        "label": "Closing-tag prefix cue",
+        "observation": "Three top examples center on the token </ and one on div following </, all in markup code.",
+        "hypothesis": "The path may convey the closing-tag prefix. Use the same tag name in opening and closing positions and compare literal strings containing the same prefix.",
+        "evidence": "Linked hypothesis MID:1629. P1, upstream parent of PRE:2360. The exact topology recurs across Gemma 2, Granite at 4/5 shared validation anchors supporting the original fixed paths. Component identities may vary by anchor. Example exact anchor 0df678b88fdd415c822b774d1c86c5a0901f896aa66591bd2661f4c49508e243.\nGemma 2 · gemma.L12.mlp_down/1591 → gemma.L13.q/2360\nGranite · granite.L17.mlp_down/1591 → granite.L18.q/2360\n\nIndependent test co-firing for the end gates: 72/149 target firings, 16 documents. Same-site, firing-matched alternative gates have P95 2 anchors. Full paths and controls: docs/multimodel/analysis/natural_validation_circuit_discovery_61036_related/evidence.json (html-tag-P1-mid-1591).",
+        "status": "Hypothesis proposed",
+        "tags": "circuit relative, natural validation, unvalidated"
+      },
+      "updatedAt": "2026-11-25T23:47:58.582Z"
+    }
+  ]
+}

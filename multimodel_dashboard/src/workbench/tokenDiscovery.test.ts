@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readWorkbenchAsset } from "./negationWorkbenchData";
-import { selectToken, tokenGates, tokenGraph, type TokenExample, type TokenGraphAsset } from "./tokenDiscovery";
+import { filterTokenGates, graphWitnessForGate, selectExample, selectGroup, selectToken, tokenGates, tokenGraph, type GraphWitnessDataset, type TokenExample, type TokenGraphAsset } from "./tokenDiscovery";
 
 const anchor: TokenExample["positions"][number] = {
   anchor_id: "exact", character_boundary: 3, final_query: false, roles_ending: [],
@@ -45,6 +45,34 @@ describe("token discovery", () => {
     expect(selectToken(example, "")).toBe(final);
     expect(selectToken(example, "exact")).toBe(anchor);
     expect(tokenGates(anchor)).toEqual([{ id: "MID:42", value: .4 }, { id: "PRE:42", value: .3 }]);
+  });
+
+  it("keeps an explicitly selected group and returns to the final anchor of another condition", () => {
+    expect(selectGroup(["preferred", "selected"], "selected", ["preferred"])).toBe("selected");
+    expect(selectGroup(["preferred", "selected"], "previous-split", ["missing", "preferred"])).toBe("preferred");
+    const neg = { ...example, condition: "negative", positions: [{ ...final, anchor_id: "negative-final" }] };
+    expect(selectExample([example, neg], "negative", "affirmative")).toBe(neg);
+    expect(selectToken(neg, anchor.anchor_id)?.anchor_id).toBe("negative-final");
+  });
+
+  it("preserves a gate that is active at the selected token and updates the shared sidebar filters", () => {
+    const active = tokenGates(anchor);
+    expect(filterTokenGates(active, "ALL", "", "PRE:42").selected).toBe("PRE:42");
+    expect(filterTokenGates(active, "ALL", "", "PRE:91").selected).toBe("MID:42");
+    expect(filterTokenGates(active, "PRE", "42", "MID:42").rows).toEqual([{ id: "PRE:42", value: .3 }]);
+    expect(filterTokenGates([], "ALL", "", "MID:42")).toEqual({ rows: [], selected: undefined });
+  });
+
+  it("navigates to a stored witness for this gate and model", () => {
+    const inventory: GraphWitnessDataset = { anchors: [
+      { group: "one", condition: "negative", anchor: "earlier-token", final: false },
+      { group: "one", condition: "negative", anchor: "last-token", final: true },
+      { group: "two", condition: "affirmative", anchor: "other-group", final: true },
+    ], gates: { "PRE:42": [[0, 2], [1, 3], [2, 4]] } };
+    expect(graphWitnessForGate(inventory, "PRE:42", "smol", "one", "negative", "earlier-token")?.anchor).toBe("earlier-token");
+    expect(graphWitnessForGate(inventory, "PRE:42", "gemma", "one", "negative", "earlier-token")?.anchor).toBe("last-token");
+    expect(graphWitnessForGate(inventory, "PRE:42", "granite", "one", "negative")?.anchor).toBe("other-group");
+    expect(graphWitnessForGate(inventory, "MID:42", "smol")).toBeUndefined();
   });
 
   it("requires exact anchor, example and pool identities", () => {

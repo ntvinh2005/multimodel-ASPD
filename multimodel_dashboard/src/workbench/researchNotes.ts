@@ -18,7 +18,17 @@ export type NoteFields = {
   evidence: string;
   status: NoteStatus;
   tags: string;
+  informationRead?: string;
+  transformation?: string;
+  informationWritten?: string;
+  counterevidence?: string;
+  openQuestions?: string;
 };
+export const COMPUTATION_NOTE_LABELS = {
+  informationRead: "Information read", transformation: "Transformation performed", informationWritten: "Information written",
+  counterevidence: "Counterevidence", openQuestions: "Open questions",
+} as const;
+const computationFields = Object.keys(COMPUTATION_NOTE_LABELS) as (keyof typeof COMPUTATION_NOTE_LABELS)[];
 export type ResearchNote = { target: NoteTarget; fields: NoteFields; updatedAt: string };
 export type NoteRecords = Record<string, ResearchNote>;
 
@@ -81,7 +91,8 @@ export function noteTags(value: string) {
 
 export function hasNoteContent(fields: NoteFields) {
   return fields.status !== "Unreviewed"
-    || [fields.label, fields.observation, fields.hypothesis, fields.evidence, fields.tags].some((value) => value.trim());
+    || [fields.label, fields.observation, fields.hypothesis, fields.evidence, fields.tags,
+      ...computationFields.map(key => fields[key] ?? "")].some((value) => value.trim());
 }
 
 function validNote(value: unknown): value is ResearchNote {
@@ -96,6 +107,7 @@ function validNote(value: unknown): value is ResearchNote {
       || ((t.scope === "model" || t.scope === "component") && typeof t.modelId === "string" && t.modelId.length > 0
         && (t.scope === "model" || Number.isInteger(t.layer) && t.layer >= 0 && matrices.includes(t.matrix))))
     && [f.label, f.observation, f.hypothesis, f.evidence, f.tags].every((field) => typeof field === "string")
+    && computationFields.every(key => f[key] === undefined || typeof f[key] === "string")
     && NOTE_STATUSES.includes(f.status)
     && typeof note.updatedAt === "string" && Number.isFinite(Date.parse(note.updatedAt)));
 }
@@ -135,7 +147,8 @@ export const EMPTY_NOTE_FILTERS: NoteFilters = { search: "", hypothesis: "", mod
 export function filterNotes(records: ResearchNote[], filters: NoteFilters) {
   const match = (content: string, query: string) => content.toLowerCase().includes(query.trim().toLowerCase());
   return records.filter(({ target, fields }) =>
-    match([targetLabel(target), target.checkpoint, fields.label, fields.observation, fields.hypothesis, fields.evidence, fields.tags].join(" "), filters.search)
+    match([targetLabel(target), target.checkpoint, fields.label, fields.observation, fields.hypothesis, fields.evidence, fields.tags,
+      ...computationFields.map(key => fields[key])].join(" "), filters.search)
     && match(fields.hypothesis, filters.hypothesis)
     && (!filters.model || filters.model === (target.scope === "shared" ? "shared" : target.modelId))
     && (!filters.status || filters.status === fields.status)
@@ -158,13 +171,14 @@ export function importNotesJson(raw: string): ResearchNote[] {
 export function exportNotesCsv(records: ResearchNote[]) {
   const rows: (string | number)[][] = [[
     "checkpoint_manifest_sha256", "scope", "gate_id", "model_id", "layer", "matrix",
-    "short_label", "observation", "hypothesis", "evidence", "status", "tags", "updated_at",
+    "short_label", "observation", "hypothesis", "evidence", "status", "tags", "updated_at", ...computationFields,
   ]];
   for (const { target, fields, updatedAt } of records) {
     rows.push([
       target.checkpoint, target.scope, target.gateId, target.scope === "shared" ? "" : target.modelId,
       target.scope === "component" ? target.layer : "", target.scope === "component" ? target.matrix : "",
       fields.label, fields.observation, fields.hypothesis, fields.evidence, fields.status, fields.tags, updatedAt,
+      ...computationFields.map(key => fields[key] ?? ""),
     ]);
   }
   return rows.map((row) => row.map((cell) => {

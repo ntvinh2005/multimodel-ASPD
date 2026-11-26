@@ -1,0 +1,29 @@
+.uw-shell .rn-library {
+  color-scheme: only light;
+  background: #fff;
+  color: #172033;
+}
+
+.uw-shell .rn-library::backdrop {
+  background: #fff;
+}
+
+.uw-shell .rn-library :is(header, table, th, td, details, fieldset, .rn-library-note, .cc-editor) {
+  background: #fff;
+}
+
+.uw-shell .rn-library :is(button, input, textarea, select, option) {
+  background: #fff;
+  color: #334155;
+}
+
+.uw-shell .rn-library button:is(:hover, [aria-expanded="true"], [aria-pressed="true"]) {
+  background: #fff;
+  border-color: #64748b;
+  color: #172033;
+}
+
+.uw-shell .rn-library :is(button, input, textarea, select, summary):focus-visible {
+  outline: 2px solid #168f83;
+  outline-offset: 2px;
+}

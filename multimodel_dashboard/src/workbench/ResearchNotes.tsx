@@ -1,12 +1,14 @@
 import { createContext, useContext, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
-  EMPTY_NOTE, EMPTY_NOTE_FILTERS, NOTE_MODELS, NOTE_STATUSES, NOTE_STORAGE_PREFIX, SCOPE_LABEL,
+  COMPUTATION_NOTE_LABELS, EMPTY_NOTE, EMPTY_NOTE_FILTERS, NOTE_MODELS, NOTE_STATUSES, NOTE_STORAGE_PREFIX, SCOPE_LABEL,
   exportNotesCsv, exportNotesJson, filterNotes, hasNoteContent, importNotesJson, loadNotes,
   noteKey, noteTags, statusClass, storeNote, targetLabel,
   type NoteFields, type NoteRecords, type NoteTarget, type ResearchNote,
 } from "./researchNotes";
 import "./researchNotes.css";
-import { seedPreliminaryNotes, selectionFrameGateIds, selectionFrameHypothesis, selectionFrameTitle } from "./preliminaryResearchNotes";
+import CircuitNoteLinks from "./CircuitNoteLinks";
+import { expandedCandidateInNote } from "./expandedNaturalValidation";
+import { seedBottomUpBatch2Notes, seedBottomUpNotes, seedExpandedNaturalValidationNotes, seedPreliminaryNotes, seedRelatedCircuitNotes, selectionFrameGateIds, selectionFrameHypothesis, selectionFrameTitle } from "./preliminaryResearchNotes";
 
 type NotesState = { records: NoteRecords; warning: string };
 type NotesContext = NotesState & {
@@ -34,6 +36,10 @@ export function ResearchNotesProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     try {
       seedPreliminaryNotes(window.localStorage);
+      seedBottomUpNotes(window.localStorage);
+      seedBottomUpBatch2Notes(window.localStorage);
+      seedRelatedCircuitNotes(window.localStorage);
+      seedExpandedNaturalValidationNotes(window.localStorage);
       publish(readSaved());
     } catch {
       publish({ ...current.current, warning: "Browser storage could not import the example notes. Export or retry after enabling storage." });
@@ -125,13 +131,15 @@ export function NotesLocatorCell({ target, title, beta, representative, onSelect
   </i>;
 }
 
-export function ResearchNotesEditor({ targets, evidenceReference, openByDefault = false }: {
+export function ResearchNotesEditor({ targets, evidenceReference, openByDefault = false, requestedTarget }: {
   targets: NoteTarget[];
   evidenceReference?: string;
   openByDefault?: boolean;
+  requestedTarget?: NoteTarget;
 }) {
-  const defaultTarget = targets.find((target) => target.scope === "component") ?? targets[0];
-  const [chosen, setChosen] = useState(() => noteKey(defaultTarget));
+  const defaultTarget = requestedTarget ?? targets.find((target) => target.scope === "component") ?? targets[0];
+  const [selection, setSelection] = useState<{ key: string; request?: NoteTarget }>();
+  const chosen = selection?.request === requestedTarget ? selection?.key : undefined;
   const { records } = useResearchNotes();
   const target = targets.find((item) => noteKey(item) === chosen) ?? defaultTarget;
   const note = records[noteKey(target)];
@@ -139,10 +147,11 @@ export function ResearchNotesEditor({ targets, evidenceReference, openByDefault 
     <summary>Research notes {note && <span className={`rn-status ${statusClass(note.fields.status)}`}>{note.fields.status}</span>}</summary>
     <div className="rn-editor-body">
       {targets.length > 1 && <label className="rn-field">Annotation scope
-        <select value={noteKey(target)} onChange={(event) => setChosen(event.target.value)}>
+        <select value={noteKey(target)} onChange={(event) => setSelection({ key: event.target.value, request: requestedTarget })}>
           {targets.map((item) => <option key={noteKey(item)} value={noteKey(item)}>{SCOPE_LABEL[item.scope]} · {targetLabel(item)}</option>)}
         </select>
       </label>}
+      <CircuitNoteLinks target={target} />
       <NoteFieldsEditor target={target} evidenceReference={evidenceReference} />
     </div>
   </details>;
@@ -162,6 +171,14 @@ function NoteFieldsEditor({ target, evidenceReference }: { target: NoteTarget; e
     <label className="rn-field">Hypothesis
       <textarea rows={2} value={fields.hypothesis} onChange={(event) => edit(target, { hypothesis: event.target.value })} />
     </label>
+    {target.scope === "component" && <details><summary>Computation annotations</summary>
+      {Object.entries(COMPUTATION_NOTE_LABELS).map(([name, label]) => {
+        const key = name as keyof typeof COMPUTATION_NOTE_LABELS;
+        return <label className="rn-field" key={key}>{label}
+          <textarea rows={2} value={fields[key] ?? ""} onChange={event => edit(target, { [key]: event.target.value })} />
+        </label>;
+      })}
+    </details>}
     <label className="rn-field">Evidence <small>Supporting or contradicting examples, dependencies, or interventions</small>
       <textarea rows={3} value={fields.evidence} onChange={(event) => edit(target, { evidence: event.target.value })} />
     </label>
@@ -193,7 +210,10 @@ function download(content: string, type: string, suffix: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function ResearchNotesLibrary() {
+export function ResearchNotesLibrary({ onOpenCandidate, buttonLabel = "Research notes" }: {
+  onOpenCandidate?: (id: string) => void;
+  buttonLabel?: string;
+} = {}) {
   const dialog = useRef<HTMLDialogElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const [filters, setFilters] = useState(EMPTY_NOTE_FILTERS);
@@ -205,7 +225,7 @@ export function ResearchNotesLibrary() {
   const models = [...new Set(notes.flatMap(({ target }) => target.scope === "shared" ? [] : [target.modelId]))];
   const results = filterNotes(notes, filters);
   return <>
-    <button type="button" className="rn-library-trigger" onClick={() => dialog.current?.showModal()}>Research notes <small>{notes.length}</small></button>
+    <button type="button" className="rn-library-trigger" onClick={() => dialog.current?.showModal()}>{buttonLabel} <small>{notes.length}</small></button>
     <dialog ref={dialog} className="rn-library" aria-label="Research notes and hypotheses">
       <header><h2>Research notes</h2><button type="button" onClick={() => dialog.current?.close()}>Close</button></header>
       <div className="rn-library-actions">
@@ -253,14 +273,18 @@ export function ResearchNotesLibrary() {
         <table>
           <caption>{results.length} of {notes.length} saved notes</caption>
           <thead><tr><th scope="col">Target</th><th scope="col">Label</th><th scope="col">Hypothesis</th><th scope="col">Status</th><th scope="col">Tags</th></tr></thead>
-          <tbody>{results.map(({ target, fields }) => <tr key={noteKey(target)}>
+          <tbody>{results.map(({ target, fields }) => {
+            const candidate = onOpenCandidate && expandedCandidateInNote(fields.observation);
+            return <tr key={noteKey(target)}>
             <th scope="row"><button type="button" onClick={() => setSelected(target)}>{targetLabel(target)}</button>
               <small title={target.checkpoint}>{SCOPE_LABEL[target.scope]} · {target.checkpoint.slice(0, 12)}</small>
             </th>
-            <td>{fields.label}</td><td>{fields.hypothesis}</td>
+            <td>{fields.label}{candidate && <button type="button" className="rn-open-graph" aria-label={`Open graph for ${candidate.id}`}
+              onClick={() => { dialog.current?.close(); onOpenCandidate?.(candidate.id); }}>Open graph</button>}</td><td>{fields.hypothesis}</td>
             <td><span className={`rn-status ${statusClass(fields.status)}`}>{fields.status}</span></td>
             <td>{noteTags(fields.tags).join(", ")}</td>
-          </tr>)}</tbody>
+          </tr>;
+          })}</tbody>
         </table>
       </div>
       {!results.length && <p>{notes.length ? "No notes match these filters." : "Select a gate or component to start recording notes."}</p>}
@@ -271,6 +295,7 @@ export function ResearchNotesLibrary() {
       </details>
       {selected && <section className="rn-library-note" aria-label="Edit selected note">
         <header><strong>Edit selected note</strong><button type="button" onClick={() => setSelected(null)}>Done</button></header>
+        <CircuitNoteLinks key={noteKey(selected)} target={selected} onSelect={setSelected} />
         <NoteFieldsEditor target={selected} />
       </section>}
     </dialog>

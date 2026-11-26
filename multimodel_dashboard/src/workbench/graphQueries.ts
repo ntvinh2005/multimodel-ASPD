@@ -1,4 +1,4 @@
-import type { Component, DependencyEdge, TraceDirection, TraceResult } from "./types";
+import type { Component, DatasetManifest, DependencyEdge, TraceDirection, TraceResult } from "./types";
 
 export function searchSharedGates<T extends { id: string }>(gates: T[], query: string): T[] {
   const term = query.trim().toUpperCase().replace(/^(PRE|MID)[\s:/_-]*/, "$1:");
@@ -11,6 +11,41 @@ export function searchSharedGates<T extends { id: string }>(gates: T[], query: s
     const rank = key === term ? 0 : key.startsWith(term) ? 1 : 2;
     return [{ gate, rank }];
   }).sort((left, right) => left.rank - right.rank).map(({ gate }) => gate);
+}
+
+export function discoveryScenarioForGate(manifest: DatasetManifest, gateId: string) {
+  return manifest.export?.selectedScenarios.find((scenario) => scenario.discoveryGateIds?.includes(gateId));
+}
+
+export function measuredViewForGate(
+  gateId: string, anchorId: string, modelIds: ReadonlySet<string>, components: readonly Component[],
+  edges: readonly DependencyEdge[], manifest: DatasetManifest,
+) {
+  const identity = new Map(components.map(component => [component.id, component.gateId]));
+  const matches = new Map<string, { gates: Set<string>; models: Set<string>; rows: number }>();
+  for (const edge of edges) {
+    if (!modelIds.has(edge.modelId) || edge.normalizedMagnitude === null) continue;
+    const source = identity.get(edge.source);
+    const target = identity.get(edge.target);
+    if (!source || !target || (source !== gateId && target !== gateId)) continue;
+    const row = matches.get(edge.anchorId) ?? { gates: new Set<string>(), models: new Set<string>(), rows: 0 };
+    row.gates.add(source);
+    row.gates.add(target);
+    row.models.add(edge.modelId);
+    row.rows++;
+    matches.set(edge.anchorId, row);
+  }
+  const scenario = discoveryScenarioForGate(manifest, gateId);
+  const preferred = scenario && matches.has(scenario.anchorId) ? scenario.anchorId
+    : matches.has(anchorId) ? anchorId
+    : [...matches].sort(([, a], [, b]) => b.models.size - a.models.size || b.rows - a.rows)[0]?.[0];
+  const measured = preferred ? matches.get(preferred) : undefined;
+  const scenarioGates = preferred === scenario?.anchorId ? scenario?.discoveryGateIds ?? [] : [];
+  return {
+    anchorId: preferred ?? anchorId,
+    gates: new Set([gateId, ...scenarioGates, ...(measured?.gates ?? [])]),
+    measuredAnchors: matches.size,
+  };
 }
 
 export function componentsForSelection(components: Component[], gateIds: Set<string>, modelIds: Set<string>, representativeOnly: boolean) {

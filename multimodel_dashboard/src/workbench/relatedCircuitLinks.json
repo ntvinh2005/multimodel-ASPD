@@ -1,0 +1,611 @@
+{
+  "checkpoint": "735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969",
+  "relations": [
+    {
+      "id": "parenthesis-C1-pre-1884",
+      "hypothesis": "parenthesis",
+      "originGate": "MID:7027",
+      "relativeGate": "PRE:1884",
+      "referenceGate": "MID:7027",
+      "hop": "C1",
+      "participatingModels": [
+        "gemma",
+        "granite",
+        "smol"
+      ],
+      "commonHits": 8,
+      "commonOpportunities": 18,
+      "examples": [
+        {
+          "model": "gemma",
+          "anchorId": "075d86bb1669dc437b6bae3bb7786947ba84c3187435c71c3e8fdfbb48b6afcf",
+          "components": [
+            "gemma.L09.mlp_gate/7027",
+            "gemma.L15.v/1884"
+          ],
+          "weights": [
+            0.011715536937117577
+          ]
+        },
+        {
+          "model": "granite",
+          "anchorId": "075d86bb1669dc437b6bae3bb7786947ba84c3187435c71c3e8fdfbb48b6afcf",
+          "components": [
+            "granite.L19.mlp_gate/7027",
+            "granite.L20.v/1884"
+          ],
+          "weights": [
+            0.015717893838882446
+          ]
+        },
+        {
+          "model": "smol",
+          "anchorId": "075d86bb1669dc437b6bae3bb7786947ba84c3187435c71c3e8fdfbb48b6afcf",
+          "components": [
+            "smol.L08.mlp_down/7027",
+            "smol.L09.q/1884"
+          ],
+          "weights": [
+            0.007700999267399311
+          ]
+        }
+      ]
+    },
+    {
+      "id": "member-access-P2-pre-3595",
+      "hypothesis": "member-access",
+      "originGate": "MID:6439",
+      "relativeGate": "PRE:3595",
+      "referenceGate": "PRE:485",
+      "hop": "P2",
+      "participatingModels": [
+        "gemma",
+        "granite",
+        "smol"
+      ],
+      "commonHits": 4,
+      "commonOpportunities": 12,
+      "examples": [
+        {
+          "model": "gemma",
+          "anchorId": "129086fbd37baf036be3460f150e76afe154db2b3c1a7748d2d0c5d4d8b5b95a",
+          "components": [
+            "gemma.L09.q/3595",
+            "gemma.L09.mlp_down/3459",
+            "gemma.L10.k/485"
+          ],
+          "weights": [
+            0.00919212494045496,
+            0.011107565835118294
+          ]
+        },
+        {
+          "model": "granite",
+          "anchorId": "129086fbd37baf036be3460f150e76afe154db2b3c1a7748d2d0c5d4d8b5b95a",
+          "components": [
+            "granite.L17.q/3595",
+            "granite.L20.q/3595",
+            "granite.L21.q/485"
+          ],
+          "weights": [
+            0.009351998567581177,
+            0.009906020946800709
+          ]
+        },
+        {
+          "model": "smol",
+          "anchorId": "129086fbd37baf036be3460f150e76afe154db2b3c1a7748d2d0c5d4d8b5b95a",
+          "components": [
+            "smol.L08.q/3595",
+            "smol.L08.mlp_down/3459",
+            "smol.L09.q/485"
+          ],
+          "weights": [
+            0.020245468243956566,
+            0.005781265441328287
+          ]
+        }
+      ]
+    },
+    {
+      "id": "demonstratives-P2-pre-3719",
+      "hypothesis": "demonstratives",
+      "originGate": "PRE:4587",
+      "relativeGate": "PRE:3719",
+      "referenceGate": "PRE:4587",
+      "hop": "P2",
+      "participatingModels": [
+        "gemma",
+        "granite",
+        "smol"
+      ],
+      "commonHits": 9,
+      "commonOpportunities": 15,
+      "examples": [
+        {
+          "model": "gemma",
+          "anchorId": "1cf037d0e062f996a153cc7f34cfa4a060c7889da33e82832ec0b037816f0cba",
+          "components": [
+            "gemma.L13.q/3719",
+            "gemma.L14.mlp_down/2635",
+            "gemma.L15.v/4587"
+          ],
+          "weights": [
+            0.039472490549087524,
+            0.12885987758636475
+          ]
+        },
+        {
+          "model": "granite",
+          "anchorId": "1cf037d0e062f996a153cc7f34cfa4a060c7889da33e82832ec0b037816f0cba",
+          "components": [
+            "granite.L16.q/3719",
+            "granite.L22.mlp_down/2635",
+            "granite.L23.q/4587"
+          ],
+          "weights": [
+            0.018813105300068855,
+            0.03296362981200218
+          ]
+        },
+        {
+          "model": "smol",
+          "anchorId": "1cf037d0e062f996a153cc7f34cfa4a060c7889da33e82832ec0b037816f0cba",
+          "components": [
+            "smol.L08.q/3719",
+            "smol.L08.mlp_gate/2635",
+            "smol.L09.k/4587"
+          ],
+          "weights": [
+            0.02010689675807953,
+            0.018432356417179108
+          ]
+        }
+      ]
+    },
+    {
+      "id": "period-convergence-relay-C1-pre-7938",
+      "hypothesis": "period-convergence-relay",
+      "originGate": "MID:3437",
+      "relativeGate": "PRE:7938",
+      "referenceGate": "MID:1759",
+      "hop": "C1",
+      "participatingModels": [
+        "granite",
+        "smol"
+      ],
+      "commonHits": 6,
+      "commonOpportunities": 9,
+      "examples": [
+        {
+          "model": "granite",
+          "anchorId": "1395e4ccdba10929606ed58498d96bd74e7b3ed6951227e392b863266a31379e",
+          "components": [
+            "granite.L19.mlp_up/1759",
+            "granite.L20.v/7938"
+          ],
+          "weights": [
+            0.021687909960746765
+          ]
+        },
+        {
+          "model": "smol",
+          "anchorId": "1395e4ccdba10929606ed58498d96bd74e7b3ed6951227e392b863266a31379e",
+          "components": [
+            "smol.L08.o/1759",
+            "smol.L09.v/7938"
+          ],
+          "weights": [
+            0.026273444294929504
+          ]
+        }
+      ]
+    },
+    {
+      "id": "period-convergence-relay-C1-pre-6393",
+      "hypothesis": "period-convergence-relay",
+      "originGate": "MID:3437",
+      "relativeGate": "PRE:6393",
+      "referenceGate": "MID:3437",
+      "hop": "C1",
+      "participatingModels": [
+        "gemma",
+        "granite",
+        "smol"
+      ],
+      "commonHits": 3,
+      "commonOpportunities": 3,
+      "examples": [
+        {
+          "model": "gemma",
+          "anchorId": "1395e4ccdba10929606ed58498d96bd74e7b3ed6951227e392b863266a31379e",
+          "components": [
+            "gemma.L15.mlp_down/3437",
+            "gemma.L16.q/6393"
+          ],
+          "weights": [
+            0.03142991662025452
+          ]
+        },
+        {
+          "model": "granite",
+          "anchorId": "1395e4ccdba10929606ed58498d96bd74e7b3ed6951227e392b863266a31379e",
+          "components": [
+            "granite.L20.o/3437",
+            "granite.L23.q/6393"
+          ],
+          "weights": [
+            0.03048696182668209
+          ]
+        },
+        {
+          "model": "smol",
+          "anchorId": "1395e4ccdba10929606ed58498d96bd74e7b3ed6951227e392b863266a31379e",
+          "components": [
+            "smol.L08.mlp_down/3437",
+            "smol.L09.v/6393"
+          ],
+          "weights": [
+            0.04681898653507233
+          ]
+        }
+      ]
+    },
+    {
+      "id": "clean-P1-mid-6908",
+      "hypothesis": "clean",
+      "originGate": "PRE:5171",
+      "relativeGate": "MID:6908",
+      "referenceGate": "PRE:5171",
+      "hop": "P1",
+      "participatingModels": [
+        "gemma",
+        "granite",
+        "smol"
+      ],
+      "commonHits": 8,
+      "commonOpportunities": 8,
+      "examples": [
+        {
+          "model": "gemma",
+          "anchorId": "039e771fcef270ee76a0a7de67d45342ef609b35a3264b2715a54f314e66ccef",
+          "components": [
+            "gemma.L15.mlp_down/6908",
+            "gemma.L16.v/5171"
+          ],
+          "weights": [
+            0.056150492280721664
+          ]
+        },
+        {
+          "model": "granite",
+          "anchorId": "039e771fcef270ee76a0a7de67d45342ef609b35a3264b2715a54f314e66ccef",
+          "components": [
+            "granite.L19.mlp_down/6908",
+            "granite.L22.q/5171"
+          ],
+          "weights": [
+            0.022884536534547806
+          ]
+        },
+        {
+          "model": "smol",
+          "anchorId": "039e771fcef270ee76a0a7de67d45342ef609b35a3264b2715a54f314e66ccef",
+          "components": [
+            "smol.L08.mlp_down/6908",
+            "smol.L09.q/5171"
+          ],
+          "weights": [
+            0.01827957108616829
+          ]
+        }
+      ]
+    },
+    {
+      "id": "digit-format-P2-mid-2170",
+      "hypothesis": "digit-format",
+      "originGate": "MID:2548",
+      "relativeGate": "MID:2170",
+      "referenceGate": "PRE:8147",
+      "hop": "P2",
+      "participatingModels": [
+        "gemma",
+        "granite",
+        "smol"
+      ],
+      "commonHits": 3,
+      "commonOpportunities": 7,
+      "examples": [
+        {
+          "model": "gemma",
+          "anchorId": "111afede47970f70816377ae2596b2cc3eb73f794fcb4639759c877da9571952",
+          "components": [
+            "gemma.L15.mlp_up/2170",
+            "gemma.L15.mlp_down/2548",
+            "gemma.L16.v/8147"
+          ],
+          "weights": [
+            0.030733201652765274,
+            0.02944948896765709
+          ]
+        },
+        {
+          "model": "granite",
+          "anchorId": "111afede47970f70816377ae2596b2cc3eb73f794fcb4639759c877da9571952",
+          "components": [
+            "granite.L16.mlp_up/2170",
+            "granite.L17.mlp_gate/2548",
+            "granite.L19.v/8147"
+          ],
+          "weights": [
+            0.006613066885620356,
+            0.013843259774148464
+          ]
+        },
+        {
+          "model": "smol",
+          "anchorId": "111afede47970f70816377ae2596b2cc3eb73f794fcb4639759c877da9571952",
+          "components": [
+            "smol.L08.mlp_up/2170",
+            "smol.L09.mlp_gate/2548",
+            "smol.L10.k/8147"
+          ],
+          "weights": [
+            0.021295100450515747,
+            0.04052911698818207
+          ]
+        }
+      ]
+    },
+    {
+      "id": "digit-format-C2-pre-7288",
+      "hypothesis": "digit-format",
+      "originGate": "MID:2548",
+      "relativeGate": "PRE:7288",
+      "referenceGate": "MID:2548",
+      "hop": "C2",
+      "participatingModels": [
+        "gemma",
+        "granite",
+        "smol"
+      ],
+      "commonHits": 2,
+      "commonOpportunities": 7,
+      "examples": [
+        {
+          "model": "gemma",
+          "anchorId": "608e2d79dbfb307fad6e9e865f070ba4e654231c211116be2282c391ac1521de",
+          "components": [
+            "gemma.L15.mlp_gate/2548",
+            "gemma.L15.mlp_down/2548",
+            "gemma.L16.v/7288"
+          ],
+          "weights": [
+            0.17198388278484344,
+            0.018576398491859436
+          ]
+        },
+        {
+          "model": "granite",
+          "anchorId": "608e2d79dbfb307fad6e9e865f070ba4e654231c211116be2282c391ac1521de",
+          "components": [
+            "granite.L17.mlp_down/2548",
+            "granite.L18.mlp_gate/2548",
+            "granite.L21.q/7288"
+          ],
+          "weights": [
+            0.0421818308532238,
+            0.011956422589719296
+          ]
+        },
+        {
+          "model": "smol",
+          "anchorId": "608e2d79dbfb307fad6e9e865f070ba4e654231c211116be2282c391ac1521de",
+          "components": [
+            "smol.L08.mlp_up/2548",
+            "smol.L09.o/6847",
+            "smol.L13.q/7288"
+          ],
+          "weights": [
+            0.023767361417412758,
+            0.038851503282785416
+          ]
+        }
+      ]
+    },
+    {
+      "id": "geography-fanout-P2-mid-346",
+      "hypothesis": "geography-fanout",
+      "originGate": "MID:4214",
+      "relativeGate": "MID:346",
+      "referenceGate": "PRE:5139",
+      "hop": "P2",
+      "participatingModels": [
+        "gemma",
+        "granite",
+        "smol"
+      ],
+      "commonHits": 2,
+      "commonOpportunities": 6,
+      "examples": [
+        {
+          "model": "gemma",
+          "anchorId": "73b305e83f6d6e6554f857969e4b24465ed5b68e7a7a1e9fbfaed3afe2d0d926",
+          "components": [
+            "gemma.L15.mlp_gate/346",
+            "gemma.L15.mlp_down/5937",
+            "gemma.L16.q/5139"
+          ],
+          "weights": [
+            0.05212445184588432,
+            0.0623040571808815
+          ]
+        },
+        {
+          "model": "granite",
+          "anchorId": "73b305e83f6d6e6554f857969e4b24465ed5b68e7a7a1e9fbfaed3afe2d0d926",
+          "components": [
+            "granite.L20.mlp_up/346",
+            "granite.L20.mlp_down/5937",
+            "granite.L22.q/5139"
+          ],
+          "weights": [
+            0.20368412137031555,
+            0.06867196410894394
+          ]
+        },
+        {
+          "model": "smol",
+          "anchorId": "73b305e83f6d6e6554f857969e4b24465ed5b68e7a7a1e9fbfaed3afe2d0d926",
+          "components": [
+            "smol.L09.mlp_up/346",
+            "smol.L09.mlp_down/5937",
+            "smol.L10.k/5139"
+          ],
+          "weights": [
+            0.018165549263358116,
+            0.024929344654083252
+          ]
+        }
+      ]
+    },
+    {
+      "id": "object-code-P1-mid-4857",
+      "hypothesis": "object-code",
+      "originGate": "PRE:6041",
+      "relativeGate": "MID:4857",
+      "referenceGate": "PRE:6041",
+      "hop": "P1",
+      "participatingModels": [
+        "gemma",
+        "granite",
+        "smol"
+      ],
+      "commonHits": 8,
+      "commonOpportunities": 8,
+      "examples": [
+        {
+          "model": "gemma",
+          "anchorId": "2d131d77f8254f397891b3f0998e55b0c6b66f7a3c9e676d459fe10c0fd75e6a",
+          "components": [
+            "gemma.L13.mlp_down/4857",
+            "gemma.L14.q/6041"
+          ],
+          "weights": [
+            0.009356062859296799
+          ]
+        },
+        {
+          "model": "granite",
+          "anchorId": "2d131d77f8254f397891b3f0998e55b0c6b66f7a3c9e676d459fe10c0fd75e6a",
+          "components": [
+            "granite.L19.mlp_down/4857",
+            "granite.L20.v/6041"
+          ],
+          "weights": [
+            0.012318235822021961
+          ]
+        },
+        {
+          "model": "smol",
+          "anchorId": "2d131d77f8254f397891b3f0998e55b0c6b66f7a3c9e676d459fe10c0fd75e6a",
+          "components": [
+            "smol.L08.mlp_down/4857",
+            "smol.L10.q/6041"
+          ],
+          "weights": [
+            0.014356289058923721
+          ]
+        }
+      ]
+    },
+    {
+      "id": "quantity-P1-mid-7523",
+      "hypothesis": "quantity",
+      "originGate": "PRE:7189",
+      "relativeGate": "MID:7523",
+      "referenceGate": "PRE:7189",
+      "hop": "P1",
+      "participatingModels": [
+        "gemma",
+        "granite",
+        "smol"
+      ],
+      "commonHits": 2,
+      "commonOpportunities": 6,
+      "examples": [
+        {
+          "model": "gemma",
+          "anchorId": "5811fb9210f1c8d44dc5ca717340a1195d80a5626f283f5aa0339e9ff97d0705",
+          "components": [
+            "gemma.L14.mlp_down/7523",
+            "gemma.L15.k/7189"
+          ],
+          "weights": [
+            0.02282131277024746
+          ]
+        },
+        {
+          "model": "granite",
+          "anchorId": "5811fb9210f1c8d44dc5ca717340a1195d80a5626f283f5aa0339e9ff97d0705",
+          "components": [
+            "granite.L17.mlp_gate/7523",
+            "granite.L18.q/7189"
+          ],
+          "weights": [
+            0.009549622423946857
+          ]
+        },
+        {
+          "model": "smol",
+          "anchorId": "5811fb9210f1c8d44dc5ca717340a1195d80a5626f283f5aa0339e9ff97d0705",
+          "components": [
+            "smol.L08.mlp_down/7523",
+            "smol.L09.q/7189"
+          ],
+          "weights": [
+            0.009192023426294327
+          ]
+        }
+      ]
+    },
+    {
+      "id": "html-tag-P1-mid-1591",
+      "hypothesis": "html-tag",
+      "originGate": "MID:1629",
+      "relativeGate": "MID:1591",
+      "referenceGate": "PRE:2360",
+      "hop": "P1",
+      "participatingModels": [
+        "gemma",
+        "granite"
+      ],
+      "commonHits": 4,
+      "commonOpportunities": 5,
+      "examples": [
+        {
+          "model": "gemma",
+          "anchorId": "0df678b88fdd415c822b774d1c86c5a0901f896aa66591bd2661f4c49508e243",
+          "components": [
+            "gemma.L12.mlp_down/1591",
+            "gemma.L13.q/2360"
+          ],
+          "weights": [
+            0.010701286606490612
+          ]
+        },
+        {
+          "model": "granite",
+          "anchorId": "0df678b88fdd415c822b774d1c86c5a0901f896aa66591bd2661f4c49508e243",
+          "components": [
+            "granite.L17.mlp_down/1591",
+            "granite.L18.q/2360"
+          ],
+          "weights": [
+            0.009951155632734299
+          ]
+        }
+      ]
+    }
+  ]
+}
