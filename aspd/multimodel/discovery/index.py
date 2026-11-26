@@ -116,6 +116,11 @@ def token_scopes(root, seed, limit=None):
         for row, _ in inventory:
             by_family.setdefault(row.get("family", ""), set()).add(row["group_id"])
         reserved = set().union(*(group_split(dataset, f, g, seed) for f, g in by_family.items()))
+        if by_family and not reserved:
+            # Selection Frame families have only one measured group each.
+            reserved = group_split(
+                dataset, "held-out-templates", set().union(*by_family.values()), seed
+            )
         if limit and len(inventory) > limit:
             # Sample complete measured groups so matched contrasts remain available.
             group_ids = sorted({row["group_id"] for row, _ in inventory})

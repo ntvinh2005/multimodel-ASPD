@@ -116,6 +116,10 @@ def prepare(args, output):
         "evidence": sha(args.evidence),
         "source": all_code_hashes(),
     }
+    backend_manifest = args.natural / "edges-shard-000-of-008" / "manifest.json"
+    contract["sourceModels"] = load(backend_manifest)["backend"]["models"]
+    contract["naturalTimingManifestSha256"] = sha(backend_manifest)
+    contract["versions"] = {"numpy": np.__version__, "networkx": nx.__version__}
     index_root = output / "index"
     if index_root.exists():
         previous = load(index_root / "manifest.json")
@@ -400,6 +404,57 @@ def opportunity_rates(index, row, occurrences, cache):
     ]
 
 
+def counterexamples(index, row, occurrences, opportunities):
+    source = index.scopes[row["firstScope"]]
+    if not source.get("role"):
+        return []
+    nodes = {node for pair in row["edges"] for node in pair}
+    gates = {gate_of(node) for node in nodes}
+    key = source["dataset"], source["model"], source.get("family"), source["role"]
+    controls = []
+    for i in opportunities[key]:
+        scope = index.scopes[i]
+        if i not in occurrences and gates <= scope.get("active", {}).keys() and scope.get("text"):
+            controls.append(
+                {
+                    field: scope.get(field)
+                    for field in (
+                        "anchor",
+                        "pool",
+                        "model",
+                        "group",
+                        "condition",
+                        "split",
+                        "text",
+                        "boundary",
+                    )
+                }
+            )
+    return sorted(controls, key=lambda item: (item["split"] != "heldout", item["anchor"]))[:3]
+
+
+def component_roles(row, witnesses):
+    before = Counter(a for a, _ in row["edges"])
+    after = Counter(b for _, b in row["edges"])
+    values = witnesses[0]["components"]
+    return [
+        {
+            "componentId": decode(node),
+            "structuralRole": (
+                "relay"
+                if before[node] and after[node]
+                else "input arm"
+                if before[node]
+                else "downstream readout"
+            ),
+            "incoming": after[node],
+            "outgoing": before[node],
+            **values.get(decode(node), {}),
+        }
+        for node in sorted(before.keys() | after.keys())
+    ]
+
+
 def describe_candidate(row, witness_rows, signs, context_rates, examples):
     evidence = next((item for item in witness_rows if item.get("text")), None)
     sink = row["metadata"].get("top-down", {})
@@ -462,6 +517,7 @@ def evaluate(index, rows, templates, independent, seed):
                 i
             )
     catalogs, groups = [], defaultdict(list)
+    shape_groups = defaultdict(list)
     for row in rows:
         edges = row["edges"]
         ids = recurring(postings, edges)
@@ -509,6 +565,10 @@ def evaluate(index, rows, templates, independent, seed):
             for text in independent.get(gate, {}).values()
         ]
         context_semantics = describe_candidate(row, checked, stable, rate, examples)
+        context_semantics["componentRoles"] = component_roles(row, checked)
+        context_semantics["counterexampleContexts"] = counterexamples(
+            index, row, ids, control_scopes
+        )
         family_key, graph = directed_gate_signature(edges)
         result = {
             "id": f"CXD-{row['id']}",
@@ -534,6 +594,8 @@ def evaluate(index, rows, templates, independent, seed):
             "crossModel": {"models": [source["model"]], "sharedExactAnchors": 0, "peers": []},
         }
         groups[family_key].append((result, graph, ids))
+        shape = nx.weisfeiler_lehman_graph_hash(graph, iterations=4)
+        shape_groups[(source["dataset"], shape)].append((result, graph))
         catalogs.append(result)
     for variants in groups.values():
         for (left, a, li), (right, b, ri) in itertools.combinations(variants, 2):
@@ -556,6 +618,15 @@ def evaluate(index, rows, templates, independent, seed):
                 evidence["peers"].append(
                     {"id": y["id"], "model": y["model"], "sharedExactAnchors": joint}
                 )
+
+    for variants in shape_groups.values():
+        for result, graph in variants:
+            peers = {
+                other["model"]
+                for other, shape in variants
+                if other["model"] != result["model"] and nx.is_isomorphic(graph, shape)
+            }
+            result["crossModel"]["topologyOnlyModels"] = sorted(peers)
 
     def goals(row):
         null = row["matchedNull"]
@@ -629,7 +700,7 @@ def main():
     parser.add_argument("--circuits", type=Path, action="append", required=True)
     parser.add_argument("--pilot", action="store_true")
     parser.add_argument("--workers", type=int, default=1)
-    parser.add_argument("--shortlist-per-source-model-direction", type=int, default=5)
+    parser.add_argument("--shortlist-per-source-model-direction", type=int, default=10)
     parser.add_argument("--seed", type=int, default=61036)
     args = parser.parse_args()
     limit = min(24, len(os.sched_getaffinity(0)), int(os.getenv("SLURM_CPUS_PER_TASK", "1")))
