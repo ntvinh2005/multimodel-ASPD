@@ -1,0 +1,50 @@
+{
+  "CXD-a3e04e475d3f184f": {
+    "reviewTitle": "Recurring Granite attention–MLP path as a specificity control",
+    "hypothesis": "This layout may support a generic local routing step shared by prediction contexts in several task families.",
+    "alternative": "Its recurrence in no-match and repeated-no-association conditions, as well as in Selection Frame, is consistent with a recurrent high-coverage component configuration.",
+    "proposedTest": "Match query-token identity and prefix position across induction and no-match stimuli. Compare internal component coefficients while holding gate support and parent-record coverage visible."
+  },
+  "CXD-ff8564930e5bf82d": {
+    "reviewTitle": "SmolLM2 final determiner-to-MLP routing",
+    "hypothesis": "PRE:3207 attention projections feed a MID:6020 readout at the final determiner that may prepare information about the referenced candidate.",
+    "alternative": "The same path occurs in affirmative, negative and scope-control prompts, so article processing or query-template continuity can explain much of the recurrence.",
+    "proposedTest": "Hold final 'the' and query syntax fixed, vary the referenced target and whether the same negated statement applies to that target, then compare the fixed downstream Gate projection."
+  },
+  "CXD-9760e17982a8c61a": {
+    "reviewTitle": "Gemma eight-component determiner and local MLP integration",
+    "hypothesis": "An earlier MID:6020 MLP pair may supply information to PRE:3207 Q/K. The measured final MID:6020 Down target receives branches from Q and same-layer Gate/Up components.",
+    "alternative": "All four polarity and answer-swap conditions in the held-out group contain this path. A common determiner-triggered routing pattern, with independent Gate/Up effects, remains compatible.",
+    "proposedTest": "Keep the final token, syntax and candidate list fixed, swap the queried entity, and measure the L16 Down coefficient and the local Gate/Up branch readout in each condition."
+  },
+  "CXD-1d7322926a89a591": {
+    "reviewTitle": "Granite attention convergence and MLP write",
+    "hypothesis": "PRE:3207 Q components and a MID:6020 Up component may converge to prepare a candidate-query representation through the MID:4578 attention output and MLP Down targets.",
+    "alternative": "SmolLM2 and Granite share the gate-labeled topology at three discovery anchors, while their held-out recurrence differs. Shared prompt format can generate the same topology.",
+    "proposedTest": "Use unseen templates with equivalent queries and fixed terminal tokens. Check separate requirements for the readout and the MLP write under target and scope changes."
+  },
+  "CXD-d6c066817f4bbfe3": {
+    "reviewTitle": "SmolLM2 counterpart of the Granite candidate-query topology",
+    "hypothesis": "L13–L14 Q and Up components may feed the candidate-query readout at L14 O and Down.",
+    "alternative": "Some matched affirmative or scope-control contexts also contain this circuit, and this exact component path has no held-out recurrence in the index.",
+    "proposedTest": "Test the same matched target and scope perturbations as for the Granite topology on new templates. Compare response directions for the two readouts separately."
+  },
+  "CXD-650bfa991afe88c6": {
+    "reviewTitle": "SmolLM2 MLP convergence before a query projection",
+    "hypothesis": "Two MLP Down arms may combine before PRE:2152 reads a sentence-level representation at the ending anchor.",
+    "alternative": "The covered held-out sentences include carrying a book in active and passive voice, so generic clause closure or punctuation could account for the path.",
+    "proposedTest": "Keep the ending punctuation fixed and vary active/passive voice and agent–theme assignments across selection and non-selection templates."
+  },
+  "CXD-0b022cc1e55bbeb6": {
+    "reviewTitle": "Granite composition of two sentence-period motifs",
+    "hypothesis": "Two previously saved sentence-period motifs share an exact MLP Up component and may coordinate two attention-side readouts.",
+    "alternative": "The Natural Validation graph archive lacks the exact text behind these 11 witnesses. Independent period-associated activation examples cannot verify their semantics.",
+    "proposedTest": "Recover exact anchor text or construct matched period controls across clause completion, abbreviations and list punctuation. Measure the two readouts separately."
+  },
+  "CXD-cfaacda2b24c56e3": {
+    "reviewTitle": "SmolLM2 bridge between demonstrative and discourse motifs",
+    "hypothesis": "The six-component bridge may connect a number-sensitive demonstrative route and a discourse-reference route through L09 attention readers.",
+    "alternative": "The four exact Natural Validation anchors have no linked text. A shared response to lexical This or These could explain the structural overlap.",
+    "proposedTest": "Cross demonstrative number with deictic versus discourse-reference use and freeze separate readouts for each branch before held-out evaluation."
+  }
+}

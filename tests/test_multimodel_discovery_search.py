@@ -128,3 +128,18 @@ def test_heldout_prefix_audit_rejects_repeated_causal_prefix():
         "unseenHeldoutPrefixes": 1,
         "heldoutGroupsWithUnseenPrefixes": 1,
     }
+
+
+def test_conditional_null_preserves_per_matrix_pair_degrees():
+    from collections import Counter
+
+    from aspd.multimodel.cli.audit_discovered_circuits import rewire_block
+
+    rows = [(1, 11), (2, 12), (3, 13), (4, 14)]
+    starts = Counter(a for a, _ in rows)
+    stops = Counter(b for _, b in rows)
+    live = set(rows)
+    assert rewire_block(rows, live, random.Random(39), 64) > 0
+    assert starts == Counter(a for a, _ in live)
+    assert stops == Counter(b for _, b in live)
+    assert len(live) == len(rows)

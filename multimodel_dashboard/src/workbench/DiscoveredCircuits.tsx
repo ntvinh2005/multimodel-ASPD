@@ -27,12 +27,18 @@ export type DiscoveryCandidate = {
   structure: { nodes: number; edges: number; depth: number; branching: number; convergence: number; diamonds: number };
   crossModel: { models: EvalModel[]; topologyOnlyModels?: EvalModel[]; sharedExactAnchors: number; peers: Array<{id: string; model: EvalModel; sharedExactAnchors: number}> };
   recurrence: Array<{dataset: string; split: string; anchors: number; groups: number}>;
-  interpretation: { hypothesis: string; alternative: string; counterevidence: string; proposedTest: string;
+  interpretation: { reviewTitle?: string; hypothesis: string; alternative: string; counterevidence: string; proposedTest: string;
     componentRoles?: Array<{componentId: string; structuralRole: string; coefficient?: number | null}>;
     counterexampleContexts?: Array<{anchor: string; text: string; condition: string; split: string}>;
     independentActivationExamples: Array<{anchor: string; gate: string; before: string; token: string; after: string}> };
   witnesses: Witness[];
   matchedNull: {trials: number; hits: number | null};
+  conditionalGraphNull?: {trials: number; hits: number | null; acceptedSwaps: number};
+  measuredContextSelectivity?: {
+    denominators: Array<{dataset: string; family: string; split: string; condition: string;
+      roleAnchors: number; allGatesActive: number; requiredTargetsMeasured: number; exactCircuitPresent: number}>;
+    counterexamples: Array<{anchor: string; text: string; condition: string; split: string}>;
+  };
   prefixAudit?: {distinctHeldoutPrefixes: number; unseenHeldoutPrefixes: number; heldoutPrefixesSeenInDiscovery: number};
 };
 
@@ -45,7 +51,7 @@ export function matchesDiscovery(candidate: DiscoveryCandidate, filters: {
   return (filters.direction === "" || candidate.directions.includes(filters.direction))
     && candidate.structure.nodes >= filters.nodes && candidate.anchorCount >= filters.recurrence
     && candidate.crossModel.models.length >= filters.models
-    && (!term || [candidate.id, candidate.dataset, candidate.interpretation.hypothesis,
+    && (!term || [candidate.id, candidate.dataset, candidate.interpretation.reviewTitle ?? "", candidate.interpretation.hypothesis,
       ...candidate.gateIds, ...candidate.componentIds].some(value => value.toLowerCase().includes(term)));
 }
 
@@ -151,7 +157,7 @@ export default function DiscoveredCircuits({ checkpoint, Graph }: {checkpoint: s
         </div>
         <label>Candidate <select value={selected?.id ?? ""} onChange={event => {select(event.target.value); selectWitness(0);}}>
           {!matching.length && <option value="">No matching candidates</option>}
-          {matching.map(row => <option key={row.id} value={row.id}>{row.id} · {row.structure.nodes} nodes · {row.anchorCount} anchors · {row.dataset}</option>)}
+          {matching.map(row => <option key={row.id} value={row.id}>{row.interpretation.reviewTitle ?? row.id} · {row.structure.nodes} nodes · {row.anchorCount} anchors · {row.dataset}</option>)}
         </select></label>
         {selected && <div className="uw-detail">
           <p><strong>{selected.status}</strong> · {selected.directions.join(" / ")} · Pareto front {selected.paretoFront}</p>
@@ -161,6 +167,7 @@ export default function DiscoveredCircuits({ checkpoint, Graph }: {checkpoint: s
             {" · "}{selected.crossModel.sharedExactAnchors} same-anchor cross-model matches</p>
           {selected.prefixAudit && <p>{selected.prefixAudit.unseenHeldoutPrefixes} unseen held-out prefixes
             {" · "}{selected.prefixAudit.heldoutPrefixesSeenInDiscovery} repeated discovery prefixes</p>}
+          {selected.interpretation.reviewTitle && <h3>{selected.interpretation.reviewTitle}</h3>}
           <p>{selected.interpretation.hypothesis}</p>
           {selected.interpretation.componentRoles?.length ? <details><summary>Component roles in the measured graph</summary>
             <ul>{selected.interpretation.componentRoles.map(role => <li key={role.componentId}>
@@ -171,7 +178,7 @@ export default function DiscoveredCircuits({ checkpoint, Graph }: {checkpoint: s
             <p>{selected.interpretation.counterevidence}</p><p>{selected.interpretation.proposedTest}</p>
             {selected.recurrence.map(row => <p key={row.dataset + "/" + row.split}>
               {row.dataset} · {row.split} · {row.anchors} anchors · {row.groups} matched groups</p>)}
-            {selected.interpretation.counterexampleContexts?.map(row => <blockquote key={row.anchor}>
+            {(selected.measuredContextSelectivity?.counterexamples ?? selected.interpretation.counterexampleContexts)?.map(row => <blockquote key={row.anchor}>
               {row.text} <small>{row.split} · {row.condition} · {row.anchor.slice(0, 12)}</small>
             </blockquote>)}
             {!!selected.interpretation.independentActivationExamples.length && <details><summary>Independent gate firing examples</summary>
@@ -179,9 +186,21 @@ export default function DiscoveredCircuits({ checkpoint, Graph }: {checkpoint: s
                 {row.before}<mark>{row.token.replaceAll("▁", " ")}</mark>{row.after} <small>{row.gate}</small>
               </blockquote>)}
             </details>}
+            {!!selected.conditionalGraphNull?.trials && <p>{selected.conditionalGraphNull.hits}/{selected.conditionalGraphNull.trials}
+              {" "}degree-matched rewirings reproduce the circuit at the audited anchor.</p>}
             <p>{selected.matchedNull.trials ? `${selected.matchedNull.hits}/${selected.matchedNull.trials} matched null graphs`
               : "Matched null unavailable for this witness"}</p>
           </details>
+          {!!selected.measuredContextSelectivity?.denominators.length && <details><summary>Context and coverage controls</summary>
+            <div className="cc-scroll"><table className="cc-table"><thead><tr><th>Source / condition</th>
+              <th>Role anchors</th><th>All gates active</th><th>Targets measured</th><th>Exact circuit present</th>
+            </tr></thead><tbody>{selected.measuredContextSelectivity.denominators.map(row =>
+              <tr key={[row.dataset, row.family, row.split, row.condition].join("/")}>
+                <th>{row.dataset} · {row.family} · {row.split} · {row.condition}</th>
+                <td>{row.roleAnchors}</td><td>{row.allGatesActive}</td>
+                <td>{row.requiredTargetsMeasured}</td><td>{row.exactCircuitPresent}</td>
+              </tr>)}</tbody></table></div>
+          </details>}
           {!!selected.crossModel.topologyOnlyModels?.length && <p>Unlabeled topology matches in {
             selected.crossModel.topologyOnlyModels.map(model => MODEL_NAMES[model]).join(", ")
           }.</p>}
