@@ -132,7 +132,17 @@ def prepare(args, output):
             stats = write_index(
                 stage,
                 (
-                    natural_scopes(args.natural, 96 if args.pilot else None),
+                    natural_scopes(
+                        args.natural,
+                        96 if args.pilot else None,
+                        {
+                            snap["anchor"]
+                            for item in load(args.evidence).values()
+                            for snap in item["snapshots"]
+                        }
+                        if args.pilot
+                        else (),
+                    ),
                     token_scopes(args.tokens, args.seed, 24 if args.pilot else None),
                     heldout_natural_scopes(args.natural_test, args.natural_pilot),
                 ),

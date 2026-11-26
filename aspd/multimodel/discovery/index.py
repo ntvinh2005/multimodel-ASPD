@@ -117,8 +117,11 @@ def token_scopes(root, seed, limit=None):
             by_family.setdefault(row.get("family", ""), set()).add(row["group_id"])
         reserved = set().union(*(group_split(dataset, f, g, seed) for f, g in by_family.items()))
         if limit and len(inventory) > limit:
-            # Stratified systematic sample so pilots see more than one matched group.
-            inventory = [inventory[i] for i in np.linspace(0, len(inventory) - 1, limit, dtype=int)]
+            # Sample complete measured groups so matched contrasts remain available.
+            group_ids = sorted({row["group_id"] for row, _ in inventory})
+            chosen = set([group for group in group_ids if group not in reserved][:2])
+            chosen.update([group for group in group_ids if group in reserved][:1])
+            inventory = [(row, example) for row, example in inventory if row["group_id"] in chosen]
         for row, example in inventory:
             meta = meta_for_window(
                 row, example, dataset, "heldout" if row["group_id"] in reserved else "discovery"
@@ -143,7 +146,7 @@ def token_graphs(asset, meta):
             edges[encode(parent), target] = (effect, abs(effect) * norm / sigma)
     for gate, graph in asset["official"].items():
         if graph["anchorId"] != meta["anchor"] or not np.isclose(
-            graph["activation"], meta["active"][gate]
+            graph["activation"], meta["active"].get(gate, 0.0)
         ):
             raise ValueError("Official graph does not match natural support")
     official = [
@@ -186,7 +189,7 @@ def token_graphs(asset, meta):
             yield {**meta, "model": model, "complete": asset["completeComponents"]}, edge, scalar
 
 
-def natural_scopes(root, limit=None):
+def natural_scopes(root, limit=None, witness_anchors=()):
     profile = root / "profiles"
     complete = load(profile / "COMPLETE")
     manifest = load(profile / "manifest.json", complete["sha256"]["manifest.json"])
@@ -222,6 +225,8 @@ def natural_scopes(root, limit=None):
             sample = np.linspace(
                 0, len(vocab["anchor_ids"]) - 1, min(limit, len(vocab["anchor_ids"])), dtype=int
             )
+            known = [i for i, value in enumerate(vocab["anchor_ids"]) if value in witness_anchors]
+            sample = np.union1d(sample, known)
             selected = np.flatnonzero(np.isin(anchor, sample))
         else:
             selected = np.arange(len(anchor), dtype=np.int32)
