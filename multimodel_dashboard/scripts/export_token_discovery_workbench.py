@@ -10,10 +10,11 @@ from pathlib import Path
 
 from export_negation_workbench import compact_write
 
+from aspd.multimodel.cli.benchmark_token_dependencies import complete_token_graph
 from aspd.multimodel.cli.evaluate_aspd_v3_induction import _load_references
 from aspd.multimodel.cli.evaluate_aspd_v3_negation import jsonl
-from aspd.multimodel.cli.measure_induction_query import _bundle_graph, _gate_label
-from aspd.multimodel.cli.measure_negation_comprehensive import active_gates, unpack
+from aspd.multimodel.cli.measure_induction_query import _gate_label
+from aspd.multimodel.cli.measure_negation_comprehensive import active_gates
 from aspd.multimodel.cli.prepare_aspd_v3_negation import read_contract
 from aspd.multimodel.posthoc.artifacts import sha256_file
 from aspd.multimodel.posthoc.ids import ComponentId
@@ -153,27 +154,8 @@ def complete_graphs(root, shard_roots, anchors, checkpoint, config, output):
                 raise ValueError("benchmark graph does not match its original token")
             if anchor in assets:
                 continue
-            data = {ComponentId.from_key(key): value for key, value in payload.items()}
-            results = {anchor: {comp: unpack(value) for comp, value in data.items()}}
-            norms = {comp: value[1] for comp, value in data.items()}
-            official = {}
-            for gate in sorted(active_gates(row)):
-                graph = _bundle_graph(gate, row, results, norms, reps, importance)
-                for model in graph["models"].values():
-                    if not model["targets"]:
-                        model.update(status="no_reference_representatives", strength=None, scores=None)
-                for pair in graph["comparisons"]:
-                    pair["available"] = all(graph["models"][model]["targets"] for model in pair["models"])
-                    if not pair["available"]:
-                        pair.update(jaccard=None)
-                official[_gate_label(gate)] = graph
             path = output / f"complete-graph-{anchor}.json.gz"
-            payload = {
-                "anchorId": anchor, "exampleId": row["example_id"], "poolId": row["pool_id"],
-                "checkpointSha256": checkpoint, "official": official, "componentTargets": payload,
-                "outputScale": record["outputScale"],
-                "completeComponents": True,
-            }
+            payload = complete_token_graph(row, payload, record["outputScale"], checkpoint, importance, reps)
             with path.open("xb") as raw, gzip.GzipFile(fileobj=raw, mode="wb", mtime=0, compresslevel=3) as zipped:
                 zipped.write(json.dumps(payload, separators=(",", ":"), allow_nan=False).encode())
             assets[anchor] = {"path": path.name, "sha256": sha256_file(path)}

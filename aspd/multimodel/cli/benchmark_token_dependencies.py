@@ -14,12 +14,18 @@ import torch
 
 from aspd.multimodel.cli.evaluate_aspd_v3_induction import _anchor_metadata
 from aspd.multimodel.cli.evaluate_aspd_v3_negation import backend_options, jsonl
-from aspd.multimodel.cli.measure_induction_query import PARENT_RULE, _supports
+from aspd.multimodel.cli.measure_induction_query import (
+    PARENT_RULE,
+    _bundle_graph,
+    _gate_label,
+    _supports,
+)
 from aspd.multimodel.cli.measure_negation_comprehensive import (
     active_gates,
     load_inputs,
     measure_missing,
     official_targets,
+    unpack,
 )
 from aspd.multimodel.posthoc.artifacts import runtime_provenance, sha256_file, write_json
 from aspd.multimodel.posthoc.ids import SITES, ComponentId
@@ -126,6 +132,30 @@ def export_batch(path, rows, records, representatives, importance, provenance):
     }
     with gzip.open(path, "xt", encoding="utf-8", compresslevel=3) as handle:
         json.dump(unpacked, handle, separators=(",", ":"), allow_nan=False)
+
+
+def complete_token_graph(row, payload, scales, checkpoint, importance, reps):
+    anchor = row["anchor_id"]
+    data = {ComponentId.from_key(key): value for key, value in payload.items()}
+    results = {anchor: {comp: unpack(value) for comp, value in data.items()}}
+    norms = {comp: value[1] for comp, value in data.items()}
+    official = {}
+    for gate in sorted(active_gates(row)):
+        graph = _bundle_graph(gate, row, results, norms, reps, importance)
+        for model in graph["models"].values():
+            if not model["targets"]:
+                model.update(status="no_reference_representatives", strength=None, scores=None)
+        for pair in graph["comparisons"]:
+            pair["available"] = all(graph["models"][model]["targets"] for model in pair["models"])
+            if not pair["available"]:
+                pair.update(jaccard=None)
+        official[_gate_label(gate)] = graph
+    return {
+        "anchorId": anchor, "exampleId": row["example_id"], "poolId": row["pool_id"],
+        "checkpointSha256": checkpoint, "official": official, "componentTargets": payload,
+        "outputScale": scales,
+        "completeComponents": True,
+    }
 
 
 def main():

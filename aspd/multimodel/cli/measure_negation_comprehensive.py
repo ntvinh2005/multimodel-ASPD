@@ -189,7 +189,16 @@ def measure_missing(backend, prepared, rows, requests):
     anchors = [row["anchor_id"] for row in rows]
     task = task_pool_from_verified([prepared[anchor] for anchor in anchors], mechanism="negation")
     query = subset_pool(task, [task.anchor_ids.index(anchor) for anchor in anchors])
-    inputs = backend._model_inputs(query)
+    return measure_frozen_inputs(backend, backend._model_inputs(query), rows, requests)
+
+
+def measure_frozen_inputs(backend, inputs, rows, requests):
+    """Measure distinct-document anchors under their exact archived binary gate support."""
+    anchors = [row["anchor_id"] for row in rows]
+    for model in MODEL_ORDER:
+        docs = inputs[model].anchor_document
+        if docs.numel() != len(rows) or docs.unique().numel() != len(rows):
+            raise ValueError("Taylor batches require one anchor per distinct document")
     gates = {site: torch.zeros((len(rows), backend.n_features), dtype=torch.bool) for site in SITES}
     for index, row in enumerate(rows):
         for site, values in _supports(row).items():

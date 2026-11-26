@@ -91,7 +91,7 @@ def model_inputs(native, rows, model, pad_id, device):
     )
 
 
-def replay(args):
+def load_test_archive(args):
     pilot, native = read(args.pilot), read(args.replay_inputs)
     if pilot["schemaVersion"] != 1 or pilot["split"] != "test" or native["schemaVersion"] != 1:
         raise ValueError("Unsupported held-out artifact")
@@ -130,6 +130,35 @@ def replay(args):
     tokenizers = {
         model: load_v3_tokenizer(registry[model], local_files_only=True) for model in MODELS
     }
+    return pilot, native, archive, reference, registry, tokenizers
+
+
+def verify_test_support(archive_root, archive, rows):
+    with np.load(verify(archive_root / "anchors.npz", archive["anchors_sha256"])) as original:
+        original_rows = {key: row for row, key in enumerate(original["anchor_ids"])}
+        documents = original["document_indices"]
+    source_docs = read(verify(archive_root / "documents.json", archive["documents_sha256"]))
+    matrices = {}
+    for site in SITES:
+        report = archive["site_reports"][site]
+        with np.load(
+            verify(archive_root / f"{site}_natural_firings.npz", report["natural_firings_sha256"])
+        ) as source:
+            matrices[site] = {key: source[key] for key in ("indptr", "indices", "values")}
+    for doc, point in rows:
+        original_row = original_rows[point["anchor"]]
+        if (
+            point["pool"] != original_row // 2048
+            or source_docs[int(documents[original_row])]["document_id"] != doc
+            or point["gates"] != anchor_measurement(original_row, matrices)
+        ):
+            raise ValueError("Pilot point differs from the original frozen test support")
+
+
+def replay(args):
+    pilot, native, archive, reference, registry, tokenizers = load_test_archive(args)
+    checkpoint = Path(reference["checkpoint"])
+    expected_hash = reference["checkpoint_manifest_sha256"]
     windows = [pilot["examples"][key] for key in args.window]
     anchors = list(
         dict.fromkeys(
@@ -149,25 +178,7 @@ def replay(args):
     rows = replay_rows(pilot, native, anchors, tokenizers)
     if len({document for document, _ in rows}) > 4:
         raise ValueError("Select at most four distinct documents per replay")
-    with np.load(verify(args.archive / "anchors.npz", archive["anchors_sha256"])) as original:
-        original_rows = {key: row for row, key in enumerate(original["anchor_ids"])}
-        documents = original["document_indices"]
-    source_docs = read(verify(args.archive / "documents.json", archive["documents_sha256"]))
-    matrices = {}
-    for site in SITES:
-        report = archive["site_reports"][site]
-        with np.load(
-            verify(args.archive / f"{site}_natural_firings.npz", report["natural_firings_sha256"])
-        ) as source:
-            matrices[site] = {key: source[key] for key in ("indptr", "indices", "values")}
-    for doc, point in rows:
-        original_row = original_rows[point["anchor"]]
-        if (
-            point["pool"] != original_row // 2048
-            or source_docs[int(documents[original_row])]["document_id"] != doc
-            or point["gates"] != anchor_measurement(original_row, matrices)
-        ):
-            raise ValueError("Pilot point differs from the original frozen test support")
+    verify_test_support(args.archive, archive, rows)
     components = [ComponentId.from_key(key) for key in dict.fromkeys(args.component)]
     model = components[0].model
     if any(component.model != model for component in components):
@@ -280,7 +291,7 @@ def replay(args):
                 "checkpoint": expected_hash,
                 "dataset": pilot["dataset"],
                 "split": pilot["split"],
-                "archiveManifestSha256": sha(archive_path),
+                "archiveManifestSha256": pilot["provenance"]["archiveManifestSha256"],
                 "pilotSha256": sha(args.pilot),
                 "nativeInputsSha256": sha(args.replay_inputs),
                 "configSha256": sha(args.config),
