@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { matchingNaturalGraph, naturalMetric, naturalScale, naturalScalar,
-  type NaturalTokenAsset, type NaturalTokenGraphAsset, type NaturalScalarAsset, type NaturalTokenPoint } from "./naturalTokenEvidence";
+import { naturalGraphArchive, naturalMetric, naturalScale, naturalScalar,
+  type NaturalTokenAsset, type NaturalGraphArchive, type NaturalScalarAsset, type NaturalTokenPoint } from "./naturalTokenEvidence";
 
 const active: NaturalTokenPoint = { anchor: "a", pool: 4, characterBoundary: 15, positions: { smol: 7 },
   gates: { "MID:1117": 1.75 }, graphCoverage: "unavailable" };
@@ -32,13 +32,15 @@ describe("Natural Validation exact token evidence", () => {
     expect(naturalScale([undefined, -2, 1.75, 0])).toBe(2);
   });
 
-  it("rejects nearby graphs and retains measured empty graphs", () => {
+  it("resolves refs within the same frozen held-out archive", () => {
     const scope = { anchor: "a", pool: 4, dataset: "archive", archiveManifestSha256: "mf" };
-    const graph: NaturalTokenGraphAsset = { ...scope, schemaVersion: 1, checkpoint: "ck", split: "test",
-      coverage: "full", snapshot: { anchor: "a", kind: "measured", representatives: [], edges: [] } };
-    expect(matchingNaturalGraph("ck", scope, graph)).toBe(graph);
-    expect(matchingNaturalGraph("ck", scope, { ...graph, snapshot: { ...graph.snapshot, anchor: "validation" } })).toBeUndefined();
-    expect(matchingNaturalGraph("ck", scope, { ...graph, pool: 5 })).toBeUndefined();
-    expect(matchingNaturalGraph("ck", scope, undefined)).toBeUndefined();
+    const graph: NaturalGraphArchive = { schemaVersion: 1, dataset: "archive", archiveManifestSha256: "mf",
+      checkpointSha256: "ck", split: "test", anchorsMeasured: 1, pilotAnchors: 489,
+      graphs: { a: { path: "batch-000000/a.json.gz", sha256: "sha" } } };
+    expect(naturalGraphArchive("ck", scope, graph)?.graphs.a).toBe(graph.graphs.a);
+    expect(naturalGraphArchive("ck", scope, { ...graph, dataset: "validation" })).toBeUndefined();
+    expect(naturalGraphArchive("ck", scope, { ...graph, archiveManifestSha256: "foreign" })).toBeUndefined();
+    expect(naturalGraphArchive("other", scope, graph)).toBeUndefined();
+    expect(naturalGraphArchive("ck", { ...scope, anchor: "other" }, graph)?.graphs.other).toBeUndefined();
   });
 });

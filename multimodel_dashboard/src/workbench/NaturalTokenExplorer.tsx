@@ -11,7 +11,7 @@ import { notesForSelection } from "./researchNotes";
 import "./naturalTokenExplorer.css";
 
 export default function NaturalTokenExplorer({ checkpoint, candidate, gate, rows, components,
-  component, onComponent, onAnchor, measurement }: {
+  component, onComponent, onAnchor, onGate, measurement }: {
   checkpoint: string;
   candidate: string;
   gate: string;
@@ -20,6 +20,7 @@ export default function NaturalTokenExplorer({ checkpoint, candidate, gate, rows
   component?: string;
   onComponent: (id: string) => void;
   onAnchor: (scope: TestTokenScope) => void;
+  onGate?: (gate: string) => void;
   measurement?: Measurement;
 }) {
   const [selected, setSelected] = useState<{ center: string; index: number }>();
@@ -81,11 +82,11 @@ export default function NaturalTokenExplorer({ checkpoint, candidate, gate, rows
               ...Object.entries(row.positions).map(([model, pos]) => `${MODEL_NAMES[model as EvalModel]} token ${pos}`),
               row.anchor, value == null ? "Measurement unavailable" : String(value),
             ].join(" · ") : "Exact archive anchor unavailable";
-            return row ? <button type="button" key={index} aria-pressed={pressed} title={title}
+            return row ? <button type="button" key={index} aria-pressed={pressed} aria-label={text.trim() ? undefined : "Space token"} title={title}
               className={`${value == null ? "missing" : ""} ${value != null && value < 0 ? "negative" : ""}`}
               style={{ "--activation": value != null && scale > 0 ? .85 * Math.abs(value) / scale : 0 } as CSSProperties}
-              onClick={() => { setSelected({ center: example.anchor, index }); onAnchor({ anchor: row.anchor, pool: row.pool, dataset: asset.dataset,
-                archiveManifestSha256: asset.provenance.archiveManifestSha256 }); }}>{text}</button>
+              onClick={() => { setSelected({ center: example.anchor, index }); onAnchor({ point: row, documentId: window.documentId, anchor: row.anchor, pool: row.pool, dataset: asset.dataset,
+                archiveManifestSha256: asset.provenance.archiveManifestSha256 }); }}>{text === " " ? "␠" : text}</button>
               : <span className="uw-unavailable-token" title={title} key={index}>{text}</span>;
           })}</p>}
         <dl><dt>Source</dt><dd>{example.source}</dd><dt>Center gˢ</dt><dd>{example.activation.toPrecision(5)}</dd>
@@ -101,7 +102,7 @@ export default function NaturalTokenExplorer({ checkpoint, candidate, gate, rows
       </div>
       <details open><summary>Active shared gates</summary>
         <div className="uw-active-tokens">{active.map(([id, value]) => <button type="button" key={id}
-          aria-pressed={id === displayGate} onClick={() => { setActiveGate(id); setMetric("gate"); }}
+          aria-pressed={id === displayGate} onClick={() => { setActiveGate(id); setMetric("gate"); onGate?.(id); }}
           title={`gˢ ${value} · g 1`}>{id} · {value.toPrecision(3)}</button>)}</div>
       </details>
       {component && identity && <>

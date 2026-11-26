@@ -1,5 +1,5 @@
 import { componentIdentity } from "./circuitComposition";
-import type { ExpandedSnapshot } from "./expandedNaturalValidation";
+import type { AssetRef } from "./tokenDiscovery";
 import type { EvalModel } from "./negationWorkbenchData";
 
 export const naturalTokenMetrics = {
@@ -85,19 +85,17 @@ export function naturalScale(values: (number | undefined)[]) {
   return Math.max(0, ...values.map(value => Math.abs(value ?? 0)));
 }
 
-export type TestTokenScope = { anchor: string; pool: number; dataset: string; archiveManifestSha256: string };
-export type NaturalTokenGraphAsset = TestTokenScope & {
-  schemaVersion: 1;
-  checkpoint: string;
-  split: "test";
-  coverage: "full" | "partial";
-  snapshot: ExpandedSnapshot;
+type TestTokenKey = { anchor: string; pool: number; dataset: string; archiveManifestSha256: string };
+export type TestTokenScope = TestTokenKey & { point: NaturalTokenPoint; documentId: string };
+export type NaturalGraphArchive = {
+  schemaVersion: 1; checkpointSha256: string; dataset: string; split: "test"; archiveManifestSha256: string;
+  anchorsMeasured: number; pilotAnchors: number;
+  graphs: Record<string, AssetRef>;
 };
 
-export function matchingNaturalGraph(checkpoint: string, scope: TestTokenScope | undefined,
-  graph: NaturalTokenGraphAsset | undefined) {
-  return scope && graph?.schemaVersion === 1 && graph.checkpoint === checkpoint && graph.split === "test"
-    && graph.anchor === scope.anchor && graph.snapshot?.anchor === scope.anchor && graph.pool === scope.pool
-    && graph.dataset === scope.dataset && graph.archiveManifestSha256 === scope.archiveManifestSha256
-    && (graph.coverage === "full" || graph.coverage === "partial") ? graph : undefined;
+export function naturalGraphArchive(checkpoint: string, scope: TestTokenKey | undefined,
+  archive: NaturalGraphArchive | undefined) {
+  return scope && archive?.schemaVersion === 1 && archive.checkpointSha256 === checkpoint
+    && archive.dataset === scope.dataset && archive.split === "test"
+    && archive.archiveManifestSha256 === scope.archiveManifestSha256 ? archive : undefined;
 }
