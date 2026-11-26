@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { componentIdentity, type Measurement } from "./circuitComposition";
 import { MODEL_NAMES, readWorkbenchAsset, type EvalModel } from "./negationWorkbenchData";
+import type { NaturalLocal } from "./naturalTokenEvidence";
 import "./componentComputation.css";
 
 type Term = { index: number; value: number };
@@ -28,8 +29,8 @@ type Artifact = {
   schemaVersion: 1; candidate: string; checkpoint: string; static: Record<string, Static>;
   anchors: Record<string, Witness>; provenance: { evidenceSha256: string; extensionsSha256: string };
 };
-type TokenMeasurement = { activation?: number; support?: boolean; magnitude?: number; scale?: number; beta?: number | null; representative?: boolean;
-  dataset?: string; pool?: string };
+type TokenMeasurement = { activation?: number; support?: boolean; reading?: number; coefficient?: number; magnitude?: number; normalized?: number; scale?: number; beta?: number | null; representative?: boolean;
+  dataset?: string; pool?: string; local?: NaturalLocal[] };
 const DIRECTORY = "component-computation/nvx025";
 const format = (value: number | null | undefined) => value == null ? "Unavailable" : value.toPrecision(5);
 const model = (id: string) => MODEL_NAMES[id as EvalModel] ?? id;
@@ -66,7 +67,8 @@ export default function ComponentComputationInspector({ id, checkpoint, anchor, 
   }, [opened, checkpoint, candidateId]);
   const artifact = loaded.artifact?.checkpoint === checkpoint && loaded.artifact?.candidate === candidateId ? loaded.artifact : undefined;
   const factors = artifact?.static[id];
-  const archived = artifact?.anchors[anchor]?.anchor === anchor ? artifact.anchors[anchor] : undefined;
+  const archived = !token?.dataset && (!measurement || measurement.scope.dataset === "natural-validation")
+    && artifact?.anchors[anchor]?.anchor === anchor ? artifact.anchors[anchor] : undefined;
   const archivedRow = archived?.rows[id];
   const exact = measurement?.scope.checkpoint === checkpoint && measurement?.scope.anchor === anchor ? measurement : undefined;
   const controlledDataset = token?.dataset ?? exact?.scope.dataset;
@@ -85,11 +87,12 @@ export default function ComponentComputationInspector({ id, checkpoint, anchor, 
     && (replay.dataset === controlledDataset || `${replay.dataset}-${replay.split}` === controlledDataset)
     ? replay.rows.find(row => row.anchor === anchor && row.pool === controlledPool && row.support === token?.support) : undefined;
   const support = token?.support ?? archivedRow?.support;
-  const coefficient = archivedRow?.coefficient ?? exact?.coefficients?.[id] ?? nativeRow?.coefficient ?? (support === false ? 0 : undefined);
-  const reading = nativeRow?.reading ?? archivedRow?.reading ?? (support === true ? coefficient : undefined);
+  const coefficient = token?.coefficient ?? archivedRow?.coefficient ?? exact?.coefficients?.[id] ?? nativeRow?.coefficient ?? (support === false ? 0 : undefined);
+  const reading = token?.reading ?? nativeRow?.reading ?? archivedRow?.reading ?? (support === true ? coefficient : undefined);
   const magnitude = token?.magnitude ?? nativeRow?.magnitude ?? normalizedContribution(coefficient, factors?.uNorm).magnitude;
   const sigma = token?.scale ?? factors?.sigma;
-  const local = archived?.local.filter(row => row.source === id || row.target === id) ?? [];
+  const local = token?.local?.map(row => ({ ...row, method: "native-mlp-local", nativeReplay: true }))
+    ?? archived?.local.filter(row => row.source === id || row.target === id) ?? [];
   const edges = useMemo(() => {
     const merged = new Map<string, Edge>();
     for (const edge of exact?.edges ?? []) {
@@ -146,7 +149,7 @@ export default function ComponentComputationInspector({ id, checkpoint, anchor, 
       {nativeRow && <><p>Largest native reading terms vⱼxⱼ</p><Terms values={nativeRow.readingTerms} /></>}
     </details>
     <details><summary>Contribution and writing</summary>
-      <dl><dt>Signed e · ‖eu‖₂ · ‖eu‖₂ / σ</dt><dd>{format(coefficient)} · {format(magnitude)} · {format(magnitude == null || !sigma ? nativeRow?.normalized : magnitude / sigma)}</dd>
+      <dl><dt>Signed e · ‖eu‖₂ · ‖eu‖₂ / σ</dt><dd>{format(coefficient)} · {format(magnitude)} · {format(magnitude == null || !sigma ? token?.normalized ?? nativeRow?.normalized : magnitude / sigma)}</dd>
         <dt>Output dimension · ‖u‖₂ · σ</dt><dd>{factors?.dOut ?? "Unavailable"} · {format(factors?.uNorm)} · {format(sigma)}</dd></dl>
       <p>Signed coefficients use the checkpoint’s factor basis. Contribution vectors are invariant to reciprocal rescaling of the factors.</p>
       {factors && <><p>{coefficient == null ? "Largest writer weights in u" : "Largest signed contribution coordinates"}</p>

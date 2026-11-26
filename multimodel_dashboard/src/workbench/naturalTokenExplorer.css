@@ -1,0 +1,10 @@
+.uw-natural-tokens .uw-token-legend { font-size: .79rem; color: #46566a; }
+.uw-natural-tokens .ig-sequence { overflow-wrap: anywhere; }
+.uw-shell .uw-natural-tokens .td-sequence button.negative { background: rgb(145 94 187 / var(--activation)); }
+.uw-shell .uw-natural-tokens .td-sequence button.missing {
+  background: repeating-linear-gradient(135deg, transparent 0 4px, #e6ebf1 4px 6px);
+}
+.uw-unavailable-token { text-decoration: underline dotted #a8b4c1; text-underline-offset: .19em; }
+.uw-natural-tokens .td-anchor-bar code { font-size: .68rem; overflow-wrap: anywhere; }
+.uw-active-tokens { display: flex; flex-wrap: wrap; gap: .25rem; padding: .4rem 0; }
+.uw-active-tokens button[aria-pressed="true"] { border-color: #168f83; }

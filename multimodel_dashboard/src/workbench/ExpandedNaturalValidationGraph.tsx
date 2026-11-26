@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentType } from "react";
 import { measurementFromGraph } from "./compositionMeasurements";
+import { matchingNaturalGraph, type NaturalTokenGraphAsset, type TestTokenScope } from "./naturalTokenEvidence";
+import NaturalTokenExplorer from "./NaturalTokenExplorer";
 import ComponentComputationInspector from "./ComponentComputationInspector";
 import { edgeThresholdScale, formatEdgeMagnitude } from "./displayUtils";
 import { expandedCatalog, loadExpandedEvidence, renderableExpandedGraph, type ExpandedCandidate, type ExpandedEvidence, type FiringExample } from "./expandedNaturalValidation";
@@ -95,43 +97,73 @@ export function NaturalWitness({ gates, reference, artifact, evidence, Graph, ne
   neighborhoodLimit?: number; onExploreGate?: (id: string) => void;
 }) {
   const [snapshotIndex, setSnapshotIndex] = useState(0);
-  const snapshot = evidence.snapshots[snapshotIndex];
+  const savedSnapshot = evidence.snapshots[snapshotIndex];
   const [selection, select] = useState<{ anchor: number; id: string } | null>(null);
   const [tab, setTab] = useState<"details" | "examples">("details");
   const [exampleGate, setExampleGate] = useState(gates[0]);
   const [threshold, setThreshold] = useState(0);
+  const [testScope, setTestScope] = useState<TestTokenScope>();
+  const checkpoint = expandedCatalog.checkpoint;
+  const graphPath = testScope && `natural-token-pilots/${reference}/graphs/${testScope.anchor}.json`;
+  const testGraph = matchingNaturalGraph(checkpoint, testScope, useWorkbenchAsset<NaturalTokenGraphAsset>(graphPath)?.data);
+  const snapshot = testGraph?.snapshot ?? savedSnapshot;
+  const [testComponent, setTestComponent] = useState<string>();
+  const [testEdge, setTestEdge] = useState<string>();
+  const witnessComponents = useMemo(() => [...new Set(evidence.snapshots.flatMap(item =>
+    item.edges.flatMap(({ source, target }) => [source, target])))].sort(), [evidence.snapshots]);
   const { components, edges } = useMemo(() => renderableExpandedGraph(snapshot), [snapshot]);
   const thresholdScale = useMemo(() => edgeThresholdScale(edges), [edges]);
   const visibleEdges = useMemo(() => edgesForAnchor(edges, snapshot.anchor, new Set(components.map(({ id }) => id)), threshold),
     [components, edges, snapshot.anchor, threshold]);
   const displayed = new Set(visibleEdges);
-  const checkpoint = expandedCatalog.checkpoint;
   const measurement = useMemo(() => measurementFromGraph({
-    checkpoint, dataset: "natural-validation", anchor: snapshot.anchor, example: null, pool: null,
-    artifact,
-  }, edges), [checkpoint, snapshot.anchor, edges, artifact]);
-  const selected = selection?.anchor === snapshotIndex ? selection.id : null;
+    checkpoint, dataset: testGraph?.dataset ?? "natural-validation", anchor: snapshot.anchor, example: null,
+    pool: testGraph ? String(testGraph.pool) : null, artifact: testGraph && graphPath ? graphPath : artifact,
+  }, edges), [checkpoint, snapshot.anchor, edges, artifact, testGraph, graphPath]);
+  const selected = testScope ? testComponent ?? null : selection?.anchor === snapshotIndex ? selection.id : null;
   const node = components.find(({ id }) => id === selected);
-  const edge = visibleEdges.find(({ id }) => id === selected);
+  const edge = visibleEdges.find(({ id }) => id === (testScope ? testEdge : selected));
   const raw = edge && snapshot.edges[edges.indexOf(edge)];
   const trace = useMemo(() => node ? traceGraph(visibleEdges, node.id, "both", 3) : null, [visibleEdges, node]);
   const gateColors = Object.fromEntries(gates.map((id, index) => [id, colors[index]]));
   const focus = (id: string) => {
+    if (testScope) {
+      if (components.some(item => item.id === id)) {
+        setTestComponent(id);
+        setTestEdge(undefined);
+      } else {
+        setTestEdge(id);
+      }
+      return;
+    }
     select({ anchor: snapshotIndex, id });
+    if (components.some(item => item.id === id)) setTestComponent(id);
     setTab("details");
   };
 
   return <div className="uw-main">
     <section className="uw-graph-area">
+      {testScope && !testGraph ? <>
+        <div className="uw-graph-toolbar">
+          <button type="button" onClick={() => { setTestScope(undefined); setTab("details"); }}>Return to saved validation graph</button>
+          <span>Held-out test token</span>
+        </div>
+        <p className="uw-edge-state">Dependency graph unavailable at this test anchor.</p>
+        <p className="uw-edge-state"><code>{testScope.anchor}</code></p>
+      </> : <>
       <div className="uw-graph-toolbar">
-        {evidence.snapshots.length > 1 && <label>Witness <select value={snapshotIndex} onChange={event => {
+        {testScope && <button type="button" onClick={() => { setTestScope(undefined); setTab("details"); }}>
+          Return to saved validation graph
+        </button>}
+        {!testScope && evidence.snapshots.length > 1 && <label>Witness <select value={snapshotIndex} onChange={event => {
           setSnapshotIndex(Number(event.target.value));
           select(null);
           setThreshold(0);
         }}>
           {evidence.snapshots.map((item, index) => <option key={item.kind} value={index}>{item.kind}</option>)}
         </select></label>}
-        <button type="button" onClick={() => { select(null); setThreshold(0); }}>Restore graph</button>
+        <button type="button" onClick={() => { select(null); setTestEdge(undefined); setThreshold(0); }}>Restore graph</button>
+        <span>{testGraph?.coverage === "full" ? "Full measured token graph" : "Partial archived graph"}</span>
         <span>{components.length} components · {visibleEdges.length}/{edges.length} measured edges shown</span>
       </div>
       <div className="uw-edge-filter">
@@ -143,7 +175,10 @@ export function NaturalWitness({ gates, reference, artifact, evidence, Graph, ne
             aria-label="Minimum normalized edge weight" aria-valuetext={formatEdgeMagnitude(threshold)}
             value={threshold} disabled={thresholdScale.maximum === 0} onChange={event => {
               const value = Number(event.target.value);
-              if (edge?.normalizedMagnitude != null && edge.normalizedMagnitude < value) select(null);
+              if (edge?.normalizedMagnitude != null && edge.normalizedMagnitude < value) {
+                select(null);
+                setTestEdge(undefined);
+              }
               setThreshold(value);
             }} />
         </label>
@@ -159,10 +194,14 @@ export function NaturalWitness({ gates, reference, artifact, evidence, Graph, ne
           direction="both" widthScale="sqrt" colors={gateColors} annotationCheckpoint={checkpoint}
           compositionMeasurement={measurement} onComponent={focus} onEdge={focus} />)}
       </div>
+      {testGraph && !edges.length && <p className="uw-edge-state">No dependency edges retained in the measured scope.</p>}
+      {testGraph && edge && <p className="uw-edge-state"><code>{edge.source} → {edge.target}</code>
+        {" · signed E "}{edge.signedEffect?.toPrecision(5)}{" · normalized w "}{edge.normalizedMagnitude?.toPrecision(5)}</p>}
+      </>}
     </section>
     <aside className="uw-inspector">
       <div className="uw-tabs">
-        <button type="button" className={tab === "details" ? "active" : ""} onClick={() => setTab("details")}>Details</button>
+        <button type="button" className={tab === "details" ? "active" : ""} onClick={() => { setTestScope(undefined); setTab("details"); }}>Details</button>
         <button type="button" className={tab === "examples" ? "active" : ""} onClick={() => setTab("examples")}>Examples</button>
       </div>
       {tab === "details" ? <div className="uw-detail uw-candidate-detail">
@@ -195,7 +234,16 @@ export function NaturalWitness({ gates, reference, artifact, evidence, Graph, ne
         {evidence.alternative && <p><b>Alternative</b> {evidence.alternative}</p>}
         {evidence.test && <p><b>Proposed test</b> {evidence.test}</p>}
         {onExploreGate && <details><summary>Artifact provenance</summary><p>{artifact}</p></details>}
-      </div> : <Examples gates={gates} gate={exampleGate} onGateChange={setExampleGate} examples={evidence.examples} documents={evidence.documents} />}
+      </div> : <div className="uw-examples uw-candidate-examples">
+        <h2>Held-out firing examples</h2>
+        {gates.length > 1 && <label>Gate <select value={exampleGate} onChange={event => {
+          setExampleGate(event.target.value); setTestScope(undefined);
+        }}>{gates.map(id => <option key={id}>{id}</option>)}</select></label>}
+        <NaturalTokenExplorer checkpoint={checkpoint} candidate={reference} gate={exampleGate}
+          rows={evidence.examples[exampleGate] ?? []} components={witnessComponents}
+          component={testComponent} onComponent={setTestComponent}
+          onAnchor={scope => { setTestScope(scope); setTestEdge(undefined); setThreshold(0); }} measurement={testGraph ? measurement : undefined} />
+      </div>}
     </aside>
   </div>;
 }
