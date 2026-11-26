@@ -11,6 +11,7 @@ import { getExpandedCandidate } from "./expandedNaturalValidation";
 import { dictionaryPath, validateDictionary, type DictionaryIndex } from "./naturalDictionary";
 import { useWorkbenchAsset } from "./TokenCircuitExplorer";
 import { CircuitCaptureButton, CircuitLibraryButton, CircuitLibraryProvider, useCircuitLibrary } from "./CircuitLibrary";
+import DiscoveredCircuits from "./DiscoveredCircuits";
 import CircuitCompositionExplorer from "./CircuitCompositionExplorer";
 import ComponentComputationInspector from "./ComponentComputationInspector";
 import { measurementFromGraph } from "./compositionMeasurements";
@@ -199,6 +200,7 @@ function CircuitWorkbench() {
       activeCandidateId={expandedCandidateId} onOpenCandidate={openExpandedCandidate}
       dictionary={dictionary} dictionaryError={dictionaryAsset?.error ?? dictionaryResult.error}
       activeDictionaryGate={dictionaryGate} onOpenDictionaryGate={openDictionaryGate} />
+    <DiscoveredCircuits checkpoint={naturalCheckpoint} Graph={ModelGraph} />
     <CircuitCompositionExplorer checkpoint={naturalCheckpoint} measurement={dictionaryGate || expandedCandidate || showMeasuredSummary ? undefined : naturalMeasurement} />
     {dictionaryGate && dictionary ? <DictionaryNaturalValidationGraph key={dictionaryGate} gate={dictionaryGate} index={dictionary} Graph={ModelGraph} onExploreGate={openDictionaryGate} />
       : expandedCandidate ? <ExpandedNaturalValidationGraph key={expandedCandidate.id} candidate={expandedCandidate} Graph={ModelGraph} />

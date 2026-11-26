@@ -1,0 +1,6 @@
+.discovered-content { padding: .45rem .85rem .8rem; }
+.discovered-content .uw-graph-toolbar { flex-wrap: wrap; }
+.discovered-content select { max-width: 100%; }
+.discovered-content input[type="number"] { width: 5rem; }
+.discovered-workspace { margin-top: .6rem; }
+.discovered-workspace code { overflow-wrap: anywhere; }
