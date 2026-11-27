@@ -46,7 +46,8 @@
 .cc-panel .cc-selected { background: #f0f5fa; padding: .55rem; border-radius: 5px; }
 .cc-table { border-collapse: collapse; font-size: .84rem; }
 .cc-table :is(th, td) { padding: .35rem .5rem; text-align: left; border: 1px solid #dce5eb; white-space: nowrap; }
-.cc-table th { background: #f4f8fb; font-weight: 550; }
+.uw-shell .cc-table th { background: #f4f8fb; color: #334155; font-weight: 550; }
+.uw-shell .cc-table tbody tr:hover { background: #eef2f7; }
 .cc-table button[aria-pressed="true"], .cc-table .cc-current-token { outline: 2px solid #376399; outline-offset: -2px; }
 .cc-code-line { display: block; }
 .cc-provenance dl { overflow-wrap: anywhere; }

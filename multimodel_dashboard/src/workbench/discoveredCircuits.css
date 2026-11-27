@@ -1,6 +1,31 @@
 .discovered-content { padding: .45rem .85rem .8rem; }
-.discovered-content .uw-graph-toolbar { flex-wrap: wrap; }
-.discovered-content select { max-width: 100%; }
-.discovered-content input[type="number"] { width: 5rem; }
+.discovered-content .discovered-filters {
+  display: grid;
+  grid-template-columns: minmax(11rem, 2fr) minmax(8rem, 1fr) repeat(3, minmax(5.5rem, .65fr));
+  gap: .55rem .75rem;
+}
+.discovered-picker {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: .6rem;
+  color: #526176;
+  font-size: .75rem;
+}
 .discovered-workspace { margin-top: .6rem; }
 .discovered-workspace code { overflow-wrap: anywhere; }
+.discovered-workspace .discovered-context {
+  display: block;
+  margin: 0;
+  border-width: 0 0 1px;
+  overflow-wrap: anywhere;
+}
+.discovered-workspace .uw-threshold-label input[type="range"] {
+  background: transparent;
+  border: 0;
+}
+@media (max-width: 820px) {
+  .discovered-content .discovered-filters {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
+  }
+}

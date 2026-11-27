@@ -94,18 +94,25 @@ function WitnessGraph({ witness, candidate, checkpoint, Graph }: {
   return <div className="uw-main discovered-workspace">
     <section className="uw-graph-area">
       <p className="uw-graph-key">{MODEL_NAMES[witness.model]} · {witness.dataset} · {witness.split} · {witness.condition ?? "natural"}</p>
-      {positions.length > 0 && <p className="td-sequence">{positions.slice(0, Math.max(0, boundary - 1)).join("")}
-        <mark title="Exact canonical boundary">{positions[boundary - 1]}</mark>{positions.slice(boundary).join("")}</p>}
-      <label>Minimum normalized edge weight <output>{formatEdgeMagnitude(threshold)}</output>
-        <input type="range" value={threshold} min={0} max={range.maximum || range.step}
-          step={range.step} onChange={event => setThreshold(Number(event.target.value))} />
-      </label>
+      {positions.length > 0 && <div className="uw-context discovered-context">
+        <p className="ig-sequence td-sequence">{positions.slice(0, Math.max(0, boundary - 1)).join("")}
+          <mark title="Exact canonical boundary">{positions[boundary - 1]}</mark>{positions.slice(boundary).join("")}</p>
+      </div>}
+      <div className="uw-edge-filter">
+        <label className="uw-threshold-label">
+          <span>Minimum normalized edge weight</span>
+          <output>{formatEdgeMagnitude(threshold)}</output>
+          <input type="range" value={threshold} min={0} max={range.maximum || range.step}
+            step={range.step} aria-valuetext={formatEdgeMagnitude(threshold)}
+            onChange={event => setThreshold(Number(event.target.value))} />
+        </label>
+      </div>
       <Graph modelId={witness.model} components={graph.components} edges={visible} spotlight={null}
         selectedComponent={selected ?? null} selectedEdge={edge?.id ?? null} trace={trace} direction="both"
         widthScale="sqrt" colors={colors} annotationCheckpoint={checkpoint} compositionMeasurement={graph.measurement}
         onComponent={id => { setSelected(id); selectEdge(undefined); }}
         onEdge={id => { selectEdge(id); setSelected(undefined); }} />
-      <details><summary>Exact witness provenance</summary><code>{witness.anchor}</code>
+      <details className="uw-provenance-drawer"><summary>Exact witness provenance</summary><code>{witness.anchor}</code>
         <p>Pool {witness.pool ?? "Unavailable"} · archive {witness.artifact}</p></details>
       <CircuitCompositionExplorer checkpoint={checkpoint} measurement={graph.measurement}
         anchor={witness.anchor} model={witness.model} />
@@ -145,17 +152,17 @@ export default function DiscoveredCircuits({ checkpoint, Graph }: {checkpoint: s
       {asset?.error && <p role="status">This build has no measured discovery catalog.</p>}
       {!asset && <p role="status">Loading measured candidates…</p>}
       {catalog && <>
-        <div className="uw-graph-toolbar">
-          <label>Search <input type="search" value={query} placeholder="Hypothesis, gate or candidate"
+        <div className="uw-expanded-search discovered-filters">
+          <label>Search <input className="uw-form-control" type="search" value={query} placeholder="Hypothesis, gate or candidate"
             onChange={event => { setQuery(event.target.value); selectWitness(0); }} /></label>
-          <label>Direction <select value={direction} onChange={event => { setDirection(event.target.value); selectWitness(0); }}>
+          <label>Direction <select className="uw-form-control" value={direction} onChange={event => { setDirection(event.target.value); selectWitness(0); }}>
             <option value="">All</option><option>bottom-up</option><option>top-down</option><option>composition</option>
           </select></label>
-          <label>Min nodes <input type="number" min={5} value={nodes} onChange={event => setNodes(Number(event.target.value))} /></label>
-          <label>Min anchors <input type="number" min={1} value={recurrence} onChange={event => setRecurrence(Number(event.target.value))} /></label>
-          <label>Min models <input type="number" min={1} max={3} value={models} onChange={event => setModels(Number(event.target.value))} /></label>
+          <label>Min nodes <input className="uw-form-control" type="number" min={5} value={nodes} onChange={event => setNodes(Number(event.target.value))} /></label>
+          <label>Min anchors <input className="uw-form-control" type="number" min={1} value={recurrence} onChange={event => setRecurrence(Number(event.target.value))} /></label>
+          <label>Min models <input className="uw-form-control" type="number" min={1} max={3} value={models} onChange={event => setModels(Number(event.target.value))} /></label>
         </div>
-        <label>Candidate <select value={selected?.id ?? ""} onChange={event => {select(event.target.value); selectWitness(0);}}>
+        <label className="discovered-picker">Candidate <select className="uw-form-control" value={selected?.id ?? ""} onChange={event => {select(event.target.value); selectWitness(0);}}>
           {!matching.length && <option value="">No matching candidates</option>}
           {matching.map(row => <option key={row.id} value={row.id}>{row.interpretation.reviewTitle ?? row.id} · {row.structure.nodes} nodes · {row.anchorCount} anchors · {row.dataset}</option>)}
         </select></label>
@@ -208,7 +215,7 @@ export default function DiscoveredCircuits({ checkpoint, Graph }: {checkpoint: s
             {selected.crossModel.peers.map(peer => <button type="button" key={peer.id} onClick={() => {
               select(peer.id); setDirection(""); setNodes(5); setRecurrence(1); setModels(1); setQuery(""); selectWitness(0);
             }}>{MODEL_NAMES[peer.model]} · {peer.id} · {peer.sharedExactAnchors} exact anchors</button>)}</details>}
-          <label>Measured witness <select value={anchor ? selected.witnesses.indexOf(anchor) : ""} onChange={event => selectWitness(Number(event.target.value))}>
+          <label className="discovered-picker">Measured witness <select className="uw-form-control" value={anchor ? selected.witnesses.indexOf(anchor) : ""} onChange={event => selectWitness(Number(event.target.value))}>
             {selected.witnesses.map((row, i) => <option key={row.anchor + "/" + row.model} value={i}>{row.split} · {row.condition ?? "natural"} · {row.anchor.slice(0, 12)}</option>)}
           </select></label>
           {anchor && <WitnessGraph key={selected.id + "/" + anchor.anchor + "/" + anchor.model}
