@@ -73,8 +73,8 @@ export default function NaturalMeasuredGraph({ data, scope, checkpoint, gate, Gr
         compositionMeasurement={data.measurement} annotationCheckpoint={checkpoint}
         evidenceReference={`Held-out test anchor ${scope.anchor}`} anchorLabel="SELECTED TOKEN"
         onExploreGate={onGate} onInspectComponent={onInspectComponent} />
-      : data.measurement ? <p className="uw-edge-state">No active component targets at this measured token.</p>
-      : <p className="uw-edge-state">Dependency graph unavailable at this test anchor.</p>}
+      : data.measurement ? <p className="uw-edge-state">No active target components in this token’s measured graph.</p>
+      : <p className="uw-edge-state">No dependency graph is saved for this test token.</p>}
     <p className="uw-edge-state"><code>{scope.anchor}</code></p>
   </>;
 }

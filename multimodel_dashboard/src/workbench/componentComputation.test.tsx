@@ -18,7 +18,7 @@ it("rejects coefficients from another anchor or checkpoint", () => {
   }} />);
   expect(html).not.toContain("123456");
   expect(html).toContain("Component computation");
-  expect(html).toContain("Native activations for this component and anchor are unavailable");
+  expect(html).toContain("The export has no saved model activations for this component at this token.");
 });
 
 it("selects natural positive and inactive positions within each exact example", () => {

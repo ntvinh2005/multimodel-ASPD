@@ -127,7 +127,7 @@ export default function InductionGateExplorer({ onCircuitView, onOpenCandidate, 
           }} />
           <div className="ig-gate-filters">
             <label>Site<select value={site} onChange={(event) => setSite(event.target.value as typeof site)}><option>ALL</option><option>PRE</option><option>MID</option></select></label>
-            {!anchorOnly && <label>Sort<select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}><option value="contrast">|Induction − control|</option><option value="fires">Positive final-query fires</option><option value="beta">Maximum representative β</option></select></label>}
+            {!anchorOnly && <label>Sort<select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}><option value="contrast">Activation difference |Δ|</option><option value="fires">Induction and changed-continuation firings</option><option value="beta">Maximum representative β</option></select></label>}
           </div>
           {anchorOnly && <button type="button" onClick={() => { setAnchorOnly(false); setOnlyMeasured(false); setQuery(""); }}>Browse all gates</button>}
           {!anchorOnly && (witnesses || graphSelection) && <label className="ig-graph-filter">
@@ -138,15 +138,15 @@ export default function InductionGateExplorer({ onCircuitView, onOpenCandidate, 
           className={id === gateKey ? "selected" : ""} aria-pressed={id === gateKey}>
           <strong>{inductionCheckpointManifest ? <ResearchGateLabel checkpoint={inductionCheckpointManifest} gateId={id} /> : id}</strong>
           <span>{value !== undefined ? `gˢ ${value.toPrecision(4)}` : aggregate && `Δ ${signed(aggregate.contrast)}`}</span>
-          {aggregate && <small>{positiveFires(aggregate)} positive query fires · β {maxBeta(aggregate).toFixed(3)}</small>}
+          {aggregate && <small>{positiveFires(aggregate)} final-token firings in induction conditions · β {maxBeta(aggregate).toFixed(3)}</small>}
           {aggregate && (witnesses?.gates ?? graphSelection)?.[id] && <small className="ig-graph-indicator">Measured graph available</small>}
         </button>)}
-        {!shown.length && <p className="uw-empty">{anchorOnly && anchor && !active.length ? "No gates fired at this token." : "No gates match these filters."}</p>}
+        {!shown.length && <p className="uw-empty">{anchorOnly && anchor && !active.length ? "No gates fired at this position." : "No gates match these filters."}</p>}
       </aside>
       <section className="ig-detail">
         {gateKey && <header><div><span className="uw-eyebrow">SHARED GATE · {gateKey.split(":")[0]}</span>
           <h2>{inductionCheckpointManifest ? <ResearchGateLabel checkpoint={inductionCheckpointManifest} gateId={gateKey} /> : gateKey}</h2></div>
-          {selected && <div className="ig-badges"><span>Final-query contrast {signed(selected.contrast)}</span></div>}
+          {selected && <div className="ig-badges"><span>Final token · induction − control {signed(selected.contrast)}</span></div>}
         </header>}
         {tokenIndex && groups.length && inductionCheckpointManifest ? <section className="ig-examples">
           <header><h3>Matched examples</h3><p>Click a token to inspect its active gates and dependencies.</p></header>

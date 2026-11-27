@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { GraphRenderer } from "./InductionQueryGraph";
+import { conditionLabel, familyLabel, selectionFrameFamily } from "./discoveryWording";
 import { searchSharedGates } from "./graphQueries";
 import SharedGateSearch from "./SharedGateSearch";
 import { ResearchGateLabel } from "./ResearchNotes";
@@ -270,8 +271,8 @@ function NegationPanel({ index, Graph }: { index: NegationIndex; Graph: GraphRen
           <strong><ResearchGateLabel checkpoint={index.checkpointSha256} gateId={id} /></strong>
           <span>{value !== undefined ? `gˢ ${numeric(value)}` : `Δ ${numeric(aggregate?.contrast)}`}</span>
           {aggregate && <>
-            <small>{queryFires(aggregate)} query fires · β {numeric(maxBeta(aggregate))}</small>
-            {expandedGroupId ? <small>Active at a matched final query</small>
+            <small>{queryFires(aggregate)} final-token firings · β {numeric(maxBeta(aggregate))}</small>
+            {expandedGroupId ? <small>Active at a final token in this group</small>
               : id in (witnesses?.gates ?? split.selection) && <small className="ig-graph-indicator">Measured graph available</small>}
           </>}
         </button>)}
@@ -280,7 +281,7 @@ function NegationPanel({ index, Graph }: { index: NegationIndex; Graph: GraphRen
       <section className="ig-detail">
         {gateKey && <header><div><span className="uw-eyebrow">SHARED GATE</span>
           <h2><ResearchGateLabel checkpoint={index.checkpointSha256} gateId={gateKey} /></h2></div>
-          {gate && <span className="ig-badges"><span>Final-query contrast {numeric(gate.contrast)}</span></span>}
+          {gate && <span className="ig-badges"><span>Final token · negative − affirmative {numeric(gate.contrast)}</span></span>}
         </header>}
         <section className="ig-examples">
           <header><h3>Matched examples</h3><p>Click a token to inspect its active gates and dependencies.</p></header>
@@ -290,13 +291,13 @@ function NegationPanel({ index, Graph }: { index: NegationIndex; Graph: GraphRen
             }}>
               {!groupOptions.length && <option value="">No matching examples</option>}
               {groupOptions.map((id) => <option key={id} value={id}>{selectionFrame
-                ? id.replace("selection-frame-discovery-", "").replaceAll("_", " ")
+                ? familyLabel(selectionFrameFamily(id))
                 : id.slice("negation-".length) + " · " + FAMILY_LABELS[split.groups[id].family]}</option>)}
             </select></label>
             <label>Condition<select value={example?.condition ?? conditionChoice}
               onChange={(event) => changeCondition(event.target.value as NegationCondition)}>
               {(examples.length ? examples.map(row => row.condition as NegationCondition) : groupMeta?.conditions ?? [])
-                .map(key => <option key={key} value={key}>{NEGATION_LABELS[key]}</option>)}
+                .map(key => <option key={key} value={key}>{conditionLabel(dataset, key, selectionFrame ? selectionFrameFamily(selectedGroup) : undefined)}</option>)}
             </select></label>
             <ModelSelect model={model} onChange={setModel} />
             {!selectionFrame && !expandedGroupId && <label>Negative outcome<select value={outcome} onChange={(event) => {
@@ -312,7 +313,7 @@ function NegationPanel({ index, Graph }: { index: NegationIndex; Graph: GraphRen
               Compare a second gate
               <input type="search" placeholder="e.g. PRE:4312" value={peer} onChange={(event) => setPeer(event.target.value)} />
             </label>}
-            <MatchedContexts examples={examples} nativeById={nativeById} selected={example.example_id} anchor={anchor.anchor_id}
+            <MatchedContexts dataset={dataset} examples={examples} nativeById={nativeById} selected={example.example_id} anchor={anchor.anchor_id}
               model={model} onSelect={changeCondition} onToken={inspectToken} gate={gateKey} peer={peerKey} />
             <TokenAnchorBar anchor={anchor} model={model} activeCount={active.length} anchorOnly={focusToken}
               onToggle={!selectionFrame && !focusToken ? () => inspectToken(example, anchor.anchor_id) : undefined}
@@ -372,7 +373,8 @@ function maxBeta(gate: NegationGate) {
   return values.length ? Math.max(...values) : null;
 }
 
-function MatchedContexts({ examples, nativeById, selected, anchor, model, onSelect, onToken, gate, peer }: {
+function MatchedContexts({ dataset, examples, nativeById, selected, anchor, model, onSelect, onToken, gate, peer }: {
+  dataset: string;
   examples: TokenExample[];
   nativeById: ReadonlyMap<string, NegationExample>;
   selected: string;
@@ -388,22 +390,22 @@ function MatchedContexts({ examples, nativeById, selected, anchor, model, onSele
     keys.map((key) => activationAt(position, key)),
   )));
   return <div className="td-matched">
-    {keys.length > 0 && <p className="ig-graph-status">Shared activation scale · gˢ 0–{numeric(scale)}</p>}
+    {keys.length > 0 && <p className="ig-graph-status">Same color scale for all examples · gˢ 0–{numeric(scale)}</p>}
     <div className="negation-context-grid">{examples.map((row) => {
       const native = nativeById.get(row.example_id);
       const current = row.example_id === selected;
       const condition = row.condition as NegationCondition;
       return <article key={row.example_id} className={`ig-context ${current ? "negation-context-selected" : ""}`}>
       <header>
-        <div><strong>{NEGATION_LABELS[condition]}</strong><span>{row.example_id}</span></div>
-        {!current && <button type="button" onClick={() => onSelect(condition)}>Inspect this condition</button>}
+        <div><strong>{conditionLabel(dataset, condition, dataset === "selection-frame" ? selectionFrameFamily(row.group_id) : undefined)}</strong><span>{row.example_id}</span></div>
+        {!current && <button type="button" onClick={() => onSelect(condition)}>Select example</button>}
       </header>
       {(keys.length ? keys : [undefined]).map((id) => <TokenSequence key={id ?? "prompt"} example={row} gate={id}
         scale={scale} anchor={current ? anchor : undefined} model={model} label={keys.length > 1 ? id : undefined}
         onSelect={id => onToken(row, id)} />)}
       {native && <>
       <p>Valid {native.valid_alternatives.join(", ")}{native.excluded_candidates.length > 0 && <> · excluded {native.excluded_candidates.join(", ")}</>}</p>
-      <p>Fixed margin L = logit({native.candidate_orientation[0]}) − logit({native.candidate_orientation[1]})</p>
+      <p>Logit difference L = logit({native.candidate_orientation[0]}) − logit({native.candidate_orientation[1]})</p>
       <div className="ig-predictions">{MODEL_IDS.map((model) => {
         const prediction = native.predictions[model];
         return <span key={model}><b>{MODEL_NAMES[model]}</b> {JSON.stringify(prediction.predicted_token)}

@@ -182,7 +182,7 @@ export function TokenDependencyInspector({ checkpoint, dataset, index, example, 
       completeComponents={asset?.data?.completeComponents} anchorLabel={anchor.final_query ? "FINAL QUERY" : "SELECTED TOKEN"}
       onExploreGate={onExploreGate} onAnnotate={onAnnotate} onInspectComponent={setInspectedComponent} />
       : (issue || (!loading && gate && active && Boolean(composition.measurement?.targets.length))) && <p className="ig-graph-status" role="status">
-        {issue ?? (anchor.final_query ? legacy?.error : undefined) ?? "This gate fired here, but its downstream components are outside the measured graph subset."}</p>}
+        {issue ?? (anchor.final_query ? legacy?.error : undefined) ?? "This gate fired here. Its downstream components were outside the measured set."}</p>}
     {!loading && !hasGateRows && onOpenMeasuredExample
       && <button type="button" onClick={onOpenMeasuredExample}>Open a measured example for {gate}</button>}
     {inspected && <ComponentComputationInspector id={inspected} checkpoint={checkpoint} anchor={anchor.anchor_id}

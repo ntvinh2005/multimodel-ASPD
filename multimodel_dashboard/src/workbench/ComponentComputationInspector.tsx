@@ -127,31 +127,31 @@ export default function ComponentComputationInspector({ id, checkpoint, anchor, 
     } catch (error) { setDownloadError(error instanceof Error ? error.message : String(error)); }
   }
   const nativeRole: Record<string, string> = {
-    Q: "Writes a query representation before native head reshaping and position transforms.",
-    K: "Writes a key representation. Compatibility and actual retrieval require native query and attention data.",
-    V: "Writes a value representation. Consumption requires native attention weights and output projection.",
-    O: "Reads the attention output and contributes to the residual-stream projection.",
-    gate: "Writes to the channel-wise nonlinear MLP gate branch.",
-    up: "Writes to the MLP Up branch, multiplied elementwise by the fixed activated Gate branch.",
-    down: "Reads the gated MLP hidden channels and contributes to the residual-stream projection.",
+    Q: "Adds to the query vector before the model splits it into heads and applies position information.",
+    K: "Adds to the key vector. Query vectors and attention weights show which tokens use that key.",
+    V: "Adds to the value vector. Attention weights determine how much of it reaches the output projection.",
+    O: "Reads the combined attention-head output and adds to the residual stream.",
+    gate: "Changes the MLP Gate input before its activation function.",
+    up: "Changes the MLP Up vector. Each channel is multiplied by the corresponding activated Gate value.",
+    down: "Reads the MLP channels after gating and adds to the residual stream.",
   };
   return <details className="ci-inspector" open onToggle={event => setOpened(event.currentTarget.open)}>
     <summary>Component computation · <code>{id}</code></summary>
     <dl><dt>Model · gate · layer · matrix</dt><dd>{model(identity.modelId)} · {identity.gateId} · L{identity.layer} · {identity.matrix}</dd>
       <dt>Anchor</dt><dd><code>{anchor}</code></dd>
-      <dt>Shared gˢ · binary g</dt><dd>{format(token?.activation)} · {support == null ? "Unavailable" : Number(support)}</dd>
+      <dt>Gate strength gˢ · on/off g</dt><dd>{format(token?.activation)} · {support == null ? "Unavailable" : Number(support)}</dd>
       <dt>Reference β · ρ</dt><dd>{format(factors?.beta ?? token?.beta)} · {format(factors?.rho)}
         {(factors?.representative ?? token?.representative) ? " · representative" : ""}</dd></dl>
     {loaded.error && candidateId === "NVX-025" && <p role="status">{loaded.error}</p>}
     <details><summary>Input and reading</summary>
       <dl><dt>Ungated reading vᵀx</dt><dd>{format(reading)}</dd><dt>Input dimension · ‖v‖₂</dt><dd>{factors?.dIn ?? "Unavailable"} · {format(factors?.vNorm)}</dd></dl>
-      {factors && <><p>Largest checkpoint reader weights by absolute magnitude</p><Terms values={factors.readWeights} /></>}
-      {nativeRow && <><p>Largest native reading terms vⱼxⱼ</p><Terms values={nativeRow.readingTerms} /></>}
+      {factors && <><p>Largest input weights in v</p><Terms values={factors.readWeights} /></>}
+      {nativeRow && <><p>Input channels contributing most to vᵀx</p><Terms values={nativeRow.readingTerms} /></>}
     </details>
     <details><summary>Contribution and writing</summary>
-      <dl><dt>Signed e · ‖eu‖₂ · ‖eu‖₂ / σ</dt><dd>{format(coefficient)} · {format(magnitude)} · {format(magnitude == null || !sigma ? token?.normalized ?? nativeRow?.normalized : magnitude / sigma)}</dd>
+      <dl><dt>Signed coefficient e · contribution size · size relative to output scale</dt><dd>{format(coefficient)} · {format(magnitude)} · {format(magnitude == null || !sigma ? token?.normalized ?? nativeRow?.normalized : magnitude / sigma)}</dd>
         <dt>Output dimension · ‖u‖₂ · σ</dt><dd>{factors?.dOut ?? "Unavailable"} · {format(factors?.uNorm)} · {format(sigma)}</dd></dl>
-      <p>Signed coefficients use the checkpoint’s factor basis. Contribution vectors are invariant to reciprocal rescaling of the factors.</p>
+      <p>The sign and scale of e depend on u and v. The contribution eu stays the same if u and v are rescaled inversely.</p>
       {factors && <><p>{coefficient == null ? "Largest writer weights in u" : "Largest signed contribution coordinates"}</p>
         <Terms values={coefficient == null ? factors.writeWeights : factors.writeWeights.map(term => ({ ...term, value: coefficient * term.value }))} />
         <button type="button" onClick={() => void download(factors.factors)}>Download verified u and v</button>{downloadError && <p role="alert">{downloadError}</p>}</>}
@@ -165,8 +165,8 @@ export default function ComponentComputationInspector({ id, checkpoint, anchor, 
         <Terms values={factors.heads.norms.map((value, index) => ({ index, value }))} />
       </details>}
       {local.length ? local.map(row => <p key={row.source}><code>{row.source} → {row.target}</code><br />
-        {row.nativeReplay ? "Exact local replay" : "Affine prediction from the archived Taylor derivative"} · Down e {format(row.before)} → {format(row.after)} · Δe {format(row.delta)}</p>)
-        : !nativeRow && <p>Native activations for this component and anchor are unavailable in the current export.</p>}
+        {row.nativeReplay ? "Local calculation with other inputs fixed" : "First-order estimate from the saved Taylor derivative"} · Down e {format(row.before)} → {format(row.after)} · Δe {format(row.delta)}</p>)
+        : !nativeRow && <p>The export has no saved model activations for this component at this token.</p>}
       {nativeRow?.local && ("attentionRows" in nativeRow.local ? <>
         <p>Native attention replay · source position {nativeRow.local.pivot}. Score differences are centered by the softmax normalizer.</p>
         <ul>{nativeRow.local.attentionRows.slice(0, 12).map((row, i) => <li key={i}>
@@ -192,14 +192,14 @@ export default function ComponentComputationInspector({ id, checkpoint, anchor, 
         {" · e "}{format(row.e)}{" · ‖eu‖₂ "}{format(factors ? Math.abs(row.e) * factors.uNorm : null)}</li>)}</ul>
     </details>}
     <details><summary>Upstream and downstream effects</summary>
-      {!edges.length && <p>No retained dependency records are available for this component at this anchor.</p>}
+      {!edges.length && <p>No saved edges for this component at this position.</p>}
       {edges.slice(0, 12).map(edge => {
         const baseline = archived?.rows[edge.target]?.coefficient ?? exact?.coefficients?.[edge.target];
         return <p key={edge.source + "|" + edge.target}><b>{edge.target === id ? "Upstream" : "Downstream"}</b>{" "}
           <code>{edge.source} → {edge.target}</code><br />Taylor E {format(edge.E)} · normalized w {format(edge.w)}
           {" · target e "}{format(baseline)}{" · first-order Δe on removal "}{format(-edge.E)}</p>;
       })}
-      <p>Each score is a frozen-gate effect at this anchor. Paths are never multiplied or summed here.</p>
+      <p>Each edge estimates the effect of one component at this position with gate states fixed.</p>
     </details>
     {artifact && <details><summary>Provenance</summary><p>{artifact.candidate} · <code>{artifact.provenance.evidenceSha256}</code></p></details>}
   </details>;

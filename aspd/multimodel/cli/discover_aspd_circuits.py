@@ -455,47 +455,22 @@ def component_roles(row, witnesses):
     ]
 
 
-def describe_candidate(row, witness_rows, signs, context_rates, examples):
-    evidence = next((item for item in witness_rows if item.get("text")), None)
-    sink = row["metadata"].get("top-down", {})
-    links = row["metadata"].get("composition", {})
-    role = (evidence or {}).get("role")
-    family = (evidence or {}).get("family")
-    description = {}
-    if sink and role:
-        description["hypothesis"] = (
-            f"Upstream branches may combine context information at the {role} position before writing to {decode(sink['sink'])}."
-        )
-    elif links:
-        description["hypothesis"] = (
-            f"The {links['relationship']} may coordinate the computations attributed to the two smaller saved circuits."
-        )
-    elif evidence and family:
-        description["hypothesis"] = (
-            f"The convergent or serial dependencies may coordinate processing in {family.replace('_', ' ')} contexts."
-        )
-    else:
-        description["hypothesis"] = (
-            "The recurring dependencies may combine multiple local computations. A specific semantic role remains open."
-        )
-    description["alternative"] = (
-        "Shared lexical cues, common firing, or a highly connected component can produce recurrence. "
-        "Signed Taylor effects are local dependency estimates."
-    )
-    description["counterevidence"] = (
-        f"At least one matched edge changes sign across witnesses ({signs} stable)."
-        if signs is not None and signs < 1
-        else "Held-out support is absent or limited for this exact component path."
-        if not context_rates
-        or not any(r["matches"] for r in context_rates if r["split"] == "heldout")
-        else "Co-firing and alternative pathways remain compatible with these observations."
-    )
-    description["proposedTest"] = (
-        "Freeze an annotated internal readout and vary the hypothesized cues independently, with matched "
-        "non-firings and held-out groups; use targeted ablation and restoration only in a separate approved study."
-    )
-    description["independentActivationExamples"] = examples[:3]
-    return description
+def describe_candidate(signs, context_rates, examples):
+    return {
+        "hypothesis": "Computational role unknown.",
+        "alternative": "Shared wording, gate activity or highly connected components may explain why the graph repeats.",
+        "counterevidence": (
+            f"{signs:.0%} of the edges kept the same sign across the saved examples."
+            if signs is not None and signs < 1
+            else "No held-out comparison for this candidate."
+            if not context_rates or not any(r["split"] == "heldout" for r in context_rates)
+            else "No exact match at the comparable held-out positions."
+            if not any(r["matches"] for r in context_rates if r["split"] == "heldout")
+            else ""
+        ),
+        "proposedTest": "Change the suspected cue in new prompts. Keep the token and the rest of the wording fixed where possible.",
+        "independentActivationExamples": examples[:3],
+    }
 
 
 def evaluate(index, rows, templates, independent, seed):
@@ -564,7 +539,7 @@ def evaluate(index, rows, templates, independent, seed):
             for gate in sorted({gate_of(node) for node in nodes})
             for text in independent.get(gate, {}).values()
         ]
-        context_semantics = describe_candidate(row, checked, stable, rate, examples)
+        context_semantics = describe_candidate(stable, rate, examples)
         context_semantics["componentRoles"] = component_roles(row, checked)
         context_semantics["counterexampleContexts"] = counterexamples(
             index, row, ids, control_scopes
