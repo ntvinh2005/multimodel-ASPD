@@ -248,6 +248,7 @@ function RevisedWorkspace({ catalog }: { catalog: RevisedCatalog }) {
   const [split, setSplit] = useState<Split>("heldout");
   const [key, setKey] = useState("");
   const id = (pair: Pair) => pair.left + "|" + pair.right;
+  const sameGatePairs = catalog.pairs.filter(({ left, right }) => catalog.components[left].gate === catalog.components[right].gate).length;
   const first = catalog.pairs[0];
   const modelNames = [first.left, first.right].map(c => MODEL_NAMES[catalog.components[c].model]).join(" and ");
   const pairs = catalog.pairs.filter(pair => {
@@ -264,6 +265,8 @@ function RevisedWorkspace({ catalog }: { catalog: RevisedCatalog }) {
   return <main className="td-section discovered-circuits" aria-label="Semantic Discovery">
     <div className="discovered-content">
       <SemanticDiscoveryGuide pair={first} modelNames={modelNames} />
+      <p>{catalog.pairs.length} pairs passed the held-out checks. {sameGatePairs} share the same gate ID on both sides.
+        {" "}Shared gate support can lead both components to contribute in the same contexts.</p>
       <div className="discovered-filters">
         <label>Find a gate or component<input className="uw-form-control" type="search" value={query}
           onChange={event => setQuery(event.target.value)} /></label>

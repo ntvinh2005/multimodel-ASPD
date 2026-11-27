@@ -2,7 +2,7 @@
 
 ## Status
 
-The updated collector, scoring pipeline, release verifier, and Workbench are implemented. The frozen checkpoint and post-hoc reference files were verified. The CPU archive diagnostic below has run. The fresh ASPD inference, held-out candidate results, and new live catalog depend on the GPU pilot. The existing catalog remains served during this period.
+Fresh inference and held-out analysis are complete. The 192-pool run yielded three exploratory pairs that passed the prespecified criteria. The archived comparison is kept below for reproducibility.
 
 ## What the original results show
 
@@ -65,4 +65,18 @@ python -m aspd.multimodel.cli.analyze_aspd_semantic_contributions \
 python -m aspd.multimodel.cli.install_aspd_semantic_discovery "$ANALYSIS_OUTPUT/frontend"
 ```
 
-No fresh candidate or graph metrics are available as of the CPU diagnostic. The original study remains available in its immutable archive.
+## Measured 192-pool result
+
+The collector at `d4bf2f2189390f088f43cc9711cf29709509c20e` sealed 393,216 unique aligned anchors, 1,747 components, and 197 shared gates. Coverage was estimated on 393,093 anchors from 1,254 independent documents across 15 sources after excluding the boundary document. The pilot job `53076426` used one B200 for 6m 39s. Expansion job `53080259` added 188 pools on one B200 in 12m 04s. The sealed files total 52.6 MB. CPU job `53081703` completed in 1h 10m 36s with 8 CPUs requested and about 9.7 GiB peak host RSS.
+
+1,729 components passed the 10-context floor in both splits. Of 48 discovery-shortlisted pairs, 35 had eligible held-out controls and 3 passed all prespecified held-out checks. The five retained components have a held-out minimum of 42 and mean of 70.2. All five exceed the discovery target.
+
+| Pair | Held-out documents | Combined OT | Advantage and exploratory 95% interval | Exact-anchor Jaccard |
+|---|---:|---:|---:|---:|
+| `granite.L23.mlp_down/515` ↔ `smol.L09.mlp_up/515` | 89/89 | 0.433 | 0.407 [0.298, 0.574] | 0.728 |
+| `gemma.L16.mlp_gate/515` ↔ `granite.L23.mlp_down/515` | 89/89 | 0.428 | 0.450 [0.252, 0.636] | 0.695 |
+| `gemma.L14.v/5597` ↔ `gemma.L15.q/5597` | 42/42 | 0.462 | 0.396 [0.174, 0.549] | 0.714 |
+
+All 48 shortlisted pairs shared a gate ID within each pair, including the two cross-model pairs. OT, mean-embedding distance, and exact-anchor overlap all beat both controls on the same 35 evaluable pairs. The experiment therefore leaves the incremental value of OT unresolved. Shared natural support also offers an explanation for the high exact-anchor overlap in the retained pairs. For MID:515, the strongest held-out examples include words such as “medical” and “MEDICAL” in two different documents. This is an observation from the examples. The study leaves the computation, cross-model functional equivalence, and universality open.
+
+The new catalog records exact-anchor Taylor coverage as unavailable. Catalog SHA-256 is `7172ac0545672d8d4351cfc8255ca955361c3f470cf4c1fd4876714e7ec1b46d`. The corresponding coverage, shortlist, evaluated pairs, method summary, and verified bundles are in the separate `v2-d4bf2f2-20261127-analysis-192` analysis directory. The original study remains in its archive.
