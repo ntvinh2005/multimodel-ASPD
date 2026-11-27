@@ -137,8 +137,8 @@ export function readNegationAsset<T>(path: string, signal: AbortSignal, hash?: s
   return readWorkbenchAsset<T>(`negation/${path}`, signal, hash);
 }
 
-export async function readWorkbenchAsset<T>(path: string, signal: AbortSignal, hash?: string): Promise<T> {
-  const response = await fetch(`${import.meta.env.BASE_URL}${path}`, { signal });
+export async function readWorkbenchAsset<T>(path: string, signal: AbortSignal, hash?: string, cache?: RequestCache): Promise<T> {
+  const response = await fetch(`${import.meta.env.BASE_URL}${path}`, { signal, cache });
   const compressed = path.endsWith(".json.gz");
   const contentType = response.headers.get("content-type") ?? "";
   if (!response.ok || !(compressed ? /gzip|octet-stream/.test(contentType) : contentType.includes("json"))) {

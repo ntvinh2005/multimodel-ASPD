@@ -13,6 +13,7 @@ import { useWorkbenchAsset } from "./TokenCircuitExplorer";
 import { CircuitCaptureButton, CircuitLibraryProvider, useCircuitLibrary } from "./CircuitLibrary";
 import DiscoveredCircuits from "./DiscoveredCircuits";
 import SemanticDiscovery from "./SemanticDiscovery";
+import SemanticDiscoveryRevision from "./SemanticDiscoveryRevision";
 import CircuitCompositionExplorer from "./CircuitCompositionExplorer";
 import ComponentComputationInspector from "./ComponentComputationInspector";
 import { measurementFromGraph } from "./compositionMeasurements";
@@ -212,7 +213,8 @@ function CircuitWorkbench() {
     </nav>
     {naturalView === "summary" && <MeasuredSummary onExplore={() => setNaturalView("graphs")} />}
     {naturalView === "discovery" && <DiscoveredCircuits checkpoint={naturalCheckpoint} Graph={ModelGraph} />}
-    {naturalView === "semantic" && <SemanticDiscovery checkpoint={naturalCheckpoint} Graph={ModelGraph} />}
+    {naturalView === "semantic" && <SemanticDiscoveryRevision checkpoint={naturalCheckpoint}
+        legacy={<SemanticDiscovery checkpoint={naturalCheckpoint} Graph={ModelGraph} />} />}
     {naturalView === "graphs" && <>
     <NaturalValidationScenarios manifest={data.manifest} activeAnchorId={dictionaryGate || expandedCandidate ? null : anchorId}
       onSelect={openMeasuredScenario} query={gateQuery} onQueryChange={setGateQuery}

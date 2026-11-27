@@ -34,6 +34,8 @@ constraints without weakening these rules.
   results report.
 - For ASPD experiment infrastructure, also read
   `.agents/skills/aspd-experiments/SKILL.md` when it exists.
+- For Workbench UI, measurement exports, or researcher-facing interpretation, read
+  [Research Workbench practices](docs/multimodel/research_workbench_practices.md).
 
 ## Project storage ceiling
 

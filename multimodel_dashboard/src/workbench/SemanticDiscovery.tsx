@@ -8,6 +8,7 @@ import { ResearchNotesEditor } from "./ResearchNotes";
 import { notesForSelection } from "./researchNotes";
 import { useWorkbenchAsset } from "./TokenCircuitExplorer";
 import type { DependencyEdge } from "./types";
+import { SemanticDiscoveryGuide } from "./SemanticDiscoveryRevision";
 
 type Anchor = {
   anchor: string; prefix: string; pool: number; source: string; document: string;
@@ -320,6 +321,8 @@ export default function SemanticDiscovery({ checkpoint, Graph }: { checkpoint: s
 
   return <main className="td-section discovered-circuits" aria-label="Semantic Discovery">
     <div className="discovered-content">
+      <SemanticDiscoveryGuide archived />
+      <p>Original Semantic OT study · examples use archived dependency anchors. The outline shows the anchor location.</p>
       {!asset && !seal?.error && <p role="status">Loading Natural Validation Semantic OT results…</p>}
       {(asset?.error || seal?.error) && <p role="status">Semantic OT results are unavailable in this build.</p>}
       {asset?.data && !data && <p role="alert">This catalog belongs to a different dataset or checkpoint.</p>}
@@ -413,7 +416,7 @@ export default function SemanticDiscovery({ checkpoint, Graph }: { checkpoint: s
                 {totals ? <p>{totals.measuredNonzero} measured nonzero contributions · total size {show(totals.normalizedMass)}
                   {" · "}positive coefficient mass {show(totals.positiveMass)} · negative coefficient mass {show(totals.negativeMass)}</p>
                   : <p>No measured positive mass in this split.</p>}
-                {component.examples[split]?.slice(0, 4).map(example => <div key={example.anchor}>
+                {component.examples[split]?.map(example => <div key={example.anchor}>
                   <Prefix row={data.anchors[example.anchor]} model={component.model} />
                   <small>Coefficient e {show(example.coefficient)} · contribution relative to output scale {show(example.normalizedMagnitude)}</small>
                 </div>)}

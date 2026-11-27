@@ -13,17 +13,17 @@ import { componentIdentity } from "./circuitComposition";
 import { noteKey, notesForGate, type NoteTarget } from "./researchNotes";
 import "./tokenDiscovery.css";
 
-export function useWorkbenchAsset<T>(path?: string, hash?: string) {
+export function useWorkbenchAsset<T>(path?: string, hash?: string, cache?: RequestCache) {
   const [result, setResult] = useState<{ path: string; hash?: string; data?: T; error?: string }>();
   useEffect(() => {
     if (!path) return;
     const controller = new AbortController();
-    void readWorkbenchAsset<T>(path, controller.signal, hash).then(
+    void readWorkbenchAsset<T>(path, controller.signal, hash, cache).then(
       (data) => { if (!controller.signal.aborted) setResult({ path, hash, data }); },
       (error: Error) => { if (!controller.signal.aborted) setResult({ path, hash, error: error.message }); },
     );
     return () => controller.abort();
-  }, [path, hash]);
+  }, [path, hash, cache]);
   return result?.path === path && result?.hash === hash ? result : undefined;
 }
 
