@@ -1,28 +1,30 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { componentsForSelection, edgesForAnchor, jaccard, measuredViewForGate, searchSharedGates, traceGraph, tvDistance } from "./graphQueries";
 import { activationOpacity, activationWindow, DEFAULT_GRAPH_VIEWBOX, edgeThresholdScale, formatEdgeMagnitude, panGraphViewBox, zoomGraphViewBox, type ActivationContextView, type GraphViewBox } from "./displayUtils";
 import { formatBytes, measuredValidationArtifact, modelPairLabel } from "./measuredArtifact";
 import { measuredWorkbenchDataset as data } from "./measuredDataset";
-import InductionGateExplorer, { CircuitSelect, type CircuitView } from "./InductionGateExplorer";
+import WorkbenchHeader, { type CircuitView } from "./WorkbenchHeader";
 import NegationGateExplorer from "./NegationGateExplorer";
 import NaturalValidationScenarios from "./NaturalValidationScenarios";
 import ExpandedNaturalValidationGraph, { DictionaryNaturalValidationGraph } from "./ExpandedNaturalValidationGraph";
 import { getExpandedCandidate } from "./expandedNaturalValidation";
 import { dictionaryPath, validateDictionary, type DictionaryIndex } from "./naturalDictionary";
 import { useWorkbenchAsset } from "./TokenCircuitExplorer";
-import { CircuitCaptureButton, CircuitLibraryButton, CircuitLibraryProvider, useCircuitLibrary } from "./CircuitLibrary";
+import { CircuitCaptureButton, CircuitLibraryProvider, useCircuitLibrary } from "./CircuitLibrary";
 import DiscoveredCircuits from "./DiscoveredCircuits";
 import CircuitCompositionExplorer from "./CircuitCompositionExplorer";
 import ComponentComputationInspector from "./ComponentComputationInspector";
 import { measurementFromGraph } from "./compositionMeasurements";
 import type { Measurement } from "./circuitComposition";
-import { ResearchGateLabel, ResearchNotesEditor, ResearchNotesLibrary, ResearchNotesProvider, useResearchNotes } from "./ResearchNotes";
+import { ResearchGateLabel, ResearchNotesEditor, ResearchNotesProvider, useResearchNotes } from "./ResearchNotes";
 import { notesForGate, notesForSelection, SCOPE_LABEL, selectionNotes } from "./researchNotes";
 import type { Component, DependencyEdge, ResearchHypothesis, TraceDirection } from "./types";
 import "./workbench.css";
 import "./researcherFixes.css";
 import "./lightTheme.css";
 import "./activationExamples.css";
+
+const InductionGateExplorer = lazy(() => import("./InductionGateExplorer"));
 
 const palette = ["#51d6c3", "#f0b45b", "#8ca8ff", "#de7cdf", "#73c982", "#ed7d77", "#55a6d9", "#c49a6c"];
 const gateColors: Record<string, string> = Object.fromEntries(data.gates.map((gate, index) => [gate.id, palette[index % palette.length]]));
@@ -34,6 +36,12 @@ const naturalCheckpoint = data.manifest.export?.activationExamples?.checkpointMa
 export default function UniversalWorkbench() {
   return <ResearchNotesProvider><CircuitLibraryProvider><CircuitWorkbench /></CircuitLibraryProvider></ResearchNotesProvider>;
 }
+
+const naturalViews = [
+  ["summary", "Measured validation summary"],
+  ["graphs", "Measured graphs"],
+  ["discovery", "Circuit Discovery"],
+] as const;
 
 function CircuitWorkbench() {
   const [circuitView, setCircuitView] = useState<CircuitView>("natural");
@@ -59,10 +67,10 @@ function CircuitWorkbench() {
   });
   const [pinnedComponentIds, setPinnedComponentIds] = useState<string[]>(() => JSON.parse(localStorage.getItem("aspd-pinned-components") || "[]") as string[]);
   const [pinnedEdgeIds, setPinnedEdgeIds] = useState<string[]>(() => JSON.parse(localStorage.getItem("aspd-pinned-edges") || "[]") as string[]);
-  const [showMeasuredSummary, setShowMeasuredSummary] = useState(true);
+  const [naturalView, setNaturalView] = useState<(typeof naturalViews)[number][0]>("summary");
   const [expandedCandidateId, setExpandedCandidateId] = useState<string | null>(null);
   const [dictionaryGate, setDictionaryGate] = useState<string | null>(null);
-  const dictionaryAsset = useWorkbenchAsset<DictionaryIndex>(circuitView === "natural" ? `${dictionaryPath}/index.json` : undefined);
+  const dictionaryAsset = useWorkbenchAsset<DictionaryIndex>(circuitView === "natural" && naturalView === "graphs" ? `${dictionaryPath}/index.json` : undefined);
   const dictionaryResult = useMemo(() => {
     if (!dictionaryAsset?.data) return {};
     try {
@@ -160,51 +168,60 @@ function CircuitWorkbench() {
     setThreshold(0);
     setRepresentativeOnly(false);
     setTab("details");
-    setShowMeasuredSummary(false);
+    setNaturalView("graphs");
   }
   function openSearchedGate(id: string) {
     setDictionaryGate(null);
     setExpandedCandidateId(null);
-    setShowMeasuredSummary(false);
+    setNaturalView("graphs");
     spotlightGate(id);
   }
   function openExpandedCandidate(id: string) {
     if (!getExpandedCandidate(id)) return;
     setDictionaryGate(null);
     setExpandedCandidateId(id);
+    setNaturalView("graphs");
+    setCircuitView("natural");
   }
   function openDictionaryGate(id: string) {
     setExpandedCandidateId(null);
     setDictionaryGate(id);
-  }
-  function openLegacyView(summary: boolean) {
-    setDictionaryGate(null);
-    setExpandedCandidateId(null);
-    setShowMeasuredSummary(summary);
+    setNaturalView("graphs");
   }
   function togglePinnedComponent(id: string) { setPinnedComponentIds((old) => old.includes(id) ? old.filter((item) => item !== id) : [...old, id]); }
   function togglePinnedEdge(id: string) { setPinnedEdgeIds((old) => old.includes(id) ? old.filter((item) => item !== id) : [...old, id]); }
 
-  if (circuitView === "induction") return <InductionGateExplorer onCircuitView={setCircuitView} Graph={ModelGraph} />;
-  if (circuitView === "negation") return <NegationGateExplorer onCircuitView={setCircuitView} Graph={ModelGraph} />;
+  if (circuitView === "induction") return <Suspense fallback={<div className="uw-shell">
+    <WorkbenchHeader title="Induction Gate Explorer" view="induction" onChangeView={setCircuitView}
+      onOpenCandidate={openExpandedCandidate} />
+    <p className="uw-empty" role="status">Loading measured Induction data…</p>
+  </div>}>
+    <InductionGateExplorer onCircuitView={setCircuitView} onOpenCandidate={openExpandedCandidate} Graph={ModelGraph} />
+  </Suspense>;
+  if (circuitView === "negation") return <NegationGateExplorer onCircuitView={setCircuitView} onOpenCandidate={openExpandedCandidate} Graph={ModelGraph} />;
 
   return <div className="uw-shell">
-    <header className="uw-header">
-      <div><span className="uw-kicker">MULTI-MODEL ASPD · UNIVERSAL MECHANISM DISCOVERY</span><h1>Circuit Workbench</h1><p>Select a gate, reveal its components, trace measured dependencies, compare model-specific realizations.</p></div>
-      <div className="uw-header-actions"><ResearchNotesLibrary buttonLabel="Notes library" onOpenCandidate={openExpandedCandidate} /><CircuitLibraryButton checkpoint={naturalCheckpoint} /><CircuitSelect value="natural" onChange={setCircuitView} /><div className="uw-provenance"><span>POST-HOC SOURCE</span><code>{data.manifest.sourceRevision.slice(0, 12)}</code><small>Gemma · SmolLM2 · Granite</small></div></div>
-    </header>
-    <nav className="uw-data-switch" aria-label="Data view"><button className={!dictionaryGate && !expandedCandidate && showMeasuredSummary ? "active" : ""} onClick={() => openLegacyView(true)}>Measured validation summary</button><button className={dictionaryGate || expandedCandidate || !showMeasuredSummary ? "active" : ""} onClick={() => openLegacyView(false)}>Measured graphs</button></nav>
-    <NaturalValidationScenarios manifest={data.manifest} activeAnchorId={dictionaryGate || expandedCandidate || showMeasuredSummary ? null : anchorId}
+    <WorkbenchHeader title="Circuit Workbench" view="natural" onChangeView={setCircuitView}
+      checkpoint={naturalCheckpoint} onOpenCandidate={openExpandedCandidate} />
+    <nav className="uw-data-switch" aria-label="Natural Validation views">
+      {naturalViews.map(([view, label]) => <button key={view} type="button"
+        aria-pressed={naturalView === view} className={naturalView === view ? "active" : ""}
+        onClick={() => setNaturalView(view)}>{label}</button>)}
+    </nav>
+    {naturalView === "summary" && <MeasuredSummary onExplore={() => setNaturalView("graphs")} />}
+    {naturalView === "discovery" && <DiscoveredCircuits checkpoint={naturalCheckpoint} Graph={ModelGraph} />}
+    {naturalView === "graphs" && <>
+    <NaturalValidationScenarios manifest={data.manifest} activeAnchorId={dictionaryGate || expandedCandidate ? null : anchorId}
       onSelect={openMeasuredScenario} query={gateQuery} onQueryChange={setGateQuery}
       matchingGates={gateQuery.trim() ? matchingGates.map(({ id }) => id) : []} onOpenGate={openSearchedGate}
       activeCandidateId={expandedCandidateId} onOpenCandidate={openExpandedCandidate}
       dictionary={dictionary} dictionaryError={dictionaryAsset?.error ?? dictionaryResult.error}
       activeDictionaryGate={dictionaryGate} onOpenDictionaryGate={openDictionaryGate} />
-    <DiscoveredCircuits checkpoint={naturalCheckpoint} Graph={ModelGraph} />
-    <CircuitCompositionExplorer checkpoint={naturalCheckpoint} measurement={dictionaryGate || expandedCandidate || showMeasuredSummary ? undefined : naturalMeasurement} />
-    {dictionaryGate && dictionary ? <DictionaryNaturalValidationGraph key={dictionaryGate} gate={dictionaryGate} index={dictionary} Graph={ModelGraph} onExploreGate={openDictionaryGate} />
+    {dictionaryGate ? dictionary
+      ? <DictionaryNaturalValidationGraph key={dictionaryGate} gate={dictionaryGate} index={dictionary} Graph={ModelGraph} onExploreGate={openDictionaryGate} />
+      : <p className="uw-empty" role="status">{dictionaryAsset?.error ?? dictionaryResult.error ?? "Loading measured dictionary…"}</p>
       : expandedCandidate ? <ExpandedNaturalValidationGraph key={expandedCandidate.id} candidate={expandedCandidate} Graph={ModelGraph} />
-      : showMeasuredSummary ? <MeasuredSummary onExplore={() => openLegacyView(false)} /> : <>
+      : <>
     <div className="uw-warning"><strong>MEASURED · PROFILE-BACKED BOUNDED VISUALIZATION</strong> Components, stored parent sets, per-anchor S/π, and signed edges come from the completed hash-verified post-hoc artifact. The deterministic browser subset is not a dictionary-wide estimate, and first-order Taylor edges are not general causal validation.</div>
     <section className="uw-controls">
       <div className="uw-control-group uw-gates"><label>SHARED GATES <b>{gateIds.size} selected</b>{spotlight && <em>Spotlight: {spotlight}</em>}</label>
@@ -252,8 +269,10 @@ function CircuitWorkbench() {
         </div>}
       </aside>
     </main>
+    <CircuitCompositionExplorer checkpoint={naturalCheckpoint} measurement={naturalMeasurement} />
     <details className="uw-provenance-drawer"><summary>Experimental provenance</summary><dl><dt>Dataset</dt><dd>{data.manifest.dataset.id}@{data.manifest.dataset.revision}</dd><dt>Graph split</dt><dd>{data.manifest.dataset.splitPolicy}</dd><dt>Parent backend</dt><dd>job {data.manifest.export?.parentBackend?.slurmJobId} · {data.manifest.export?.parentBackend?.parentRows.toLocaleString()} stored parent rows · K={data.manifest.export?.parentBackend?.rule.k_par}, τ={data.manifest.export?.parentBackend?.rule.tau}</dd><dt>Activation examples</dt><dd>{data.manifest.export?.activationExamples?.experimentFamily} · split {data.manifest.export?.activationExamples?.selectedSplit} · independent graph anchors</dd><dt>Source</dt><dd>{data.manifest.sourceRevision}</dd><dt>Config</dt><dd>{data.manifest.trainingConfig}</dd><dt>Specification</dt><dd>{data.manifest.specification.path} · SHA-256 {data.manifest.specification.sha256}</dd><dt>Screening</dt><dd>β · K_rep={data.manifest.screening.kRep} · τ_rep={data.manifest.screening.tauRep}</dd><dt>Bundle selection</dt><dd>{data.manifest.export?.selectionRule}</dd><dt>Graph bound</dt><dd>{data.manifest.export?.graphBound}</dd><dt>Verification</dt><dd>{data.manifest.export?.verification}</dd>{data.models.map((model) => <Fragment key={model.id}><dt>{model.id} tokenizer</dt><dd>{model.tokenizer}</dd></Fragment>)}</dl></details>
     <footer className="uw-footer"><span>Display is bounded to selected gates/models/anchor; no cross-model dependency edges are rendered.</span><span>Config: {data.manifest.trainingConfig}</span></footer></>}
+    </>}
   </div>;
 }
 

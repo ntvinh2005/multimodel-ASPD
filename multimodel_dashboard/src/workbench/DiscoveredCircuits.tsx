@@ -133,7 +133,6 @@ function WitnessGraph({ witness, candidate, checkpoint, Graph }: {
 }
 
 export default function DiscoveredCircuits({ checkpoint, Graph }: {checkpoint: string; Graph: GraphRenderer}) {
-  const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [direction, setDirection] = useState("");
   const [nodes, setNodes] = useState(5);
@@ -141,16 +140,16 @@ export default function DiscoveredCircuits({ checkpoint, Graph }: {checkpoint: s
   const [models, setModels] = useState(1);
   const [id, select] = useState("");
   const [witness, selectWitness] = useState(0);
-  const asset = useWorkbenchAsset<Catalog>(open ? "circuit-discovery/catalog.json" : undefined);
+  const asset = useWorkbenchAsset<Catalog>("circuit-discovery/catalog.json");
   const catalog = asset?.data?.schemaVersion === 1 && asset.data.provenance.checkpoint === checkpoint ? asset.data : undefined;
   const matching = catalog?.candidates.filter(row => matchesDiscovery(row, {query, direction, nodes, recurrence, models})) ?? [];
   const selected = matching.find(row => row.id === id) ?? matching[0];
   const anchor = selected?.witnesses[witness] ?? selected?.witnesses[0];
-  return <details className="td-section discovered-circuits" onToggle={event => setOpen(event.currentTarget.open)}>
-    <summary>Discovered circuit candidates</summary>
-    {open && <div className="discovered-content">
+  return <main className="td-section discovered-circuits" aria-label="Circuit discovery candidates">
+    <div className="discovered-content">
       {asset?.error && <p role="status">This build has no measured discovery catalog.</p>}
       {!asset && <p role="status">Loading measured candidates…</p>}
+      {asset?.data && !catalog && <p role="status">The discovery catalog does not match this Workbench’s schema or checkpoint.</p>}
       {catalog && <>
         <div className="uw-expanded-search discovered-filters">
           <label>Search <input className="uw-form-control" type="search" value={query} placeholder="Hypothesis, gate or candidate"
@@ -162,20 +161,28 @@ export default function DiscoveredCircuits({ checkpoint, Graph }: {checkpoint: s
           <label>Min anchors <input className="uw-form-control" type="number" min={1} value={recurrence} onChange={event => setRecurrence(Number(event.target.value))} /></label>
           <label>Min models <input className="uw-form-control" type="number" min={1} max={3} value={models} onChange={event => setModels(Number(event.target.value))} /></label>
         </div>
-        <label className="discovered-picker">Candidate <select className="uw-form-control" value={selected?.id ?? ""} onChange={event => {select(event.target.value); selectWitness(0);}}>
+        <label className="discovered-picker">Candidate ({matching.length}/{catalog.candidates.length}) <select className="uw-form-control" value={selected?.id ?? ""} onChange={event => {select(event.target.value); selectWitness(0);}}>
           {!matching.length && <option value="">No matching candidates</option>}
           {matching.map(row => <option key={row.id} value={row.id}>{row.interpretation.reviewTitle ?? row.id} · {row.structure.nodes} nodes · {row.anchorCount} anchors · {row.dataset}</option>)}
         </select></label>
-        {selected && <div className="uw-detail">
-          <p><strong>{selected.status}</strong> · {selected.directions.join(" / ")} · Pareto front {selected.paretoFront}</p>
-          <p>{selected.structure.nodes} nodes · {selected.structure.edges} edges · depth {selected.structure.depth}
-            {" · "}{selected.structure.convergence} convergence points · {selected.structure.diamonds} diamonds</p>
-          <p>{selected.anchorCount} exact anchors · {selected.crossModel.models.map(model => MODEL_NAMES[model]).join(", ")}
-            {" · "}{selected.crossModel.sharedExactAnchors} same-anchor cross-model matches</p>
-          {selected.prefixAudit && <p>{selected.prefixAudit.unseenHeldoutPrefixes} unseen held-out prefixes
-            {" · "}{selected.prefixAudit.heldoutPrefixesSeenInDiscovery} repeated discovery prefixes</p>}
-          {selected.interpretation.reviewTitle && <h3>{selected.interpretation.reviewTitle}</h3>}
-          <p>{selected.interpretation.hypothesis}</p>
+        {selected && <div className="discovered-selection">
+          <header className="discovered-summary">
+            <h2>{selected.interpretation.reviewTitle ?? selected.id}</h2>
+            <p>{selected.interpretation.hypothesis}</p>
+            <small>{selected.status} · {selected.directions.join(" / ")} · {selected.structure.nodes} nodes · {selected.structure.edges} edges
+              {" · "}{selected.anchorCount} exact anchors · {selected.crossModel.models.map(model => MODEL_NAMES[model]).join(", ")}</small>
+          </header>
+          <label className="discovered-picker">Measured witness <select className="uw-form-control" value={anchor ? selected.witnesses.indexOf(anchor) : ""} onChange={event => selectWitness(Number(event.target.value))}>
+            {selected.witnesses.map((row, i) => <option key={row.anchor + "/" + row.model} value={i}>{row.split} · {row.condition ?? "natural"} · {row.anchor.slice(0, 12)}</option>)}
+          </select></label>
+          {anchor && <WitnessGraph key={selected.id + "/" + anchor.anchor + "/" + anchor.model}
+            witness={anchor} candidate={selected} checkpoint={checkpoint} Graph={Graph} />}
+          <details className="uw-provenance-drawer"><summary>Structure and recurrence</summary>
+            <p>Pareto front {selected.paretoFront} · depth {selected.structure.depth} · {selected.structure.convergence} convergence points
+              {" · "}{selected.structure.diamonds} diamonds · {selected.crossModel.sharedExactAnchors} same-anchor cross-model matches</p>
+            {selected.prefixAudit && <p>{selected.prefixAudit.unseenHeldoutPrefixes} unseen held-out prefixes
+              {" · "}{selected.prefixAudit.heldoutPrefixesSeenInDiscovery} repeated discovery prefixes</p>}
+          </details>
           {selected.interpretation.componentRoles?.length ? <details><summary>Component roles in the measured graph</summary>
             <ul>{selected.interpretation.componentRoles.map(role => <li key={role.componentId}>
               <code>{role.componentId}</code> · {role.structuralRole}
@@ -215,13 +222,9 @@ export default function DiscoveredCircuits({ checkpoint, Graph }: {checkpoint: s
             {selected.crossModel.peers.map(peer => <button type="button" key={peer.id} onClick={() => {
               select(peer.id); setDirection(""); setNodes(5); setRecurrence(1); setModels(1); setQuery(""); selectWitness(0);
             }}>{MODEL_NAMES[peer.model]} · {peer.id} · {peer.sharedExactAnchors} exact anchors</button>)}</details>}
-          <label className="discovered-picker">Measured witness <select className="uw-form-control" value={anchor ? selected.witnesses.indexOf(anchor) : ""} onChange={event => selectWitness(Number(event.target.value))}>
-            {selected.witnesses.map((row, i) => <option key={row.anchor + "/" + row.model} value={i}>{row.split} · {row.condition ?? "natural"} · {row.anchor.slice(0, 12)}</option>)}
-          </select></label>
-          {anchor && <WitnessGraph key={selected.id + "/" + anchor.anchor + "/" + anchor.model}
-            witness={anchor} candidate={selected} checkpoint={checkpoint} Graph={Graph} />}
+
         </div>}
       </>}
-    </div>}
-  </details>;
+    </div>
+  </main>;
 }

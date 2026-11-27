@@ -117,7 +117,9 @@ export default function NaturalValidationScenarios({ manifest, activeAnchorId, o
         </button>)}
       </div>}
       {!matches.length && !starterMatches.length && !dictionaryMatches.length && <p role="status">No gate or candidate matches this search.</p>}
-    </> : browsing && dictionary ? null : <><div className="uw-scenario-list">
+    </> : browsing && dictionary ? null : <details className="uw-scenario-shortcuts">
+      <summary>Measured anchor shortcuts ({scenarios.length})</summary>
+      <div className="uw-scenario-list">
       {discovery.map(({ anchorId, gateId, discoveryGateIds }) => (
         <button key={anchorId} type="button" aria-pressed={anchorId === activeAnchorId} onClick={() => onSelect(anchorId)}>
           <strong>{discoveryTitles.get(gateId) ?? gateId}</strong>
@@ -130,6 +132,6 @@ export default function NaturalValidationScenarios({ manifest, activeAnchorId, o
       {baseline.map(({ anchorId, gateId }) => (
         <button key={anchorId} type="button" aria-pressed={anchorId === activeAnchorId} onClick={() => onSelect(anchorId)}>{gateId}</button>
       ))}
-    </div>}</>}
+    </div>}</details>}
   </section>;
 }

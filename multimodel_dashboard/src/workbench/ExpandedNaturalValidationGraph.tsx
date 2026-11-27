@@ -1,3 +1,4 @@
+import CircuitCompositionExplorer from "./CircuitCompositionExplorer";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentType } from "react";
 import { measurementFromGraph } from "./compositionMeasurements";
@@ -81,7 +82,10 @@ export function DictionaryNaturalValidationGraph({ gate, index, Graph, onExplore
         evidence={{ snapshots: [data.snapshot], examples: { [gate]: data.examples } }}
         neighborhoodLimit={index.outgoingLimitPerModel} onExploreGate={onExploreGate} />
       : <div className="uw-main">
-        <section className="uw-graph-area"><p className="uw-edge-state">The Natural Validation artifact retained no dependency edge incident to {gate}. Held-out examples and gate notes are available in the inspector.</p></section>
+        <section className="uw-graph-area">
+          <p className="uw-edge-state">The Natural Validation artifact retained no dependency edge incident to {gate}. Held-out examples and gate notes are available in the inspector.</p>
+          <CircuitCompositionExplorer checkpoint={index.checkpoint} />
+        </section>
         <aside className="uw-inspector">
           <Examples gates={[gate]} examples={{ [gate]: data.examples }} />
           <ResearchNotesEditor targets={notesForGate(index.checkpoint, gate, models)} evidenceReference={`${gate} · Natural Validation`} />
@@ -175,6 +179,7 @@ export function NaturalWitness({ gates, reference, artifact, evidence, Graph, ne
           compositionMeasurement={measurement} onComponent={focus} onEdge={focus} />)}
       </div>
       </>}
+      <CircuitCompositionExplorer checkpoint={checkpoint} measurement={testScope ? graphData.measurement : measurement} />
     </section>
     <aside className="uw-inspector">
       <div className="uw-tabs">

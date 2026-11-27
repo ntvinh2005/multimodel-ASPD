@@ -342,3 +342,38 @@ html, body { background: #f6f8fb; }
   .induction-shell > .ig-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media(max-width:1100px){.uw-stat-grid{grid-template-columns:repeat(3,1fr)}.uw-measured-grid{grid-template-columns:1fr}.uw-measured-boundary{grid-template-columns:1fr}.uw-measured-hero{flex-direction:column}.uw-run-state{border-left:0;border-top:3px solid #168f83;padding:12px 0 0}}
+
+.uw-data-switch { flex-wrap: wrap; }
+.uw-shell .uw-header { gap: .75rem; }
+.uw-shell .uw-header-actions {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .45rem;
+}
+.uw-shell .uw-circuit-select { min-width: 10.5rem; }
+.uw-shell .ig-dataset-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  background: var(--l);
+}
+.ig-dataset-toolbar > label { padding: .4rem .65rem; }
+.ig-dataset-toolbar .ig-run-meta { padding: .4rem .65rem; }
+.ig-gate-filters { display: flex; flex-wrap: wrap; gap: .35rem; }
+.ig-gate-filters > label { display: grid; flex: 1; gap: .2rem; min-width: 0; font-size: .72rem; }
+.ig-gate-filters select {
+  width: 100%;
+  min-width: 0;
+  padding: .25rem;
+  background: #fff;
+  color: #263548;
+  border: 1px solid var(--l);
+  border-radius: 4px;
+}
+.uw-scenario-shortcuts > summary {
+  width: fit-content;
+  margin-top: .4rem;
+  color: #526176;
+  font-size: .75rem;
+  cursor: pointer;
+}

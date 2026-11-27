@@ -3,7 +3,7 @@
 import { useEffect, useState, type ComponentProps, type ComponentType } from "react";
 import { edgeThresholdScale, formatEdgeMagnitude } from "./displayUtils";
 import { edgesForAnchor, traceGraph } from "./graphQueries";
-import { CONDITIONS, CONDITION_LABEL, inductionCheckpointManifest, type InductionCondition } from "./inductionGateDataset";
+import { CONDITIONS, CONDITION_LABEL, type InductionCondition } from "./inductionConditions";
 import { ResearchNotesEditor } from "./ResearchNotes";
 import { CircuitCaptureButton } from "./CircuitLibrary";
 import { measurementFromGraph } from "./compositionMeasurements";
@@ -64,7 +64,7 @@ const MODEL_LABELS = { gemma: "Gemma 2", smol: "SmolLM2", granite: "Granite 3.3"
 const MODELS = ["gemma", "smol", "granite"] as const;
 const number = (value: number | null) => value === null ? "—" : value.toPrecision(4);
 
-export function useInductionQueryGraphs(discoveryManifest: string | null) {
+export function useInductionQueryGraphs(discoveryManifest: string | null, checkpointManifest?: string) {
   const [bundle, setBundle] = useState<Bundle | null>(null);
   const [loadError, setLoadError] = useState("");
   useEffect(() => {
@@ -82,7 +82,7 @@ export function useInductionQueryGraphs(discoveryManifest: string | null) {
         if (value.schemaVersion !== 1 || value.split !== "discovery"
             || value.provenance?.scope !== "final_query_same_anchor_frozen_discovery_support"
             || value.provenance.discoveryManifestSha256 !== discoveryManifest
-            || (inductionCheckpointManifest && value.provenance.checkpointManifestSha256 !== inductionCheckpointManifest)
+            || (checkpointManifest && value.provenance.checkpointManifestSha256 !== checkpointManifest)
             || !value.examples?.length || !Object.keys(value.selection).length) {
           throw new Error("The graph artifact does not match this discovery dataset.");
         }
@@ -93,7 +93,7 @@ export function useInductionQueryGraphs(discoveryManifest: string | null) {
     }
     void load();
     return () => controller.abort();
-  }, [discoveryManifest, bundle, loadError]);
+  }, [discoveryManifest, checkpointManifest, bundle, loadError]);
   return { bundle, loadError };
 }
 

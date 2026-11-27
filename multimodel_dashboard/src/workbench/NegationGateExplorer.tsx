@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { CircuitSelect, type CircuitView } from "./InductionGateExplorer";
 import type { GraphRenderer } from "./InductionQueryGraph";
 import { searchSharedGates } from "./graphQueries";
 import SharedGateSearch from "./SharedGateSearch";
-import { ResearchGateLabel, ResearchNotesLibrary } from "./ResearchNotes";
+import { ResearchGateLabel } from "./ResearchNotes";
 import ComponentBetaLocator from "./ComponentBetaLocator";
 import { ModelSelect, SelectedNoteEditor, TokenAnchorBar, TokenDependencyInspector, TokenSequence, useGraphWitnesses, useSelectedNote, useTokenGroup, useTokenIndex } from "./TokenCircuitExplorer";
 import { filterTokenGates, graphWitnessForGate, selectExample, selectGroup, selectToken, tokenGates, type GraphWitness, type TokenExample } from "./tokenDiscovery";
-import { CircuitLibraryButton } from "./CircuitLibrary";
+import WorkbenchHeader, { type CircuitView } from "./WorkbenchHeader";
 import {
   activationAt, CONDITION_OUTCOMES, expandedAtFinalQuery, FAMILY_LABELS, graphAtFinalQuery,
   matchesExpandedDiscovery, MODEL_IDS, MODEL_NAMES,
@@ -35,8 +34,9 @@ function useAsset<T>(path: string | null, hash?: string) {
   return result?.path === path ? result : undefined;
 }
 
-export default function NegationGateExplorer({ onCircuitView, Graph }: {
+export default function NegationGateExplorer({ onCircuitView, onOpenCandidate, Graph }: {
   onCircuitView: (view: CircuitView) => void;
+  onOpenCandidate: (id: string) => void;
   Graph: GraphRenderer;
 }) {
   const asset = useAsset<NegationIndex>("index.json");
@@ -47,11 +47,8 @@ export default function NegationGateExplorer({ onCircuitView, Graph }: {
     catch (failure) { error = failure instanceof Error ? failure.message : String(failure); }
   }
   return <div className="uw-shell induction-shell negation-shell">
-    <header className="uw-header">
-      <div><span className="uw-kicker">MULTI-MODEL ASPD</span><h1>Negation Gate Explorer</h1>
-        <p>Compare matched examples and inspect shared gates and measured dependencies at a selected token.</p></div>
-      <div className="uw-header-actions"><ResearchNotesLibrary buttonLabel="Notes library" /><CircuitLibraryButton checkpoint={index?.checkpointSha256} /><CircuitSelect value="negation" onChange={onCircuitView} /></div>
-    </header>
+    <WorkbenchHeader title="Negation Gate Explorer" view="negation" onChangeView={onCircuitView}
+      checkpoint={index?.checkpointSha256} onOpenCandidate={onOpenCandidate} />
     {index ? <NegationPanel index={index} Graph={Graph} />
       : <p className="uw-empty" role="status">{error ?? "Loading measured Negation data…"}</p>}
   </div>;
@@ -205,7 +202,7 @@ function NegationPanel({ index, Graph }: { index: NegationIndex; Graph: GraphRen
   }
 
   return <>
-    <section className="ig-toolbar">
+    <section className="ig-toolbar ig-dataset-toolbar">
       <label>Dataset<select value={selectionFrame ? "selection-frame" : splitName} onChange={(event) => {
         const choice = event.target.value;
         const next = choice === "smoke" ? "smoke" : "discovery";
@@ -241,14 +238,6 @@ function NegationPanel({ index, Graph }: { index: NegationIndex; Graph: GraphRen
         <option value="all">All Discovery groups</option>
         <option value="expanded">Groups with expanded final-query graphs · {expandedGroupIds.length}</option>
       </select></label>}
-      <label>Site<select value={site} onChange={(event) => setSite(event.target.value)}>
-        <option>ALL</option><option>PRE</option><option>MID</option>
-      </select></label>
-      {!focusToken && <label>Sort<select value={sort} onChange={(event) => setSort(event.target.value)}>
-        <option value="contrast">|Negative − affirmative|</option>
-        <option value="fires">Final-query fire count</option>
-        <option value="beta">Maximum representative β</option>
-      </select></label>}
     </section>
     <main className="ig-layout">
       <aside className="ig-gate-list" aria-label="Shared gates">
@@ -258,6 +247,16 @@ function NegationPanel({ index, Graph }: { index: NegationIndex; Graph: GraphRen
           <SharedGateSearch value={query} onChange={setQuery} onSelectFirst={() => {
             if (shown[0]) selectGate(shown[0].id);
           }} />
+          <div className="ig-gate-filters">
+            <label>Site<select value={site} onChange={(event) => setSite(event.target.value)}>
+              <option>ALL</option><option>PRE</option><option>MID</option>
+            </select></label>
+            {!focusToken && <label>Sort<select value={sort} onChange={(event) => setSort(event.target.value)}>
+              <option value="contrast">|Negative − affirmative|</option>
+              <option value="fires">Final-query fire count</option>
+              <option value="beta">Maximum representative β</option>
+            </select></label>}
+          </div>
           {focusToken && !selectionFrame && <button type="button" onClick={() => {
             setAnchorOnly(false); setGraphOnly(false); setQuery("");
           }}>Browse all gates</button>}

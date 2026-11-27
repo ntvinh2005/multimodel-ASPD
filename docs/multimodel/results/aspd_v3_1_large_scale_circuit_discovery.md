@@ -60,7 +60,7 @@ python -m aspd.multimodel.cli.audit_discovered_circuits \
   --review docs/multimodel/results/aspd_v3_1_circuit_discovery_hypotheses.json
 ```
 
-The Workbench reads `circuit-discovery/catalog.json` from the static artifact root in **Natural Validation → Discovered circuit candidates**. Filters use discovery direction, size, recurrence, model evidence and hypothesis text. Each opened graph is one exact archived witness. The existing inspector, circuit draft, composition tools and notes use the same identities and local storage.
+The Workbench reads `circuit-discovery/catalog.json` from the static artifact root in **Natural Validation → Circuit Discovery**. Filters use discovery direction, size, recurrence, model evidence and hypothesis text. Each opened graph is one exact archived witness. The existing inspector, circuit draft, composition tools and notes use the same identities and local storage.
 
 
 ## Full run and evidence

@@ -29,3 +29,9 @@
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
   }
 }
+
+.discovered-selection { display: grid; gap: .55rem; margin-top: .75rem; }
+.discovered-summary h2 { margin: 0; font-size: 1.1rem; }
+.discovered-summary p { margin: .25rem 0; }
+.discovered-summary small { color: #526176; }
+.discovered-selection > details { border-top: 1px solid var(--l); padding: .55rem .7rem; }

@@ -3,22 +3,21 @@ import { CONDITIONS, CONDITION_LABEL, inductionCheckpointManifest, inductionGate
 import InductionQueryGraph, { useInductionQueryGraphs, type GraphRenderer } from "./InductionQueryGraph";
 import { searchSharedGates } from "./graphQueries";
 import SharedGateSearch from "./SharedGateSearch";
-import { NotesLocatorCell, ResearchGateLabel, ResearchNotesLibrary } from "./ResearchNotes";
+import { NotesLocatorCell, ResearchGateLabel } from "./ResearchNotes";
 import type { NoteTarget } from "./researchNotes";
 import { ModelSelect, SelectedNoteEditor, TokenAnchorBar, TokenDependencyInspector, TokenSequence, useGraphWitnesses, useSelectedNote, useTokenGroup, useTokenIndex, useWorkbenchAsset } from "./TokenCircuitExplorer";
 import { filterTokenGates, graphWitnessForGate, selectExample, selectGroup, selectToken, tokenGates, type GraphWitness, type TokenExample } from "./tokenDiscovery";
 import { activationAt, type EvalModel, type MatrixLocator } from "./negationWorkbenchData";
 import ComponentBetaLocator from "./ComponentBetaLocator";
-import { CircuitLibraryButton } from "./CircuitLibrary";
+import WorkbenchHeader, { type CircuitView } from "./WorkbenchHeader";
 
-export type CircuitView = "natural" | "induction" | "negation";
 const MODEL_LABEL: Record<string, string> = { gemma: "Gemma 2", smol: "SmolLM2", granite: "Granite 3.3" };
 
-export default function InductionGateExplorer({ onCircuitView, Graph }: { onCircuitView: (value: CircuitView) => void; Graph: GraphRenderer }) {
+export default function InductionGateExplorer({ onCircuitView, onOpenCandidate, Graph }: { onCircuitView: (value: CircuitView) => void; onOpenCandidate: (id: string) => void; Graph: GraphRenderer }) {
   const discovery = inductionGateDataset.splits.discovery;
   const [splitName, setSplitName] = useState<"smoke" | "discovery">(discovery.status === "measured" ? "discovery" : "smoke");
   const split = (splitName === "discovery" && discovery.status === "measured" ? discovery : inductionGateDataset.splits.smoke) as MeasuredInductionSplit;
-  const { bundle, loadError } = useInductionQueryGraphs(splitName === "discovery" ? split.manifestSha256 : null);
+  const { bundle, loadError } = useInductionQueryGraphs(splitName === "discovery" ? split.manifestSha256 : null, inductionCheckpointManifest);
   const graphSelection = splitName === "discovery" ? bundle?.selection : undefined;
   const [onlyMeasured, setOnlyMeasured] = useState(false);
   const [site, setSite] = useState<"ALL" | "PRE" | "MID">("ALL");
@@ -112,15 +111,11 @@ export default function InductionGateExplorer({ onCircuitView, Graph }: { onCirc
   }
 
   return <div className="uw-shell induction-shell">
-    <header className="uw-header">
-      <div><span className="uw-kicker">MULTI-MODEL ASPD</span><h1>Induction Gate Explorer</h1><p>Compare matched examples and inspect shared gates and measured dependencies at a selected token.</p></div>
-      <div className="uw-header-actions"><ResearchNotesLibrary buttonLabel="Notes library" /><CircuitLibraryButton checkpoint={inductionCheckpointManifest} /><CircuitSelect value="induction" onChange={onCircuitView} /></div>
-    </header>
+    <WorkbenchHeader title="Induction Gate Explorer" view="induction" onChangeView={onCircuitView}
+      checkpoint={inductionCheckpointManifest} onOpenCandidate={onOpenCandidate} />
     <div className="uw-warning"><strong>MEASURED · NO CIRCUIT CLAIM</strong>{inductionGateDataset.scientificBoundary}</div>
-    <section className="ig-toolbar">
+    <section className="ig-toolbar ig-dataset-toolbar">
       <label>Split<select value={splitName} onChange={(event) => changeSplit(event.target.value as "smoke" | "discovery")}><option value="smoke">Smoke · 32 paired groups</option><option value="discovery" disabled={discovery.status !== "measured"}>Discovery {discovery.status === "measured" ? `· ${discovery.groups} paired groups` : "· running / not bundled"}</option></select></label>
-      <label>Site<select value={site} onChange={(event) => setSite(event.target.value as typeof site)}><option>ALL</option><option>PRE</option><option>MID</option></select></label>
-      {!anchorOnly && <label>Sort<select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}><option value="contrast">|Induction − control|</option><option value="fires">Positive final-query fires</option><option value="beta">Maximum representative β</option></select></label>}
       <div className="ig-run-meta"><strong>{split.gates.length.toLocaleString()}</strong><span>active gates</span><strong>{split.pools}</strong><span>BatchTopK pools</span></div>
     </section>
     <main className="ig-layout">
@@ -130,6 +125,10 @@ export default function InductionGateExplorer({ onCircuitView, Graph }: { onCirc
           <SharedGateSearch value={query} onChange={setQuery} onSelectFirst={() => {
             if (shown[0]) selectGate(shown[0].id);
           }} />
+          <div className="ig-gate-filters">
+            <label>Site<select value={site} onChange={(event) => setSite(event.target.value as typeof site)}><option>ALL</option><option>PRE</option><option>MID</option></select></label>
+            {!anchorOnly && <label>Sort<select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}><option value="contrast">|Induction − control|</option><option value="fires">Positive final-query fires</option><option value="beta">Maximum representative β</option></select></label>}
+          </div>
           {anchorOnly && <button type="button" onClick={() => { setAnchorOnly(false); setOnlyMeasured(false); setQuery(""); }}>Browse all gates</button>}
           {!anchorOnly && (witnesses || graphSelection) && <label className="ig-graph-filter">
             <input type="checkbox" checked={onlyMeasured} onChange={(event) => setOnlyMeasured(event.target.checked)} /> With measured graphs ({Object.keys(witnesses?.gates ?? graphSelection ?? {}).length})
@@ -220,18 +219,6 @@ export default function InductionGateExplorer({ onCircuitView, Graph }: { onCirc
     </main>
     <footer className="uw-footer"><span>Dataset: {split.split} · {split.groups} groups · {split.examples} conditions · exact 2,048-anchor BatchTopK pools.</span><span>Source {split.sourceRevision.slice(0, 12)}</span></footer>
   </div>;
-}
-
-export function CircuitSelect({ value, onChange }: { value: CircuitView; onChange: (value: CircuitView) => void }) {
-  return <label className="uw-circuit-select">
-    <span>CIRCUIT / EVALUATION VIEW</span>
-    <select aria-label="Circuit or evaluation view" value={value} onChange={(event) => onChange(event.target.value as CircuitView)}>
-      <option value="natural">Natural validation · measured dependencies</option>
-      <option value="induction">Induction · shared gates and measured graphs</option>
-      <option value="negation">Negation · shared gates and measured graphs</option>
-    </select>
-    <small>Changing view does not reuse edges across datasets.</small>
-  </label>;
 }
 
 function positiveFires(gate: InductionGate) { return gate.finalQueryFires.induction + gate.finalQueryFires.counterfactual; }
