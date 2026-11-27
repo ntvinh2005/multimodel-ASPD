@@ -80,6 +80,12 @@ The recovered prefix data and replay ledger occupy 51 MiB. The expanded scored c
 
 Choose **Natural Validation → Circuit Discovery** for the dataset-restricted rerun and archive. The mixed historical catalog is selectable in that panel. Choose **Natural Validation → Semantic Discovery** to inspect paired prefixes, less similar transport matches, coefficient mass by sign, held-out comparisons and native same-anchor graphs. A displayed semantic pair is based on its context distributions, including pairs with different gates. The graphs are only drawn from records at one recovered model and anchor.
 
+### Comparing dependency graphs across models
+
+The pair comparison exports the saved edges touching each selected component at the exact position in each model. It opens shared aligned positions first. OT-paired and separate contexts appear as separate options with their own anchor IDs. The slider applies the same minimum normalized weight to both graphs.
+
+Of the 54 cross-model pairs, 51 have graphs on both sides in discovery, including 13 at a shared position. The held-out counts are 12 with graphs on both sides and one with a shared position. In SOT-010, the Gemma and Granite MID:4856 components have 11 and 14 retained incident edges, respectively, at the first shared held-out position.
+
 The run artifacts are in `/blue/thai/share/multimodel-ASPD/repo/.codex_runtime/semantic-ot-natural-validation-v1/`. `recovery/COMPLETE.json` pins the corpus bytes, exact anchor inventory and tokenizer files. `pilot/COMPLETE.json` and `expanded/COMPLETE.json` pin scored results, embedding vectors and the review table. The recovered corpus text and tensors remain on HiPerGator. Profiles and checkpoint were read-only.
 
 Use a new output root, the frozen validation archive, the shared tokenizer cache and a single CPU thread for the pilot. The stream input is the first 134,217,728 bytes of the pinned `train/00.jsonl.zst`. Use the listed MiniLM revision and pack `config.json`, `tokenizer.json`, `tokenizer_config.json`, `special_tokens_map.json`, and `model.safetensors` in one directory.
@@ -111,4 +117,7 @@ python -m aspd.multimodel.cli.export_aspd_natural_candidates \
 python -m aspd.multimodel.cli.link_aspd_semantic_circuits \
   --semantic "$OUT/expanded" --graph-index "$GRAPH_INDEX" \
   --output "$OUT/circuit-links.json"
+python -m aspd.multimodel.cli.export_aspd_semantic_pair_graphs \
+  --semantic "$OUT/expanded" --graph-index "$GRAPH_INDEX" \
+  --output "$OUT/pair-graphs-v1.json"
 ```

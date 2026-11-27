@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import type { GraphRenderer } from "./InductionQueryGraph";
 import { componentIdentity, type Measurement } from "./circuitComposition";
+import { edgeThresholdScale, formatEdgeMagnitude } from "./displayUtils";
+import { traceGraph } from "./graphQueries";
 import { MODEL_IDS, MODEL_NAMES, type EvalModel } from "./negationWorkbenchData";
 import { ResearchNotesEditor } from "./ResearchNotes";
 import { notesForSelection } from "./researchNotes";
@@ -30,10 +32,17 @@ type PathRecord = {
   witnesses: Array<Omit<Witness, "component"> & { split: Split }>;
 };
 type PathCatalog = { checkpoint: string; dataset: string; catalogSha256: string; pairs: PathRecord[] };
+type GraphExample = { left: string; right: string; kind: "shared" | "transport" | "contrast" | "separate" };
+type GraphComparison = { sharedSupport: number; examples: GraphExample[] };
+type PairGraphCatalog = {
+  schemaVersion: number; checkpoint: string; dataset: string; catalogSha256: string; graphIndexSha256: string;
+  pairs: Record<string, Record<Split, GraphComparison>>;
+  graphs: Record<string, Witness & { pool: number }>;
+};
 type Cluster = { id: string; components: string[]; models: EvalModel[]; links: Pair[]; graphs: Witness[] };
 type Totals = { measuredNonzero: number; normalizedMass: number; positiveMass: number; negativeMass: number };
 type SemanticCatalog = {
-  schemaVersion: number; dataset: string; provenance: { checkpoint: string; split: string };
+  schemaVersion: number; dataset: string; provenance: { checkpoint: string; split: string; graphIndexSha256: string };
   summary: { selected: Record<EvalModel, number>; scoredDiscoveryPairs: number; crossModelClusters: number };
   clusters: Cluster[];
   anchors: Record<string, Anchor>;
@@ -67,19 +76,26 @@ function Prefix({ row, model }: { row: Anchor; model: EvalModel }) {
   </div>;
 }
 
-function ContextGraph({ witness, row, checkpoint, Graph }: {
-  witness: Witness; row: Anchor; checkpoint: string; Graph: GraphRenderer;
-}) {
-  const [selected, setSelected] = useState<string | null>(null);
-  const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
-  const ids = [...new Set(witness.edges.flatMap(edge => [edge.source, edge.target]))];
-  const components = ids.map(id => ({ ...componentIdentity(id), beta: null, rho: null, representative: false }));
-  const edges: DependencyEdge[] = witness.edges.map(record => ({
+function dependencyEdges(witness: Witness): DependencyEdge[] {
+  return witness.edges.map(record => ({
     id: `${witness.anchor}/${record.source}/${record.target}`, anchorId: witness.anchor,
     modelId: witness.model, source: record.source, target: record.target,
     signedEffect: record.E, normalizedMagnitude: record.w, upstreamCoefficient: null,
     gradient: null, normalization: "Stored parent weight", evidence: "measured-taylor",
   }));
+}
+
+function ContextGraph({ witness, row, checkpoint, Graph, hidePrefix, threshold = 0, colors, onComparisonNote }: {
+  witness: Witness; row: Anchor; checkpoint: string; Graph: GraphRenderer;
+  hidePrefix?: boolean; threshold?: number; colors?: Record<string, string>;
+  onComparisonNote?: (componentId: string | null) => void;
+}) {
+  const [selected, setSelected] = useState<string | null>(null);
+  const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
+  const ids = [...new Set(witness.edges.flatMap(edge => [edge.source, edge.target]))];
+  const components = ids.map(id => ({ ...componentIdentity(id), beta: null, rho: null, representative: false }));
+  const edges = dependencyEdges(witness);
+  const visible = edges.filter(edge => (edge.normalizedMagnitude ?? 0) >= threshold);
   const measurement: Measurement = {
     scope: { checkpoint, dataset: "natural-validation", anchor: witness.anchor, example: row.document,
       pool: String(row.pool), artifact: witness.artifact },
@@ -87,24 +103,93 @@ function ContextGraph({ witness, row, checkpoint, Graph }: {
     edges: witness.edges.map(edge => ({ source: edge.source, target: edge.target, signed: edge.E, weight: edge.w })),
   };
   const node = components.find(component => component.id === selected);
-  const edge = edges.find(record => record.id === selectedEdge);
+  const edge = visible.find(record => record.id === selectedEdge);
   return <div>
-    <Prefix row={row} model={witness.model} />
-    <Graph modelId={witness.model} components={components} edges={edges}
-      spotlight={componentIdentity(witness.component).gateId} selectedComponent={selected} selectedEdge={selectedEdge}
-      trace={null} direction="both" widthScale="sqrt" onComponent={id => { setSelected(id); setSelectedEdge(null); }}
-      onEdge={id => { setSelected(null); setSelectedEdge(id); }} annotationCheckpoint={checkpoint}
-      compositionMeasurement={measurement} />
+    {!hidePrefix && <Prefix row={row} model={witness.model} />}
+    <Graph modelId={witness.model} components={components} edges={visible}
+      spotlight={componentIdentity(witness.component).gateId} selectedComponent={selected} selectedEdge={edge?.id ?? null}
+      trace={selected ? traceGraph(visible, selected, "both", 1) : null} direction="both" widthScale="sqrt"
+      onComponent={id => { setSelected(id); setSelectedEdge(null); onComparisonNote?.(id); }}
+      onEdge={id => { setSelected(null); setSelectedEdge(id); onComparisonNote?.(null); }}
+      colors={colors} annotationCheckpoint={checkpoint} compositionMeasurement={measurement} />
     {edge && <p><code>{edge.source} → {edge.target}</code> · E {show(edge.signedEffect)} · w {show(edge.normalizedMagnitude)}</p>}
-    {node && <ResearchNotesEditor key={node.id} targets={notesForSelection(checkpoint, node.gateId, node.modelId, node)}
+    {node && !onComparisonNote && <ResearchNotesEditor key={node.id} targets={notesForSelection(checkpoint, node.gateId, node.modelId, node)}
       evidenceReference={`Semantic Discovery · ${row.anchor}`} />}
   </div>;
+}
+
+function graphExampleLabel({ left, right, kind }: GraphExample) {
+  if (left === right) return "Same aligned token";
+  if (kind === "transport") return "OT-matched contexts";
+  if (kind === "contrast") return "Less similar OT contexts";
+  return "Separate measured contexts";
+}
+
+function PairGraphComparison({ pair, comparison, anchors, graphs, checkpoint, Graph }: {
+  pair: Pair; comparison: GraphComparison; anchors: SemanticCatalog["anchors"]; graphs: PairGraphCatalog["graphs"];
+  checkpoint: string; Graph: GraphRenderer;
+}) {
+  const [position, setPosition] = useState(0);
+  const [threshold, setThreshold] = useState(0);
+  const [annotation, setAnnotation] = useState<{ componentId: string; anchor: string } | null>(null);
+  const example = comparison.examples[position];
+  if (!example) return <p>No paired graph records in this split.</p>;
+
+  const panels = [
+    { component: pair.left, anchor: example.left },
+    { component: pair.right, anchor: example.right },
+  ].map(({ component, anchor }) => ({
+    component, anchor, row: anchors[anchor], model: componentIdentity(component).modelId as EvalModel,
+    witness: graphs[`${component}|${anchor}`],
+  }));
+  const allEdges = panels.flatMap(panel => panel.witness ? dependencyEdges(panel.witness) : []);
+  const scale = edgeThresholdScale(allEdges);
+  const keys = [...new Set(allEdges.flatMap(edge => [edge.source, edge.target].map(id => componentIdentity(id).gateId)))].sort();
+  const colors = Object.fromEntries(keys.map((gate, index) => [gate, `hsl(${index * 137.5} 54% 67%)`]));
+  const shared = example.left === example.right;
+  const node = annotation ? componentIdentity(annotation.componentId) : undefined;
+
+  return <>
+    <label className="discovered-picker">Graph example<select className="uw-form-control" value={position}
+      onChange={event => { setPosition(Number(event.target.value)); setThreshold(0); setAnnotation(null); }}>
+      {comparison.examples.map((item, index) => <option key={item.left + "|" + item.right} value={index}>
+        {graphExampleLabel(item)} · {item.left.slice(0, 8)}{item.left !== item.right && ` / ${item.right.slice(0, 8)}`}
+      </option>)}
+    </select></label>
+    <p>{shared ? "Same text and aligned position in both graphs." : "Each graph is measured at the position in its own context."}
+      {" "}Scope: saved edges touching the selected component.</p>
+    {shared && <Prefix row={panels[0].row} model={panels[0].model} />}
+    <div className="uw-edge-filter">
+      <label className="uw-threshold-label">
+        <span>Minimum edge weight in both graphs</span><output>{formatEdgeMagnitude(threshold)}</output>
+        <input type="range" min="0" max={scale.maximum || scale.step} step={scale.step} value={threshold}
+          disabled={!scale.maximum} aria-label="Minimum edge weight in both graphs"
+          onChange={event => setThreshold(Number(event.target.value))} />
+      </label>
+    </div>
+    <div className="negation-context-grid semantic-graph-panels">
+      {panels.map(({ component, anchor, row, model, witness }) => <section key={component + "|" + anchor}
+        aria-label={`Dependency graph for ${MODEL_NAMES[model]}`}>
+        <strong>{MODEL_NAMES[model]}</strong>{" "}<code>{component}</code>
+        <small className="semantic-graph-anchor" title={anchor}>Token {row.positions[model]} · {anchor.slice(0, 12)}
+          {" · "}{witness ? `${witness.edges.filter(edge => edge.w >= threshold).length}/${witness.edges.length} edges shown` : "Graph unavailable"}</small>
+        {witness ? <ContextGraph witness={witness} row={row} checkpoint={checkpoint} Graph={Graph}
+          hidePrefix={shared} threshold={threshold} colors={colors}
+          onComparisonNote={componentId => setAnnotation(componentId ? { componentId, anchor } : null)} />
+          : <>{!shared && <Prefix row={row} model={model} />}<p>No saved edges for this component at this token.</p></>}
+      </section>)}
+    </div>
+    {node && annotation && <ResearchNotesEditor key={node.id}
+      targets={notesForSelection(checkpoint, node.gateId, node.modelId, node)}
+      evidenceReference={`Semantic Discovery · ${annotation.anchor}`} />}
+  </>;
 }
 
 export default function SemanticDiscovery({ checkpoint, Graph }: { checkpoint: string; Graph: GraphRenderer }) {
   const seal = useWorkbenchAsset<{ catalogSha256: string }>("semantic-discovery/COMPLETE.json");
   const asset = useWorkbenchAsset<SemanticCatalog>(seal?.data?.catalogSha256 ? "semantic-discovery/catalog.json" : undefined,
     seal?.data?.catalogSha256);
+  const comparedGraphs = useWorkbenchAsset<PairGraphCatalog>(asset?.data ? "semantic-discovery/pair-graphs-v1.json" : undefined);
   const paths = useWorkbenchAsset<PathCatalog>(asset?.data ? "semantic-discovery/circuit-links.json" : undefined);
   const data = asset?.data?.schemaVersion === 1 && asset.data.dataset === "natural-validation"
     && asset.data.provenance.checkpoint === checkpoint && asset.data.provenance.split === "validation" ? asset.data : undefined;
@@ -138,6 +223,10 @@ export default function SemanticDiscovery({ checkpoint, Graph }: { checkpoint: s
   const pair = pairs[pairIndex] ?? pairs[0];
   const graphs = selected?.graphs.filter(item => item.component === pair?.left || item.component === pair?.right) ?? [];
   const graph = graphs[graphIndex] ?? graphs[0];
+  const graphComparison = comparedGraphs?.data?.schemaVersion === 1 && comparedGraphs.data.checkpoint === checkpoint
+    && comparedGraphs.data.dataset === "natural-validation" && comparedGraphs.data.catalogSha256 === seal?.data?.catalogSha256
+    && comparedGraphs.data.graphIndexSha256 === data?.provenance.graphIndexSha256 ? comparedGraphs.data : undefined;
+  const comparison = pair && graphComparison?.pairs[`${pair.left}|${pair.right}`]?.[split];
   const result = pair?.[split];
   const matchingPaths = paths?.data?.checkpoint === checkpoint && paths.data.dataset === "natural-validation"
     && paths.data.catalogSha256 === seal?.data?.catalogSha256
@@ -216,6 +305,14 @@ export default function SemanticDiscovery({ checkpoint, Graph }: { checkpoint: s
               <td>{show(result.controlMeasures?.ot)}</td><td>{show(result.suffixRemovedControlOt)}</td><td>{show(result.controlMeasures?.centroid)}</td>
               <td>{show(result.controlMeasures?.anchorOverlap)}</td></tr></tbody>
           </table></div> : <p role="status">Too few measured contexts for this pair in {split === "heldout" ? "held-out documents" : "discovery"}.</p>}
+          <details className="semantic-graph-compare">
+            <summary>Compare dependency graphs{comparison?.examples.length ? ` · ${comparison.examples.length} examples` : ""}</summary>
+            {comparison && graphComparison ? <PairGraphComparison key={pair.left + "|" + pair.right + "|" + split}
+              pair={pair} comparison={comparison} anchors={data.anchors} graphs={graphComparison.graphs}
+              checkpoint={checkpoint} Graph={Graph} />
+              : <p>{comparedGraphs?.error ? "Graph comparisons are unavailable in this build."
+                : comparedGraphs ? "No paired graph records for this selection." : "Loading graph comparisons…"}</p>}
+          </details>
           {result.transport.map((cell, index) => <details key={split + index} open={index === 0}>
             <summary>{cell.kind === "counterexample" ? "Less similar linked contexts" : "Contexts paired by OT"}
               {" · "}{(100 * cell.mass).toFixed(1)}% of mass · distance {show(cell.cost)}
@@ -256,7 +353,7 @@ export default function SemanticDiscovery({ checkpoint, Graph }: { checkpoint: s
               witness={{ ...pathWitness, component: chosenPath.left }} row={data.anchors[pathWitness.anchor]}
               checkpoint={checkpoint} Graph={Graph} /> : <p>No saved path for this split.</p>}
           </details>}
-          <details><summary>Saved dependencies for this pair</summary>
+          <details><summary>Individual graph examples</summary>
             {graph ? <>
               <label className="discovered-picker">Measured position<select className="uw-form-control"
                 value={graphs.indexOf(graph)} onChange={event => setGraphIndex(Number(event.target.value))}>

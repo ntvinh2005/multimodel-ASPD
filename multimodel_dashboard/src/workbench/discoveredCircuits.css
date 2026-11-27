@@ -35,3 +35,8 @@
 .discovered-summary p { margin: .25rem 0; }
 .discovered-summary small { color: #526176; }
 .discovered-selection > details { border-top: 1px solid var(--l); padding: .55rem .7rem; }
+
+.semantic-graph-compare[open] > summary { margin-bottom: .6rem; }
+.semantic-graph-panels > section { min-width: 0; }
+.semantic-graph-panels code { overflow-wrap: anywhere; }
+.semantic-graph-anchor { display: block; margin: .2rem 0 .55rem; color: #526176; }
