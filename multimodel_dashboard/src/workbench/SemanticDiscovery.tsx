@@ -1,0 +1,219 @@
+import { useMemo, useState } from "react";
+import type { GraphRenderer } from "./InductionQueryGraph";
+import { componentIdentity, type Measurement } from "./circuitComposition";
+import { MODEL_NAMES, type EvalModel } from "./negationWorkbenchData";
+import { ResearchNotesEditor } from "./ResearchNotes";
+import { notesForSelection } from "./researchNotes";
+import { useWorkbenchAsset } from "./TokenCircuitExplorer";
+import type { DependencyEdge } from "./types";
+
+type Anchor = {
+  anchor: string; prefix: string; pool: number; source: string; document: string;
+  positions: Record<EvalModel, number>;
+};
+type Values = { ot: number; centroid: number; anchorOverlap: number };
+type Pair = {
+  left: string; right: string;
+  discovery: Comparison; heldout: Comparison;
+};
+type Comparison = {
+  suffixRemovedOt?: number | null; suffixRemovedControlOt?: number | null;
+  measures: Values | null; controlMeasures: Values | null; controlComponent: string | null;
+  transport: Array<{ left: string; right: string; mass: number; cost: number; kind: string }>;
+};
+type Witness = {
+  anchor: string; component: string; model: EvalModel; artifact: string;
+  edges: Array<{ source: string; target: string; E: number; w: number }>;
+};
+type PathRecord = {
+  left: string; right: string; leftCluster: string; rightCluster: string; discovery: number; heldout: number;
+  witnesses: Array<Omit<Witness, "component"> & { split: Split }>;
+};
+type PathCatalog = { checkpoint: string; dataset: string; catalogSha256: string; pairs: PathRecord[] };
+type Cluster = { id: string; components: string[]; models: EvalModel[]; links: Pair[]; graphs: Witness[] };
+type Totals = { measuredNonzero: number; normalizedMass: number; positiveMass: number; negativeMass: number };
+type SemanticCatalog = {
+  schemaVersion: number; dataset: string; provenance: { checkpoint: string; split: string };
+  summary: { selected: Record<EvalModel, number>; scoredDiscoveryPairs: number; crossModelClusters: number };
+  clusters: Cluster[];
+  anchors: Record<string, Anchor>;
+  components: Record<string, {
+    gate: string; model: EvalModel; totals: Partial<Record<Split, Totals>>;
+    examples: Partial<Record<Split, Array<{ anchor: string; coefficient: number; normalizedMagnitude: number }>>>;
+  }>;
+  structuralOverlaps: Array<{ cluster: string; structural: string; components: string[] }>;
+};
+type Split = "discovery" | "heldout";
+
+function show(value?: number | null) {
+  return value == null ? "Unavailable" : value.toPrecision(3);
+}
+
+function Prefix({ row, model }: { row: Anchor; model: EvalModel }) {
+  const end = row.prefix.match(/[^\p{L}\p{N}_\s]+\s*$|[\p{L}\p{N}_]+\s*$/u);
+  const boundary = end?.index ?? Math.max(0, row.prefix.length - 1);
+  return <div>
+    <p className="ig-sequence td-sequence">{row.prefix.slice(0, boundary)}
+      <mark title="The aligned anchor ends here">{row.prefix.slice(boundary)}</mark>
+    </p>
+    <small>{row.source} · {MODEL_NAMES[model]} token {row.positions[model]} · pool {row.pool}</small>
+  </div>;
+}
+
+function ContextGraph({ witness, row, checkpoint, Graph }: {
+  witness: Witness; row: Anchor; checkpoint: string; Graph: GraphRenderer;
+}) {
+  const [selected, setSelected] = useState<string | null>(null);
+  const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
+  const ids = [...new Set(witness.edges.flatMap(edge => [edge.source, edge.target]))];
+  const components = ids.map(id => ({ ...componentIdentity(id), beta: null, rho: null, representative: false }));
+  const edges: DependencyEdge[] = witness.edges.map(record => ({
+    id: `${witness.anchor}/${record.source}/${record.target}`, anchorId: witness.anchor,
+    modelId: witness.model, source: record.source, target: record.target,
+    signedEffect: record.E, normalizedMagnitude: record.w, upstreamCoefficient: null,
+    gradient: null, normalization: "Stored parent weight", evidence: "measured-taylor",
+  }));
+  const measurement: Measurement = {
+    scope: { checkpoint, dataset: "natural-validation", anchor: witness.anchor, example: row.document,
+      pool: String(row.pool), artifact: witness.artifact },
+    complete: false, targets: [...new Set(edges.map(edge => edge.target))],
+    edges: witness.edges.map(edge => ({ source: edge.source, target: edge.target, signed: edge.E, weight: edge.w })),
+  };
+  const node = components.find(component => component.id === selected);
+  const edge = edges.find(record => record.id === selectedEdge);
+  return <div>
+    <Prefix row={row} model={witness.model} />
+    <Graph modelId={witness.model} components={components} edges={edges}
+      spotlight={componentIdentity(witness.component).gateId} selectedComponent={selected} selectedEdge={selectedEdge}
+      trace={null} direction="both" widthScale="sqrt" onComponent={id => { setSelected(id); setSelectedEdge(null); }}
+      onEdge={id => { setSelected(null); setSelectedEdge(id); }} annotationCheckpoint={checkpoint}
+      compositionMeasurement={measurement} />
+    {edge && <p><code>{edge.source} → {edge.target}</code> · E {show(edge.signedEffect)} · w {show(edge.normalizedMagnitude)}</p>}
+    {node && <ResearchNotesEditor key={node.id} targets={notesForSelection(checkpoint, node.gateId, node.modelId, node)}
+      evidenceReference={`Semantic Discovery · ${row.anchor}`} />}
+  </div>;
+}
+
+export default function SemanticDiscovery({ checkpoint, Graph }: { checkpoint: string; Graph: GraphRenderer }) {
+  const seal = useWorkbenchAsset<{ catalogSha256: string }>("semantic-discovery/COMPLETE.json");
+  const asset = useWorkbenchAsset<SemanticCatalog>(seal?.data?.catalogSha256 ? "semantic-discovery/catalog.json" : undefined,
+    seal?.data?.catalogSha256);
+  const paths = useWorkbenchAsset<PathCatalog>(asset?.data ? "semantic-discovery/circuit-links.json" : undefined);
+  const data = asset?.data?.schemaVersion === 1 && asset.data.dataset === "natural-validation"
+    && asset.data.provenance.checkpoint === checkpoint && asset.data.provenance.split === "validation" ? asset.data : undefined;
+  const [query, setQuery] = useState("");
+  const [model, setModel] = useState("");
+  const [clusterId, setClusterId] = useState("");
+  const [pairIndex, setPairIndex] = useState(0);
+  const [graphIndex, setGraphIndex] = useState(0);
+  const [split, setSplit] = useState<Split>("discovery");
+  const [pathIndex, setPathIndex] = useState(0);
+  const clusters = useMemo(() => data?.clusters.filter(cluster =>
+    (!model || cluster.models.includes(model as EvalModel)) &&
+    [cluster.id, ...cluster.components].some(id => id.toLowerCase().includes(query.trim().toLowerCase())),
+  ) ?? [], [data, model, query]);
+  const selected = clusters.find(cluster => cluster.id === clusterId) ?? clusters[0];
+  const pair = selected?.links[pairIndex] ?? selected?.links[0];
+  const graph = selected?.graphs[graphIndex] ?? selected?.graphs[0];
+  const result = pair?.[split];
+  const matchingPaths = paths?.data?.checkpoint === checkpoint && paths.data.dataset === "natural-validation"
+    && paths.data.catalogSha256 === seal?.data?.catalogSha256
+    ? paths.data.pairs.filter(row => row.leftCluster === selected?.id || row.rightCluster === selected?.id) : [];
+  const chosenPath = matchingPaths[pathIndex] ?? matchingPaths[0];
+  const pathWitness = chosenPath?.witnesses.find(row => row.split === split);
+  function reset() { setPairIndex(0); setGraphIndex(0); setPathIndex(0); }
+
+  return <main className="td-section discovered-circuits" aria-label="Semantic Discovery">
+    <div className="discovered-content">
+      {!asset && !seal?.error && <p role="status">Loading Natural Validation Semantic OT results…</p>}
+      {(asset?.error || seal?.error) && <p role="status">Semantic OT results are unavailable in this build.</p>}
+      {asset?.data && !data && <p role="alert">This catalog belongs to a different dataset or checkpoint.</p>}
+      {data && <>
+        <p>{data.clusters.length} groups · {data.summary.crossModelClusters} across models
+          {" · "}{data.summary.scoredDiscoveryPairs} discovery pairs compared</p>
+        <div className="uw-expanded-search discovered-filters">
+          <label>Find a component or group<input className="uw-form-control" type="search" value={query}
+            onChange={event => { setQuery(event.target.value); reset(); }} /></label>
+          <label>Model<select className="uw-form-control" value={model} onChange={event => { setModel(event.target.value); reset(); }}>
+            <option value="">All models</option>
+            {Object.entries(MODEL_NAMES).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+          </select></label>
+        </div>
+        <label className="discovered-picker">Group<select className="uw-form-control" value={selected?.id ?? ""}
+          onChange={event => { setClusterId(event.target.value); reset(); }}>
+          {!clusters.length && <option value="">No matching groups</option>}
+          {clusters.map(cluster => <option key={cluster.id} value={cluster.id}>{cluster.id} · {cluster.components.length} components · {
+            cluster.models.map(id => MODEL_NAMES[id]).join(", ")
+          }</option>)}
+        </select></label>
+        {selected && pair && result && <div className="discovered-selection">
+          <label className="discovered-picker">Component pair<select className="uw-form-control"
+            value={selected.links.indexOf(pair)} onChange={event => setPairIndex(Number(event.target.value))}>
+            {selected.links.map((link, index) => <option key={index} value={index}>{link.left} ↔ {link.right}</option>)}
+          </select></label>
+          <label className="discovered-picker">Examples<select className="uw-form-control" value={split}
+            onChange={event => setSplit(event.target.value as Split)}>
+            <option value="discovery">Discovery</option><option value="heldout">Held-out documents</option>
+          </select></label>
+          {result.measures ? <div className="cc-scroll"><table className="cc-table">
+            <caption>Smaller distances indicate more similar contexts.</caption>
+            <thead><tr><th>Pair</th><th>OT distance</th><th>OT without final word or punctuation</th><th>Average embedding distance</th><th>Shared anchor mass</th></tr></thead>
+            <tbody><tr><th>Selected</th><td>{show(result.measures.ot)}</td><td>{show(result.suffixRemovedOt)}</td>
+              <td>{show(result.measures.centroid)}</td><td>{show(result.measures.anchorOverlap)}</td></tr>
+            <tr><th>Matched control{result.controlComponent && <> <code>{result.controlComponent}</code></>}</th>
+              <td>{show(result.controlMeasures?.ot)}</td><td>{show(result.suffixRemovedControlOt)}</td><td>{show(result.controlMeasures?.centroid)}</td>
+              <td>{show(result.controlMeasures?.anchorOverlap)}</td></tr></tbody>
+          </table></div> : <p role="status">Too few measured contexts for this pair in {split === "heldout" ? "held-out documents" : "discovery"}.</p>}
+          {result.transport.map((cell, index) => <details key={split + index} open={index === 0}>
+            <summary>{cell.kind === "counterexample" ? "Less similar linked contexts" : "Contexts paired by OT"}
+              {" · "}{(100 * cell.mass).toFixed(1)}% of mass · distance {show(cell.cost)}</summary>
+            <div className="negation-context-grid">
+              <Prefix row={data.anchors[cell.left]} model={data.components[pair.left].model} />
+              <Prefix row={data.anchors[cell.right]} model={data.components[pair.right].model} />
+            </div>
+          </details>)}
+          <details><summary>Component contributions and examples</summary>
+            {[pair.left, pair.right].map(id => {
+              const component = data.components[id];
+              const totals = component.totals[split];
+              return <section key={id}>
+                <h3><code>{id}</code></h3>
+                {totals ? <p>{totals.measuredNonzero} measured nonzero contributions · total size {show(totals.normalizedMass)}
+                  {" · "}positive coefficient mass {show(totals.positiveMass)} · negative coefficient mass {show(totals.negativeMass)}</p>
+                  : <p>No measured positive mass in this split.</p>}
+                {component.examples[split]?.slice(0, 4).map(example => <div key={example.anchor}>
+                  <Prefix row={data.anchors[example.anchor]} model={component.model} />
+                  <small>Coefficient e {show(example.coefficient)} · contribution relative to output scale {show(example.normalizedMagnitude)}</small>
+                </div>)}
+              </section>;
+            })}
+          </details>
+          {chosenPath && <details><summary>Directed paths between grouped components</summary>
+            <label className="discovered-picker">Path<select className="uw-form-control" value={matchingPaths.indexOf(chosenPath)}
+              onChange={event => setPathIndex(Number(event.target.value))}>
+              {matchingPaths.map((row, index) => <option key={row.left + row.right} value={index}>
+                {row.leftCluster} {row.left} → {row.rightCluster} {row.right}
+              </option>)}
+            </select></label>
+            <p>{chosenPath.discovery} discovery positions · {chosenPath.heldout} held-out positions with this path.</p>
+            {pathWitness ? <ContextGraph key={chosenPath.left + chosenPath.right + pathWitness.anchor}
+              witness={{ ...pathWitness, component: chosenPath.left }} row={data.anchors[pathWitness.anchor]}
+              checkpoint={checkpoint} Graph={Graph} /> : <p>No saved path for this split.</p>}
+          </details>}
+          <details><summary>Natural Validation dependencies</summary>
+            {graph ? <>
+              <label className="discovered-picker">Measured position<select className="uw-form-control"
+                value={selected.graphs.indexOf(graph)} onChange={event => setGraphIndex(Number(event.target.value))}>
+                {selected.graphs.map((item, index) => <option key={index} value={index}>{item.component} · {item.anchor.slice(0, 10)}</option>)}
+              </select></label>
+              <ContextGraph key={graph.anchor + graph.component} witness={graph} row={data.anchors[graph.anchor]}
+                checkpoint={checkpoint} Graph={Graph} />
+            </> : <p>No matching Natural Validation edge records for this group.</p>}
+            {data.structuralOverlaps.filter(row => row.cluster === selected.id).map(row =>
+              <p key={row.structural}>Shared component IDs with {row.structural} · {row.components.length}</p>)}
+          </details>
+        </div>}
+      </>}
+    </div>
+  </main>;
+}

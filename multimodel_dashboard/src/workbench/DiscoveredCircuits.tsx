@@ -138,6 +138,7 @@ function WitnessGraph({ witness, candidate, checkpoint, Graph }: {
 }
 
 export default function DiscoveredCircuits({ checkpoint, Graph }: {checkpoint: string; Graph: GraphRenderer}) {
+  const [scope, setScope] = useState("natural-pilot");
   const [query, setQuery] = useState("");
   const [direction, setDirection] = useState("");
   const [nodes, setNodes] = useState(5);
@@ -145,17 +146,28 @@ export default function DiscoveredCircuits({ checkpoint, Graph }: {checkpoint: s
   const [models, setModels] = useState(1);
   const [id, select] = useState("");
   const [witness, selectWitness] = useState(0);
-  const asset = useWorkbenchAsset<Catalog>("circuit-discovery/catalog.json");
+  const asset = useWorkbenchAsset<Catalog>(scope === "all" ? "circuit-discovery/catalog.json"
+    : scope === "natural-archive" ? "natural-circuit-discovery/archive.json" : "natural-circuit-discovery/catalog.json");
   const catalog = asset?.data?.schemaVersion === 1 && asset.data.provenance.checkpoint === checkpoint ? asset.data : undefined;
-  const matching = catalog?.candidates.filter(row => matchesDiscovery(row, {query, direction, nodes, recurrence, models})) ?? [];
+  const matching = catalog?.candidates.filter(row => (scope === "all" || row.dataset === "natural-validation")
+    && matchesDiscovery(row, {query, direction, nodes, recurrence, models})) ?? [];
   const selected = matching.find(row => row.id === id) ?? matching[0];
   const copy = selected && discoveryWording(selected);
   const anchor = selected?.witnesses[witness] ?? selected?.witnesses[0];
   return <main className="td-section discovered-circuits" aria-label="Circuit discovery candidates">
     <div className="discovered-content">
-      {asset?.error && <p role="status">Circuit Discovery data could not be loaded.</p>}
+      {asset?.error && <p role="status">{scope === "natural-pilot"
+        ? "The Natural Validation rerun is unavailable in this build. Choose the original search to browse its saved graphs."
+        : "Circuit Discovery data could not be loaded."}</p>}
       {!asset && <p role="status">Loading measured candidates…</p>}
       {asset?.data && !catalog && <p role="status">This catalog is incompatible with the Workbench or its checkpoint.</p>}
+      <label className="discovered-picker">Catalog<select className="uw-form-control" value={scope} onChange={event => {
+        setScope(event.target.value); setQuery(""); select(""); selectWitness(0);
+      }}>
+        <option value="natural-pilot">Natural Validation · rerun with recovered text</option>
+        <option value="natural-archive">Natural Validation · original structural search</option>
+        <option value="all">Original search · all datasets</option>
+      </select></label>
       {catalog && <>
         <div className="uw-expanded-search discovered-filters">
           <label>Search <input className="uw-form-control" type="search" value={query} placeholder="Context, gate, hypothesis or circuit ID"
@@ -210,7 +222,7 @@ export default function DiscoveredCircuits({ checkpoint, Graph }: {checkpoint: s
             {(selected.measuredContextSelectivity?.counterexamples ?? selected.interpretation.counterexampleContexts)?.map(row => <blockquote key={row.anchor}>
               {row.text} <small>{splitLabel(row.split)} · {conditionLabel(selected.dataset, row.condition)} · {row.anchor.slice(0, 12)}</small>
             </blockquote>)}
-            {!!selected.interpretation.independentActivationExamples.length && <details><summary>Other examples where individual gates fire</summary>
+            {scope === "all" && !!selected.interpretation.independentActivationExamples.length && <details><summary>Other examples where individual gates fire</summary>
               <p>Each example shows one gate. Open a measured example above to see edges.</p>
               {selected.interpretation.independentActivationExamples.map(row => <blockquote key={row.gate + row.anchor}>
                 {row.before}<mark>{row.token.replaceAll("▁", " ")}</mark>{row.after} <small>{row.gate}</small>

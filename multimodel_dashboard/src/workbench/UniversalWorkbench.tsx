@@ -12,6 +12,7 @@ import { dictionaryPath, validateDictionary, type DictionaryIndex } from "./natu
 import { useWorkbenchAsset } from "./TokenCircuitExplorer";
 import { CircuitCaptureButton, CircuitLibraryProvider, useCircuitLibrary } from "./CircuitLibrary";
 import DiscoveredCircuits from "./DiscoveredCircuits";
+import SemanticDiscovery from "./SemanticDiscovery";
 import CircuitCompositionExplorer from "./CircuitCompositionExplorer";
 import ComponentComputationInspector from "./ComponentComputationInspector";
 import { measurementFromGraph } from "./compositionMeasurements";
@@ -41,6 +42,7 @@ const naturalViews = [
   ["summary", "Measured validation summary"],
   ["graphs", "Measured graphs"],
   ["discovery", "Circuit Discovery"],
+  ["semantic", "Semantic Discovery"],
 ] as const;
 
 function CircuitWorkbench() {
@@ -210,6 +212,7 @@ function CircuitWorkbench() {
     </nav>
     {naturalView === "summary" && <MeasuredSummary onExplore={() => setNaturalView("graphs")} />}
     {naturalView === "discovery" && <DiscoveredCircuits checkpoint={naturalCheckpoint} Graph={ModelGraph} />}
+    {naturalView === "semantic" && <SemanticDiscovery checkpoint={naturalCheckpoint} Graph={ModelGraph} />}
     {naturalView === "graphs" && <>
     <NaturalValidationScenarios manifest={data.manifest} activeAnchorId={dictionaryGate || expandedCandidate ? null : anchorId}
       onSelect={openMeasuredScenario} query={gateQuery} onQueryChange={setGateQuery}

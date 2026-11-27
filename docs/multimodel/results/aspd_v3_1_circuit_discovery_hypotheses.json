@@ -38,13 +38,13 @@
   "CXD-0b022cc1e55bbeb6": {
     "reviewTitle": "Two Granite sentence-ending paths share an MLP component",
     "hypothesis": "Two saved paths share one MLP Up component. It may supply information to both downstream attention components.",
-    "alternative": "The archive has no linked text for the 11 measured positions. Separate examples where these gates fire on periods only suggest a link to punctuation.",
+    "alternative": "The original archive stored edges for 11 positions. Period examples suggest a punctuation link, which can be checked against recovered text at the measured positions.",
     "proposedTest": "Compare the two attention components on periods that end sentences, mark abbreviations or appear in lists."
   },
   "CXD-cfaacda2b24c56e3": {
     "reviewTitle": "SmolLM2 connects two paths involving “this” and “these”",
     "hypothesis": "The six-component path may connect a response to “this” versus “these” with a response to what those words refer to.",
-    "alternative": "The four measured graph positions have no linked text. Both paths may simply respond to the words “this” or “these.”",
+    "alternative": "Both paths may simply respond to the words “this” or “these.”",
     "proposedTest": "Vary “this” versus “these” and whether the word refers to an object or an earlier idea. Compare the two branches on held-out examples."
   }
 }
