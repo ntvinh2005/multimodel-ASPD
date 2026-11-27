@@ -213,7 +213,7 @@ function CircuitWorkbench() {
     </nav>
     {naturalView === "summary" && <MeasuredSummary onExplore={() => setNaturalView("graphs")} />}
     {naturalView === "discovery" && <DiscoveredCircuits checkpoint={naturalCheckpoint} Graph={ModelGraph} />}
-    {naturalView === "semantic" && <SemanticDiscoveryRevision checkpoint={naturalCheckpoint}
+    {naturalView === "semantic" && <SemanticDiscoveryRevision checkpoint={naturalCheckpoint} Graph={ModelGraph}
         legacy={<SemanticDiscovery checkpoint={naturalCheckpoint} Graph={ModelGraph} />} />}
     {naturalView === "graphs" && <>
     <NaturalValidationScenarios manifest={data.manifest} activeAnchorId={dictionaryGate || expandedCandidate ? null : anchorId}

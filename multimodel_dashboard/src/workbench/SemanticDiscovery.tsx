@@ -8,11 +8,12 @@ import { ResearchNotesEditor } from "./ResearchNotes";
 import { notesForSelection } from "./researchNotes";
 import { useWorkbenchAsset } from "./TokenCircuitExplorer";
 import type { DependencyEdge } from "./types";
-import { SemanticDiscoveryGuide } from "./SemanticDiscoveryRevision";
+import { SemanticDiscoveryGuide } from "./SemanticDiscoveryGuide";
 
-type Anchor = {
+export type Anchor = {
   anchor: string; prefix: string; pool: number; source: string; document: string;
   positions: Record<EvalModel, number>;
+  native?: Record<EvalModel, [number, number, number, number]>;
 };
 type Values = { ot: number; centroid: number; anchorOverlap: number };
 type Pair = {
@@ -24,7 +25,7 @@ type Comparison = {
   measures: Values | null; controlMeasures: Values | null; controlComponent: string | null;
   transport: Array<{ left: string; right: string; mass: number; cost: number; kind: string }>;
 };
-type Witness = {
+export type Witness = {
   anchor: string; component: string; model: EvalModel; artifact: string;
   edges: Array<{ source: string; target: string; E: number; w: number }>;
 };
@@ -69,9 +70,13 @@ function show(value?: number | null) {
 function Prefix({ row, model }: { row: Anchor; model: EvalModel }) {
   const end = row.prefix.match(/[^\p{L}\p{N}_\s]+\s*$|[\p{L}\p{N}_]+\s*$/u);
   const boundary = end?.index ?? Math.max(0, row.prefix.length - 1);
+  const native = row.native?.[model];
+  const codepoints = native && Array.from(row.prefix);
+  const before = codepoints && native ? codepoints.slice(0, native[2]).join("") : row.prefix.slice(0, boundary);
+  const token = codepoints && native ? codepoints.slice(native[2], native[3]).join("") : row.prefix.slice(boundary);
   return <div>
-    <p className="ig-sequence td-sequence">{row.prefix.slice(0, boundary)}
-      <mark title="The aligned anchor ends here">{row.prefix.slice(boundary)}</mark>
+    <p className="ig-sequence td-sequence">{before}
+      <mark title="The aligned anchor ends here">{token}</mark>
     </p>
     <small>{row.source} · {MODEL_NAMES[model]} token {row.positions[model]} · pool {row.pool}</small>
   </div>;
@@ -93,7 +98,7 @@ function ContextGraph({ witness, row, checkpoint, Graph, hidePrefix, threshold =
 }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
-  const ids = [...new Set(witness.edges.flatMap(edge => [edge.source, edge.target]))];
+  const ids = [...new Set([witness.component, ...witness.edges.flatMap(edge => [edge.source, edge.target])])];
   const components = ids.map(id => ({ ...componentIdentity(id), beta: null, rho: null, representative: false }));
   const edges = dependencyEdges(witness);
   const visible = edges.filter(edge => (edge.normalizedMagnitude ?? 0) >= threshold);
@@ -131,7 +136,11 @@ type GraphPanel = {
 };
 type GraphView = { anchors: SemanticCatalog["anchors"]; checkpoint: string; Graph: GraphRenderer };
 
-function ComparisonPanels({ panels, anchors, checkpoint, Graph }: GraphView & { panels: GraphPanel[] }) {
+export function ComparisonPanels({ panels, anchors, checkpoint, Graph, scopeLabel, onAnnotation }: GraphView & {
+  panels: GraphPanel[];
+  scopeLabel?: string;
+  onAnnotation?: (component: string | null, anchor: string) => void;
+}) {
   const [threshold, setThreshold] = useState(0);
   const [annotation, setAnnotation] = useState<{ componentId: string; anchor: string } | null>(null);
   const allEdges = panels.flatMap(panel => panel.witness ? dependencyEdges(panel.witness) : []);
@@ -143,7 +152,7 @@ function ComparisonPanels({ panels, anchors, checkpoint, Graph }: GraphView & { 
 
   return <>
     <p>{sharedAnchor ? "Same text and aligned token in all panels." : "Each panel shows its own text and token."}
-      {" "}Scope: saved edges touching the selected component.</p>
+      {" "}{scopeLabel ?? "Scope: saved edges touching the selected component."}</p>
     {sharedAnchor && <Prefix row={anchors[sharedAnchor]} model={panels[0].model} />}
     <div className="uw-edge-filter">
       <label className="uw-threshold-label">
@@ -160,10 +169,14 @@ function ComparisonPanels({ panels, anchors, checkpoint, Graph }: GraphView & { 
           <strong>{MODEL_NAMES[model]}</strong>{component && <>{" "}<code>{component}</code></>}
           {controls}
           {row && anchor && <small className="semantic-graph-anchor" title={anchor}>Token {row.positions[model]} · {anchor.slice(0, 12)}
-            {" · "}{witness ? `${witness.edges.filter(edge => edge.w >= threshold).length}/${witness.edges.length} edges shown` : "Graph unavailable"}</small>}
+            {" · "}{!witness ? "Graph unavailable" : witness.edges.length === 0 ? "Measured · no parent passed the rule"
+              : `${witness.edges.filter(edge => edge.w >= threshold).length}/${witness.edges.length} edges shown`}</small>}
           {witness && row && anchor ? <ContextGraph witness={witness} row={row} checkpoint={checkpoint} Graph={Graph}
             hidePrefix={!!sharedAnchor} threshold={threshold} colors={colors}
-            onComparisonNote={componentId => setAnnotation(componentId ? { componentId, anchor } : null)} />
+            onComparisonNote={componentId => {
+              if (onAnnotation) onAnnotation(componentId, anchor);
+              else setAnnotation(componentId ? { componentId, anchor } : null);
+            }} />
             : <>{row && !sharedAnchor && <Prefix row={row} model={model} />}<p>No saved graph for this selection.</p></>}
         </section>;
       })}

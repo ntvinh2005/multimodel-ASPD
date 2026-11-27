@@ -225,3 +225,90 @@ def test_taylor_selection_uses_only_shared_anchors_and_prefers_independent_sourc
     assert select_anchors(examples, 3) == ["a", "d", "c"]
     with pytest.raises(ValueError, match="Only 3 independent common anchors"):
         select_anchors(examples, 4)
+
+
+def test_taylor_publication_rejects_different_catalog_or_model(tmp_path):
+    from aspd.multimodel.cli.install_semantic_ot_graphs import publish
+    from aspd.multimodel.posthoc.artifacts import write_json
+
+    root = tmp_path / "workbench"
+    run_id = "d" * 64
+    target_root = root / "semantic-discovery-v2" / run_id
+    target_root.mkdir(parents=True)
+    target = "gemma.L16.mlp_gate/515"
+    file = target_root / "catalog.json"
+    write_json(
+        file,
+        {
+            "dataset": "natural-validation",
+            "checkpoint": "test",
+            "components": {target: {}},
+        },
+    )
+    digest = sha256_file(file)
+    seal = target_root / "COMPLETE.json"
+    write_json(seal, {"catalogSha256": digest})
+    write_json(
+        root / "semantic-discovery-release.json",
+        {
+            "runId": run_id,
+            "completeSha256": sha256_file(seal),
+        },
+    )
+    graph = {
+        "schemaVersion": 1,
+        "runId": run_id,
+        "catalogSha256": digest,
+        "dataset": "natural-validation",
+        "checkpoint": "test",
+        "anchorOrder": ["abc"],
+        "anchors": {"abc": {"pool": 75, "split": "heldout"}},
+        "graphs": {
+            f"{target}|abc": {
+                "anchor": "abc",
+                "pool": 75,
+                "component": target,
+                "model": "gemma",
+                "edges": [{"source": "gemma.L13.q/2", "target": target, "E": -0.03, "w": 0.008}],
+            }
+        },
+    }
+
+    def sealed_graph(name):
+        dest = tmp_path / name
+        dest.mkdir()
+        write_json(dest / "graphs.json", graph)
+        write_json(
+            dest / "COMPLETE.json",
+            {
+                "sha256": sha256_file(dest / "graphs.json"),
+                "anchors": 1,
+                "targetGraphs": 1,
+            },
+        )
+        return dest
+
+    publication = publish(sealed_graph("valid"), root)
+    with gzip.open(target_root / ("graphs-" + publication["sha256"] + ".json.gz"), "rt") as handle:
+        assert json.load(handle)["graphs"][f"{target}|abc"]["edges"][0]["E"] == -0.03
+    graph["graphs"][f"{target}|abc"]["edges"][0]["source"] = "granite.L18.q/2"
+    with pytest.raises(ValueError, match="Invalid Taylor edge"):
+        publish(sealed_graph("wrong-model"), root)
+    graph["catalogSha256"] = "not-the-current-catalog"
+    with pytest.raises(ValueError, match="does not match"):
+        publish(sealed_graph("wrong-catalog"), root)
+
+
+def test_taylor_replay_preserves_full_native_input_batch_and_padding():
+    import torch
+
+    from aspd.multimodel.cli.measure_semantic_ot_graphs import gather_original_batch
+    from aspd.multimodel.posthoc.backend import ModelInputs
+
+    ids = torch.arange(21).reshape(3, 7)
+    mask = torch.ones_like(ids)
+    inputs = ModelInputs(ids, mask, torch.tensor([0, 2, 1]), torch.tensor([0, 5, 3]))
+    gathered = gather_original_batch(inputs, [2, 0])
+    assert gathered.input_ids is ids and gathered.attention_mask is mask
+    assert gathered.anchor_document.tolist() == [1, 0]
+    assert gathered.anchor_token.tolist() == [3, 0]

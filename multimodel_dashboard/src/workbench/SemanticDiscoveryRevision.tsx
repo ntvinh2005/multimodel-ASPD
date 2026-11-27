@@ -1,9 +1,12 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { MODEL_NAMES, type EvalModel } from "./negationWorkbenchData";
 import { ResearchNotesEditor } from "./ResearchNotes";
 import { notesForSelection } from "./researchNotes";
 import { componentIdentity } from "./circuitComposition";
 import { useWorkbenchAsset } from "./TokenCircuitExplorer";
+import { SemanticDiscoveryGuide } from "./SemanticDiscoveryGuide";
+import { ComparisonPanels, type Anchor, type Witness } from "./SemanticDiscovery";
+import type { GraphRenderer } from "./InductionQueryGraph";
 
 type Split = "discovery" | "heldout";
 type Metrics = { ot: number; centroid: number; anchorOverlap: number; distinctContextMass: number };
@@ -67,6 +70,14 @@ export type RevisedCatalog = {
   graphCoverage: "unavailable";
 };
 
+type GraphRelease = { catalogSha256: string; runId: string; sha256: string };
+type MeasuredGraphs = {
+  schemaVersion: number; runId: string; catalogSha256: string; checkpoint: string; dataset: string;
+  anchors: Record<string, Anchor & { split: Split }>;
+  graphs: Record<string, Witness & { pool: number }>;
+  anchorOrder: string[];
+};
+
 const digest = /^[a-f\d]{64}$/;
 
 export function hasSemanticCoverage(catalog: RevisedCatalog): boolean {
@@ -91,24 +102,6 @@ function percent(value: number | undefined) {
   return value == null ? "Unavailable" : (100 * value).toFixed(1) + "%";
 }
 
-export function SemanticDiscoveryGuide({ pair, modelNames, archived = false }: { pair?: Pair; modelNames?: string; archived?: boolean }) {
-  return <details className="semantic-guide">
-    <summary>How to use Semantic Discovery</summary>
-    <ol>
-      <li><strong>Select a candidate.</strong> Start with a pair that beats its matched controls on held-out documents. Check how many independent documents each component has.</li>
-      <li><strong>Read each component’s examples.</strong> Scan several documents. {archived ? "The highlight marks the recorded anchor." : "The outline marks the aligned anchor. Darker shading marks a larger measured contribution."}</li>
-      <li><strong>Compare models.</strong> Look for a specific relationship that explains both sets of examples. The two components can respond to different words or appear in different layers.</li>
-      <li><strong>Check contrasting examples.</strong> Look for similar contexts with zero or weak contribution and for strong examples that challenge your explanation.</li>
-      <li><strong>Inspect dependencies.</strong> Group graphs show available records for group members. Pair graphs show the two selected endpoints. Check the model and anchor for each panel before tracing a path.</li>
-      <li><strong>Save a hypothesis.</strong> Write down the observed pattern, a testable explanation, counterexamples, and open questions in Research Notes.</li>
-      <li><strong>Validate it.</strong> Test the explanation on new documents. Establish a causal role with a controlled intervention and measure the predicted change.</li>
-    </ol>
-    {pair && <p><strong>Worked example.</strong> Select <code>{pair.left}</code> and <code>{pair.right}</code> ({modelNames}).
-      {" "}Their held-out OT distance is {number(pair.results.heldout.combined?.values.ot)}.
-      {" "}Open a high-contribution document and a matched zero for each component. Use those contexts to propose a rule that predicts both strong and weak contributions.
-      {" "}The distance measures context similarity. The examples and any exact-anchor graphs provide observational evidence.</p>}
-  </details>;
-}
 
 function Heatmap({ example, scale }: { example: Example; scale: number }) {
   return <p className="ig-sequence td-sequence semantic-contribution-sequence">
@@ -124,9 +117,11 @@ function Heatmap({ example, scale }: { example: Example; scale: number }) {
   </p>;
 }
 
-function ComponentExamples({ component, identity, catalog, split, preferred, onNotes }: {
+function ComponentExamples({ component, identity, catalog, split, preferred, onNotes, graphAvailable, onGraph }: {
   component: Component; identity: string; catalog: RevisedCatalog; split: Split; preferred?: string;
   onNotes: (component: string, anchor: string) => void;
+  graphAvailable: (anchor: string) => boolean;
+  onGraph: (anchor: string) => void;
 }) {
   const ref = catalog.examples[identity];
   const source = useWorkbenchAsset<ExampleAsset>(`semantic-discovery-v2/${catalog.runId}/${ref.file}`, ref.sha256);
@@ -177,9 +172,9 @@ function ComponentExamples({ component, identity, catalog, split, preferred, onN
         <p>Selected anchor <code title={row.anchor}>{row.anchor.slice(0, 12)}</code>
           {" · "}pool {row.pool} · character boundary {row.boundary} · coefficient {number(row.coefficient)}
           {" · "}normalized contribution {number(row.magnitude)}</p>
-        <details><summary>Dependency measurement</summary>
-          <p>Graph unavailable for this exact model, component, and anchor.</p>
-        </details>
+        {graphAvailable(row.anchor) ? <button className="uw-form-control" type="button"
+          onClick={() => onGraph(row.anchor)}>Compare dependency graphs at this anchor</button>
+          : <small>Graph unavailable for this exact model, component, and anchor.</small>}
         <button className="uw-form-control" type="button"
           onClick={() => onNotes(identity, row.anchor)}>Open Research Notes</button>
       </>}
@@ -193,14 +188,56 @@ const names: Record<string, string> = {
   withoutTerminal: "Local prefix without terminal unit",
 };
 
-function PairResults({ pair, catalog, split }: { pair: Pair; catalog: RevisedCatalog; split: Split }) {
+function PairResults({ pair, catalog, split, measured, Graph }: {
+  pair: Pair; catalog: RevisedCatalog; split: Split; measured?: MeasuredGraphs; Graph: GraphRenderer;
+}) {
+  const heading = useRef<HTMLElement>(null);
+  const [anchor, setAnchor] = useState("");
   const [match, setMatch] = useState<number | null>(null);
   const [note, setNote] = useState<{ component: string; anchor: string } | null>(null);
   const target = note ? componentIdentity(note.component) : null;
   const metrics = pair.results[split];
   const transport = metrics.combined?.transport ?? [];
-  const preferred = match == null ? undefined : transport[match];
+  const ids = [pair.left, pair.right];
+  const witness = (id: string, at: string) => {
+    const row = measured?.graphs[id + "|" + at];
+    return row?.component === id && row.anchor === at && row.model === catalog.components[id].model
+      && row.pool === measured?.anchors[at]?.pool ? row : undefined;
+  };
+  const available = measured?.anchorOrder.filter(at => measured.anchors[at]?.split === split
+    && ids.some(id => witness(id, at))) ?? [];
+  const shared = available.filter(at => ids.every(id => witness(id, at)));
+  const transportPair = match == null ? undefined : transport[match];
+  const current = available.includes(anchor) ? anchor : shared[0] ?? available[0];
+  const preferred = transportPair ?? (current ? {
+    left: witness(pair.left, current) ? current : undefined,
+    right: witness(pair.right, current) ? current : undefined,
+  } : undefined);
   return <>
+    <section ref={heading} className="semantic-graph-compare" aria-label="Measured dependency comparison">
+      <h3>Measured dependency graphs</h3>
+      {measured && current ? <>
+        <label className="discovered-picker">Aligned anchor
+          <select className="uw-form-control" value={current} onChange={event => {
+            setAnchor(event.target.value);
+            setMatch(null);
+            setNote(null);
+          }}>
+            {[...shared, ...available.filter(at => !shared.includes(at))].map(at => {
+              const row = measured.anchors[at];
+              return <option key={at} value={at}>
+                {row.source} · pool {row.pool} · {at.slice(0, 12)} · {shared.includes(at) ? "both components" : "one component"}
+              </option>;
+            })}
+          </select>
+        </label>
+        <small>{shared.length} shared anchors · {available.length} with either endpoint measured · top 10 incoming Taylor parents per endpoint.</small>
+        <ComparisonPanels key={current} scopeLabel="Incoming Taylor edges for the selected component."
+          panels={ids.map(id => ({ model: catalog.components[id].model, anchor: current, component: id, witness: witness(id, current) }))}
+          anchors={measured.anchors} checkpoint={catalog.checkpoint} Graph={Graph}
+          onAnnotation={(componentId, fromAnchor) => setNote(componentId ? { component: componentId, anchor: fromAnchor } : null)} />
+      </> : <p>Graph unavailable for this pair and document split.</p>}
+    </section>
     <p>Lower distances mean more similar contexts. The controls measure how each endpoint compares with matched contexts where the other component contributes zero.</p>
     <div className="cc-scroll"><table className="cc-table">
       <thead><tr><th>Representation</th><th>OT distance</th><th>Control OT range</th><th>Mean embedding distance</th><th>Exact-anchor overlap</th></tr></thead>
@@ -230,19 +267,31 @@ function PairResults({ pair, catalog, split }: { pair: Pair; catalog: RevisedCat
     <div className="negation-context-grid">{(["left", "right"] as const).map(side => <ComponentExamples
       key={pair[side] + split + (preferred?.[side] ?? "")} identity={pair[side]} component={catalog.components[pair[side]]}
       split={split} catalog={catalog} preferred={preferred?.[side]}
-      onNotes={(component, anchor) => setNote({ component, anchor })} />)}</div>
+      onNotes={(component, anchor) => setNote({ component, anchor })}
+      graphAvailable={at => Boolean(witness(pair[side], at))}
+      onGraph={at => {
+        setAnchor(at);
+        setMatch(null);
+        setNote(null);
+        heading.current?.scrollIntoView({ block: "nearest" });
+      }} />)}</div>
     {note && target && <section aria-label="Semantic Discovery Research Notes">
       <ResearchNotesEditor key={target.id} targets={notesForSelection(catalog.checkpoint, target.gateId, target.modelId, target)}
         evidenceReference={`Semantic Discovery · ${note.anchor}`} />
     </section>}
-    <details><summary>Group and pair dependency graphs</summary>
-      <p>These new examples have no exact-anchor Taylor measurements. Dependency graphs and circuit links are unavailable for this release.</p>
-      <p>A group view can show one graph per model. A pair view shows only its selected components. Different anchor IDs refer to different measurements.</p>
-    </details>
   </>;
 }
 
-function RevisedWorkspace({ catalog }: { catalog: RevisedCatalog }) {
+function RevisedWorkspace({ catalog, catalogSha256, Graph }: {
+  catalog: RevisedCatalog; catalogSha256: string; Graph: GraphRenderer;
+}) {
+  const pointer = useWorkbenchAsset<GraphRelease>("semantic-discovery-graphs-release.json", undefined, "no-store")?.data;
+  const sha = pointer?.catalogSha256 === catalogSha256 && pointer.runId === catalog.runId
+    && digest.test(pointer.sha256) ? pointer.sha256 : undefined;
+  const candidate = useWorkbenchAsset<MeasuredGraphs>(sha && `semantic-discovery-v2/${catalog.runId}/graphs-${sha}.json.gz`, sha)?.data;
+  const measured = candidate?.schemaVersion === 1 && candidate.runId === catalog.runId
+    && candidate.catalogSha256 === catalogSha256 && candidate.checkpoint === catalog.checkpoint
+    && candidate.dataset === catalog.dataset ? candidate : undefined;
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState("across");
   const [split, setSplit] = useState<Split>("heldout");
@@ -264,7 +313,8 @@ function RevisedWorkspace({ catalog }: { catalog: RevisedCatalog }) {
   const current = pairs.find(pair => id(pair) === key) ?? pairs[0];
   return <main className="td-section discovered-circuits" aria-label="Semantic Discovery">
     <div className="discovered-content">
-      <SemanticDiscoveryGuide pair={first} modelNames={modelNames} />
+      <SemanticDiscoveryGuide example={{ left: first.left, right: first.right,
+        distance: first.results.heldout.combined?.values.ot }} modelNames={modelNames} />
       <p>{catalog.pairs.length} pairs passed the held-out checks. {sameGatePairs} share the same gate ID on both sides.
         {" "}Shared gate support can lead both components to contribute in the same contexts.</p>
       <div className="discovered-filters">
@@ -284,12 +334,14 @@ function RevisedWorkspace({ catalog }: { catalog: RevisedCatalog }) {
           {pairs.map(pair => <option key={id(pair)} value={id(pair)}>{pair.left} ↔ {pair.right}</option>)}
         </select>
       </label>
-      {current && <PairResults key={id(current) + split} catalog={catalog} pair={current} split={split} />}
+      {current && <PairResults key={id(current) + split} catalog={catalog} pair={current} split={split} measured={measured} Graph={Graph} />}
     </div>
   </main>;
 }
 
-export default function SemanticDiscoveryRevision({ checkpoint, legacy }: { checkpoint: string; legacy: ReactNode }) {
+export default function SemanticDiscoveryRevision({ checkpoint, legacy, Graph }: {
+  checkpoint: string; legacy: ReactNode; Graph: GraphRenderer;
+}) {
   const [showArchive, setShowArchive] = useState(false);
   const release = useWorkbenchAsset<Release>("semantic-discovery-release.json", undefined, "no-store");
   const pointer = release?.data?.schemaVersion === 2 && digest.test(release.data.runId)
@@ -311,7 +363,7 @@ export default function SemanticDiscoveryRevision({ checkpoint, legacy }: { chec
     const data = asset.data;
     if (data.checkpoint === checkpoint && data.dataset === "natural-validation"
       && data.schemaVersion === 2 && data.runId === sealed?.runId && hasSemanticCoverage(data)) {
-      return <RevisedWorkspace catalog={data} />;
+      return <RevisedWorkspace catalog={data} catalogSha256={sealed.catalogSha256} Graph={Graph} />;
     }
     return <p role="alert">Semantic Discovery catalog failed its identity or coverage checks.</p>;
   }
