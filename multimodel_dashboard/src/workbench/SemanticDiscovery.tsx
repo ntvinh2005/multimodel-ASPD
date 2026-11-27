@@ -91,17 +91,19 @@ function dependencyEdges(witness: Witness): DependencyEdge[] {
   }));
 }
 
-function ContextGraph({ witness, row, checkpoint, Graph, hidePrefix, threshold = 0, colors, onComparisonNote }: {
+function ContextGraph({ witness, row, checkpoint, Graph, hidePrefix, threshold = 0, colors, onComparisonNote, visibleSources }: {
   witness: Witness; row: Anchor; checkpoint: string; Graph: GraphRenderer;
   hidePrefix?: boolean; threshold?: number; colors?: Record<string, string>;
+  visibleSources?: ReadonlySet<string>;
   onComparisonNote?: (componentId: string | null) => void;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
-  const ids = [...new Set([witness.component, ...witness.edges.flatMap(edge => [edge.source, edge.target])])];
-  const components = ids.map(id => ({ ...componentIdentity(id), beta: null, rho: null, representative: false }));
   const edges = dependencyEdges(witness);
-  const visible = edges.filter(edge => (edge.normalizedMagnitude ?? 0) >= threshold);
+  const focused = edges.filter(edge => !visibleSources || visibleSources.has(edge.source));
+  const ids = [...new Set([witness.component, ...focused.flatMap(edge => [edge.source, edge.target])])];
+  const components = ids.map(id => ({ ...componentIdentity(id), beta: null, rho: null, representative: false }));
+  const visible = focused.filter(edge => (edge.normalizedMagnitude ?? 0) >= threshold);
   const measurement: Measurement = {
     scope: { checkpoint, dataset: "natural-validation", anchor: witness.anchor, example: row.document,
       pool: String(row.pool), artifact: witness.artifact },
@@ -133,6 +135,7 @@ function graphExampleLabel({ left, right, kind }: GraphExample) {
 
 type GraphPanel = {
   model: EvalModel; component?: string; anchor?: string; witness?: Witness; controls?: ReactNode;
+  visibleSources?: ReadonlySet<string>;
 };
 type GraphView = { anchors: SemanticCatalog["anchors"]; checkpoint: string; Graph: GraphRenderer };
 
@@ -163,16 +166,16 @@ export function ComparisonPanels({ panels, anchors, checkpoint, Graph, scopeLabe
       </label>
     </div>
     <div className="semantic-graph-panels" style={{ "--graph-count": panels.length } as CSSProperties}>
-      {panels.map(({ component, anchor, model, witness, controls }, i) => {
+      {panels.map(({ component, anchor, model, witness, controls, visibleSources }, i) => {
         const row = anchor ? anchors[anchor] : undefined;
         return <section key={model + "/" + i} aria-label={`Dependency graph for ${MODEL_NAMES[model]}`}>
           <strong>{MODEL_NAMES[model]}</strong>{component && <>{" "}<code>{component}</code></>}
           {controls}
           {row && anchor && <small className="semantic-graph-anchor" title={anchor}>Token {row.positions[model]} · {anchor.slice(0, 12)}
             {" · "}{!witness ? "Graph unavailable" : witness.edges.length === 0 ? "Measured · no parent passed the rule"
-              : `${witness.edges.filter(edge => edge.w >= threshold).length}/${witness.edges.length} edges shown`}</small>}
+              : `${witness.edges.filter(edge => edge.w >= threshold && (!visibleSources || visibleSources.has(edge.source))).length}/${witness.edges.length} edges shown`}</small>}
           {witness && row && anchor ? <ContextGraph witness={witness} row={row} checkpoint={checkpoint} Graph={Graph}
-            hidePrefix={!!sharedAnchor} threshold={threshold} colors={colors}
+            hidePrefix={!!sharedAnchor} threshold={threshold} colors={colors} visibleSources={visibleSources}
             onComparisonNote={componentId => {
               if (onAnnotation) onAnnotation(componentId, anchor);
               else setAnnotation(componentId ? { componentId, anchor } : null);

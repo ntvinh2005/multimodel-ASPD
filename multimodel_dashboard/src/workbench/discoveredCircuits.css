@@ -74,3 +74,17 @@
   outline-offset: 1px;
   border-radius: 2px;
 }
+
+.semantic-pattern-inspector {
+  display: grid;
+  gap: .5rem;
+  border-bottom: 1px solid var(--l);
+  padding-bottom: .65rem;
+}
+
+.semantic-pattern-inspector p { margin: .2rem 0; }
+.semantic-pattern-inspector ul {
+  max-height: 12rem;
+  overflow-y: auto;
+}
+.semantic-pattern-inspector button { margin: .2rem .3rem .15rem 0; }

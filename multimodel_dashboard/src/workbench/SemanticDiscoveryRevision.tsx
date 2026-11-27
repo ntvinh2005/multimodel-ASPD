@@ -4,6 +4,8 @@ import { ResearchNotesEditor } from "./ResearchNotes";
 import { notesForSelection } from "./researchNotes";
 import { componentIdentity } from "./circuitComposition";
 import { useWorkbenchAsset } from "./TokenCircuitExplorer";
+import SemanticPatternInspector from "./SemanticPatternInspector";
+import type { PatternEdge } from "./semanticPatterns";
 import { SemanticDiscoveryGuide } from "./SemanticDiscoveryGuide";
 import { ComparisonPanels, type Anchor, type Witness } from "./SemanticDiscovery";
 import type { GraphRenderer } from "./InductionQueryGraph";
@@ -194,11 +196,13 @@ function PairResults({ pair, catalog, split, measured, Graph }: {
   const heading = useRef<HTMLElement>(null);
   const [anchor, setAnchor] = useState("");
   const [match, setMatch] = useState<number | null>(null);
+  const [showPatterns, setShowPatterns] = useState(false);
+  const [pattern, setPattern] = useState<PatternEdge[]>([]);
   const [note, setNote] = useState<{ component: string; anchor: string } | null>(null);
   const target = note ? componentIdentity(note.component) : null;
   const metrics = pair.results[split];
   const transport = metrics.combined?.transport ?? [];
-  const ids = [pair.left, pair.right];
+  const ids: [string, string] = [pair.left, pair.right];
   const witness = (id: string, at: string) => {
     const row = measured?.graphs[id + "|" + at];
     return row?.component === id && row.anchor === at && row.model === catalog.components[id].model
@@ -209,6 +213,11 @@ function PairResults({ pair, catalog, split, measured, Graph }: {
   const shared = available.filter(at => ids.every(id => witness(id, at)));
   const transportPair = match == null ? undefined : transport[match];
   const current = available.includes(anchor) ? anchor : shared[0] ?? available[0];
+  function selectAnchor(at: string) {
+    setAnchor(at);
+    setMatch(null);
+    setNote(null);
+  }
   const preferred = transportPair ?? (current ? {
     left: witness(pair.left, current) ? current : undefined,
     right: witness(pair.right, current) ? current : undefined,
@@ -218,11 +227,7 @@ function PairResults({ pair, catalog, split, measured, Graph }: {
       <h3>Measured dependency graphs</h3>
       {measured && current ? <>
         <label className="discovered-picker">Aligned anchor
-          <select className="uw-form-control" value={current} onChange={event => {
-            setAnchor(event.target.value);
-            setMatch(null);
-            setNote(null);
-          }}>
+          <select className="uw-form-control" value={current} onChange={event => selectAnchor(event.target.value)}>
             {[...shared, ...available.filter(at => !shared.includes(at))].map(at => {
               const row = measured.anchors[at];
               return <option key={at} value={at}>
@@ -232,8 +237,19 @@ function PairResults({ pair, catalog, split, measured, Graph }: {
           </select>
         </label>
         <small>{shared.length} shared anchors · {available.length} with either endpoint measured · top 10 incoming Taylor parents per endpoint.</small>
+        <label className="ig-graph-filter">
+          <input type="checkbox" checked={showPatterns} onChange={event => setShowPatterns(event.target.checked)} />
+          Find common patterns
+        </label>
+        {showPatterns && <SemanticPatternInspector anchors={measured.anchors} ordered={available} targets={ids}
+          models={[catalog.components[pair.left].model, catalog.components[pair.right].model]}
+          selected={pattern} onChange={setPattern} witnessAt={witness} onAnchor={selectAnchor} />}
         <ComparisonPanels key={current} scopeLabel="Incoming Taylor edges for the selected component."
-          panels={ids.map(id => ({ model: catalog.components[id].model, anchor: current, component: id, witness: witness(id, current) }))}
+          panels={ids.map(id => {
+            const picks = showPatterns ? pattern.filter(edge => edge.target === id) : [];
+            return { model: catalog.components[id].model, anchor: current, component: id, witness: witness(id, current),
+              visibleSources: picks.length ? new Set(picks.map(edge => edge.source)) : undefined };
+          })}
           anchors={measured.anchors} checkpoint={catalog.checkpoint} Graph={Graph}
           onAnnotation={(componentId, fromAnchor) => setNote(componentId ? { component: componentId, anchor: fromAnchor } : null)} />
       </> : <p>Graph unavailable for this pair and document split.</p>}
@@ -270,9 +286,7 @@ function PairResults({ pair, catalog, split, measured, Graph }: {
       onNotes={(component, anchor) => setNote({ component, anchor })}
       graphAvailable={at => Boolean(witness(pair[side], at))}
       onGraph={at => {
-        setAnchor(at);
-        setMatch(null);
-        setNote(null);
+        selectAnchor(at);
         heading.current?.scrollIntoView({ block: "nearest" });
       }} />)}</div>
     {note && target && <section aria-label="Semantic Discovery Research Notes">
