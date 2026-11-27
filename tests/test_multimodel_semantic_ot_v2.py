@@ -205,3 +205,23 @@ def test_analysis_exports_and_installs_only_complete_coverage(tmp_path, monkeypa
     with pytest.raises(ValueError, match="hash mismatch"):
         activate(bundle, workbench)
     assert json.loads((workbench / "semantic-discovery-release.json").read_text()) == pointer
+
+
+def test_taylor_selection_uses_only_shared_anchors_and_prefers_independent_sources():
+    from aspd.multimodel.cli.measure_semantic_ot_graphs import select_anchors
+
+    common = {
+        "a": {"pool": 76, "document": "d1", "source": "s1"},
+        "b": {"pool": 77, "document": "d1", "source": "s1"},
+        "c": {"pool": 78, "document": "d2", "source": "s1"},
+        "d": {"pool": 79, "document": "d3", "source": "s2"},
+    }
+    examples = {
+        "gemma": {"unshared": {"pool": 75, "document": "d4", "source": "s3"}, **common},
+        "smol": common,
+        "granite": common,
+    }
+
+    assert select_anchors(examples, 3) == ["a", "d", "c"]
+    with pytest.raises(ValueError, match="Only 3 independent common anchors"):
+        select_anchors(examples, 4)
