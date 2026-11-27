@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { GraphRenderer } from "./InductionQueryGraph";
 import { componentIdentity, type Measurement } from "./circuitComposition";
-import { MODEL_NAMES, type EvalModel } from "./negationWorkbenchData";
+import { MODEL_IDS, MODEL_NAMES, type EvalModel } from "./negationWorkbenchData";
 import { ResearchNotesEditor } from "./ResearchNotes";
 import { notesForSelection } from "./researchNotes";
 import { useWorkbenchAsset } from "./TokenCircuitExplorer";
@@ -44,6 +44,13 @@ type SemanticCatalog = {
   structuralOverlaps: Array<{ cluster: string; structural: string; components: string[] }>;
 };
 type Split = "discovery" | "heldout";
+type ComparisonScope = "all" | "cross-model" | `${EvalModel}/${EvalModel}`;
+
+export function matchesSemanticPair(left: EvalModel, right: EvalModel, scope: ComparisonScope) {
+  if (scope === "all") return true;
+  if (scope === "cross-model") return left !== right;
+  return scope === `${left}/${right}` || scope === `${right}/${left}`;
+}
 
 function show(value?: number | null) {
   return value == null ? "Unavailable" : value.toPrecision(3);
@@ -102,19 +109,35 @@ export default function SemanticDiscovery({ checkpoint, Graph }: { checkpoint: s
   const data = asset?.data?.schemaVersion === 1 && asset.data.dataset === "natural-validation"
     && asset.data.provenance.checkpoint === checkpoint && asset.data.provenance.split === "validation" ? asset.data : undefined;
   const [query, setQuery] = useState("");
-  const [model, setModel] = useState("");
+  const [scope, setScope] = useState<ComparisonScope>("cross-model");
+  const [heldoutOnly, setHeldoutOnly] = useState(false);
   const [clusterId, setClusterId] = useState("");
   const [pairIndex, setPairIndex] = useState(0);
   const [graphIndex, setGraphIndex] = useState(0);
   const [split, setSplit] = useState<Split>("discovery");
   const [pathIndex, setPathIndex] = useState(0);
-  const clusters = useMemo(() => data?.clusters.filter(cluster =>
-    (!model || cluster.models.includes(model as EvalModel)) &&
-    [cluster.id, ...cluster.components].some(id => id.toLowerCase().includes(query.trim().toLowerCase())),
-  ) ?? [], [data, model, query]);
-  const selected = clusters.find(cluster => cluster.id === clusterId) ?? clusters[0];
-  const pair = selected?.links[pairIndex] ?? selected?.links[0];
-  const graph = selected?.graphs[graphIndex] ?? selected?.graphs[0];
+  const byPair = useMemo(() => {
+    if (!data) return [];
+    const term = query.trim().toLowerCase();
+    return data.clusters.map(cluster => ({
+      cluster,
+      pairs: cluster.links.filter(link =>
+        matchesSemanticPair(data.components[link.left].model, data.components[link.right].model, scope)
+        && [cluster.id, link.left, link.right,
+          data.components[link.left].gate, data.components[link.right].gate].some(id => id.toLowerCase().includes(term)),
+      ),
+    })).filter(row => row.pairs.length);
+  }, [data, query, scope]);
+  const measuredHeldout = byPair.reduce((sum, row) => sum + row.pairs.filter(link => link.heldout.measures).length, 0);
+  const groups = heldoutOnly ? byPair.map(row => ({
+    cluster: row.cluster, pairs: row.pairs.filter(link => link.heldout.measures),
+  })).filter(row => row.pairs.length) : byPair;
+  const current = groups.find(row => row.cluster.id === clusterId) ?? groups[0];
+  const selected = current?.cluster;
+  const pairs = current?.pairs ?? [];
+  const pair = pairs[pairIndex] ?? pairs[0];
+  const graphs = selected?.graphs.filter(item => item.component === pair?.left || item.component === pair?.right) ?? [];
+  const graph = graphs[graphIndex] ?? graphs[0];
   const result = pair?.[split];
   const matchingPaths = paths?.data?.checkpoint === checkpoint && paths.data.dataset === "natural-validation"
     && paths.data.catalogSha256 === seal?.data?.catalogSha256
@@ -129,32 +152,61 @@ export default function SemanticDiscovery({ checkpoint, Graph }: { checkpoint: s
       {(asset?.error || seal?.error) && <p role="status">Semantic OT results are unavailable in this build.</p>}
       {asset?.data && !data && <p role="alert">This catalog belongs to a different dataset or checkpoint.</p>}
       {data && <>
-        <p>{data.clusters.length} groups · {data.summary.crossModelClusters} across models
-          {" · "}{data.summary.scoredDiscoveryPairs} discovery pairs compared</p>
         <div className="uw-expanded-search discovered-filters">
           <label>Find a component or group<input className="uw-form-control" type="search" value={query}
             onChange={event => { setQuery(event.target.value); reset(); }} /></label>
-          <label>Model<select className="uw-form-control" value={model} onChange={event => { setModel(event.target.value); reset(); }}>
-            <option value="">All models</option>
-            {Object.entries(MODEL_NAMES).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+          <label>Compare<select className="uw-form-control" value={scope} onChange={event => {
+            setScope(event.target.value as ComparisonScope); reset();
+          }}>
+            <option value="cross-model">Across models</option>
+            <option value="gemma/smol">Gemma 2 ↔ SmolLM2</option>
+            <option value="gemma/granite">Gemma 2 ↔ Granite</option>
+            <option value="smol/granite">SmolLM2 ↔ Granite</option>
+            <optgroup label="Within one model">
+              {MODEL_IDS.map(id => <option key={id} value={`${id}/${id}`}>{MODEL_NAMES[id]} only</option>)}
+            </optgroup>
+            <option value="all">All pairs</option>
+          </select></label>
+          <label>Examples<select className="uw-form-control" value={split}
+            onChange={event => {
+              const next = event.target.value as Split;
+              setSplit(next);
+              if (next === "discovery") setHeldoutOnly(false);
+            }}>
+            <option value="discovery">Discovery</option><option value="heldout">Held-out documents</option>
           </select></label>
         </div>
+        <p>{byPair.reduce((sum, row) => sum + row.pairs.length, 0)} pairs · {measuredHeldout} with held-out scores
+          {split === "heldout" && <label className="ig-graph-filter">
+            <input type="checkbox" checked={heldoutOnly} onChange={event => { setHeldoutOnly(event.target.checked); reset(); }} />
+            Show only pairs with held-out scores
+          </label>}
+        </p>
         <label className="discovered-picker">Group<select className="uw-form-control" value={selected?.id ?? ""}
           onChange={event => { setClusterId(event.target.value); reset(); }}>
-          {!clusters.length && <option value="">No matching groups</option>}
-          {clusters.map(cluster => <option key={cluster.id} value={cluster.id}>{cluster.id} · {cluster.components.length} components · {
-            cluster.models.map(id => MODEL_NAMES[id]).join(", ")
+          {!groups.length && <option value="">No matching groups</option>}
+          {groups.map(({ cluster, pairs }) => <option key={cluster.id} value={cluster.id}>{cluster.id} · {pairs.length} {
+            pairs.length === 1 ? "pair" : "pairs"
           }</option>)}
         </select></label>
         {selected && pair && result && <div className="discovered-selection">
           <label className="discovered-picker">Component pair<select className="uw-form-control"
-            value={selected.links.indexOf(pair)} onChange={event => setPairIndex(Number(event.target.value))}>
-            {selected.links.map((link, index) => <option key={index} value={index}>{link.left} ↔ {link.right}</option>)}
+            value={pairs.indexOf(pair)} onChange={event => { setPairIndex(Number(event.target.value)); setGraphIndex(0); }}>
+            {pairs.map((link, index) => <option key={link.left + link.right} value={index}>
+              {link.left} ↔ {link.right}{link.heldout.measures ? " · Held-out scores" : ""}
+            </option>)}
           </select></label>
-          <label className="discovered-picker">Examples<select className="uw-form-control" value={split}
-            onChange={event => setSplit(event.target.value as Split)}>
-            <option value="discovery">Discovery</option><option value="heldout">Held-out documents</option>
-          </select></label>
+          <div className="negation-context-grid">
+            {[pair.left, pair.right].map(id => {
+              const component = data.components[id];
+              return <div key={id}>
+                <strong>{MODEL_NAMES[component.model]}</strong>{" "}<code>{id}</code>
+                <p>{component.gate} · {component.totals[split]
+                  ? `${component.totals[split].measuredNonzero} measured nonzero contributions`
+                  : "No measured nonzero contributions in this split"}</p>
+              </div>;
+            })}
+          </div>
           {result.measures ? <div className="cc-scroll"><table className="cc-table">
             <caption>Smaller distances indicate more similar contexts.</caption>
             <thead><tr><th>Pair</th><th>OT distance</th><th>OT without final word or punctuation</th><th>Average embedding distance</th><th>Shared anchor mass</th></tr></thead>
@@ -166,10 +218,14 @@ export default function SemanticDiscovery({ checkpoint, Graph }: { checkpoint: s
           </table></div> : <p role="status">Too few measured contexts for this pair in {split === "heldout" ? "held-out documents" : "discovery"}.</p>}
           {result.transport.map((cell, index) => <details key={split + index} open={index === 0}>
             <summary>{cell.kind === "counterexample" ? "Less similar linked contexts" : "Contexts paired by OT"}
-              {" · "}{(100 * cell.mass).toFixed(1)}% of mass · distance {show(cell.cost)}</summary>
+              {" · "}{(100 * cell.mass).toFixed(1)}% of mass · distance {show(cell.cost)}
+              {cell.left === cell.right && " · Same aligned position"}</summary>
             <div className="negation-context-grid">
-              <Prefix row={data.anchors[cell.left]} model={data.components[pair.left].model} />
-              <Prefix row={data.anchors[cell.right]} model={data.components[pair.right].model} />
+              {([["left", pair.left], ["right", pair.right]] as const).map(([side, id]) =>
+                <div key={side}>
+                  <strong>{MODEL_NAMES[data.components[id].model]}</strong>
+                  <Prefix row={data.anchors[cell[side]]} model={data.components[id].model} />
+                </div>)}
             </div>
           </details>)}
           <details><summary>Component contributions and examples</summary>
@@ -200,15 +256,15 @@ export default function SemanticDiscovery({ checkpoint, Graph }: { checkpoint: s
               witness={{ ...pathWitness, component: chosenPath.left }} row={data.anchors[pathWitness.anchor]}
               checkpoint={checkpoint} Graph={Graph} /> : <p>No saved path for this split.</p>}
           </details>}
-          <details><summary>Natural Validation dependencies</summary>
+          <details><summary>Saved dependencies for this pair</summary>
             {graph ? <>
               <label className="discovered-picker">Measured position<select className="uw-form-control"
-                value={selected.graphs.indexOf(graph)} onChange={event => setGraphIndex(Number(event.target.value))}>
-                {selected.graphs.map((item, index) => <option key={index} value={index}>{item.component} · {item.anchor.slice(0, 10)}</option>)}
+                value={graphs.indexOf(graph)} onChange={event => setGraphIndex(Number(event.target.value))}>
+                {graphs.map((item, index) => <option key={index} value={index}>{MODEL_NAMES[item.model]} · {item.component} · {item.anchor.slice(0, 10)}</option>)}
               </select></label>
               <ContextGraph key={graph.anchor + graph.component} witness={graph} row={data.anchors[graph.anchor]}
                 checkpoint={checkpoint} Graph={Graph} />
-            </> : <p>No matching Natural Validation edge records for this group.</p>}
+            </> : <p>No matching Natural Validation edge records for this pair.</p>}
             {data.structuralOverlaps.filter(row => row.cluster === selected.id).map(row =>
               <p key={row.structural}>Shared component IDs with {row.structural} · {row.components.length}</p>)}
           </details>
