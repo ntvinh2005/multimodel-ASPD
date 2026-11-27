@@ -36,7 +36,22 @@
 .discovered-summary small { color: #526176; }
 .discovered-selection > details { border-top: 1px solid var(--l); padding: .55rem .7rem; }
 
-.semantic-graph-compare[open] > summary { margin-bottom: .6rem; }
+.semantic-graph-compare {
+  display: grid;
+  gap: .55rem;
+  min-width: 0;
+  border-top: 1px solid var(--l);
+  padding-top: .65rem;
+}
+.semantic-graph-compare h3 { margin: 0; font-size: 1rem; }
+.semantic-graph-panels {
+  display: grid;
+  grid-template-columns: repeat(var(--graph-count), minmax(290px, 1fr));
+  gap: 8px;
+  overflow-x: auto;
+}
+.semantic-graph-panels .ig-sequence { white-space: pre-wrap; }
+.semantic-graph-select { display: grid; gap: .2rem; margin: .35rem 0; font-size: .75rem; }
 .semantic-graph-panels > section { min-width: 0; }
 .semantic-graph-panels code { overflow-wrap: anywhere; }
 .semantic-graph-anchor { display: block; margin: .2rem 0 .55rem; color: #526176; }
