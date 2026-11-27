@@ -33,7 +33,7 @@ from aspd.multimodel.posthoc.ids import GateId
 from aspd.multimodel.posthoc.parents import ParentRule
 from aspd.multimodel.posthoc.representatives import RepresentativeRule
 
-STAGES: tuple[str, ...] = ("importance", "representatives", "edges", "compare")
+STAGES: tuple[str, ...] = ("importance", "representatives", "edges", "compare", "profiles")
 BACKENDS: tuple[str, ...] = ("toy", "v31_checkpoint")
 
 #: Edge-score conventions that follow from the formulation's own definitions (not settings):
@@ -186,7 +186,7 @@ class PosthocConfig:
             if self.anchor_sampling == "seeded_random":
                 required["edges.anchor_seed"] = self.anchor_seed
             required["anchors.edge_anchor_source"] = self.edge_anchor_source
-        if stage == "compare":
+        if stage in ("compare", "profiles"):
             required.update({"parents.k_par": self.k_par, "parents.tau": self.tau})
         missing = [name for name, value in required.items() if value is None]
         if stage in ("importance", "edges"):
@@ -210,7 +210,7 @@ class PosthocConfig:
         return RepresentativeRule(self.screening_metric, int(self.k_rep), float(self.tau_rep))  # type: ignore[arg-type]
 
     def parent_rule(self) -> ParentRule:
-        self.require_ready("compare")
+        self.require_ready("compare")  # profiles needs exactly the same decisions
         return ParentRule(int(self.k_par), float(self.tau))  # type: ignore[arg-type]
 
     def pairs(self) -> tuple[tuple[str, str], ...] | None:

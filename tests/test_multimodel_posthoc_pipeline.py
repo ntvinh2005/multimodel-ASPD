@@ -276,3 +276,136 @@ def test_result_files_are_group_readable(toy_run: Path) -> None:
 
     for path in (toy_run / "edges/edges.safetensors", toy_run / "importance/importance.safetensors"):
         assert path.stat().st_mode & stat.S_IRGRP, path
+
+
+# ------------------------------------------------------------------- profiles
+@pytest.fixture(scope="module")
+def profiled(toy_run: Path, tmp_path_factory) -> Path:
+    import shutil
+
+    root = tmp_path_factory.mktemp("profiles") / "run"
+    for stage in ("importance", "representatives", "edges", "compare"):
+        shutil.copytree(toy_run / stage, root / stage)
+    run_stages(load_config(TOY), root, ("profiles",))
+    return root
+
+
+def test_parents_per_anchor_equal_parent_set(profiled: Path) -> None:
+    from safetensors.torch import load_file
+
+    from aspd.multimodel.posthoc.artifacts import load_edge_table
+    from aspd.multimodel.posthoc.ids import ComponentId
+    from aspd.multimodel.posthoc.parents import parent_set
+
+    rule = load_config(TOY).parent_rule()
+    rows = load_file(str(profiled / "profiles/parents_per_anchor.safetensors"))
+    vocab = json.loads((profiled / "profiles/parents_vocab.json").read_text())
+    stored: dict = {}
+    for k in range(rows["E"].numel()):
+        key = (vocab["anchor_ids"][int(rows["anchor"][k])], vocab["components"][int(rows["downstream"][k])])
+        stored.setdefault(key, []).append(
+            (int(rows["rank"][k]), vocab["components"][int(rows["parent"][k])], float(rows["E"][k])))
+    table = load_edge_table(profiled)
+    checked = 0
+    for (anchor, down), entries in stored.items():
+        expected = parent_set(table.get(anchor, ComponentId.from_key(down)), rule)
+        entries.sort()
+        assert [e[1] for e in entries] == [p.component.key for p in expected]
+        assert [e[2] for e in entries] == pytest.approx([p.score for p in expected])
+        checked += 1
+    assert checked > 0
+
+
+def test_gate_profiles_match_compare_and_pi_sums_to_one(profiled: Path) -> None:
+    from aspd.multimodel.posthoc.profiles import GateModelProfile
+
+    lines = (profiled / "profiles/gate_parent_profile.jsonl").read_text().splitlines()
+    gates = {row["gate"]: row for row in map(json.loads, lines)}
+    selection = json.loads((profiled / "edges/selection.json").read_text())
+    assert set(gates) == set(selection["gates"])
+    for line in (profiled / "profiles/component_parent_profile.jsonl").read_text().splitlines():
+        row = json.loads(line)
+        assert 0 < row["anchors"] and all(0 < p["frequency"] <= 1 for p in row["top_parents"])
+    # unit check of the pi aggregation: mean pi over valid anchors is a distribution
+    from aspd.multimodel.posthoc.ids import ComponentId, MatrixId
+    from aspd.multimodel.posthoc.parents import Parent
+
+    a = ComponentId(MatrixId("m", 3, "o"), 0)
+    b1, b2 = ComponentId(MatrixId("m", 2, "v"), 1), ComponentId(MatrixId("m", 2, "q"), 2)
+    profile = GateModelProfile((a,))
+    profile.add({a: (Parent(b1, 1.0), Parent(b2, 3.0))}, {a: 1.0}, {a: 1.0})
+    profile.add({a: (Parent(b1, 2.0),)}, {a: 1.0}, {a: 1.0})
+    profile.add({}, {a: 1.0}, {a: 1.0})  # invalid anchor: M = 0
+    assert (profile.anchors, profile.valid) == (3, 2)
+    assert sum(profile.mean_pi().values()) == pytest.approx(1.0)
+    assert profile.mean_pi()[b1.gate] == pytest.approx((0.25 + 1.0) / 2)
+
+
+def test_edge_profile_counts_every_stored_edge(profiled: Path) -> None:
+    from safetensors.torch import load_file
+
+    from aspd.multimodel.posthoc.artifacts import load_edge_table
+
+    profile = json.loads((profiled / "profiles/edge_profile.json").read_text())
+    stored = sum(len(r) for r in load_edge_table(profiled))
+    assert sum(c["count"] for c in profile["all_stored_edges"]["cells"]) == stored
+    parents = load_file(str(profiled / "profiles/parents_per_anchor.safetensors"))["E"].numel()
+    assert sum(c["count"] for c in profile["parents_only"]["cells"]) == parents
+    assert all(c["layer_gap"] >= 0 for c in profile["all_stored_edges"]["cells"])
+
+
+def test_profile_parent_gate_sets_equal_compare(profiled: Path) -> None:
+    """G_{p,i}^{(n)}(alpha) rebuilt from parents_per_anchor equals compare's sets."""
+
+    from safetensors.torch import load_file
+
+    from aspd.multimodel.posthoc.ids import ComponentId
+
+    rows = load_file(str(profiled / "profiles/parents_per_anchor.safetensors"))
+    vocab = json.loads((profiled / "profiles/parents_vocab.json").read_text())
+    rebuilt: dict = {}
+    for k in range(rows["E"].numel()):
+        down = ComponentId.from_key(vocab["components"][int(rows["downstream"][k])])
+        parent = ComponentId.from_key(vocab["components"][int(rows["parent"][k])])
+        key = (down.gate.key, vocab["anchor_ids"][int(rows["anchor"][k])], down.model)
+        rebuilt.setdefault(key, set()).add(parent.gate.key)
+    compared = 0
+    for line in (profiled / "compare/comparisons.jsonl").read_text().splitlines():
+        row = json.loads(line)
+        for model, gate_set in zip(row["models"], row["parent_gate_sets"], strict=True):
+            assert set(gate_set) == rebuilt.get((row["gate"], row["anchor_id"], model), set())
+            compared += 1
+    assert compared > 0
+
+
+def test_per_anchor_S_and_pi_match_compare(profiled: Path) -> None:
+    from safetensors.torch import load_file
+
+    t = load_file(str(profiled / "profiles/parent_distributions.safetensors"))
+    vocab = json.loads((profiled / "profiles/distributions_vocab.json").read_text())
+    selection = json.loads((profiled / "edges/selection.json").read_text())
+    expected_rows = sum(len(a) for a in selection["anchors"].values()) * len(vocab["models"])
+    assert t["header_gate"].numel() == expected_rows
+    # pi sums to one on valid rows and S sums to M on every row
+    pi_sum = torch.zeros(expected_rows, dtype=torch.float64).index_add_(
+        0, t["entry_row"], torch.nan_to_num(t["entry_pi"]))
+    s_sum = torch.zeros(expected_rows, dtype=torch.float64).index_add_(0, t["entry_row"], t["entry_S"])
+    valid = t["header_valid"]
+    torch.testing.assert_close(pi_sum[valid], torch.ones(int(valid.sum()), dtype=torch.float64))
+    torch.testing.assert_close(s_sum, t["header_M"])
+    strength = {}
+    for r in range(expected_rows):
+        key = (vocab["gates"][int(t["header_gate"][r])], vocab["anchor_ids"][int(t["header_anchor"][r])],
+               vocab["models"][int(t["header_model"][r])])
+        strength[key] = float(t["header_M"][r])
+    for line in (profiled / "compare/comparisons.jsonl").read_text().splitlines():
+        row = json.loads(line)
+        for model, m in zip(row["models"], row["strength"], strict=True):
+            assert strength[(row["gate"], row["anchor_id"], model)] == pytest.approx(m)
+
+
+def test_default_pipeline_includes_profiles(tmp_path: Path) -> None:
+    root = tmp_path / "all"
+    assert cli_main(["--config", str(TOY), "--output-dir", str(root)]) == 0
+    for stage in ("importance", "representatives", "edges", "compare", "profiles"):
+        assert (root / stage / "COMPLETE").is_file(), stage

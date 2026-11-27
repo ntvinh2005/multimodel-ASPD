@@ -7,7 +7,8 @@ or request a GPU.
 ## Universal Mechanism Discovery Workbench
 
 The default route is a graph-first local workbench for the ASPD v3.1 three-model 500M lineage. It
-runs from clearly labeled deterministic synthetic post-hoc data even without the Python API.
+runs from a bounded measured bundle exported from the completed post-hoc validation and parent-profile
+artifacts; the browser does not load model weights, checkpoints, or the raw tensor shards.
 
 ```powershell
 npm install
@@ -15,11 +16,14 @@ npm run dev
 ```
 
 Implemented: multi-gate/model selection, synchronized gate spotlight, model-separated layer-aware
-graphs, parent/child/both traversal to three hops, aligned-anchor switching, signed directed edges,
-edge-width scaling, exact edge details, component locator heatmaps, parent-distribution comparison,
-zoom/pan, and local hypothesis persistence.
+graphs, explicit parent/child hop badges, parent/child/both traversal to three hops, aligned-anchor
+switching, signed directed edges, data-scaled edge filtering, exact edge details, component locator
+heatmaps, parent-distribution comparison, Gemma-token-aligned natural gate activation heatmaps,
+bounded zoom/pan, and local hypothesis persistence.
 
-Not yet implemented: imported post-hoc file validation, animated playback, path ranking, complete
+The measured JSON adapter validates references, finite numeric fields, the non-synthetic provenance
+flag, and the absence of cross-model dependency edges before rendering. Not yet implemented:
+animated playback, path ranking, complete
 circuit-difference heuristics, intervention charts, image export, session JSON import/export, and
 automated browser tests. See [the data contract](UNIVERSAL_WORKBENCH_DATA_CONTRACT.md).
 

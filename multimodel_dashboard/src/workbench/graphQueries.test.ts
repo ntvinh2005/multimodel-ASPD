@@ -1,11 +1,29 @@
 import { describe, expect, it } from "vitest";
-import { edgesForAnchor, jaccard, normalizedDistribution, traceGraph, tvDistance } from "./graphQueries";
+import { edgesForAnchor, jaccard, normalizedDistribution, searchSharedGates, traceGraph, tvDistance } from "./graphQueries";
 import type { DependencyEdge } from "./types";
 
 const edge = (id: string, source: string, target: string, anchorId = "a", magnitude = .5): DependencyEdge => ({
   id, source, target, anchorId, modelId: "model", signedEffect: magnitude,
   normalizedMagnitude: magnitude, upstreamCoefficient: .2, gradient: .3,
   normalization: "test", evidence: "taylor-only",
+});
+
+describe("shared gate search", () => {
+  const gates = ["MID:1660", "PRE:6608", "MID:6608", "MID:660", "PRE:66"].map((id) => ({ id }));
+  const ids = (query: string) => searchSharedGates(gates, query).map(({ id }) => id);
+
+  it("accepts full gate IDs regardless of case and separator", () => {
+    expect(ids(" mid: 6608 ")).toEqual(["MID:6608"]);
+    expect(ids("MID 660")).toEqual(["MID:660", "MID:6608"]);
+    expect(ids("pre/66")).toEqual(["PRE:66", "PRE:6608"]);
+  });
+
+  it("prioritizes exact feature numbers across sites and preserves unfiltered order", () => {
+    expect(ids("6608")).toEqual(["PRE:6608", "MID:6608"]);
+    expect(ids("660")).toEqual(["MID:660", "PRE:6608", "MID:6608", "MID:1660"]);
+    expect(ids("999")).toEqual([]);
+    expect(searchSharedGates(gates, " ")).toBe(gates);
+  });
 });
 
 describe("graph selection and traversal", () => {

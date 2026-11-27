@@ -1,0 +1,53 @@
+schema_version: 1
+experiment_id: aspd_v3_1_induction_mechanism_eval_v1
+status: RESEARCHER_AUTHORIZED_BOUNDED_EVALUATION
+seed: 314159
+
+training_config: configs/multimodel/aspd_v3/main500m_preparation_v1.yaml
+checkpoint: /blue/thai/vinhnguyen1/aspd_v3/main500m_preparation_v1/runs/aspd_v3_1_three_model_168targets_c8192_k32_500m_v1_resume_step16000_authfix_5ca3b43/checkpoints/step-000061036
+checkpoint_manifest_sha256: 735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969
+config_file_sha256: f7a6d87436304956ca0baca955ec2e0e929a7207142f57fc35362369822f63be
+dataset_manifest_sha256: a258974d21ceac3457529644be07459518fde7bc28501abde5c67e5e3719286f
+source_dtype: bfloat16
+device: cuda:0
+local_files_only: true
+skip_training_launch_evidence: true
+
+dataset:
+  split_groups:
+    smoke: 32
+    discovery: 256
+    heldout: 256
+  family_weights:
+    basic: 2
+    repeated_sequence: 1
+    natural_language: 1
+  oversample_factor: 4
+  max_sequence_tokens: 128
+
+batch_topk:
+  dictionary_size: 8192
+  k: 32
+  pool_anchors: 2048
+  task_anchor_budget_per_pool: 1536
+  background: pinned_validation_pile_anchors
+  update_statistics: false
+
+behavior:
+  top_predictions: 10
+  batch_size: 16
+
+components:
+  reference_posthoc_root: /blue/thai/share/multimodel-ASPD/evaluations/minhdatle/posthoc/v31_500m_validation_v1_20261122T223718
+  screening_metric: beta
+  k_rep: 3
+  tau_rep: 0.07
+  sparse_scope: approved_representatives_at_annotated_task_anchors
+
+forbidden:
+  qwen: true
+  retraining: true
+  source_weight_edits: true
+  checkpoint_edits: true
+  cross_token_attribution: true
+  exhaustive_dependency_edges: true

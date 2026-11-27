@@ -1,2 +1,4 @@
 node_modules/
 *.tsbuildinfo
+public/negation/expanded/
+dist/negation/expanded/

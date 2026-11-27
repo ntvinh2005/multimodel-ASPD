@@ -1,0 +1,50 @@
+{
+  "CXD-a3e04e475d3f184f": {
+    "reviewTitle": "Granite attention-to-MLP path across tasks",
+    "hypothesis": "This path may pass information from attention to the MLP in several kinds of prompts.",
+    "alternative": "The same path appears in Selection Frame and in induction controls where the earlier prefix is missing or the continuation does not match.",
+    "proposedTest": "Keep the query token and prefix position fixed. Compare component coefficients in induction and no-match examples, and check which gates and edges were measured."
+  },
+  "CXD-ff8564930e5bf82d": {
+    "reviewTitle": "SmolLM2 path from attention to the MLP at “the”",
+    "hypothesis": "PRE:3207 feeds MID:6020 at the final “the.” The path may help represent the object being referred to.",
+    "alternative": "The path occurs in affirmative, negative and scope-control prompts. The article or the shared prompt wording could explain it.",
+    "proposedTest": "Keep the prompt ending fixed. Change the referenced object and whether the negation applies to it. Compare the downstream MLP Gate coefficient."
+  },
+  "CXD-9760e17982a8c61a": {
+    "reviewTitle": "Gemma attention and MLP paths meet at “the”",
+    "hypothesis": "An earlier MID:6020 MLP pair may pass information to PRE:3207 Q and K. At the final token, Q and the same-layer Gate and Up components feed the MID:6020 Down component.",
+    "alternative": "The path appears in all four held-out conditions. It may be responding to the common article or prompt structure.",
+    "proposedTest": "Keep the ending, syntax and candidate list fixed. Change the queried object and compare the layer 16 Down coefficient and its Gate and Up inputs."
+  },
+  "CXD-1d7322926a89a591": {
+    "reviewTitle": "Granite query and MLP inputs meet downstream",
+    "hypothesis": "PRE:3207 Q and MID:6020 Up may help represent which object is being queried. Both feed paths into the MID:4578 O and Down components.",
+    "alternative": "SmolLM2 and Granite have the same gate connections at three discovery positions. They recur differently on held-out text and may be responding to the shared prompt format.",
+    "proposedTest": "Use new prompt templates with the same final token. Change the queried object and the scope of negation. Check the O and Down components separately."
+  },
+  "CXD-d6c066817f4bbfe3": {
+    "reviewTitle": "SmolLM2 path with the same gate connections as Granite",
+    "hypothesis": "Q and Up components in layers 13 and 14 may help represent the queried object through the layer 14 O and Down components.",
+    "alternative": "The path also appears in affirmative or scope-control prompts. The catalog records no held-out match for these exact components and edges.",
+    "proposedTest": "Change the queried object and scope of negation in fresh prompts, keeping the ending fixed. Compare the O and Down effects with Granite."
+  },
+  "CXD-650bfa991afe88c6": {
+    "reviewTitle": "Two SmolLM2 MLP outputs feed a query component",
+    "hypothesis": "Two MLP Down components feed PRE:2152 Q at sentence endings. The query component may read information about the completed sentence.",
+    "alternative": "The path also appears in active and passive sentences about carrying a book. Sentence endings or punctuation could explain it.",
+    "proposedTest": "Keep the punctuation fixed. Change active versus passive voice and who does the action in sentences with and without selection."
+  },
+  "CXD-0b022cc1e55bbeb6": {
+    "reviewTitle": "Two Granite sentence-ending paths share an MLP component",
+    "hypothesis": "Two saved paths share one MLP Up component. It may supply information to both downstream attention components.",
+    "alternative": "The original archive stored edges for 11 positions. Period examples suggest a punctuation link, which can be checked against recovered text at the measured positions.",
+    "proposedTest": "Compare the two attention components on periods that end sentences, mark abbreviations or appear in lists."
+  },
+  "CXD-cfaacda2b24c56e3": {
+    "reviewTitle": "SmolLM2 connects two paths involving “this” and “these”",
+    "hypothesis": "The six-component path may connect a response to “this” versus “these” with a response to what those words refer to.",
+    "alternative": "Both paths may simply respond to the words “this” or “these.”",
+    "proposedTest": "Vary “this” versus “these” and whether the word refers to an object or an earlier idea. Compare the two branches on held-out examples."
+  }
+}

@@ -29,3 +29,21 @@
 .uw-pinned article { display: grid; grid-template-columns: 1fr 28px; gap: 5px; margin-top: 5px; }
 .uw-pinned article > button:first-child { display: grid; gap: 3px; text-align: left; }
 .uw-pinned article small { color: #64748b; font-size: 8px; }
+.uw-gate-color-note { flex-basis: 100%; padding: 6px 8px; border-left: 3px solid #168f83; background: #eefaf8; line-height: 1.4; }
+.uw-gate-color-note b { color: #065f57; }
+.uw-display-control { align-content: start; }
+.uw-threshold-label { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; width: 100%; color: #526176; font-size: 9px; }
+.uw-threshold-label output { color: #065f57; font: 700 9px ui-monospace, monospace; }
+.uw-threshold-label input { grid-column: 1 / -1; width: 100%; accent-color: #168f83; }
+.uw-threshold-presets { display: flex; gap: 4px; }
+.uw-threshold-presets button { padding: 3px 5px; font-size: 7px; }
+.uw-graph-key { display: flex; flex-wrap: wrap; gap: 8px 14px; padding: 7px 11px; border-bottom: 1px solid #d9e0e8; background: #f8fafc; color: #526176; font-size: 8px; }
+.uw-graph-key span { display: inline-flex; align-items: center; gap: 5px; }
+.uw-graph-key i { display: inline-block; width: 10px; height: 10px; }
+.uw-graph-key .gate-fill { border-radius: 50%; background: #51d6c3; }
+.uw-graph-key .selection-ring { border: 2px solid #172033; border-radius: 50%; background: #fff; }
+.uw-graph-key b { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 13px; border-radius: 3px; background: #172033; color: #fff; font: 700 7px ui-monospace, monospace; }
+.uw-model-panel svg { overscroll-behavior: contain; user-select: none; -webkit-user-select: none; }
+.uw-model-panel svg:active { cursor: grabbing; }
+.uw-hop-badge rect { fill: #172033; stroke: #fff; stroke-width: 1px; }
+.uw-hop-badge text { fill: #fff !important; font-size: 6px; }

@@ -1,0 +1,34 @@
+.uw-shell .td-section { margin: .6rem 0; border: 1px solid #d9e0e8; border-radius: 6px; background: #fff; }
+.td-section > summary { cursor: pointer; padding: .65rem .85rem; font-weight: 650; color: #24364b; }
+.td-sequence { white-space: pre-wrap; }
+.uw-shell .td-sequence button {
+  appearance: none;
+  padding: 1px 0;
+  border: 0;
+  border-radius: 2px;
+  background: rgb(68 210 183 / var(--activation, 0));
+  color: inherit;
+  white-space: pre-wrap;
+  font: inherit;
+  cursor: pointer;
+}
+.uw-shell .td-sequence button.final-query { box-shadow: inset 0 -1px #a76e16; }
+.uw-shell .td-sequence button:hover { outline: 1px solid #168f83; }
+.uw-shell .td-sequence button:is(:focus-visible, [aria-pressed="true"]) {
+  outline: 2px solid #266598;
+  outline-offset: 1px;
+  position: relative;
+}
+.td-anchor-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .5rem;
+  padding: .5rem .65rem;
+  margin-top: .75rem;
+  border: 1px solid #d9e0e8;
+  border-radius: 6px;
+  background: #fff;
+}
+.td-anchor-bar p { margin: 0 auto 0 0; font-size: .85rem; }
+.td-inspector .cc-explorer { margin-bottom: 0; }

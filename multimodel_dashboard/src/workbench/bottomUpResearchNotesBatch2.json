@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "notes": [
+    {
+      "target": {
+        "checkpoint": "735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969",
+        "gateId": "MID:2548",
+        "scope": "shared"
+      },
+      "fields": {
+        "label": "Year-final digit fan-out",
+        "observation": "MID:2548 feeds PRE:8147 and PRE:989. Saved centers include different last digits of years in dates and biographies.",
+        "hypothesis": "A shared MID write may encode the last position of a year-like numeral, which downstream attention could use to expect a date separator or transition.",
+        "evidence": "Connected fan-out occurs in all three models on 12/14 measured anchors. Test co-firing spans 100 anchors in 33 documents. Compare identical final digits in years, quantities, identifiers and later positions while controlling the prefix. The examples are concentrated in encyclopedia prose.\n\nRaw anchors, scores and controls in docs/multimodel/analysis/natural_validation_circuit_discovery_61036_batch2/evidence.json.",
+        "status": "Hypothesis proposed",
+        "tags": "bottom-up discovery, natural validation, batch 2, unvalidated"
+      },
+      "updatedAt": "2026-11-25T23:28:18.057Z"
+    },
+    {
+      "target": {
+        "checkpoint": "735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969",
+        "gateId": "MID:4214",
+        "scope": "shared"
+      },
+      "fields": {
+        "label": "Geographic name and address routing",
+        "observation": "MID:4214 peaks at full place names. PRE:5139 and MID:5937 include state names and abbreviations in address or attribution contexts.",
+        "hypothesis": "A place-name write may feed a more specific address or state-abbreviation representation alongside a later attention read.",
+        "evidence": "A same-layer MLP-gate to MLP-down branch plus a cross-layer attention branch occurs in all three models on 10/12 measured anchors. Test co-firing spans 62 anchors in 31 documents. Try full names, postal abbreviations and identical ambiguous tokens in non-geographic uses.\n\nRaw anchors, scores and controls in docs/multimodel/analysis/natural_validation_circuit_discovery_61036_batch2/evidence.json.",
+        "status": "Hypothesis proposed",
+        "tags": "bottom-up discovery, natural validation, batch 2, unvalidated"
+      },
+      "updatedAt": "2026-11-25T23:28:18.057Z"
+    },
+    {
+      "target": {
+        "checkpoint": "735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969",
+        "gateId": "PRE:6041",
+        "scope": "shared"
+      },
+      "fields": {
+        "label": "Code type and identifier relay",
+        "observation": "MID:7001 → MID:4857 → PRE:6041 joins an MLP-up write to the same-layer MLP-down component in every model. Examples mix type names, generated class names and code identifiers.",
+        "hypothesis": "The intermediate may convert evidence for a type-like identifier into an attention read sensitive to its syntactic role.",
+        "evidence": "Each fixed path recurs on nine anchors and the three fixed paths share eight. All 20 co-firing test documents come from GitHub or StackExchange. Compare the same identifier as a type, variable, comment and string literal. Restore the intermediate after upstream ablation to test mediation.\n\nRaw anchors, scores and controls in docs/multimodel/analysis/natural_validation_circuit_discovery_61036_batch2/evidence.json.",
+        "status": "Hypothesis proposed",
+        "tags": "bottom-up discovery, natural validation, batch 2, unvalidated"
+      },
+      "updatedAt": "2026-11-25T23:28:18.057Z"
+    },
+    {
+      "target": {
+        "checkpoint": "735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969",
+        "gateId": "PRE:7189",
+        "scope": "shared"
+      },
+      "fields": {
+        "label": "Quantifying noun phrase convergence",
+        "observation": "MID:6335 peaks on types and kinds. MID:2599 peaks on number and variety. PRE:7189 peaks on amount and range before an of phrase.",
+        "hypothesis": "Two quantifier-like signals may shape a later attention read for the of-complement of a quantity or category noun.",
+        "evidence": "Convergence reaches the identical downstream component per model on seven common measured anchors. Test co-firing spans 43 anchors in 29 documents. Compare quantity and non-quantity uses of “number”, and match generic noun + of controls.\n\nRaw anchors, scores and controls in docs/multimodel/analysis/natural_validation_circuit_discovery_61036_batch2/evidence.json.",
+        "status": "Hypothesis proposed",
+        "tags": "bottom-up discovery, natural validation, batch 2, unvalidated"
+      },
+      "updatedAt": "2026-11-25T23:28:18.057Z"
+    },
+    {
+      "target": {
+        "checkpoint": "735cd57374090db7c0145315d01d9f447799a77a37941d66e4bbeafa412b4969",
+        "gateId": "MID:1629",
+        "scope": "shared"
+      },
+      "fields": {
+        "label": "Closing-tag name fan-out",
+        "observation": "In the saved centers, all three gates fire on tag-name pieces after </. Examples cover several tag types.",
+        "hypothesis": "The shared MID write may indicate that a tag name is in closing position, feeding two query reads.",
+        "evidence": "A component fan-out occurs in all three models on 7/8 measured anchors. Only two anchors support all three leading fixed forks. Compare identical tag names in opening and closing positions and use non-HTML strings containing </ as controls. The test windows are concentrated in code documents.\n\nRaw anchors, scores and controls in docs/multimodel/analysis/natural_validation_circuit_discovery_61036_batch2/evidence.json.",
+        "status": "Hypothesis proposed",
+        "tags": "bottom-up discovery, natural validation, batch 2, unvalidated"
+      },
+      "updatedAt": "2026-11-25T23:28:18.057Z"
+    }
+  ]
+}

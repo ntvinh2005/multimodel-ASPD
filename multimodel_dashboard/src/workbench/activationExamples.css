@@ -1,0 +1,47 @@
+.uw-tabs { grid-template-columns: repeat(6, 1fr); }
+.uw-examples { padding: 18px; }
+.uw-color-dot { display: inline-block; width: 8px; height: 8px; margin-right: 4px; border-radius: 50%; background: #51d6c3; vertical-align: middle; }
+.uw-examples h2 { margin: 7px 0 8px; font: 600 19px Georgia, serif; }
+.uw-examples > p { color: #64748b; font-size: 10px; line-height: 1.55; }
+.uw-example-boundary { display: grid; gap: 4px; margin: 12px 0; padding: 10px; border-left: 3px solid #3489aa; background: #eef7fb; font-size: 9px; line-height: 1.45; }
+.uw-example-boundary span { color: #526176; overflow-wrap: anywhere; }
+
+.uw-example-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 7px 12px; margin: 12px 0 9px; padding: 9px; border: 1px solid #d9e0e8; background: #f8fafc; }
+.uw-example-controls .uw-segment button { padding: 5px 7px; font-size: 8px; }
+.uw-token-legend { display: flex; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 10px; color: #526176; font-size: 8px; }
+.uw-token-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.uw-token-legend small { color: #64748b; font: 7px ui-monospace, monospace; }
+.uw-token-legend i { display: inline-block; width: 20px; height: 11px; border-radius: 2px; }
+.uw-token-legend i.gradient { width: 58px; border: 1px solid #8bc5a1; background: linear-gradient(90deg, #fff, rgba(22, 163, 74, .78)); }
+.uw-token-legend i.support { border-bottom: 3px solid #087f5b; background: rgba(22, 163, 74, .25); }
+.uw-token-legend i.center { border: 2px solid #b7791f; background: rgba(22, 163, 74, .25); }
+.uw-token-legend i.zero { border-bottom: 1px solid #94a3b8; background: #fff; }
+
+.uw-example-card { margin: 12px 0; padding: 11px; border: 1px solid #d9e0e8; background: #fff; }
+.uw-example-card.compact { margin: 7px 0; padding: 9px 11px; }
+.uw-example-card header { display: flex; justify-content: space-between; align-items: start; gap: 10px; font-size: 10px; }
+.uw-example-card header > div { display: grid; gap: 2px; }
+.uw-example-card header small { color: #64748b; font-size: 8px; }
+.uw-example-card header span { color: #087f75; font-family: ui-monospace, monospace; white-space: nowrap; }
+
+.uw-token-context { margin: 10px 0 6px; padding: 11px; border: 1px solid #d7e0e9; border-radius: 5px; background: #f8fafc; color: #1e293b; font: 11px/2 ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; user-select: text; }
+.uw-token-context.formatted { white-space: pre-wrap; }
+.uw-token-context.raw { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; line-height: 1.4; }
+.uw-activation-token { --activation-opacity: 0; position: relative; display: inline; padding: 3px 1px; border-radius: 3px; background: rgba(22, 163, 74, var(--activation-opacity)); box-decoration-break: clone; -webkit-box-decoration-break: clone; cursor: help; }
+.uw-token-context.raw .uw-activation-token { display: inline-block; padding: 3px 5px; border: 1px solid #d8e1e9; }
+.uw-activation-token.measured-zero { box-shadow: inset 0 -1px #94a3b8; color: #526176; }
+.uw-activation-token.selected-support { box-shadow: inset 0 -3px #087f5b; color: #102a20; }
+.uw-activation-token.center { z-index: 1; outline: 2px solid #b7791f; outline-offset: 1px; font-weight: 750; }
+.uw-context-boundary { display: inline-block; margin: 0 5px; padding: 1px 5px; border-radius: 999px; background: #e2e8f0; color: #64748b; font-size: 7px; font-weight: 600; white-space: nowrap; }
+.uw-example-summary { display: block; color: #526176; font-size: 8px; line-height: 1.4; }
+.uw-example-card dl { display: grid; grid-template-columns: 55px 1fr; gap: 3px; margin: 9px 0 0; font-size: 8px; }
+.uw-example-card dt { color: #64748b; }
+.uw-example-card dd { margin: 0; font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
+.uw-decoded-context { margin-top: 9px; color: #526176; font-size: 8px; }
+.uw-decoded-context summary { cursor: pointer; }
+.uw-decoded-context blockquote { margin: 7px 0 0; padding: 9px; border-left: 2px solid #168f83; background: #f8fafc; color: #28364b; font: 10px/1.5 Georgia, serif; white-space: pre-wrap; }
+
+@media (max-width: 700px) {
+  .uw-example-controls { align-items: stretch; flex-direction: column; }
+  .uw-example-controls .uw-segment { display: grid; grid-template-columns: repeat(3, 1fr); }
+}

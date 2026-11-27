@@ -1,0 +1,9 @@
+.uw-shell .ci-inspector { margin: .65rem 0; padding: .6rem; border: 1px solid #d9e0e8; border-radius: 6px; background: #fff; color: #24364b; }
+.ci-inspector summary { cursor: pointer; font-weight: 650; overflow-wrap: anywhere; padding: .3rem 0; }
+.ci-inspector details { margin-top: .35rem; border-top: 1px solid #e5ebef; }
+.ci-inspector dl { display: grid; grid-template-columns: minmax(5.8rem, 1fr) minmax(0, 1.5fr); gap: .28rem .55rem; margin: .45rem 0; }
+.ci-inspector dd { margin: 0; overflow-wrap: anywhere; }
+.ci-inspector dt { font-weight: 600; }
+.ci-inspector p, .ci-inspector li { overflow-wrap: anywhere; }
+.ci-inspector .ci-terms { display: flex; flex-wrap: wrap; gap: .3rem .7rem; list-style: none; padding: 0; }
+.ci-contexts { display: flex; flex-wrap: wrap; gap: .3rem; list-style: none; padding: 0; }

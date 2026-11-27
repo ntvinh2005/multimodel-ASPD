@@ -109,7 +109,33 @@ modules exactly as the evaluation extractors do (`v31_backend._gates`, `:180–2
 | defined only for nonempty $\mathcal R$ and positive totals in both models | `compare_pair` → `distribution_valid`; `D_TV = null` otherwise | EXACT |
 | which pairs $(n, m)$ | `comparison.model_pairs`, default `all` | EXACT (all pairs of the $N$ models) |
 
-### 4.5 Computed but not in the formulation (ADDED)
+### 4.5 Where each formulation object is written
+
+- `profiles/parents_per_anchor.safetensors` stores every $\mathrm{Pa}(a;\alpha)$ entry:
+  parent, signed $E$, $w$ and rank (`parents_vocab.json` for the ids).
+- `compare/comparisons.jsonl` stores $\mathcal G^{(n)}_{p,i}(\alpha)$, $J$, $D_{TV}$ and
+  $M$ per gate, anchor and model pair.
+- `profiles/parent_distributions.safetensors` stores $S^{(n)}_{p,i}(\xi;\alpha)$ and
+  $\pi^{(n)}_{p,i}(\xi;\alpha)$ for every gate, model, anchor and parent gate $\xi$, with
+  $|\mathcal R|$, $M$ and validity per (gate, model, anchor). `distributions_vocab.json`
+  has the ids. Their means over valid anchors are in `profiles/gate_parent_profile.jsonl`.
+- Raw $E_{b\to a}$ for all firing upstream components are in the edge shards.
+
+Until 2026-11-23 only `compare` existed: Pa, $S$ and $\pi$ were computed but not written.
+The `profiles` stage writes them. It is part of the default pipeline (`--stage all`) and of
+the CPU job of the sharded chain.
+
+### 4.6 Computed but not in the formulation (ADDED)
+
+- `profiles/component_parent_profile.jsonl`: per component, parent frequency, mean $E$,
+  mean $|E|$, mean $w$ and sign consistency over anchors. The top 20 are listed; the full
+  data is in `parents_per_anchor`.
+- `profiles/gate_parent_profile.jsonl`: per gate and model, mean $\pi$ (top 20), mean $M$
+  and valid-anchor counts, plus the parent gates that every model has in its top 20.
+- `profiles/edge_profile.json`: the distribution of edge scores by model,
+  upstream → downstream matrix type and layer gap, for all stored edges and for parents
+  only.
+
 
 | Output | Why |
 |---|---|
