@@ -4,8 +4,8 @@ import { ResearchNotesEditor } from "./ResearchNotes";
 import { notesForSelection } from "./researchNotes";
 import { componentIdentity } from "./circuitComposition";
 import { useWorkbenchAsset } from "./TokenCircuitExplorer";
-import SemanticPatternInspector from "./SemanticPatternInspector";
-import type { PatternEdge } from "./semanticPatterns";
+import SemanticPatternInspector, { CircuitExampleComparison } from "./SemanticPatternInspector";
+import { anchorsForPattern, recurringParents, type PatternEdge } from "./semanticPatterns";
 import { SemanticDiscoveryGuide } from "./SemanticDiscoveryGuide";
 import { ComparisonPanels, type Anchor, type Witness } from "./SemanticDiscovery";
 import type { GraphRenderer } from "./InductionQueryGraph";
@@ -197,6 +197,10 @@ function PairResults({ pair, catalog, split, measured, Graph }: {
   const [anchor, setAnchor] = useState("");
   const [match, setMatch] = useState<number | null>(null);
   const [showPatterns, setShowPatterns] = useState(false);
+  const [patternMode, setPatternMode] = useState<"compare" | "manual">("compare");
+  const [topK, setTopK] = useState(1);
+  const [focused, setFocused] = useState(false);
+  const [comparisonAnchors, setComparisonAnchors] = useState<{ left: string; right: string } | null>(null);
   const [pattern, setPattern] = useState<PatternEdge[]>([]);
   const [note, setNote] = useState<{ component: string; anchor: string } | null>(null);
   const target = note ? componentIdentity(note.component) : null;
@@ -213,14 +217,37 @@ function PairResults({ pair, catalog, split, measured, Graph }: {
   const shared = available.filter(at => ids.every(id => witness(id, at)));
   const transportPair = match == null ? undefined : transport[match];
   const current = available.includes(anchor) ? anchor : shared[0] ?? available[0];
+  const manual = showPatterns && patternMode === "manual";
+  const automatic = showPatterns && patternMode === "compare";
+  const ranked = automatic ? ids.map(id => recurringParents(available, id, witness)) : [];
+  const maximum = Math.max(1, Math.min(10, ...ranked.map(panel => panel.rows.length)));
+  const k = Math.min(topK, maximum);
+  const buildCircuit = (id: string, index: number) => {
+    const { measured, rows } = ranked[index];
+    const parents = rows.slice(0, k);
+    const edges = parents.map(parent => ({ target: id, source: parent.id }));
+    return { target: id, model: catalog.components[id].model, measured, parents,
+      examples: anchorsForPattern(available, edges, witness).present };
+  };
+  const circuits = automatic ? [buildCircuit(pair.left, 0), buildCircuit(pair.right, 1)] as const : undefined;
+  const chosen = manual ? pattern
+    : circuits?.flatMap(panel => panel.parents.map(parent => ({ target: panel.target, source: parent.id }))) ?? [];
+  const separate = automatic ? comparisonAnchors : null;
+  const shown = separate ?? { left: current, right: current };
   function selectAnchor(at: string) {
     setAnchor(at);
+    setComparisonAnchors(null);
     setMatch(null);
     setNote(null);
   }
-  const preferred = transportPair ?? (current ? {
-    left: witness(pair.left, current) ? current : undefined,
-    right: witness(pair.right, current) ? current : undefined,
+  function toggleParent(source: string, target: string) {
+    setPattern(previous => previous.some(edge => edge.source === source && edge.target === target)
+      ? previous.filter(edge => edge.source !== source || edge.target !== target)
+      : [...previous, { source, target }]);
+  }
+  const preferred = transportPair ?? (shown.left && shown.right ? {
+    left: witness(pair.left, shown.left) ? shown.left : undefined,
+    right: witness(pair.right, shown.right) ? shown.right : undefined,
   } : undefined);
   return <>
     <section ref={heading} className="semantic-graph-compare" aria-label="Measured dependency comparison">
@@ -241,17 +268,40 @@ function PairResults({ pair, catalog, split, measured, Graph }: {
           <input type="checkbox" checked={showPatterns} onChange={event => setShowPatterns(event.target.checked)} />
           Find common patterns
         </label>
-        {showPatterns && <SemanticPatternInspector anchors={measured.anchors} ordered={available} targets={ids}
-          models={[catalog.components[pair.left].model, catalog.components[pair.right].model]}
-          selected={pattern} onChange={setPattern} witnessAt={witness} onAnchor={selectAnchor} />}
-        <ComparisonPanels key={current} scopeLabel="Incoming Taylor edges for the selected component."
-          panels={ids.map(id => {
-            const picks = showPatterns ? pattern.filter(edge => edge.target === id) : [];
-            return { model: catalog.components[id].model, anchor: current, component: id, witness: witness(id, current),
-              visibleSources: picks.length ? new Set(picks.map(edge => edge.source)) : undefined };
+        {showPatterns && <div className="semantic-pattern-toolbar" role="group" aria-label="Pattern workflow">
+          <button type="button" aria-pressed={automatic} onClick={() => { setPatternMode("compare"); setComparisonAnchors(null); }}>
+            Compare circuit examples
+          </button>
+          <button type="button" aria-pressed={manual} onClick={() => { setPatternMode("manual"); setComparisonAnchors(null); }}>
+            Pick edges manually
+          </button>
+          {chosen.length > 0 && <label className="ig-graph-filter">
+            <input type="checkbox" checked={focused} onChange={event => setFocused(event.target.checked)} />
+            Show selected edges only
+          </label>}
+          {manual && pattern.length > 0 && <button type="button" onClick={() => setPattern([])}>Clear selection</button>}
+        </div>}
+        {circuits && <CircuitExampleComparison anchors={measured.anchors} circuits={circuits}
+          topK={k} maximum={maximum} onTopK={value => { setTopK(value); setComparisonAnchors(null); }}
+          onCompare={(left, right) => { setComparisonAnchors({ left, right }); setMatch(null); setNote(null); }} />}
+        {separate && <button className="semantic-return-aligned" type="button" onClick={() => selectAnchor(current)}>
+          Return to the same aligned anchor
+        </button>}
+        {manual && <small>Click an edge in either graph to add or remove it from the pattern.</small>}
+        <ComparisonPanels key={`${shown.left}|${shown.right}`} scopeLabel="Incoming Taylor edges for the selected component."
+          panels={ids.map((id, index) => {
+            const at = index === 0 ? shown.left : shown.right;
+            const sources = new Set(chosen.filter(edge => edge.target === id).map(edge => edge.source));
+            return { model: catalog.components[id].model, anchor: at, component: id, witness: at ? witness(id, at) : undefined,
+              markedSources: showPatterns ? sources : undefined,
+              visibleSources: showPatterns && focused && sources.size ? sources : undefined };
           })}
           anchors={measured.anchors} checkpoint={catalog.checkpoint} Graph={Graph}
+          onPatternEdge={manual ? toggleParent : undefined}
           onAnnotation={(componentId, fromAnchor) => setNote(componentId ? { component: componentId, anchor: fromAnchor } : null)} />
+        {manual && <SemanticPatternInspector anchors={measured.anchors} ordered={available} targets={ids}
+          models={[catalog.components[pair.left].model, catalog.components[pair.right].model]}
+          selected={pattern} onToggle={toggleParent} witnessAt={witness} onAnchor={selectAnchor} />}
       </> : <p>Graph unavailable for this pair and document split.</p>}
     </section>
     <p>Lower distances mean more similar contexts. The controls measure how each endpoint compares with matched contexts where the other component contributes zero.</p>

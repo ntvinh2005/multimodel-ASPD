@@ -88,3 +88,37 @@
   overflow-y: auto;
 }
 .semantic-pattern-inspector button { margin: .2rem .3rem .15rem 0; }
+
+.semantic-pattern-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .45rem;
+}
+.semantic-pattern-toolbar button[aria-pressed="true"],
+.semantic-parent-list button[aria-pressed="true"] {
+  background: #e8f5f2;
+  color: #115e59;
+  border-color: #83bcb2;
+}
+.semantic-top-k { max-width: min(100%, 390px); }
+.semantic-circuit-side { display: grid; gap: .35rem; min-width: 0; }
+.semantic-circuit-side code { overflow-wrap: anywhere; }
+.semantic-circuit-parents { margin: .1rem 0; padding-inline-start: 1.5rem; }
+.semantic-circuit-parents small { margin-inline-start: .35rem; }
+.semantic-pattern-chips { display: flex; flex-wrap: wrap; gap: .2rem; }
+.semantic-pattern-inspector .semantic-parent-list { list-style: none; margin: .4rem 0; padding: 0; }
+.semantic-parent-list button {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: .4rem;
+  align-items: baseline;
+  text-align: left;
+}
+.semantic-parent-list code { overflow-wrap: anywhere; }
+.semantic-parent-list small { flex-shrink: 0; }
+.semantic-return-aligned { justify-self: start; }
+.uw-edge-hit { cursor: pointer; }
+.uw-edge.pattern-muted { opacity: .23; }
+.uw-edge.pattern-marked { opacity: 1; filter: drop-shadow(0 0 2px #34465c); }

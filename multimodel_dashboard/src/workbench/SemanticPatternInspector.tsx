@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { MODEL_NAMES, type EvalModel } from "./negationWorkbenchData";
+import { componentIdentity } from "./circuitComposition";
 import type { Anchor } from "./SemanticDiscovery";
 import {
   anchorsForPattern, recurringParents, sharedParentGates,
@@ -13,13 +14,13 @@ type Props = {
   models: [EvalModel, EvalModel];
   selected: PatternEdge[];
   witnessAt: WitnessAt;
-  onChange: (edges: PatternEdge[]) => void;
+  onToggle: (source: string, target: string) => void;
   onAnchor: (id: string) => void;
 };
 
 function ContextPicker({ label, ids, anchors, selected, onChange, onAnchor }: {
   label: string; ids: string[]; anchors: Props["anchors"]; selected: string;
-  onChange: (id: string) => void; onAnchor: Props["onAnchor"];
+  onChange: (id: string) => void; onAnchor?: Props["onAnchor"];
 }) {
   const id = ids.includes(selected) ? selected : ids[0];
   const example = anchors[id];
@@ -36,7 +37,7 @@ function ContextPicker({ label, ids, anchors, selected, onChange, onAnchor }: {
     {example && <>
       <p className="ig-sequence td-sequence semantic-contribution-sequence">{example.prefix.length > 220 && "…"}
         {Array.from(example.prefix).slice(-220).join("")}</p>
-      <button className="uw-form-control" type="button" onClick={() => onAnchor(id)}>Open this anchor in the graphs</button>
+      {onAnchor && <button className="uw-form-control" type="button" onClick={() => onAnchor(id)}>Open this anchor in the graphs</button>}
     </>}
   </div>;
 }
@@ -54,8 +55,8 @@ function rankContrasts(ids: string[], reference: Anchor | undefined, anchors: Pr
       - Math.abs(reference.prefix.length - anchors[b].prefix.length));
 }
 
-function TerminalCounts({ present, contrast, anchors }: {
-  present: string[]; contrast: string[]; anchors: Props["anchors"];
+function TerminalCounts({ present, contrast, anchors, compareCircuits = false }: {
+  present: string[]; contrast: string[]; anchors: Props["anchors"]; compareCircuits?: boolean;
 }) {
   const count = (ids: string[]) => {
     const forms = new Map<string, number>();
@@ -66,63 +67,129 @@ function TerminalCounts({ present, contrast, anchors }: {
     return forms;
   };
   const withPattern = count(present), withoutPattern = count(contrast);
-  const repeated = [...withPattern].filter(([, n]) => n > 1)
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const forms = compareCircuits ? new Set([...withPattern.keys(), ...withoutPattern.keys()]) : new Set(withPattern.keys());
+  const repeated = [...forms].map(form => [form, withPattern.get(form) ?? 0, withoutPattern.get(form) ?? 0] as const)
+    .filter(([, left, right]) => left > 1 || (compareCircuits && right > 1))
+    .sort((a, b) => b[1] + b[2] - a[1] - a[2] || a[0].localeCompare(b[0]));
   if (!repeated.length) return null;
   return <details>
     <summary>Repeated terminal text</summary>
     <p>Check whether repeated wording could explain a pattern before comparing the surrounding contexts.</p>
     <div className="cc-scroll"><table className="cc-table">
-      <thead><tr><th>Terminal text</th><th>All edges present</th><th>Contrast</th></tr></thead>
-      <tbody>{repeated.map(([form, count]) => <tr key={form}>
-        <th><code>{form}</code></th><td>{count}/{present.length}</td><td>{withoutPattern.get(form) ?? 0}/{contrast.length}</td>
+      <thead><tr><th>Terminal text</th><th>{compareCircuits ? "Left circuit" : "All edges present"}</th>
+        <th>{compareCircuits ? "Right circuit" : "Contrast"}</th></tr></thead>
+      <tbody>{repeated.map(([form, left, right]) => <tr key={form}>
+        <th><code>{form}</code></th><td>{left}/{present.length}</td><td>{right}/{contrast.length}</td>
       </tr>)}</tbody>
     </table></div>
   </details>;
 }
 
+type CircuitSupport = {
+  target: string;
+  model: EvalModel;
+  measured: number;
+  parents: { id: string; count: number }[];
+  examples: string[];
+};
+
+export function CircuitExampleComparison({ circuits, anchors, topK, maximum, onTopK, onCompare }: {
+  circuits: readonly [CircuitSupport, CircuitSupport];
+  anchors: Props["anchors"];
+  topK: number;
+  maximum: number;
+  onTopK: (value: number) => void;
+  onCompare: (left: string, right: string) => void;
+}) {
+  const [leftPick, setLeftPick] = useState("");
+  const [rightPick, setRightPick] = useState("");
+  const [distinct, setDistinct] = useState(false);
+  const [left, right] = circuits;
+  const leftIds = new Set(left.examples), rightIds = new Set(right.examples);
+  const overlap = right.examples.filter(id => leftIds.has(id)).length;
+  const leftExamples = distinct ? left.examples.filter(id => !rightIds.has(id)) : left.examples;
+  const rightExamples = distinct ? right.examples.filter(id => !leftIds.has(id)) : right.examples;
+  const leftId = leftExamples.includes(leftPick) ? leftPick : leftExamples[0];
+  const otherDocument = rightExamples.find(id => anchors[id].document !== anchors[leftId]?.document);
+  const rightId = rightExamples.includes(rightPick) ? rightPick : otherDocument ?? rightExamples[0];
+  return <section className="semantic-pattern-inspector" aria-label="Circuit example comparison">
+    <label className="uw-threshold-label semantic-top-k">
+      <span>Top K recurring parents per circuit</span><output>{topK}</output>
+      <input aria-label="Top K recurring parents per circuit" type="range" min="1" max={maximum} step="1"
+        value={topK} onChange={event => onTopK(Number(event.target.value))} />
+    </label>
+    <p>Each side chooses its own most frequent parent components and shows only examples where its chosen edges all appear together.</p>
+    <div className="semantic-pattern-toolbar">
+      <small>{overlap} shared anchors in these two example sets.</small>
+      <label className="ig-graph-filter">
+        <input type="checkbox" checked={distinct} onChange={event => setDistinct(event.target.checked)} />
+        Hide shared anchors
+      </label>
+    </div>
+    <div className="negation-context-grid">
+      {circuits.map((side, index) => <div key={side.target} className="semantic-circuit-side">
+        <strong>{MODEL_NAMES[side.model]} <code>{side.target}</code></strong>
+        <small>{side.examples.length}/{side.measured} measured anchors contain all {side.parents.length} edges</small>
+        <ol className="semantic-circuit-parents">{side.parents.map(({ id, count }) => <li key={id}>
+          <code>{id}</code> <small>{count}/{side.measured}</small>
+        </li>)}</ol>
+        <ContextPicker label={index === 0 ? "Left circuit examples" : "Right circuit examples"}
+          ids={index === 0 ? leftExamples : rightExamples} anchors={anchors} selected={index === 0 ? leftId : rightId}
+          onChange={index === 0 ? setLeftPick : setRightPick} />
+      </div>)}
+    </div>
+    <div className="semantic-pattern-toolbar">
+      <button className="uw-form-control" type="button" disabled={!leftId || !rightId}
+        onClick={() => onCompare(leftId, rightId)}>Show both examples in the graphs</button>
+    </div>
+    <TerminalCounts present={leftExamples} contrast={rightExamples} anchors={anchors} compareCircuits />
+  </section>;
+}
+
+const minimumOptions = [
+  ["repeat", "≥2 anchors"], ["0.25", "≥25%"], ["0.5", "≥50%"], ["1", "Every anchor"],
+];
+
 export default function SemanticPatternInspector({
-  anchors, ordered, targets, models, selected, witnessAt, onChange, onAnchor,
+  anchors, ordered, targets, models, selected, witnessAt, onToggle, onAnchor,
 }: Props) {
   const [minimum, setMinimum] = useState("repeat");
+  const [search, setSearch] = useState("");
   const [present, setPresent] = useState("");
   const [contrast, setContrast] = useState("");
   const common = sharedParentGates(ordered, targets, witnessAt);
   const contexts = anchorsForPattern(ordered, selected, witnessAt);
   const reference = anchors[contexts.present.includes(present) ? present : contexts.present[0]];
+  const query = search.trim().toLowerCase();
   return <section className="semantic-pattern-inspector" aria-label="Recurring parent patterns">
-    <p>Counts use all measured anchors in this split. Choose several exact parent edges to compare contexts where they occur together with contexts where at least one is outside the saved top 10.</p>
-    <label className="discovered-picker">Minimum parent recurrence
-      <select className="uw-form-control" value={minimum} onChange={event => setMinimum(event.target.value)}>
-        <option value="repeat">At least twice</option>
-        <option value="0.25">At least 25% of measured anchors</option>
-        <option value="0.5">At least 50% of measured anchors</option>
-        <option value="1">Every measured anchor</option>
-      </select>
+    <label className="discovered-picker">Find parent by component or gate ID
+      <input className="uw-form-control" type="search" value={search} onChange={event => setSearch(event.target.value)}
+        placeholder="MID:515 or layer/matrix ID" />
     </label>
+    <div className="semantic-pattern-toolbar" role="group" aria-label="Minimum parent recurrence">
+      {minimumOptions.map(([value, label]) => <button key={value} type="button" aria-pressed={minimum === value}
+        onClick={() => setMinimum(value)}>{label}</button>)}
+    </div>
     <div className="negation-context-grid">
       {targets.map((target, index) => {
         const { measured, rows } = recurringParents(ordered, target, witnessAt);
         const existing = selected.filter(edge => edge.target === target);
         const eligible = rows.filter(row => row.count >= (minimum === "repeat" ? 2 : measured * Number(minimum))
-          && !existing.some(edge => edge.source === row.id));
-        const add = (source: string) => { if (source) onChange([...selected, { source, target }]); };
+          && (row.id.toLowerCase().includes(query) || componentIdentity(row.id).gateId.toLowerCase().includes(query)));
         return <div key={target}>
-          <label className="discovered-picker">{MODEL_NAMES[models[index]]} parents · {measured} measured anchors
-            <select className="uw-form-control" value="" onChange={event => add(event.target.value)}>
-              <option value="">{eligible.length ? "Add a measured parent edge" : "No more parents at this recurrence"}</option>
-              {eligible.map(({ id, count }) => <option key={id} value={id}>
-                {id} · {count}/{measured} ({Math.round(100 * count / measured)}%)
-              </option>)}
-            </select>
-          </label>
-          {existing.map(edge => {
-            const count = rows.find(row => row.id === edge.source)?.count ?? 0;
-            return <button key={edge.source} type="button" className="uw-form-control"
-              aria-label={`Remove ${edge.source} from the pattern`} onClick={() => onChange(selected.filter(item => item !== edge))}>
-              {edge.source} · {count}/{measured} ×
-            </button>;
-          })}
+          <strong>{MODEL_NAMES[models[index]]} parents · {measured} measured anchors</strong>
+          {existing.length > 0 && <div className="semantic-pattern-chips">{existing.map(edge =>
+            <button key={edge.source} type="button" aria-label={`Remove ${edge.source} from the pattern`}
+              onClick={() => onToggle(edge.source, target)}>{edge.source} ×</button>,
+          )}</div>}
+          {eligible.length ? <ul className="semantic-parent-list" aria-label={`Measured parents for ${target}`}>
+            {eligible.map(({ id, count }) => {
+              const active = existing.some(edge => edge.source === id);
+              return <li key={id}><button type="button" aria-pressed={active} onClick={() => onToggle(id, target)}>
+                <code>{id}</code><small>{count}/{measured} · {Math.round(100 * count / measured)}%</small>
+              </button></li>;
+            })}
+          </ul> : <p>No parents match this search and recurrence.</p>}
         </div>;
       })}
     </div>
@@ -133,8 +200,7 @@ export default function SemanticPatternInspector({
     </details>}
     {selected.length > 0 && <>
       <p>{contexts.present.length}/{contexts.present.length + contexts.contrast.length} measured anchors contain every selected edge.
-        {contexts.unavailable > 0 && ` ${contexts.unavailable} anchors lack a required target measurement.`}
-        {" "}The graphs focus on selected edges at the current anchor. Compare their signed values at each position.</p>
+        {contexts.unavailable > 0 && ` ${contexts.unavailable} anchors lack a required target measurement.`}</p>
       <div className="negation-context-grid">
         <ContextPicker label="All selected edges present" ids={contexts.present} anchors={anchors}
           selected={present} onChange={setPresent} onAnchor={onAnchor} />

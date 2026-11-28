@@ -91,10 +91,12 @@ function dependencyEdges(witness: Witness): DependencyEdge[] {
   }));
 }
 
-function ContextGraph({ witness, row, checkpoint, Graph, hidePrefix, threshold = 0, colors, onComparisonNote, visibleSources }: {
+function ContextGraph({ witness, row, checkpoint, Graph, hidePrefix, threshold = 0, colors, onComparisonNote, visibleSources, markedSources, onPatternEdge }: {
   witness: Witness; row: Anchor; checkpoint: string; Graph: GraphRenderer;
   hidePrefix?: boolean; threshold?: number; colors?: Record<string, string>;
   visibleSources?: ReadonlySet<string>;
+  markedSources?: ReadonlySet<string>;
+  onPatternEdge?: (source: string, target: string) => void;
   onComparisonNote?: (componentId: string | null) => void;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
@@ -112,13 +114,23 @@ function ContextGraph({ witness, row, checkpoint, Graph, hidePrefix, threshold =
   };
   const node = components.find(component => component.id === selected);
   const edge = visible.find(record => record.id === selectedEdge);
+  const markedEdges = markedSources && new Set(
+    visible.filter(record => markedSources.has(record.source)).map(record => record.id),
+  );
   return <div>
     {!hidePrefix && <Prefix row={row} model={witness.model} />}
     <Graph modelId={witness.model} components={components} edges={visible}
       spotlight={componentIdentity(witness.component).gateId} selectedComponent={selected} selectedEdge={edge?.id ?? null}
       trace={selected ? traceGraph(visible, selected, "both", 1) : null} direction="both" widthScale="sqrt"
       onComponent={id => { setSelected(id); setSelectedEdge(null); onComparisonNote?.(id); }}
-      onEdge={id => { setSelected(null); setSelectedEdge(id); onComparisonNote?.(null); }}
+      onEdge={id => {
+        setSelected(null);
+        setSelectedEdge(id);
+        onComparisonNote?.(null);
+        const picked = visible.find(record => record.id === id);
+        if (picked) onPatternEdge?.(picked.source, picked.target);
+      }}
+      markedEdges={markedEdges} pickPatternEdges={Boolean(onPatternEdge)}
       colors={colors} annotationCheckpoint={checkpoint} compositionMeasurement={measurement} />
     {edge && <p><code>{edge.source} → {edge.target}</code> · E {show(edge.signedEffect)} · w {show(edge.normalizedMagnitude)}</p>}
     {node && !onComparisonNote && <ResearchNotesEditor key={node.id} targets={notesForSelection(checkpoint, node.gateId, node.modelId, node)}
@@ -136,13 +148,15 @@ function graphExampleLabel({ left, right, kind }: GraphExample) {
 type GraphPanel = {
   model: EvalModel; component?: string; anchor?: string; witness?: Witness; controls?: ReactNode;
   visibleSources?: ReadonlySet<string>;
+  markedSources?: ReadonlySet<string>;
 };
 type GraphView = { anchors: SemanticCatalog["anchors"]; checkpoint: string; Graph: GraphRenderer };
 
-export function ComparisonPanels({ panels, anchors, checkpoint, Graph, scopeLabel, onAnnotation }: GraphView & {
+export function ComparisonPanels({ panels, anchors, checkpoint, Graph, scopeLabel, onAnnotation, onPatternEdge }: GraphView & {
   panels: GraphPanel[];
   scopeLabel?: string;
   onAnnotation?: (component: string | null, anchor: string) => void;
+  onPatternEdge?: (source: string, target: string) => void;
 }) {
   const [threshold, setThreshold] = useState(0);
   const [annotation, setAnnotation] = useState<{ componentId: string; anchor: string } | null>(null);
@@ -166,7 +180,7 @@ export function ComparisonPanels({ panels, anchors, checkpoint, Graph, scopeLabe
       </label>
     </div>
     <div className="semantic-graph-panels" style={{ "--graph-count": panels.length } as CSSProperties}>
-      {panels.map(({ component, anchor, model, witness, controls, visibleSources }, i) => {
+      {panels.map(({ component, anchor, model, witness, controls, visibleSources, markedSources }, i) => {
         const row = anchor ? anchors[anchor] : undefined;
         return <section key={model + "/" + i} aria-label={`Dependency graph for ${MODEL_NAMES[model]}`}>
           <strong>{MODEL_NAMES[model]}</strong>{component && <>{" "}<code>{component}</code></>}
@@ -176,6 +190,7 @@ export function ComparisonPanels({ panels, anchors, checkpoint, Graph, scopeLabe
               : `${witness.edges.filter(edge => edge.w >= threshold && (!visibleSources || visibleSources.has(edge.source))).length}/${witness.edges.length} edges shown`}</small>}
           {witness && row && anchor ? <ContextGraph witness={witness} row={row} checkpoint={checkpoint} Graph={Graph}
             hidePrefix={!!sharedAnchor} threshold={threshold} colors={colors} visibleSources={visibleSources}
+            markedSources={markedSources} onPatternEdge={onPatternEdge}
             onComparisonNote={componentId => {
               if (onAnnotation) onAnnotation(componentId, anchor);
               else setAnnotation(componentId ? { componentId, anchor } : null);

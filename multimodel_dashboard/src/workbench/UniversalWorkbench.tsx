@@ -298,7 +298,7 @@ function Metric({ label, value }: { label: string; value: string }) {
   return <article><span>{label}</span><strong>{value}</strong></article>;
 }
 
-export function ModelGraph({ modelId, components, edges, spotlight, selectedComponent, selectedEdge, trace, direction, widthScale, onComponent, onEdge, colors, annotationCheckpoint, compositionMeasurement }: { modelId: string; components: Component[]; edges: DependencyEdge[]; spotlight: string | null; selectedComponent: string | null; selectedEdge: string | null; trace: ReturnType<typeof traceGraph> | null; direction: TraceDirection; widthScale: "linear" | "sqrt" | "log"; onComponent: (id: string) => void; onEdge: (id: string) => void; colors?: Record<string, string>; annotationCheckpoint?: string; compositionMeasurement?: Measurement }) {
+export function ModelGraph({ modelId, components, edges, spotlight, selectedComponent, selectedEdge, trace, direction, widthScale, onComponent, onEdge, colors, annotationCheckpoint, compositionMeasurement, markedEdges, pickPatternEdges }: { modelId: string; components: Component[]; edges: DependencyEdge[]; spotlight: string | null; selectedComponent: string | null; selectedEdge: string | null; trace: ReturnType<typeof traceGraph> | null; direction: TraceDirection; widthScale: "linear" | "sqrt" | "log"; onComponent: (id: string) => void; onEdge: (id: string) => void; colors?: Record<string, string>; annotationCheckpoint?: string; compositionMeasurement?: Measurement; markedEdges?: ReadonlySet<string>; pickPatternEdges?: boolean }) {
   const arrowId = useId();
   const library = useCircuitLibrary();
   const drafted = annotationCheckpoint ? library?.drafts[annotationCheckpoint]?.components ?? [] : [];
@@ -332,7 +332,32 @@ export function ModelGraph({ modelId, components, edges, spotlight, selectedComp
     <defs><marker id={arrowId} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke" /></marker></defs>
     {model.selectedLayers.map((layer, index) => <g key={layer}><line x1={72 + index * 86} y1="50" x2={72 + index * 86} y2="472" className="uw-layer-line" /><text x={72 + index * 86} y="28" className="uw-layer-label">L{layer}</text></g>)}
     {["Q", "K", "V", "O", "gate", "up", "down"].map((matrix, index) => <text key={matrix} x="15" y={79 + index * 58} className="uw-matrix-label">{matrix}</text>)}
-    {edges.map((edge) => { const a = positions.get(edge.source); const b = positions.get(edge.target); if (!a || !b) return null; const relevant = !selectedComponent || trace?.edges.has(edge.id); const measure = (value: number | null) => value === null ? "missing" : value.toFixed(4); const label = `${edge.source} to ${edge.target}; signed E ${measure(edge.signedEffect)}; normalized w ${measure(edge.normalizedMagnitude)}`; return <line key={edge.id} role="button" tabIndex={0} aria-label={label} x1={a.x} y1={a.y} x2={b.x} y2={b.y} markerEnd={`url(#${arrowId})`} className={`uw-edge ${edge.signedEffect === null ? "unknown" : edge.signedEffect < 0 ? "negative" : "positive"} ${selectedEdge === edge.id ? "selected" : ""} ${relevant ? "" : "dim"}`} strokeWidth={edgeWidth(edge.normalizedMagnitude)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onEdge(edge.id); }} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onEdge(edge.id); }} />; })}
+    {pickPatternEdges && edges.map(edge => {
+      const a = positions.get(edge.source), b = positions.get(edge.target);
+      return a && b && <line key={edge.id} aria-hidden="true" className="uw-edge-hit"
+        x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="transparent" strokeWidth={12} pointerEvents="stroke"
+        onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); onEdge(edge.id); }} />;
+    })}
+    {edges.map(edge => {
+      const a = positions.get(edge.source), b = positions.get(edge.target);
+      if (!a || !b) return null;
+      const relevant = !selectedComponent || trace?.edges.has(edge.id);
+      const measure = (value: number | null) => value === null ? "missing" : value.toFixed(4);
+      const label = `${edge.source} to ${edge.target}; signed E ${measure(edge.signedEffect)}; normalized w ${measure(edge.normalizedMagnitude)}`;
+      const marked = markedEdges?.has(edge.id);
+      const sign = edge.signedEffect === null ? "unknown" : edge.signedEffect < 0 ? "negative" : "positive";
+      const style = marked ? "pattern-marked" : markedEdges?.size ? "pattern-muted" : "";
+      return <line key={edge.id} role="button" tabIndex={0} aria-label={label} aria-pressed={pickPatternEdges ? marked : undefined}
+        x1={a.x} y1={a.y} x2={b.x} y2={b.y} markerEnd={`url(#${arrowId})`}
+        className={`uw-edge ${sign} ${selectedEdge === edge.id ? "selected" : ""} ${relevant ? "" : "dim"} ${style}`}
+        strokeWidth={edgeWidth(edge.normalizedMagnitude)} onKeyDown={event => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onEdge(edge.id);
+          }
+        }} onPointerDown={event => event.stopPropagation()}
+        onClick={event => { event.stopPropagation(); onEdge(edge.id); }} />;
+    })}
     {components.map((component) => {
       const point = positions.get(component.id)!;
       const relevant = selectedComponent ? Boolean(trace?.nodes.has(component.id)) : (!spotlight || component.gateId === spotlight);
