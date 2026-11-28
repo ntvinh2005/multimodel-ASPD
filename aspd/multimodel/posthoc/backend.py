@@ -121,8 +121,14 @@ class EncodedAnchorPool:
 
     pool: AnchorPool
     continuous: Mapping[str, Tensor]  # site -> [A,C], zero outside selected support
+    preprojection_reference: Tensor | None = None  # [A, d_PRE + d_MID]
 
     def __post_init__(self) -> None:
+        reference = self.preprojection_reference
+        if reference is not None and (
+            reference.ndim != 2 or reference.shape[0] != len(self.pool.anchor_ids)
+        ):
+            raise ValueError("Preprojection rows must match the aligned anchor axis")
         for site, values in self.continuous.items():
             if site not in self.pool.gates or values.shape != self.pool.gates[site].shape:
                 raise ValueError(f"continuous gate {site!r} does not match binary support")

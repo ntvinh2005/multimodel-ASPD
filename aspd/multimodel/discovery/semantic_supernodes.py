@@ -128,7 +128,7 @@ def pairwise(distributions, vectors, *, epsilon=None):
     return result
 
 
-def tree_and_partition(matrix, count=None, threshold=None):
+def tree_and_partition(matrix, count=None, threshold=None, *, method="average"):
     if (count is None) == (threshold is None):
         raise ValueError("Use exactly one cluster cut")
     condensed = squareform(matrix, checks=True)
@@ -140,7 +140,7 @@ def tree_and_partition(matrix, count=None, threshold=None):
         raise ValueError("Cluster threshold must be finite and nonnegative")
     if len(matrix) == 1:
         return np.empty((0, 4)), [[0]]
-    tree = linkage(condensed, method="average")
+    tree = linkage(condensed, method=method)
     labels = (
         cut_tree(tree, n_clusters=[count])[:, 0]
         if count is not None

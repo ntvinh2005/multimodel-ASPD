@@ -6,6 +6,7 @@ export type Cluster = {
   medoid: string;
   outlier: string;
   withinDistance: number | null;
+  diameter?: number;
 };
 
 export type Component = { id: string; model: EvalModel; gate: string; beta: number; uNorm: number; sigma: number };
@@ -14,13 +15,13 @@ export type Partition = {
   clusters: Cluster[];
   tree: [number, number, number, number][];
   distances: number[][];
-  heldoutDistances: number[][];
+  heldoutDistances: (number | null)[][];
   evaluation: {
-    heldoutCoassignmentJaccard: number | null;
+    heldoutCoassignmentJaccard?: number | null;
     heldout: { mean: number | null; pairs: number };
-    meanEmbedding: { mean: number | null };
-    sharedGate: { mean: number | null; pairs: number };
-    random: { mean: number; quantiles: [number, number] } | null;
+    meanEmbedding?: { mean: number | null };
+    sharedGate?: { mean: number | null; pairs: number };
+    random?: { mean: number; quantiles: [number, number] } | null;
   };
 };
 export type Scope = {
@@ -85,6 +86,8 @@ export type SupernodeCatalog = {
   checkpoint: string;
   dataset: string;
   models: Record<EvalModel, Partition>;
+  mode?: "shared-reference-joint";
+  jointPartition?: Partition & { distanceCut: number };
   components: Component[];
   reference: { id: string; dimensions: number; scope: string; groundCost: string };
   settings: { support: number; epsilon: number | null };

@@ -33,6 +33,7 @@ def install(pilot, workbench, archived=None, validation=None):
             raise ValueError(f"Invalid sealed pilot artifact {name}")
     catalog = load(pilot / "catalog.json")
     run = catalog["runId"]
+    shared_reference = catalog.get("mode") == "shared-reference-joint"
     if (
         not re.fullmatch("[a-f0-9]{64}", run)
         or run != complete["runId"]
@@ -75,7 +76,7 @@ def install(pilot, workbench, archived=None, validation=None):
     evidence = load(pilot / "evidence.json")
     components = [item["id"] for item in catalog["components"]]
     counts = [len(evidence["examples"][key]["heldout"]) for key in components]
-    if min(counts) < 10 or sum(counts) / len(counts) < 20:
+    if not shared_reference and (min(counts) < 10 or sum(counts) / len(counts) < 20):
         raise ValueError("Insufficient independent held-out coverage")
     directory = workbench / "semantic-supernodes"
     directory.mkdir(parents=True, exist_ok=True)
@@ -126,9 +127,10 @@ def install(pilot, workbench, archived=None, validation=None):
                     raise ValueError("Installed semantic supernode release is immutable")
         else:
             stage.rename(destination)
-        pointer = Path(staging) / "index.json"
+        pointer_name = "shared-reference.json" if shared_reference else "index.json"
+        pointer = Path(staging) / pointer_name
         save(pointer, marker)
-        pointer.replace(directory / "index.json")
+        pointer.replace(directory / pointer_name)
     return marker
 
 

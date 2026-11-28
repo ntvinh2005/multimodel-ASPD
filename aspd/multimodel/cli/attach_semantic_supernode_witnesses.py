@@ -55,7 +55,11 @@ def project(pilot, graph_index, recovery, posthoc):
     index = Index(graph_index)
     membership = {
         key: cluster
-        for part in catalog["models"].values()
+        for part in (
+            [catalog["jointPartition"]]
+            if "jointPartition" in catalog
+            else catalog["models"].values()
+        )
         for cluster in part["clusters"]
         for key in cluster["members"]
     }

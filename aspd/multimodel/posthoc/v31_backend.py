@@ -25,6 +25,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Iterator, Mapping
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
@@ -96,6 +97,16 @@ def _pad_id(tokenizer: Any) -> int:
         if value is not None:
             return int(value)
     raise ValueError("tokenizer has neither a pad nor an eos token")
+
+
+def capture_gate_projection_input(projection: nn.Module, captured: dict[str, Tensor], site: str):
+    """Observe the exact mean-pooled tensor consumed by the trained gate projection."""
+    def remember(_module: nn.Module, args: tuple[Tensor, ...]) -> None:
+        if site in captured or len(args) != 1 or args[0].ndim != 3 or args[0].shape[0] != 1:
+            raise ValueError(f"Unexpected projection input for {site}: expected one [1,A,d] tensor")
+        captured[site] = args[0][0].detach().float().cpu()
+
+    return projection.register_forward_pre_hook(remember)
 
 
 class V31CheckpointBackend:
@@ -238,7 +249,9 @@ class V31CheckpointBackend:
             model_order=self.model_keys,
         )
 
-    def _gate_codes(self, pool: Any) -> tuple[dict[str, Tensor], dict[str, Tensor]]:
+    def _gate_codes(
+        self, pool: Any, *, capture_preprojection: bool = False
+    ) -> tuple[dict[str, Tensor], dict[str, Tensor], Tensor | None]:
         from aspd.multimodel.v3.training_capture import capture_family_pool
 
         valid = torch.ones(1, pool.anchor_count, dtype=torch.bool, device=self.device)
@@ -256,9 +269,14 @@ class V31CheckpointBackend:
         shared = self.owners[self.model_keys[0]]
         gates = {}
         continuous = {}
+        pooled = {}
         with torch.no_grad(), autocast:
             for site in ("pre", "mid"):
-                scores, _ = shared.shared_encoders[site].forward_with_logits(tokens[site], valid)
+                encoder = shared.shared_encoders[site]
+                with ExitStack() as hooks:
+                    if capture_preprojection:
+                        hooks.enter_context(capture_gate_projection_input(encoder.readout.output, pooled, site))
+                    scores, _ = encoder.forward_with_logits(tokens[site], valid)
                 code = shared.gates[site](scores, valid, update_statistics=False)
                 values = code.values[0].detach().cpu()
                 gates[site] = values > 0
@@ -269,7 +287,8 @@ class V31CheckpointBackend:
                     raise ValueError(
                         f"{site} BatchTopK selected {observed} entries; expected {expected}"
                     )
-        return gates, continuous
+        reference = torch.cat([pooled["pre"], pooled["mid"]], dim=-1) if capture_preprojection else None
+        return gates, continuous, reference
 
     def _model_inputs(self, pool: Any) -> dict[str, ModelInputs]:
         """Convert the established aligned-pool payload without changing anchor order."""
@@ -290,7 +309,9 @@ class V31CheckpointBackend:
     def _to_pool(self, pool: Any) -> AnchorPool:
         return self.encode_aligned_pool(pool).pool
 
-    def encode_aligned_pool(self, pool: Any) -> EncodedAnchorPool:
+    def encode_aligned_pool(
+        self, pool: Any, *, capture_preprojection: bool = False
+    ) -> EncodedAnchorPool:
         """Evaluate one caller-supplied exact 2,048-anchor pool with natural BatchTopK."""
 
         pool.validate(
@@ -298,11 +319,11 @@ class V31CheckpointBackend:
             sequence_length=int(self.config.data.sequence_length),
             model_order=self.model_keys,
         )
-        gates, continuous = self._gate_codes(pool)
+        gates, continuous, reference = self._gate_codes(pool, capture_preprojection=capture_preprojection)
         binary = AnchorPool(
             anchor_ids=tuple(pool.anchor_ids), gates=gates, models=self._model_inputs(pool)
         )
-        return EncodedAnchorPool(pool=binary, continuous=continuous)
+        return EncodedAnchorPool(pool=binary, continuous=continuous, preprojection_reference=reference)
 
     def pools(self, count: int, *, skip: int = 0) -> Iterator[AnchorPool]:
         for pool in self.aligned_pools(count, skip=skip):

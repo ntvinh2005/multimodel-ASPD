@@ -15,22 +15,35 @@ const fmt = (value: number | null | undefined) => value == null ? "Unavailable" 
 export default function SemanticSupernodeDiscovery({ checkpoint, onBaseline, Graph }: {
   checkpoint: string; onBaseline: () => void; Graph: GraphRenderer;
 }) {
-  const release = useWorkbenchAsset<SupernodeRelease>(`${SUPERNODE_PATH}/index.json`, undefined, "no-store");
+  const [view, setView] = useState<"shared" | "baseline">("shared");
+  const shared = useWorkbenchAsset<SupernodeRelease>(`${SUPERNODE_PATH}/shared-reference.json`, undefined, "no-store");
+  const baseline = useWorkbenchAsset<SupernodeRelease>(`${SUPERNODE_PATH}/index.json`, undefined, "no-store");
+  const release = view === "shared" ? shared : baseline;
   const pointer = release?.data;
   const path = pointer?.schemaVersion === 1 && pointer.checkpoint === checkpoint
     ? releasePath(pointer.runId, pointer.catalog) : undefined;
   const asset = useWorkbenchAsset<SupernodeCatalog>(path, pointer?.catalog?.sha256);
   const catalog = asset?.data;
-  if (!catalog || catalog.runId !== pointer?.runId || catalog.checkpoint !== checkpoint
-    || catalog.dataset !== "natural-validation" || catalog.schemaVersion !== 1) {
-    return <section className="uw-empty" role="status">
-      {release?.error || asset?.error || (pointer && !path) || catalog
-        ? "No verified Semantic Supernode pilot is available for this checkpoint."
-        : "Loading the Semantic Supernode pilot…"}
-      <button type="button" onClick={onBaseline}>Open component-level Semantic Discovery</button>
-    </section>;
-  }
-  return <SupernodeWorkspace key={catalog.runId} catalog={catalog} onBaseline={onBaseline} Graph={Graph} />;
+  const valid = catalog && catalog.runId === pointer?.runId && catalog.checkpoint === checkpoint
+    && catalog.dataset === "natural-validation" && catalog.schemaVersion === 1
+    && (view === "shared" ? catalog.mode === "shared-reference-joint" && !!catalog.jointPartition : !catalog.jointPartition);
+  return <>
+    <div className="sn-toolbar">
+      <label>Supernode method <select value={view} onChange={event => setView(event.target.value as typeof view)}>
+        <option value="shared">ASPD shared reference · complete linkage</option>
+        <option value="baseline">Archived MiniLM · average linkage</option>
+      </select></label>
+    </div>
+    {valid ? <SupernodeWorkspace key={catalog.runId} catalog={catalog} onBaseline={onBaseline} Graph={Graph} />
+      : <section className="uw-empty" role="status">
+        {release?.error || asset?.error || (pointer && !path) || catalog
+          ? view === "shared"
+            ? "Shared reference results are pending export of the pooled PRE/MID anchor vectors."
+            : "No verified archived supernode pilot is available for this checkpoint."
+          : "Loading the Semantic Supernode pilot…"}
+        <button type="button" onClick={onBaseline}>Open component-level Semantic Discovery</button>
+      </section>}
+  </>;
 }
 
 function usePilotAsset<T>(run: string, ref?: Ref) {
@@ -47,7 +60,8 @@ function SupernodeWorkspace({ catalog, onBaseline, Graph }: {
   const [withGraphs, setWithGraphs] = useState(false);
   const [mode, setMode] = useState<"supernodes" | "components" | "comparison">("supernodes");
   const [component, setComponent] = useState("");
-  const partition = catalog.models[model];
+  const joint = catalog.jointPartition;
+  const partition = joint ?? catalog.models[model];
   const clusters = useMemo(() => [...partition.clusters].sort((a, b) =>
     b.members.length - a.members.length || (a.withinDistance ?? Infinity) - (b.withinDistance ?? Infinity)),
   [partition]);
@@ -62,26 +76,26 @@ function SupernodeWorkspace({ catalog, onBaseline, Graph }: {
   return <div className="sn-workbench">
     <div className="sn-heading">
       <div><h2>Semantic Supernode Discovery</h2>
-        <p>Natural Validation · {catalog.components.length} representative components · {catalog.settings.support} documents per transport distribution</p></div>
+        <p>Natural Validation · {catalog.components.length} representative components · {joint ? "joint clustering" : "per-model clustering"} · up to {catalog.settings.support} {joint ? "anchors" : "documents"} per distribution</p></div>
       <button type="button" onClick={onBaseline}>Component-level baseline</button>
     </div>
     <details className="sn-section">
       <summary>How to use this workspace</summary>
       <ol>
-        <li>Choose a model and cluster. Compare its central member and its most distant member on held-out documents.</li>
-        <li>Open the cross-model view to read the context pairs that carry the most transport mass.</li>
+        <li>{joint ? "Select a joint cluster, then compare its members’ top contribution anchors across models." : "Choose a model and cluster. Compare its central and farthest members on held-out documents."}</li>
+        <li>{joint ? "The distance inspector compares any two members. A cutoff bounds every pair in a joint cluster." : "Open the cross-model view to read the context pairs that carry the most transport mass."}</li>
         <li>Inspect archived Taylor witnesses at their exact anchors. Use component mode to see which terms were measured.</li>
         <li>Save a provisional label. Independent intervention evidence is listed under Causal Validation.</li>
       </ol>
     </details>
     <div className="sn-toolbar">
-      <label>Model <select value={model} onChange={event => { setModel(event.target.value as EvalModel); setSearch(""); }}>
+      <label>{joint ? "Graph model" : "Model"} <select value={model} onChange={event => { setModel(event.target.value as EvalModel); setSearch(""); }}>
         {MODEL_IDS.map(m => <option key={m} value={m}>{MODEL_NAMES[m]}</option>)}</select></label>
       <label>Find a supernode or component <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Gate, matrix or label" /></label>
       <label><input type="checkbox" checked={withGraphs} onChange={event => setWithGraphs(event.target.checked)} /> Taylor witnesses only</label>
       <label>Graph view <select value={mode} onChange={event => setMode(event.target.value as typeof mode)}>
         <option value="supernodes">Semantic supernodes</option><option value="components">Component-level graph</option>
-        <option value="comparison">Cross-model comparison</option>
+        {!joint && <option value="comparison">Cross-model comparison</option>}
       </select></label>
     </div>
     <div className="sn-grid">
@@ -90,7 +104,7 @@ function SupernodeWorkspace({ catalog, onBaseline, Graph }: {
         {visible.map(cluster => <button key={cluster.id} type="button" aria-pressed={chosen.id === cluster.id}
           onClick={() => setSelection(cluster.id)}>
           <strong>{labelFor(catalog, cluster) || cluster.medoid}</strong>
-          <small>{cluster.members.length} {cluster.members.length === 1 ? "member" : "members"} · within OT {cluster.withinDistance == null ? "—" : fmt(cluster.withinDistance)}{graphed.has(cluster.id) && " · Taylor witnesses"}</small>
+          <small>{cluster.members.length} {cluster.members.length === 1 ? "member" : "members"} · {joint ? `diameter ${fmt(cluster.diameter)}` : `within OT ${cluster.withinDistance == null ? "—" : fmt(cluster.withinDistance)}`}{graphed.has(cluster.id) && " · Taylor witnesses"}</small>
         </button>)}
         {!visible.length && <p>No matching supernode.</p>}
       </aside>
@@ -98,6 +112,7 @@ function SupernodeWorkspace({ catalog, onBaseline, Graph }: {
         <section className="sn-section">
           <div className="sn-heading"><h3>Supernode members</h3><small>Study ID <code>{chosen.id}</code></small></div>
           <LabelEditor key={chosen.id} catalog={catalog} cluster={chosen} onSave={() => setLabelsUpdated(labelsUpdated + 1)} />
+          {joint && <p>{MODEL_IDS.map(id => `${MODEL_NAMES[id]} ${chosen.members.filter(key => byComponent.get(key)?.model === id).length}`).join(" · ")}. Maximum discovery pairwise OT {fmt(chosen.diameter)}.</p>}
           <p>Central member <code>{chosen.medoid}</code> · Farthest member <code>{chosen.outlier}</code></p>
           <div className="sn-members">{chosen.members.map(key => <button type="button" key={key}
             aria-pressed={activeComponent === key} onClick={() => setComponent(key)}>
@@ -111,9 +126,11 @@ function SupernodeWorkspace({ catalog, onBaseline, Graph }: {
     </div>
     <details className="sn-section">
       <summary>Clustering &amp; distance inspector</summary>
-      <p>{catalog.reference.groundCost} ground cost · {catalog.reference.dimensions} dimensions · {catalog.reference.scope} causal text.</p>
-      <p>Held-out mean within OT {fmt(recurrence.heldout.mean)} ({recurrence.heldout.pairs} pairs). Random-size-matched mean {fmt(recurrence.random?.mean)}. Mean-embedding partition {fmt(recurrence.meanEmbedding.mean)}. Shared-gate grouping {fmt(recurrence.sharedGate.mean)} ({recurrence.sharedGate.pairs} pairs). Pair co-assignment Jaccard across document splits {fmt(recurrence.heldoutCoassignmentJaccard)}.</p>
-      <Clustering key={model} partition={partition} component={activeComponent} />
+      <p>{catalog.reference.groundCost} ground cost · {catalog.reference.dimensions} dimensions · {catalog.reference.scope}{joint ? " before gate projection" : " causal text"}.</p>
+      <p>Held-out mean within OT {fmt(recurrence.heldout.mean)} ({recurrence.heldout.pairs} measured pairs).
+        {joint ? ` Discovery cut τ = ${joint.distanceCut}.`
+          : ` Random-size-matched mean ${fmt(recurrence.random?.mean)}. Mean embedding ${fmt(recurrence.meanEmbedding?.mean)}. Shared-gate grouping ${fmt(recurrence.sharedGate?.mean)}. Pair co-assignment Jaccard ${fmt(recurrence.heldoutCoassignmentJaccard)}.`}</p>
+      <Clustering key={joint ? "joint" : model} partition={partition} component={activeComponent} method={joint ? "Complete" : "Average"} />
     </details>
     <CausalValidation catalog={catalog} cluster={chosen} />
   </div>;
@@ -164,27 +181,29 @@ function EvidencePanel({ catalog, component }: { catalog: SupernodeCatalog; comp
   const item = examples[index];
   const scope = item && data?.witnesses[item.anchor];
   const counts = catalog.counts[component];
+  const joint = !!catalog.jointPartition;
   const max = Math.max(1e-12, ...Object.values(data?.examples ?? {}).flat().flatMap(row =>
     [row.strength, ...(row.heatmap ?? []).map(span => span[6])]));
   return <section className="sn-section" aria-label="Semantic Evidence Inspector">
     <h3>Contribution examples</h3>
-    <p><code>{component}</code> · {counts.discovery.exportedNonzero} discovery and {counts.heldout.exportedNonzero} held-out documents shown.
-      Color shows normalized contribution on one component-wide scale. The anchor has an outline.</p>
+    <p><code>{component}</code> · {counts.discovery.exportedNonzero} discovery and {counts.heldout.exportedNonzero} held-out {joint ? "anchors" : "documents"} shown.
+      {joint ? ` These cover ${counts.discovery.distinctNonzeroDocuments} and ${counts.heldout.distinctNonzeroDocuments} distinct documents respectively.` : ""}
+      Color shows {joint ? "raw contribution κ" : "normalized contribution"} on one component-wide scale. The anchor has an outline.</p>
     <div className="sn-toolbar">
       <label>Examples <select value={split} onChange={event => { setSplit(event.target.value); setIndex(0); }}>
         <option value="heldout">Held out · strongest</option><option value="discovery">Discovery · strongest</option>
-        <option value="heldoutContrast">Held out · measured zero</option><option value="discoveryContrast">Discovery · measured zero</option>
+        {!joint && <><option value="heldoutContrast">Held out · measured zero</option><option value="discoveryContrast">Discovery · measured zero</option></>}
       </select></label>
-      <button type="button" disabled={index === 0} onClick={() => setIndex(index - 1)}>Previous document</button>
-      <button type="button" disabled={index + 1 >= examples.length} onClick={() => setIndex(index + 1)}>Next document</button>
+      <button type="button" disabled={index === 0} onClick={() => setIndex(index - 1)}>{joint ? "Previous anchor" : "Previous document"}</button>
+      <button type="button" disabled={index + 1 >= examples.length} onClick={() => setIndex(index + 1)}>{joint ? "Next anchor" : "Next document"}</button>
       {examples.length > 0 && <small>{index + 1} / {examples.length}</small>}
     </div>
-    {scope && item ? <ExampleText scope={scope} item={item} model={catalog.components.find(c => c.id === component)!.model} max={max} />
+    {scope && item ? <ExampleText scope={scope} item={item} model={catalog.components.find(c => c.id === component)!.model} max={max} strengthLabel={joint ? "κ" : "r"} />
       : <p role="status">{asset?.error ? "Evidence file unavailable." : data ? "No examples for this selection." : "Loading measured contexts…"}</p>}
   </section>;
 }
 
-function ExampleText({ scope, item, model, max }: { scope: Scope; item?: Example; model: EvalModel; max?: number }) {
+function ExampleText({ scope, item, model, max, strengthLabel = "r" }: { scope: Scope; item?: Example; model: EvalModel; max?: number; strengthLabel?: string }) {
   const span = scope.native?.[model];
   const position = span?.[0] ?? scope.positions?.[model];
   const token = span?.[1] ?? scope.tokenIds?.[model];
@@ -192,7 +211,7 @@ function ExampleText({ scope, item, model, max }: { scope: Scope; item?: Example
   const textAt = (start: number, end?: number) => characters.slice(start, end).join("");
   let offset = 0;
   return <div className="sn-example">
-    <small>{scope.source} · pool {scope.pool} · native token {position} (ID {token}){scope.split && ` · ${scope.split}`}{item ? ` · r ${fmt(item.strength)} · signed e ${fmt(item.coefficient)}` : ""}</small>
+    <small>{scope.source} · pool {scope.pool} · native token {position} (ID {token}){scope.split && ` · ${scope.split}`}{item ? ` · ${strengthLabel} ${fmt(item.strength)} · signed e ${fmt(item.coefficient)}` : ""}</small>
     <div className="sn-text">
       {item?.heatmap ? <>{item.heatmap.map(([anchor, start, end, pos, tokenId, e, value]) => {
         const gap = textAt(offset, start);
@@ -200,7 +219,7 @@ function ExampleText({ scope, item, model, max }: { scope: Scope; item?: Example
         offset = Math.max(offset, end);
         return <Fragment key={anchor}>{gap}<span className={anchor === scope.anchor ? "sn-anchor" : undefined}
           style={{ backgroundColor: `rgba(44,148,117,${max ? .75 * value / max : 0})` }}
-          title={`Anchor ${anchor} · token ${pos} (ID ${tokenId}) · e ${e} · r ${value}`}>{text}</span></Fragment>;
+          title={`Anchor ${anchor} · token ${pos} (ID ${tokenId}) · e ${e} · ${strengthLabel} ${value}`}>{text}</span></Fragment>;
       })}{textAt(offset)}</>
         : span ? <>{textAt(Math.max(0, span[2] - 400), span[2])}<mark className="sn-anchor">{textAt(span[2], span[3])}</mark>{textAt(span[3])}</> : textAt(Math.max(0, scope.boundary - 400))}
     </div>
@@ -281,7 +300,7 @@ function DirectedGraph({ catalog, cluster, model, edges, focused, onEdge }: {
   const other = [...new Set(edges.map(row => row.from === cluster.id ? row.to : row.from))];
   if (!other.length) return null;
   const title = (id: string) => {
-    const node = catalog.models[model].clusters.find(item => item.id === id);
+    const node = (catalog.jointPartition ?? catalog.models[model]).clusters.find(item => item.id === id);
     return node && (labelFor(catalog, node) || node.medoid) || id;
   };
   const height = Math.max(125, other.length * 49 + 24);
@@ -383,7 +402,7 @@ function CrossModel({ catalog, selected }: { catalog: SupernodeCatalog; selected
   </section>;
 }
 
-function Clustering({ partition, component }: { partition: Partition; component: string }) {
+function Clustering({ partition, component, method }: { partition: Partition; component: string; method: "Average" | "Complete" }) {
   const [cut, setCut] = useState<"count" | "distance">("count");
   const [count, setCount] = useState(partition.clusters.length);
   const [threshold, setThreshold] = useState(partition.tree.at(-1)?.[2] ?? 0);
@@ -414,7 +433,7 @@ function Clustering({ partition, component }: { partition: Partition; component:
           </rect>))}
         </svg>
       </div>
-      <div><h4>Average-linkage dendrogram</h4><Dendrogram partition={partition} threshold={cut === "distance" ? threshold : undefined} /></div>
+      <div><h4>{method}-linkage dendrogram</h4><Dendrogram partition={partition} threshold={cut === "distance" ? threshold : undefined} /></div>
     </div>
     <div className="sn-toolbar">
       <label>Compare component with <select value={target} onChange={e => setTarget(Number(e.target.value))}>
@@ -446,7 +465,7 @@ function Dendrogram({ partition, threshold }: { partition: Partition; threshold?
     return point;
   }
   visit(root);
-  return <svg viewBox="-5 -5 290 190" role="img" aria-label="Average-linkage clustering dendrogram">
+  return <svg viewBox="-5 -5 290 190" role="img" aria-label="Hierarchical clustering dendrogram">
     {paths.map((d, i) => <path key={i} d={d} fill="none" stroke="#42738b" strokeWidth=".65" />)}
     {threshold != null && <line x1={threshold * 275 / xmax} y1={0} x2={threshold * 275 / xmax} y2={180} stroke="#977137" strokeDasharray="4 2" />}
   </svg>;
