@@ -5,7 +5,7 @@ Use this guide when changing visualization, experiment data, or researcher-facin
 ## Design and interaction
 
 - Keep each workflow in the correct evaluation view. A Natural Validation result belongs under Natural Validation. A separate research workflow can sit alongside Measured Validation Summary and Measured Graph.
-- Reuse the Workbench's light theme, typography, spacing, controls, and graph renderer. Check dropdowns, internal graph labels, inactive rows, legends, and detail panels in the actual browser.
+- Follow the [ASPD Workbench frontend skill](../../.agents/skills/aspd-workbench-frontend/SKILL.md). Use black text on white surfaces and reuse the Workbench's typography, spacing, controls, and graph renderer.
 - Put the selected example, token, gate, component, and measured dependencies in one workspace. Keep the final aligned token as the default where that behavior already exists. Update the same inspector on selection. One selection must produce one Research Notes editor.
 - Make common tasks direct. Provide searchable PRE/MID gate IDs, sensible initial selections, model comparisons side by side, and document browsing from the relevant component. Preserve the researcher's working context, annotations, and circuit definitions.
 - Show graph direction, sign, weight, and model and anchor identity. Base the threshold slider on measured normalized edge weights. Changing the slider filters what the researcher sees. Keep measured parent distributions and their selection rules fixed. Check that zooming and panning preserve the current view.

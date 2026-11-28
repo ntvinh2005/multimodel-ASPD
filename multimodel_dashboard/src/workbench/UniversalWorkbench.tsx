@@ -88,20 +88,6 @@ function CircuitWorkbench() {
   const expandedCandidate = expandedCandidateId ? getExpandedCandidate(expandedCandidateId) : undefined;
   const matchingGates = useMemo(() => searchSharedGates(data.gates, gateQuery), [gateQuery]);
 
-  useEffect(() => {
-    const root = document.documentElement;
-    const body = document.body;
-    const previous = { rootScheme: root.style.colorScheme, rootBackground: root.style.background, bodyBackground: body.style.background };
-    root.style.colorScheme = "light";
-    root.style.background = "#f6f8fb";
-    body.style.background = "#f6f8fb";
-    return () => {
-      root.style.colorScheme = previous.rootScheme;
-      root.style.background = previous.rootBackground;
-      body.style.background = previous.bodyBackground;
-    };
-  }, []);
-
   useEffect(() => localStorage.setItem("aspd-pinned-components", JSON.stringify(pinnedComponentIds)), [pinnedComponentIds]);
   useEffect(() => localStorage.setItem("aspd-pinned-edges", JSON.stringify(pinnedEdgeIds)), [pinnedEdgeIds]);
   const visibleComponents = useMemo(() => componentsForSelection(data.components, gateIds, modelIds, representativeOnly), [gateIds, modelIds, representativeOnly]);

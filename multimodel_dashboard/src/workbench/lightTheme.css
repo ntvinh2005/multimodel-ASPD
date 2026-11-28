@@ -1,12 +1,22 @@
-:root { color-scheme: light; }
-html, body { background: #f6f8fb; }
+html:has(.uw-shell, #root:empty),
+body:has(.uw-shell, #root:empty),
 .uw-shell {
-  --p: #ffffff;
+  color-scheme: only light;
+  color: #000;
+  background: #fff;
+}
+
+.uw-shell {
+  --p: #fff;
   --l: #d9e0e8;
   min-height: 100vh;
-  color: #172033;
-  background: #f6f8fb;
-  color-scheme: light;
+}
+
+.uw-shell :is(input, select, option, textarea) {
+  color: #000;
+  background: #fff;
+  border-color: #cbd5e1;
+  color-scheme: only light;
 }
 
 .uw-header,
@@ -41,9 +51,9 @@ html, body { background: #f6f8fb; }
 .uw-shell button {
   border-color: #cbd5e1;
   background: #ffffff;
-  color: #334155;
+  color: #000;
 }
-.uw-shell button:hover { border-color: #64748b; color: #0f172a; background: #f8fafc; }
+.uw-shell button:hover { border-color: #64748b; color: #000; background: #fff; }
 .uw-gates button.selected { background: color-mix(in srgb, var(--gate) 15%, #fff); color: #172033; font-weight: 700; }
 .uw-gates button.available { color: #334155; opacity: 1; }
 .uw-gates label em { color: #6b4d0c; font-size: 10px; }
@@ -122,7 +132,7 @@ html, body { background: #f6f8fb; }
 
 .uw-data-switch { display: flex; gap: 6px; padding: 10px 0; }
 .uw-data-switch button { font-weight: 650; }
-.uw-data-switch button.active { border-color: #168f83; background: #e3f5f2; color: #065f57; }
+.uw-data-switch button.active { border-color: #168f83; background: #fff; color: #000; }
 
 .uw-scenario-browser {
   padding: 12px;
@@ -214,6 +224,7 @@ html, body { background: #f6f8fb; }
   background: #ffffff;
   color: #334155;
 }
+.uw-shell .uw-circuit-select select { color: #000; }
 .uw-circuit-select small { color: #64748b; }
 
 .ig-toolbar {

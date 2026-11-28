@@ -27,7 +27,7 @@ export default function SemanticSupernodeDiscovery({ checkpoint, onBaseline, Gra
   const valid = catalog && catalog.runId === pointer?.runId && catalog.checkpoint === checkpoint
     && catalog.dataset === "natural-validation" && catalog.schemaVersion === 1
     && (view === "shared" ? catalog.mode === "shared-reference-joint" && !!catalog.jointPartition : !catalog.jointPartition);
-  return <>
+  return <div className="sn-view">
     <div className="sn-toolbar">
       <label>Supernode method <select value={view} onChange={event => setView(event.target.value as typeof view)}>
         <option value="shared">ASPD shared reference · complete linkage</option>
@@ -43,7 +43,7 @@ export default function SemanticSupernodeDiscovery({ checkpoint, onBaseline, Gra
           : "Loading the Semantic Supernode pilot…"}
         <button type="button" onClick={onBaseline}>Open component-level Semantic Discovery</button>
       </section>}
-  </>;
+  </div>;
 }
 
 function usePilotAsset<T>(run: string, ref?: Ref) {
@@ -327,8 +327,8 @@ function DirectedGraph({ catalog, cluster, model, edges, focused, onEdge }: {
     })}
     {[cluster.id, ...other].map(id => <g key={id}>
       <rect x={x(id) - 77} y={y(id) - 16} width="154" height="32" rx="6"
-        fill={id === cluster.id ? "#e0f0f5" : "#f7f9fc"} stroke="#7495a7" />
-      <text x={x(id)} y={y(id)} dominantBaseline="middle" textAnchor="middle" fontSize="10" fill="#1c3447">
+        fill={id === cluster.id ? "#e0f0f5" : "#fff"} stroke="#7495a7" />
+      <text x={x(id)} y={y(id)} dominantBaseline="middle" textAnchor="middle" fontSize="10" fill="currentColor">
         {title(id).length > 25 ? `${title(id).slice(0, 24)}…` : title(id)}
       </text>
       <title>{title(id)}</title>
