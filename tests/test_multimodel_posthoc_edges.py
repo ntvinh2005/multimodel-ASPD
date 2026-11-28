@@ -202,3 +202,32 @@ def test_fused_output_slices_are_probed_and_ablated_independently() -> None:
                                        fraction=1e-6)[row] / 1e-6
             assert float(fd) == pytest.approx(score, rel=1e-3, abs=1e-6)
         assert {b.matrix for b in record.upstream} == {q, k}
+
+
+def test_simultaneous_supernode_ablation_reuses_native_hooks(toy: ToyBackend) -> None:
+    from aspd.multimodel.posthoc.supernode_ablation import exact_effects, native_layer_reference
+
+    key = "alpha"
+    model, specs, factors = toy.source_model(key), toy.hook_specs(key), toy.factors(key)
+    inputs, gates, _ = _group(toy, key)
+    layer = toy.layers[-1]
+    v = MatrixId(key, layer, "v")
+    o = MatrixId(key, layer, "o")
+    active = gates["pre"].sum(0).argsort(descending=True).tolist()[:2]
+    parents = [ComponentId(v, i) for i in active]
+    target = ComponentId(o, int(gates["mid"].sum(0).argmax()))
+    results = exact_effects(
+        model, inputs, gates, specs, factors, parents, [target], {target: 2.0},
+        matrix_scales={o: 1.0}, layer_scales={f"model.layers.{layer}": 1.0},
+        capture_logits=True, continuation_ids=(0,),
+    )
+    # With Q and K fixed V → O is a linear path.
+    separate = sum(exact_ablation_effect(model, inputs, gates, specs, factors, target, b) for b in parents)
+    torch.testing.assert_close(results["coefficient"][target.key], separate, atol=2e-7, rtol=1e-4)
+    assert results["js"].shape == (inputs.anchor_count,)
+    assert (results["js"] >= 0).all()
+    assert results["functional"][0].shape == results["js"].shape
+    assert results["gates"] == "frozen-binary"
+    assert results["matrix"][o.key].shape == results["js"].shape
+    assert results["layer"][f"model.layers.{layer}"].shape == results["js"].shape
+    assert native_layer_reference(model, inputs, [f"model.layers.{layer}"])[0].shape[0] == inputs.anchor_count

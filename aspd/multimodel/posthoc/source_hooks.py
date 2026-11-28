@@ -70,9 +70,9 @@ def assert_unique_documents(inputs: ModelInputs) -> None:
         raise ValueError("probed forward requires at most one anchor per document")
 
 
-def _run(model: nn.Module, inputs: ModelInputs) -> None:
+def _run(model: nn.Module, inputs: ModelInputs) -> Any:
     try:
-        model(input_ids=inputs.input_ids, attention_mask=inputs.attention_mask, use_cache=False)
+        return model(input_ids=inputs.input_ids, attention_mask=inputs.attention_mask, use_cache=False)
     except _CapturesComplete:
         return
 
@@ -132,6 +132,9 @@ class ProbedForward:
 
     probes: dict[MatrixId, Tensor] = field(default_factory=dict)
     inputs: dict[MatrixId, Tensor] = field(default_factory=dict)
+    outputs: dict[MatrixId, Tensor] = field(default_factory=dict)
+    layers: dict[str, Tensor] = field(default_factory=dict)
+    logits: Tensor | None = None
 
 
 def probed_forward(
@@ -144,6 +147,9 @@ def probed_forward(
     gates: Mapping[str, Tensor] | None = None,
     factors: Mapping[MatrixId, tuple[Tensor, Tensor]] | None = None,
     ablations: Iterable[Ablation] = (),
+    output_matrices: Iterable[MatrixId] = (),
+    output_layers: Iterable[str] = (),
+    capture_logits: bool = False,
 ) -> ProbedForward:
     """Run the source model once with probes, input captures and optional ablations.
 
@@ -158,12 +164,16 @@ def probed_forward(
     capture = set(capture)
     ablations = tuple(ablations)
     ablated = {ablation.component.matrix for ablation in ablations}
-    for matrix in probe | capture | ablated:
+    output_matrices = set(output_matrices)
+    output_layers = set(output_layers)
+    full_forward = bool(output_matrices or output_layers or capture_logits)
+    hooked = probe | capture | ablated | output_matrices
+    for matrix in hooked:
         if matrix not in by_matrix:
             raise KeyError(f"no hook spec for {matrix.key}")
     if ablations and (gates is None or factors is None):
         raise ValueError("ablations require gates and factors")
-    if not capture:
+    if not capture and not full_forward:
         # The early stop is driven by the capture set; an empty set would stop at the
         # first hooked module.
         raise ValueError("probed_forward requires at least one captured matrix input")
@@ -174,7 +184,11 @@ def probed_forward(
     needed = set(capture)
 
     with ExitStack() as stack:
-        for matrix in sorted(probe | capture | ablated):
+        for name in sorted(output_layers):
+            def layer_hook(_module, _args, output, *, name=name):
+                result.layers[name] = _first_tensor(output, name)[rows].detach()
+            stack.callback(model.get_submodule(name).register_forward_hook(layer_hook).remove)
+        for matrix in sorted(hooked):
             spec = by_matrix[matrix]
             module = model.get_submodule(spec.module_path)
 
@@ -184,7 +198,7 @@ def probed_forward(
                     ablation_inputs[spec.matrix] = x.detach()
                 if spec.matrix in capture:
                     result.inputs[spec.matrix] = x
-                    if needed.issubset(result.inputs) and not (
+                    if not full_forward and needed.issubset(result.inputs) and not (
                         spec.matrix in probe or spec.matrix in ablated
                     ):
                         raise _CapturesComplete
@@ -207,15 +221,21 @@ def probed_forward(
                     )
                     result.probes[spec.matrix] = delta
                     value = _add_at_anchors(value, spec, rows, delta)
-                if needed.issubset(result.inputs):
+                if spec.matrix in output_matrices:
+                    result.outputs[spec.matrix] = _slice(value, spec)[rows].detach()
+                if not full_forward and needed.issubset(result.inputs):
                     # Every requested input is already captured; later modules are unused.
                     raise _CapturesComplete
                 return value
 
             stack.callback(module.register_forward_pre_hook(pre).remove)
             stack.callback(module.register_forward_hook(post).remove)
-        _run(model, inputs)
+        output = _run(model, inputs)
+        if capture_logits:
+            result.logits = output.logits[rows].detach()
 
+    if output_matrices != result.outputs.keys() or output_layers != result.layers.keys():
+        raise RuntimeError("A requested native output capture did not execute")
     missing = sorted(matrix.key for matrix in capture if matrix not in result.inputs)
     if missing:
         raise RuntimeError(f"capture hooks never fired: {missing}")

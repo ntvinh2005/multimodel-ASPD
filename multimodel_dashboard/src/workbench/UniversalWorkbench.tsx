@@ -26,6 +26,7 @@ import "./researcherFixes.css";
 import "./lightTheme.css";
 import "./activationExamples.css";
 
+const SemanticSupernodeDiscovery = lazy(() => import("./SemanticSupernodeDiscovery"));
 const InductionGateExplorer = lazy(() => import("./InductionGateExplorer"));
 
 const palette = ["#51d6c3", "#f0b45b", "#8ca8ff", "#de7cdf", "#73c982", "#ed7d77", "#55a6d9", "#c49a6c"];
@@ -44,6 +45,7 @@ const naturalViews = [
   ["graphs", "Measured graphs"],
   ["discovery", "Circuit Discovery"],
   ["semantic", "Semantic Discovery"],
+  ["supernodes", "Semantic Supernode Discovery"],
 ] as const;
 
 function CircuitWorkbench() {
@@ -215,6 +217,9 @@ function CircuitWorkbench() {
     {naturalView === "discovery" && <DiscoveredCircuits checkpoint={naturalCheckpoint} Graph={ModelGraph} />}
     {naturalView === "semantic" && <SemanticDiscoveryRevision checkpoint={naturalCheckpoint} Graph={ModelGraph}
         legacy={<SemanticDiscovery checkpoint={naturalCheckpoint} Graph={ModelGraph} />} />}
+    {naturalView === "supernodes" && <Suspense fallback={<p role="status">Loading Semantic Supernode Discovery…</p>}>
+      <SemanticSupernodeDiscovery checkpoint={naturalCheckpoint} Graph={ModelGraph} onBaseline={() => setNaturalView("semantic")} />
+    </Suspense>}
     {naturalView === "graphs" && <>
     <NaturalValidationScenarios manifest={data.manifest} activeAnchorId={dictionaryGate || expandedCandidate ? null : anchorId}
       onSelect={openMeasuredScenario} query={gateQuery} onQueryChange={setGateQuery}
