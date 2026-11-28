@@ -121,7 +121,7 @@ function SupernodeWorkspace({ catalog, onBaseline, Graph }: {
         </section>
         <EvidencePanel key={activeComponent} catalog={catalog} component={activeComponent} />
         {mode === "comparison" ? <CrossModel catalog={catalog} selected={chosen} />
-          : <CircuitPanel key={`${chosen.id}-${mode}`} catalog={catalog} cluster={chosen} model={model} componentMode={mode === "components"} Graph={Graph} />}
+          : <CircuitPanel key={`${chosen.id}-${model}-${mode}`} catalog={catalog} cluster={chosen} model={model} componentMode={mode === "components"} Graph={Graph} />}
       </main>
     </div>
     <details className="sn-section">
