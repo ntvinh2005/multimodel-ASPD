@@ -118,8 +118,13 @@ def run(args):
                         "from": request["from"],
                         "to": request["to"],
                     }
-                    inputs = gather_original_batch(encoded.pool.models[model], [index])
-                    gates = {site: values[[index]] for site, values in encoded.pool.gates.items()}
+                    inputs = gather_original_batch(encoded.pool.models[model], [index]).to(
+                        backend.device
+                    )
+                    gates = {
+                        site: values[[index]].to(backend.device)
+                        for site, values in encoded.pool.gates.items()
+                    }
                     target_ids = tuple(map(ComponentId.from_key, targets))
                     specs, factors = backend.hook_specs(model), backend.factors(model)
                     model_object = backend.source_model(model)
